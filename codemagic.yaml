@@ -1,0 +1,67 @@
+workflows:
+  ios-release:
+    name: "阅读 iOS Release"
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      groups:
+        - ios_credentials
+      vars:
+        BUNDLE_ID: "com.read.app"
+    
+    scripts:
+      - name: 安装依赖
+        script: |
+          flutter pub get
+      
+      - name: 代码分析
+        script: |
+          flutter analyze --no-fatal-infos
+      
+      - name: 设置 iOS 签名
+        script: |
+          # 使用 Codemagic 自动管理签名
+          keychain initialize
+      
+      - name: 构建 iOS IPA
+        script: |
+          flutter build ipa \
+            --release \
+            --export-options-plist=/Users/builder/export_options.plist
+    
+    artifacts:
+      - build/ios/ipa/*.ipa
+    
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
+          failure: true
+
+  ios-debug:
+    name: "阅读 iOS Debug"
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    
+    scripts:
+      - name: 安装依赖
+        script: |
+          flutter pub get
+      
+      - name: 构建 Debug IPA
+        script: |
+          flutter build ipa --debug
+    
+    artifacts:
+      - build/ios/ipa/*.ipa
