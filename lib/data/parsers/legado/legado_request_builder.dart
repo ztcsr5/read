@@ -35,7 +35,11 @@ class LegadoRequestBuilder {
     if (searchUrl.startsWith('@js:') || searchUrl.startsWith('<js>')) {
       searchUrl = LegadoJsEngine().evaluate(searchUrl, variables: {
         'keyword': keyword,
+        'key': keyword,
         'page': page,
+        'source': {
+          'key': source.bookSourceUrl.replaceAll(RegExp(r'/+$'), ''),
+        },
       });
     }
 

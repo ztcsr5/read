@@ -158,6 +158,13 @@ class LegadoJsEngine {
           final encodedValue = jsonEncode(value);
           _runtime!.evaluate('var \$key = \$encodedValue;');
         });
+        
+        // Add polyfill for source.getKey()
+        _runtime!.evaluate('''
+          if (typeof source !== 'undefined' && source !== null) {
+            source.getKey = function() { return source.key; };
+          }
+        ''');
       } catch (e) {
         print('JS variables injection failed: \$e');
       }
