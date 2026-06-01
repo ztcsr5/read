@@ -424,9 +424,10 @@ class _ReaderSettingsPanelState extends ConsumerState<ReaderSettingsPanel> {
         CupertinoSlidingSegmentedControl<int>(
           groupValue: state.fontWeightIndex,
           children: const {
-            0: SizedBox(width: 70, child: Center(child: Text('常规'))),
-            1: SizedBox(width: 70, child: Center(child: Text('中等'))),
-            2: SizedBox(width: 70, child: Center(child: Text('加粗'))),
+            -1: SizedBox(width: 58, child: Center(child: Text('系统'))),
+            0: SizedBox(width: 58, child: Center(child: Text('常规'))),
+            1: SizedBox(width: 58, child: Center(child: Text('中等'))),
+            2: SizedBox(width: 58, child: Center(child: Text('加粗'))),
           },
           onValueChanged: (val) {
             if (val != null) vm.setFontWeight(val);

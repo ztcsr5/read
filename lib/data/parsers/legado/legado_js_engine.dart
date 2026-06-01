@@ -12,7 +12,7 @@ class LegadoJsEngine {
       _runtime = getJavascriptRuntime();
       _initJavaObject();
     } catch (e) {
-      print('JS Engine Initialization Error: \$e');
+      print('JS Engine Initialization Error: $e');
     }
   }
 
@@ -139,10 +139,10 @@ class LegadoJsEngine {
     try {
       final result = _runtime!.evaluate(jsCode);
       if (result.isError) {
-        print('JS Engine Initialization Error: \${result.stringResult}');
+        print('JS Engine Initialization Error: ${result.stringResult}');
       }
     } catch (e) {
-      print('JS Engine init failed: \$e');
+      print('JS Engine init failed: $e');
     }
   }
 
@@ -156,9 +156,9 @@ class LegadoJsEngine {
       try {
         variables.forEach((key, value) {
           final encodedValue = jsonEncode(value);
-          _runtime!.evaluate('var \$key = \$encodedValue;');
+          _runtime!.evaluate('var $key = $encodedValue;');
         });
-        
+
         // Add polyfill for source.getKey()
         _runtime!.evaluate('''
           if (typeof source !== 'undefined' && source !== null) {
@@ -166,7 +166,7 @@ class LegadoJsEngine {
           }
         ''');
       } catch (e) {
-        print('JS variables injection failed: \$e');
+        print('JS variables injection failed: $e');
       }
     }
 
@@ -179,7 +179,7 @@ class LegadoJsEngine {
 
     // 处理包含 return 但没有包在函数里的情况
     if (codeToRun.contains('return ') && !codeToRun.contains('function')) {
-      codeToRun = '(function() { \$codeToRun })()';
+      codeToRun = '(function() { $codeToRun })()';
     }
 
     try {
@@ -189,8 +189,8 @@ class LegadoJsEngine {
       }
       return result.stringResult;
     } catch (e) {
-      print('JS Eval failed: \$e');
-      throw Exception('JS执行异常: \$e');
+      print('JS Eval failed: $e');
+      throw Exception('JS执行异常: $e');
     }
   }
 

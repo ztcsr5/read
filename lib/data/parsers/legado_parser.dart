@@ -196,7 +196,8 @@ class LegadoParser {
             );
           }
         }
-        return results;
+        if (results.isNotEmpty) return results;
+        return _parseBooksByJsonFallback(data, rule, source);
       } catch (_) {
         return _parseBooksByJsonFallback(data, rule, source);
       }
@@ -284,33 +285,61 @@ class LegadoParser {
     final chapters = <Chapter>[];
 
     if (_isJsonRule(listRule) && _looksLikeJsonData(data, listRule)) {
-      final jsonData = data is String ? jsonDecode(data) : data;
-      var index = 0;
-      for (final node in _extractJsonNodes(jsonData, listRule)) {
-        if (node is! Map) continue;
-        final item = node.map((key, value) => MapEntry(key.toString(), value));
-        final title = _extractJsonValue(
-          item,
-          _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '',
-        );
-        final url = _extractJsonValue(
-          item,
-          _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '',
-        );
-        final fullUrl = _resolveUrl(response.realUri.toString(), url);
+      try {
+        final jsonData = data is String ? jsonDecode(data) : data;
+        var index = 0;
+        for (final node in _extractJsonNodes(jsonData, listRule)) {
+          if (node is! Map) continue;
+          final item = node.map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          final title = _extractJsonValue(
+            item,
+            _sourceScopedRule(
+              _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '',
+              source,
+            ),
+          );
+          final url = _extractJsonValue(
+            item,
+            _sourceScopedRule(
+              _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '',
+              source,
+            ),
+          );
+          final fullUrl = _resolveUrl(response.realUri.toString(), url);
 
-        chapters.add(
-          Chapter(
-            bookId: book.id,
-            title: title,
-            index: index++,
-            content: fullUrl,
-            wordCount: 0,
-            isDownloaded: false,
-          ),
+          chapters.add(
+            Chapter(
+              bookId: book.id,
+              title: title,
+              index: index++,
+              content: fullUrl,
+              wordCount: 0,
+              isDownloaded: false,
+            ),
+          );
+        }
+        if (chapters.isNotEmpty) return chapters;
+      } catch (_) {
+        return _parseChaptersByJsonFallback(
+          data,
+          rule,
+          source,
+          book,
+          response.realUri.toString(),
         );
       }
-      return chapters;
+    }
+
+    if (_isJsOnlyRule(listRule) && _looksLikeJsonData(data, listRule)) {
+      return _parseChaptersByJsonFallback(
+        data,
+        rule,
+        source,
+        book,
+        response.realUri.toString(),
+      );
     }
 
     final document = parse(data.toString());
@@ -325,6 +354,7 @@ class LegadoParser {
         node,
         _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '',
       );
+      if (title.trim().isEmpty && url.trim().isEmpty) continue;
       final fullUrl = _resolveUrl(response.realUri.toString(), url);
 
       chapters.add(
@@ -339,7 +369,14 @@ class LegadoParser {
       );
     }
 
-    return chapters;
+    if (chapters.isNotEmpty) return chapters;
+    return _parseChaptersByJsonFallback(
+      data,
+      rule,
+      source,
+      book,
+      response.realUri.toString(),
+    );
   }
 
   /// 获取正文。
@@ -416,49 +453,64 @@ class LegadoParser {
     final name = _cleanRuleOutput(
       _extractJsonValue(
         item,
-        _ruleOrKey(rule['name'], item, [
-          'name',
-          'title',
-          'bookName',
-          'book_name',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(rule['name'], item, [
+            'name',
+            'title',
+            'bookName',
+            'book_name',
+          ]),
+          source,
+        ),
       ),
     );
     final author = _cleanRuleOutput(
       _extractJsonValue(
         item,
-        _ruleOrKey(rule['author'], item, [
-          'author',
-          'authorName',
-          'writer',
-          'writerName',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(rule['author'], item, [
+            'author',
+            'authorName',
+            'writer',
+            'writerName',
+          ]),
+          source,
+        ),
       ),
     );
     final coverUrl = _cleanRuleOutput(
       _extractJsonValue(
         item,
-        _ruleOrKey(rule['coverUrl'], item, [
-          'coverUrl',
-          'cover',
-          'picUrl',
-          'imgUrl',
-          'image',
-          'coverPath',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(rule['coverUrl'], item, [
+            'coverUrl',
+            'cover',
+            'picUrl',
+            'imgUrl',
+            'image',
+            'coverPath',
+          ]),
+          source,
+        ),
       ),
     );
+    final bookUrlRule = rule['bookUrl'] ?? rule['tocUrl'] ?? rule['catalogUrl'];
     final bookUrl = _cleanRuleOutput(
       _extractJsonValue(
         item,
-        _ruleOrKey(rule['bookUrl'], item, [
-          'bookUrl',
-          'url',
-          'detailUrl',
-          'bookId',
-          'book_id',
-          'id',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(bookUrlRule, item, [
+            'bookUrl',
+            'url',
+            'detailUrl',
+            'tocUrl',
+            'catalogUrl',
+            'bookId',
+            'book_id',
+            'id',
+          ]),
+          source,
+        ),
       ),
     );
     final base = baseUrl ?? source.bookSourceUrl;
@@ -494,7 +546,7 @@ class LegadoParser {
     );
     final bookUrl = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['bookUrl', 'url']) ?? '',
+      _firstRule(rule, const ['bookUrl', 'tocUrl', 'catalogUrl', 'url']) ?? '',
     );
     final base = baseUrl ?? source.bookSourceUrl;
 
@@ -531,6 +583,18 @@ class LegadoParser {
       if (item.containsKey(key)) return key;
     }
     return '';
+  }
+
+  static String _sourceScopedRule(String rule, BookSource source) {
+    if (rule.isEmpty) return '';
+    final baseUrl = LegadoRequestBuilder.cleanBaseUrl(source.bookSourceUrl);
+    return rule
+        .replaceAll('{{source.bookSourceUrl}}', baseUrl)
+        .replaceAll('{source.bookSourceUrl}', baseUrl)
+        .replaceAll('{{source.key}}', baseUrl)
+        .replaceAll('{source.key}', baseUrl)
+        .replaceAll('{{baseUrl}}', baseUrl)
+        .replaceAll('{baseUrl}', baseUrl);
   }
 
   static Map<String, dynamic> _ruleMap(String? ruleJson) {
@@ -770,6 +834,137 @@ class LegadoParser {
     }
   }
 
+  static List<Chapter> _parseChaptersByJsonFallback(
+    dynamic data,
+    Map<String, dynamic> rule,
+    BookSource source,
+    Book book,
+    String baseUrl,
+  ) {
+    try {
+      final jsonData = data is String ? jsonDecode(data) : data;
+      final candidates = <dynamic>[
+        if (jsonData is Map) jsonData['data'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['chapters'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['chapterList'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['list'],
+        if (jsonData is Map) jsonData['chapters'],
+        if (jsonData is Map) jsonData['chapterList'],
+        if (jsonData is Map) jsonData['list'],
+        if (jsonData is Map) jsonData['items'],
+        ..._findLikelyChapterLists(jsonData),
+        jsonData,
+      ];
+      final list = candidates.whereType<List>().firstWhere(
+        (items) => items.whereType<Map>().any(_looksLikeChapterMap),
+        orElse: () => const [],
+      );
+      if (list.isEmpty) return [];
+
+      final chapters = <Chapter>[];
+      var index = 0;
+      for (final raw in list.whereType<Map>()) {
+        final item = _stringKeyMap(raw);
+        final title = _firstText(item, const [
+          'chapterName',
+          'name',
+          'title',
+          'chapterTitle',
+          'volumeName',
+        ]);
+        final url = _chapterUrlFromFallbackItem(
+          item,
+          rule,
+          source,
+          book,
+          baseUrl,
+        );
+        if (title.isEmpty && url.isEmpty) continue;
+        chapters.add(
+          Chapter(
+            bookId: book.id,
+            title: title.isEmpty ? '第${index + 1}章' : title,
+            index: index++,
+            content: _resolveUrl(baseUrl, url),
+            wordCount: 0,
+            isDownloaded: false,
+          ),
+        );
+      }
+      return chapters;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static String _chapterUrlFromFallbackItem(
+    Map<String, dynamic> item,
+    Map<String, dynamic> rule,
+    BookSource source,
+    Book book,
+    String baseUrl,
+  ) {
+    final ruleValue = _firstRule(rule, const ['chapterUrl', 'url', 'link']);
+    if (ruleValue != null && ruleValue.isNotEmpty) {
+      final extracted = _extractJsonValue(
+        item,
+        _sourceScopedRule(ruleValue, source),
+      );
+      if (extracted.trim().isNotEmpty) return extracted.trim();
+    }
+
+    final direct = _firstText(item, const [
+      'chapterUrl',
+      'url',
+      'link',
+      'path',
+      'content',
+      'contentUrl',
+      'href',
+    ]);
+    if (direct.isNotEmpty) return direct;
+
+    final id = _firstText(item, const ['chapterId', 'id', 'cid']);
+    if (id.isEmpty) return '';
+    final uri = Uri.tryParse(book.filePath);
+    if (uri != null &&
+        uri.hasScheme &&
+        (uri.path.contains('findChapterList') ||
+            uri.path.contains('chapterList') ||
+            uri.path.contains('getchapter'))) {
+      final bookId =
+          uri.queryParameters['book_id'] ??
+          uri.queryParameters['bookId'] ??
+          uri.queryParameters['id'] ??
+          _firstText(item, const ['bookId', 'book_id']);
+      if (bookId.isNotEmpty) {
+        final contentUrl = Uri(
+          scheme: uri.scheme,
+          host: uri.host,
+          port: uri.hasPort ? uri.port : null,
+          path: '/chapterContent',
+        );
+        return '${contentUrl.toString()},${jsonEncode({
+          'method': 'POST',
+          'body': {'book_id': bookId, 'chapterIdList': '$id,'},
+        })}';
+      }
+    }
+    return id;
+  }
+
+  static String _firstText(Map<String, dynamic> item, List<String> keys) {
+    for (final key in keys) {
+      final value = item[key];
+      final text = value?.toString().trim();
+      if (text != null && text.isNotEmpty) return text;
+    }
+    return '';
+  }
+
   static Map<String, dynamic> _stringKeyMap(Map<dynamic, dynamic> map) {
     return map.map((key, value) => MapEntry(key.toString(), value));
   }
@@ -796,12 +991,50 @@ class LegadoParser {
     return result;
   }
 
+  static List<List<dynamic>> _findLikelyChapterLists(dynamic value) {
+    final result = <List<dynamic>>[];
+    void visit(dynamic node, [int depth = 0]) {
+      if (depth > 6) return;
+      if (node is List) {
+        if (node.whereType<Map>().any(_looksLikeChapterMap)) {
+          result.add(node);
+        }
+        for (final child in node.take(12)) {
+          visit(child, depth + 1);
+        }
+      } else if (node is Map) {
+        for (final child in node.values) {
+          visit(child, depth + 1);
+        }
+      }
+    }
+
+    visit(value);
+    return result;
+  }
+
   static bool _looksLikeBookMap(Map<dynamic, dynamic> item) {
     return item.containsKey('title') ||
         item.containsKey('bookName') ||
         item.containsKey('name') ||
         item.containsKey('bookId') ||
         item.containsKey('author');
+  }
+
+  static bool _looksLikeChapterMap(Map<dynamic, dynamic> item) {
+    return item.containsKey('chapterName') ||
+        item.containsKey('chapterTitle') ||
+        item.containsKey('chapterUrl') ||
+        item.containsKey('chapterId') ||
+        item.containsKey('cid') ||
+        item.containsKey('path') ||
+        item.containsKey('contentUrl') ||
+        (item.containsKey('name') &&
+            (item.containsKey('id') ||
+                item.containsKey('cid') ||
+                item.containsKey('chapterId'))) ||
+        (item.containsKey('title') &&
+            (item.containsKey('id') || item.containsKey('url')));
   }
 
   static String _decodeBytes(List<int> bytes, String? charset) {

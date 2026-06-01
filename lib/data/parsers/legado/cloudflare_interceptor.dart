@@ -16,7 +16,7 @@ class CloudflareInterceptor extends Interceptor {
       if (!existingCookie.contains(cfCookie)) {
         options.headers['Cookie'] = existingCookie.isEmpty
             ? cfCookie
-            : '\$existingCookie; \$cfCookie';
+            : '$existingCookie; $cfCookie';
       }
     }
     if (_userAgents.containsKey(host)) {
@@ -57,8 +57,8 @@ class CloudflareInterceptor extends Interceptor {
   void _bypassCloudflare(Response originalResponse, dynamic handler) async {
     final url = originalResponse.requestOptions.uri.toString();
     final host = originalResponse.requestOptions.uri.host;
-    
-    print('🚨 触发 Cloudflare 5秒盾，尝试使用 WebView 嗅探: \$url');
+
+    print('触发 Cloudflare 5秒盾，尝试使用 WebView 嗅探: $url');
 
     final completer = Completer<bool>();
     late final WebViewController controller;
@@ -70,29 +70,37 @@ class CloudflareInterceptor extends Interceptor {
           onPageFinished: (String currentUrl) async {
             // 检查是否拿到 cf_clearance
             try {
-              final cookies = await controller.runJavaScriptReturningResult('document.cookie');
+              final cookies = await controller.runJavaScriptReturningResult(
+                'document.cookie',
+              );
               final cookieStr = (cookies as String).replaceAll('"', '');
-              
+
               if (cookieStr.contains('cf_clearance')) {
-                final cfCookieMatch = RegExp(r'cf_clearance=[^;]+').firstMatch(cookieStr);
+                final cfCookieMatch = RegExp(
+                  r'cf_clearance=[^;]+',
+                ).firstMatch(cookieStr);
                 if (cfCookieMatch != null) {
                   _clearanceCookies[host] = cfCookieMatch.group(0)!;
-                  final ua = await controller.runJavaScriptReturningResult('navigator.userAgent');
+                  final ua = await controller.runJavaScriptReturningResult(
+                    'navigator.userAgent',
+                  );
                   _userAgents[host] = (ua as String).replaceAll('"', '');
-                  print('✅ 成功提取 cf_clearance: \${_clearanceCookies[host]}');
+                  print('成功提取 cf_clearance: ${_clearanceCookies[host]}');
                   if (!completer.isCompleted) completer.complete(true);
                 }
               } else {
                 // 判断页面内容是否已经跳过了 challenge
-                final content = await controller.runJavaScriptReturningResult('document.documentElement.outerHTML');
-                if (!content.toString().contains('cf-browser-verification') && 
+                final content = await controller.runJavaScriptReturningResult(
+                  'document.documentElement.outerHTML',
+                );
+                if (!content.toString().contains('cf-browser-verification') &&
                     !content.toString().contains('Just a moment')) {
                   print('✅ 页面似乎已跳过 CF 盾，但未找到 cf_clearance');
                   if (!completer.isCompleted) completer.complete(false);
                 }
               }
             } catch (e) {
-              print('WebView 嗅探异常: \$e');
+              print('WebView 嗅探异常: $e');
             }
           },
         ),
@@ -107,19 +115,19 @@ class CloudflareInterceptor extends Interceptor {
     });
 
     await controller.loadRequest(Uri.parse(url));
-    
+
     final success = await completer.future;
 
     if (success) {
       // 重试原请求
       final dio = Dio();
       final options = originalResponse.requestOptions;
-      
+
       final existingCookie = options.headers['Cookie'] as String? ?? '';
       final cfCookie = _clearanceCookies[host]!;
       options.headers['Cookie'] = existingCookie.isEmpty
           ? cfCookie
-          : '\$existingCookie; \$cfCookie';
+          : '$existingCookie; $cfCookie';
       options.headers['User-Agent'] = _userAgents[host];
 
       try {
@@ -139,7 +147,12 @@ class CloudflareInterceptor extends Interceptor {
     } else {
       // 失败，返回原响应
       if (handler is ErrorInterceptorHandler) {
-        handler.next(DioException(requestOptions: originalResponse.requestOptions, response: originalResponse));
+        handler.next(
+          DioException(
+            requestOptions: originalResponse.requestOptions,
+            response: originalResponse,
+          ),
+        );
       } else if (handler is ResponseInterceptorHandler) {
         handler.next(originalResponse);
       }

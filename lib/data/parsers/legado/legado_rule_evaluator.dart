@@ -1,20 +1,45 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:html/dom.dart';
 import 'package:json_path/json_path.dart';
+import 'package:crypto/crypto.dart';
+import 'package:pointycastle/export.dart';
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
+
 import 'legado_js_engine.dart';
 
 class LegadoRuleEvaluator {
+  static const _knownAttrs = {
+    'text',
+    'textNodes',
+    'html',
+    'outerHtml',
+    'href',
+    'src',
+    'data-src',
+    'data-original',
+    'content',
+    'value',
+    'title',
+    'alt',
+  };
+
   static String extractJsonValue(dynamic json, String rule) {
     if (rule.isEmpty) return '';
     if (isJsOnlyRule(rule)) {
-      final jsonStr = json is String ? json : jsonEncode(json);
-      return applyPostProcessors(
-        LegadoJsEngine().evaluate(rule, variables: {'result': jsonStr}),
-        rule,
-      );
+      try {
+        final jsonStr = json is String ? json : jsonEncode(json);
+        final value = LegadoJsEngine().evaluate(
+          rule,
+          variables: {'result': jsonStr},
+        );
+        if (value.trim().isNotEmpty) return value.trim();
+      } catch (_) {
+        return '';
+      }
     }
-    if (json is Map && rule.contains('{{')) {
+    if (json is Map && _containsJsonTemplate(rule)) {
       return applyPostProcessors(_interpolateJsonTemplate(json, rule), rule);
     }
     try {
@@ -37,14 +62,17 @@ class LegadoRuleEvaluator {
   static List<dynamic> extractJsonNodes(dynamic json, String rule) {
     if (rule.isEmpty) return const [];
     if (isJsOnlyRule(rule)) {
-      final jsonStr = json is String ? json : jsonEncode(json);
-      final jsOutput = LegadoJsEngine().evaluate(rule, variables: {'result': jsonStr});
       try {
-        final decoded = jsonDecode(jsOutput);
+        final jsonStr = json is String ? json : jsonEncode(json);
+        final value = LegadoJsEngine().evaluate(
+          rule,
+          variables: {'result': jsonStr},
+        );
+        final decoded = jsonDecode(value);
         if (decoded is List) return decoded;
-        return [decoded];
+        return decoded == null ? const [] : [decoded];
       } catch (_) {
-        return [jsOutput];
+        return const [];
       }
     }
     final nodes = <dynamic>[];
@@ -65,12 +93,6 @@ class LegadoRuleEvaluator {
 
   static String extractHtmlValue(Element node, String rule) {
     if (rule.isEmpty) return '';
-    if (isJsOnlyRule(rule)) {
-      return applyPostProcessors(
-        LegadoJsEngine().evaluate(rule, variables: {'result': node.outerHtml}),
-        rule,
-      );
-    }
     final alternatives = rule.split(RegExp(r'\|\||&&'));
     for (final part in alternatives) {
       final value = _extractSingleHtmlValue(node, part);
@@ -200,28 +222,45 @@ class LegadoRuleEvaluator {
 
   static String applyPostProcessors(String value, String rule) {
     var output = value;
-
     if (rule.contains('@get:')) {
       final key = rule.split('@get:')[1].split(RegExp(r'[@#]')).first.trim();
-      final getRes = LegadoJsEngine().evaluate('java.get("$key")');
-      if (getRes.isNotEmpty) output = getRes;
+      try {
+        final cached = LegadoJsEngine().evaluate('java.get("$key")');
+        if (cached.trim().isNotEmpty) output = cached;
+      } catch (_) {
+        // Keep the current value if the embedded engine is unavailable.
+      }
     }
 
-    if (rule.contains('@js:')) {
-      final jsPart = '@js:' + rule.split('@js:')[1].split('##').first;
-      output = LegadoJsEngine().evaluate(jsPart, variables: {'result': output});
-    } else if (rule.contains('<js>')) {
-      final jsPart = '<js>' + rule.split('<js>')[1].split('</js>').first + '</js>';
-      output = LegadoJsEngine().evaluate(jsPart, variables: {'result': output});
+    if (rule.contains('@js:') || rule.contains('<js>')) {
+      try {
+        final jsPart = rule.contains('@js:')
+            ? '@js:${rule.split('@js:')[1].split('##').first}'
+            : '<js>${rule.split('<js>')[1].split('</js>').first}</js>';
+        final evaluated = LegadoJsEngine().evaluate(
+          jsPart,
+          variables: {'result': output},
+        );
+        if (evaluated.trim().isNotEmpty) output = evaluated;
+      } catch (_) {
+        // Specialized Dart fallbacks below cover common Legado java.* helpers.
+      }
     }
 
     if (rule.contains('@put:')) {
       final key = rule.split('@put:')[1].split(RegExp(r'[@#]')).first.trim();
-      LegadoJsEngine().evaluate('java.put("$key", result)', variables: {'result': output});
+      try {
+        LegadoJsEngine().evaluate(
+          'java.put("$key", result)',
+          variables: {'result': output},
+        );
+      } catch (_) {
+        // Cache bridge is best-effort.
+      }
     }
 
     if (rule.contains('##')) {
-      final parts = rule.substring(rule.indexOf('##')).split('##');
+      final parts = rule.split('##');
       final processors = parts.skip(1).toList();
       for (var index = 0; index < processors.length; index += 2) {
         final pattern = processors[index];
@@ -236,6 +275,7 @@ class LegadoRuleEvaluator {
         }
       }
     }
+    output = _applyJsPostProcessors(output, rule);
     return output.trim();
   }
 
@@ -300,11 +340,25 @@ class LegadoRuleEvaluator {
     Map<dynamic, dynamic> json,
     String rule,
   ) {
-    return rule.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (match) {
+    var output = rule.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (match) {
       final key = match.group(1)?.trim() ?? '';
       if (key.isEmpty) return '';
       return _extractSingleJsonValue(json, key);
     });
+    output = output.replaceAllMapped(
+      RegExp(r'\{(\$[^{}]+|[A-Za-z_][A-Za-z0-9_\.\[\]\*]*)\}'),
+      (match) {
+        final key = match.group(1)?.trim() ?? '';
+        if (key.isEmpty) return '';
+        return _extractSingleJsonValue(json, key);
+      },
+    );
+    return output;
+  }
+
+  static bool _containsJsonTemplate(String rule) {
+    return rule.contains('{{') ||
+        RegExp(r'\{(\$[^{}]+|[A-Za-z_][A-Za-z0-9_\.\[\]\*]*)\}').hasMatch(rule);
   }
 
   static List<dynamic> _extractNodesByJsonPath(dynamic json, String rule) {
@@ -388,29 +442,23 @@ class LegadoRuleEvaluator {
     var attr = 'text';
     if (attrAllowed && parts.length > 1 && _isAttributeToken(parts.last)) {
       attr = parts.removeLast();
+    } else if (!attrAllowed &&
+        parts.length > 1 &&
+        _isKnownAttributeToken(parts.last)) {
+      parts.removeLast();
     }
     return _HtmlRule(parts, attr);
+  }
+
+  static bool _isKnownAttributeToken(String token) {
+    return _knownAttrs.contains(token);
   }
 
   static bool _isAttributeToken(String token) {
     if (token.contains(' ') || token.startsWith('.') || token.startsWith('#')) {
       return false;
     }
-    const knownAttrs = {
-      'text',
-      'textNodes',
-      'html',
-      'outerHtml',
-      'href',
-      'src',
-      'data-src',
-      'data-original',
-      'content',
-      'value',
-      'title',
-      'alt',
-    };
-    return knownAttrs.contains(token) ||
+    return _knownAttrs.contains(token) ||
         RegExp(r'^[a-zA-Z_][a-zA-Z0-9_\-:]*$').hasMatch(token);
   }
 
@@ -459,7 +507,7 @@ class LegadoRuleEvaluator {
     if (index != null) {
       final base = index.group(1)?.trim() ?? selector;
       final number = int.tryParse(index.group(2) ?? '');
-      if (number != null && !_looksLikeClassSelector(base)) {
+      if (number != null) {
         return (
           selector: base,
           index: number,
@@ -469,11 +517,6 @@ class LegadoRuleEvaluator {
       }
     }
     return (selector: selector, index: null, sliceStart: null, sliceEnd: null);
-  }
-
-  static bool _looksLikeClassSelector(String selector) {
-    final trimmed = selector.trim();
-    return trimmed.startsWith('.') || trimmed.contains(RegExp(r'\.[A-Za-z_-]'));
   }
 
   static List<Element> _slice(List<Element> nodes, int? start, int? end) {
@@ -503,6 +546,10 @@ class LegadoRuleEvaluator {
       RegExp(r'\bclass\.([A-Za-z0-9_\-]+)'),
       (match) => '.${match.group(1)}',
     );
+    output = output.replaceAllMapped(
+      RegExp(r'\btag\.([A-Za-z0-9_\-]+)'),
+      (match) => match.group(1) ?? '',
+    );
     return output;
   }
 
@@ -519,6 +566,86 @@ class LegadoRuleEvaluator {
       'outerHtml' => target.outerHtml.trim(),
       _ => target.attributes[attrName] ?? '',
     };
+  }
+
+  static String _applyJsPostProcessors(String value, String rule) {
+    if (!rule.contains('@js:') && !rule.contains('<js>')) return value;
+    var output = value;
+
+    final aesMatch = RegExp(
+      r'''java\.aesBase64DecodeToString\(\s*result\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']*)["']''',
+    ).firstMatch(rule);
+    if (aesMatch != null) {
+      final key = aesMatch.group(1) ?? '';
+      final iv = aesMatch.group(3) ?? '';
+      final decoded = _aesBase64Decode(output, key, iv);
+      if (decoded.isNotEmpty) output = decoded;
+    }
+
+    if (RegExp(
+      r'java\.(base64Decode|base64DecodeToString)\(\s*result\s*\)',
+    ).hasMatch(rule)) {
+      try {
+        output = utf8.decode(base64Decode(output), allowMalformed: true);
+      } catch (_) {
+        // Keep the original value if it is not valid base64.
+      }
+    }
+
+    if (RegExp(r'java\.md5Encode\(\s*result\s*\)').hasMatch(rule)) {
+      output = md5.convert(utf8.encode(output)).toString();
+    }
+
+    final matchJoin = RegExp(
+      r'''result\.match\(/(.+?)/[gimsu]*\)\.join\(["']([^"']*)["']\)''',
+    ).firstMatch(rule);
+    if (matchJoin != null) {
+      try {
+        final pattern = matchJoin.group(1) ?? '';
+        final joiner = matchJoin.group(2) ?? '';
+        output = RegExp(pattern)
+            .allMatches(output)
+            .map((match) => match.group(0) ?? '')
+            .where((text) => text.isNotEmpty)
+            .join(joiner);
+      } catch (_) {
+        // Unsupported JS regex syntax; leave the original value untouched.
+      }
+    }
+
+    return output;
+  }
+
+  static String _aesBase64Decode(String value, String key, String iv) {
+    try {
+      final keyBytes = Uint8List.fromList(utf8.encode(key));
+      if (keyBytes.length != 16 &&
+          keyBytes.length != 24 &&
+          keyBytes.length != 32) {
+        return '';
+      }
+      var ivBytes = Uint8List.fromList(utf8.encode(iv));
+      if (ivBytes.length != 16) {
+        ivBytes = Uint8List(16);
+      }
+
+      final cipher = PaddedBlockCipherImpl(
+        PKCS7Padding(),
+        CBCBlockCipher(AESEngine()),
+      );
+      cipher.init(
+        false,
+        PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>, Null>(
+          ParametersWithIV<KeyParameter>(KeyParameter(keyBytes), ivBytes),
+          null,
+        ),
+      );
+      final input = base64Decode(value.trim());
+      final output = cipher.process(Uint8List.fromList(input));
+      return utf8.decode(output, allowMalformed: true).trim();
+    } catch (_) {
+      return '';
+    }
   }
 }
 

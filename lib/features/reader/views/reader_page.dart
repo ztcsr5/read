@@ -48,6 +48,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   int _lastVisibleItemIndex = 0;
   int _lastPagedPageIndex = 0;
   DateTime _lastProgressSaveAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _pageCacheKey;
+  List<_ReaderPageData>? _pageCache;
 
   // 动画控制器
   late AnimationController _overlayAnimController;
@@ -413,7 +415,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               }
             },
             child: MediaQuery(
-              data: MediaQuery.of(context).copyWith(boldText: false),
+              data: MediaQuery.of(context).copyWith(
+                boldText: readerState.fontWeightIndex == -1
+                    ? MediaQuery.boldTextOf(context)
+                    : false,
+              ),
               child: _buildReadingContent(bgColor, textColor),
             ),
           ),
@@ -600,6 +606,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   List<_ReaderPageData> _buildReaderPages(ReaderState state, Size size) {
     if (state.items.isEmpty) return const [];
+    final key = _pageLayoutCacheKey(state, size);
+    final cached = _pageCache;
+    if (_pageCacheKey == key && cached != null) return cached;
+
     final width = (size.width - state.pagePadding * 2).clamp(80.0, size.width);
     final height =
         size.height -
@@ -627,7 +637,36 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (current.isNotEmpty) {
       pages.add(_ReaderPageData(List.unmodifiable(current)));
     }
-    return pages;
+    final immutable = List<_ReaderPageData>.unmodifiable(pages);
+    _pageCacheKey = key;
+    _pageCache = immutable;
+    return immutable;
+  }
+
+  String _pageLayoutCacheKey(ReaderState state, Size size) {
+    final padding = MediaQuery.of(context).padding;
+    return [
+      identityHashCode(state.items),
+      state.items.length,
+      size.width.round(),
+      size.height.round(),
+      padding.top.round(),
+      padding.bottom.round(),
+      state.fontSize,
+      state.lineHeight,
+      state.letterSpacing,
+      state.titleSpacing,
+      state.paragraphSpacing,
+      state.topPadding,
+      state.bottomPadding,
+      state.footerHeight,
+      state.paragraphIndent,
+      state.pagePadding,
+      state.fontWeightIndex,
+      MediaQuery.boldTextOf(context),
+      state.fontFamily,
+      state.isJustify,
+    ].join('|');
   }
 
   double _estimateItemHeight(ReaderItem item, ReaderState state, double width) {
@@ -1002,15 +1041,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   FontWeight _fontWeight(int index) {
+    if (index == -1) {
+      return MediaQuery.boldTextOf(context) ? FontWeight.w700 : FontWeight.w400;
+    }
     if (index == 1) return FontWeight.w600;
-    if (index == 2) return FontWeight.w900;
-    return FontWeight.w300;
+    if (index == 2) return FontWeight.w800;
+    return FontWeight.w400;
   }
 
   double _fontWeightValue(int index) {
+    if (index == -1) return MediaQuery.boldTextOf(context) ? 700 : 400;
     if (index == 1) return 600;
-    if (index == 2) return 900;
-    return 300;
+    if (index == 2) return 800;
+    return 400;
   }
 
   /// 顶部工具栏

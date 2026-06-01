@@ -57,7 +57,7 @@ class ReaderState {
   final int paragraphIndent;
   final double footerHeight;
   final String fontFamily;
-  final int fontWeightIndex; // 0=normal, 1=medium, 2=bold
+  final int fontWeightIndex; // -1=system, 0=normal, 1=medium, 2=bold
   final double pagePadding; // 页面左右边距
   final bool isJustify; // 是否两端对齐
   final ReaderBackground background;
@@ -99,7 +99,7 @@ class ReaderState {
     this.paragraphIndent = 2,
     this.footerHeight = 80.0,
     this.fontFamily = 'system',
-    this.fontWeightIndex = 0,
+    this.fontWeightIndex = -1,
     this.pagePadding = 24.0,
     this.isJustify = true,
     this.keepScreenOn = true,
@@ -657,7 +657,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
   /// 设置字体粗细
   void setFontWeight(int index) {
-    state = state.copyWith(fontWeightIndex: index);
+    state = state.copyWith(fontWeightIndex: index.clamp(-1, 2));
     _saveReaderSettings();
   }
 

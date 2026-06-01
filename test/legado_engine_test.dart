@@ -105,6 +105,75 @@ void main() {
         '/search?page=4&keyword=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9',
       );
     });
+
+    test('guards javascript header strings before Dio sees them', () {
+      final headers = LegadoRequestBuilder.parseHeaderString(
+        '<js>var headers = {"User-Agent":"MobileUA"}; return JSON.stringify(headers)</js>',
+      );
+
+      expect(headers['User-Agent'], 'MobileUA');
+      expect(headers.keys, everyElement(matches(RegExp(r'^[^\s=]+$'))));
+    });
+
+    test('filters invalid header names and keeps valid loose headers', () {
+      final headers = LegadoRequestBuilder.parseHeaderString(
+        'Bad Header = nope: value\nX-Test: ok\nCookie: a=b',
+      );
+
+      expect(headers.containsKey('Bad Header = nope'), isFalse);
+      expect(headers['X-Test'], 'ok');
+      expect(headers['Cookie'], 'a=b');
+    });
+
+    test('splits embedded config even when a JS tail follows it', () {
+      final embedded = LegadoRequestBuilder.splitEmbeddedConfig(
+        'https://example.com/search,{"method":"POST","body":{"q":"{{key}}"}}'
+        ',null,if (key.length > 0) { return "ignored"; }',
+      );
+
+      expect(embedded.url, 'https://example.com/search');
+      expect(embedded.config['method'], 'POST');
+      expect(embedded.config['body'], isA<Map>());
+    });
+
+    test('encodes map bodies from embedded configs as json', () {
+      final source = BookSource()
+        ..bookSourceName = 'Test'
+        ..bookSourceUrl = 'https://example.com';
+
+      final request = LegadoRequestBuilder.buildRequest(
+        source,
+        'https://example.com/post,{"method":"POST","body":{"q":"{{keyRaw}}","page":"{{page}}"}}',
+        keyword: 'abc def',
+        page: 7,
+      );
+
+      expect(request.method, 'POST');
+      expect(jsonDecode(request.body!), {'q': 'abc def', 'page': '7'});
+      expect(request.headers?['Content-Type'], 'application/json');
+    });
+
+    test('interpolates single-brace json path templates', () {
+      final value = LegadoRuleEvaluator.extractJsonValue({
+        'wapBookId': 229093,
+      }, r'http://sma.yueyouxs.com/b/{$.wapBookId}.html');
+
+      expect(value, 'http://sma.yueyouxs.com/b/229093.html');
+    });
+
+    test('keeps source scoped variables inside json templates', () {
+      final source = BookSource()
+        ..bookSourceName = 'Test'
+        ..bookSourceUrl = 'https://example.com/api';
+
+      final text = LegadoRequestBuilder.replaceVariables(
+        '{{source.bookSourceUrl}}/detail/{{bookId}}',
+        keyword: '',
+        source: source,
+      );
+
+      expect(text, 'https://example.com/api/detail/{{bookId}}');
+    });
   });
 
   group('LegadoRuleEvaluator', () {
@@ -226,6 +295,17 @@ void main() {
           'a.0@href',
         ),
         '/book/1',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.querySelector('.book')!,
+          'tag.a.0@href',
+        ),
+        '/book/1',
+      );
+      expect(
+        LegadoRuleEvaluator.queryOne(document, 'class.book@html')?.text.trim(),
+        '书名',
       );
     });
 

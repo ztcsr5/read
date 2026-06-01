@@ -72,8 +72,9 @@ dependencies:
   collection: ^1.19.0
   fast_gbk: ^1.0.0
   json_path: ^0.6.3
-  webview_flutter: ^4.7.0
   quickjs_engine: ^0.1.1
+  pointycastle: ^3.9.1
+  webview_flutter: 4.13.0
 
 dev_dependencies:
   flutter_test:
