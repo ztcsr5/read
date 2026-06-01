@@ -5,11 +5,15 @@ class LegadoJsEngine {
   static final LegadoJsEngine _instance = LegadoJsEngine._internal();
   factory LegadoJsEngine() => _instance;
 
-  late JavascriptRuntime _runtime;
+  JavascriptRuntime? _runtime;
 
   LegadoJsEngine._internal() {
-    _runtime = getJavascriptRuntime();
-    _initJavaObject();
+    try {
+      _runtime = getJavascriptRuntime();
+      _initJavaObject();
+    } catch (e) {
+      print('JS Engine Initialization Error: \$e');
+    }
   }
 
   void _initJavaObject() {
@@ -131,9 +135,14 @@ class LegadoJsEngine {
       };
     ''';
 
-    final result = _runtime.evaluate(jsCode);
-    if (result.isError) {
-      print('JS Engine Initialization Error: \${result.stringResult}');
+    if (_runtime == null) return;
+    try {
+      final result = _runtime!.evaluate(jsCode);
+      if (result.isError) {
+        print('JS Engine Initialization Error: \${result.stringResult}');
+      }
+    } catch (e) {
+      print('JS Engine init failed: \$e');
     }
   }
 
@@ -141,11 +150,17 @@ class LegadoJsEngine {
   /// [jsCode] 可以带有 @js: 或 <js> 包裹
   /// [variables] 会作为全局变量注入到上下文中，例如 baseUrl, result 等
   String evaluate(String jsCode, {Map<String, dynamic>? variables}) {
+    if (_runtime == null) return '';
+
     if (variables != null) {
-      variables.forEach((key, value) {
-        final encodedValue = jsonEncode(value);
-        _runtime.evaluate('var \$key = \$encodedValue;');
-      });
+      try {
+        variables.forEach((key, value) {
+          final encodedValue = jsonEncode(value);
+          _runtime!.evaluate('var \$key = \$encodedValue;');
+        });
+      } catch (e) {
+        print('JS variables injection failed: \$e');
+      }
     }
 
     String codeToRun = jsCode.trim();
@@ -160,13 +175,16 @@ class LegadoJsEngine {
       codeToRun = '(function() { \$codeToRun })()';
     }
 
-    final result = _runtime.evaluate(codeToRun);
-    
-    // 如果返回的是 JS 对象/数组，会被转为 JSON 字符串
-    return result.stringResult;
+    try {
+      final result = _runtime!.evaluate(codeToRun);
+      return result.stringResult;
+    } catch (e) {
+      print('JS Eval failed: \$e');
+      return '';
+    }
   }
 
   void dispose() {
-    _runtime.dispose();
+    _runtime?.dispose();
   }
 }
