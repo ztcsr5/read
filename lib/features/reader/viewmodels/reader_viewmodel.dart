@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'dart:ui' show Color;
+import 'dart:ui' show Brightness, Color;
 
 import '../../../data/models/book.dart';
 import '../../../data/models/chapter.dart';
@@ -105,7 +105,7 @@ class ReaderState {
     this.keepScreenOn = true,
     this.volumeKeyTurn = false,
     this.tapZoneActions = ReaderTapAction.defaultZones,
-    this.background = ReaderBackground.white,
+    this.background = ReaderBackground.system,
     this.customBackgroundColor = const Color(0xFFF6F0E4),
     this.mode = ReaderMode.scroll,
     this.bookmarks = const [],
@@ -193,6 +193,7 @@ class ReaderState {
 
 /// 阅读器背景色
 enum ReaderBackground {
+  system(Color(0xFFF9F9F9), '跟随系统'),
   white(Color(0xFFF9F9F9), '纯白'),
   cream(Color(0xFFF6F0E4), '牛皮纸'),
   green(Color(0xFFE5F1E7), '护眼绿'),
@@ -208,6 +209,7 @@ enum ReaderBackground {
   /// 获取文字颜色
   Color get textColor {
     switch (this) {
+      case ReaderBackground.system:
       case ReaderBackground.white:
       case ReaderBackground.cream:
       case ReaderBackground.green:
@@ -224,6 +226,15 @@ enum ReaderBackground {
 
 extension ReaderBackgroundResolver on ReaderState {
   Color get resolvedBackgroundColor {
+    return resolveBackgroundColor(Brightness.light);
+  }
+
+  Color resolveBackgroundColor(Brightness brightness) {
+    if (background == ReaderBackground.system) {
+      return brightness == Brightness.dark
+          ? const Color(0xFF111111)
+          : const Color(0xFFF9F9F9);
+    }
     if (background == ReaderBackground.custom) {
       return customBackgroundColor;
     }
@@ -236,6 +247,12 @@ extension ReaderBackgroundResolver on ReaderState {
     return brightness > 0.45
         ? const Color(0xFF2C2C2E)
         : const Color(0xFFEDEDF2);
+  }
+
+  Color resolveTextColor(Brightness brightness) {
+    final color = resolveBackgroundColor(brightness);
+    final luminance = color.computeLuminance();
+    return luminance > 0.45 ? const Color(0xFF2C2C2E) : const Color(0xFFEDEDF2);
   }
 }
 
@@ -363,6 +380,13 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
   Future<void> _loadReaderSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final zoneNames = prefs.getStringList('reader.tapZoneActions');
+    final savedBackgroundIndex = prefs.containsKey('reader.background.v2')
+        ? prefs.getInt('reader.background.v2')
+        : ((prefs.getInt('reader.background') ?? -1) + 1);
+    final backgroundIndex =
+        (savedBackgroundIndex == null || savedBackgroundIndex < 0)
+        ? state.background.index
+        : savedBackgroundIndex;
     final zones = zoneNames
         ?.map(
           (name) => ReaderTapAction.values.firstWhere(
@@ -395,10 +419,8 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       keepScreenOn: prefs.getBool('reader.keepScreenOn') ?? state.keepScreenOn,
       volumeKeyTurn:
           prefs.getBool('reader.volumeKeyTurn') ?? state.volumeKeyTurn,
-      background:
-          ReaderBackground.values[(prefs.getInt('reader.background') ??
-                  state.background.index)
-              .clamp(0, ReaderBackground.values.length - 1)],
+      background: ReaderBackground
+          .values[backgroundIndex.clamp(0, ReaderBackground.values.length - 1)],
       customBackgroundColor: Color(
         prefs.getInt('reader.customBackgroundColor') ??
             state.customBackgroundColor.value,
@@ -429,6 +451,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     await prefs.setBool('reader.keepScreenOn', state.keepScreenOn);
     await prefs.setBool('reader.volumeKeyTurn', state.volumeKeyTurn);
     await prefs.setInt('reader.background', state.background.index);
+    await prefs.setInt('reader.background.v2', state.background.index);
     await prefs.setInt(
       'reader.customBackgroundColor',
       state.customBackgroundColor.value,
@@ -677,6 +700,99 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     }
     state = state.copyWith(tapZoneActions: List.unmodifiable(actions));
     _saveReaderSettings();
+  }
+
+  Future<List<BookSource>> getEnabledSwitchSources() async {
+    final currentSourceId = int.tryParse(state.book?.sourceUrl ?? '');
+    final sources = await _bookRepository.getAllBookSources();
+    return sources
+        .where((source) => source.enabled && source.id != currentSourceId)
+        .toList();
+  }
+
+  Future<void> switchBookSource(BookSource source, Book candidate) async {
+    final currentBook = state.book;
+    if (currentBook == null) return;
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      var replacement = candidate;
+      try {
+        replacement = await LegadoParser.parseBookInfo(source, candidate);
+      } catch (_) {
+        replacement = candidate;
+      }
+
+      final updatedBook = currentBook.copyWith(
+        title: replacement.title.isEmpty
+            ? currentBook.title
+            : replacement.title,
+        author: replacement.author.isEmpty
+            ? currentBook.author
+            : replacement.author,
+        coverPath: replacement.coverPath?.isEmpty ?? true
+            ? currentBook.coverPath
+            : replacement.coverPath,
+        filePath: replacement.filePath,
+        fileType: 'online',
+        sourceUrl: source.id.toString(),
+      )..isFromSource = true;
+
+      final oldChapterTitle =
+          state.currentChapterIndex >= 0 &&
+              state.currentChapterIndex < state.chapters.length
+          ? state.chapters[state.currentChapterIndex].title
+          : '';
+      final chapters = await LegadoParser.getChapterList(source, updatedBook);
+      if (chapters.isEmpty) {
+        throw Exception('新书源没有解析到目录');
+      }
+
+      final currentIndex = _matchChapterIndex(
+        chapters,
+        oldChapterTitle,
+      ).clamp(0, chapters.length - 1);
+      updatedBook
+        ..currentChapter = currentIndex
+        ..currentPosition = 0
+        ..readingProgress = ((currentIndex + 1) / chapters.length).clamp(
+          0.0,
+          1.0,
+        )
+        ..lastReadTime = DateTime.now();
+
+      await _bookRepository.saveBook(updatedBook);
+      await _bookRepository.deleteChaptersForBook(updatedBook.id);
+      await _bookRepository.saveChapters(chapters);
+
+      state = state.copyWith(
+        book: updatedBook,
+        chapters: chapters,
+        loadedChapters: const [],
+        items: const [],
+        currentChapterIndex: currentIndex,
+        scrollPosition: 0,
+        readingProgress: updatedBook.readingProgress,
+        isLoading: false,
+      );
+      await _loadCurrentChapter(includePrevious: false);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: '换源失败: $e');
+      rethrow;
+    }
+  }
+
+  int _matchChapterIndex(List<Chapter> chapters, String title) {
+    if (title.trim().isEmpty) return state.currentChapterIndex;
+    final target = _normalizeTitleText(title);
+    final exact = chapters.indexWhere(
+      (chapter) => _normalizeTitleText(chapter.title) == target,
+    );
+    if (exact >= 0) return exact;
+    final fuzzy = chapters.indexWhere((chapter) {
+      final value = _normalizeTitleText(chapter.title);
+      return value.contains(target) || target.contains(value);
+    });
+    return fuzzy >= 0 ? fuzzy : state.currentChapterIndex;
   }
 
   /// 切换自动翻页

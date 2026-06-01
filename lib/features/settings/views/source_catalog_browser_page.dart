@@ -254,7 +254,7 @@ class _SourceCatalogBrowserPageState
         throw Exception('HTTP ${response.statusCode}');
       }
       final text = utf8.decode(response.bodyBytes, allowMalformed: true);
-      if (_looksLikeCloudflareChallenge(text)) {
+      if (!_looksLikeJson(text) && _looksLikeCloudflareChallenge(text)) {
         throw Exception(
           '目标站启用了 Cloudflare/JS 验证，App 不能直接拉取。请在浏览器下载 JSON 后用本地文件导入。',
         );
@@ -451,6 +451,14 @@ class _SourceCatalogBrowserPageState
   }
 
   bool _looksLikeCloudflareChallenge(String text) {
+    if (_looksLikeJson(text)) {
+      try {
+        jsonDecode(text);
+        return false;
+      } on FormatException {
+        // Continue with the lightweight challenge-page checks below.
+      }
+    }
     return text.contains('/cdn-cgi/challenge-platform') ||
         text.contains('Just a moment') ||
         text.contains('Enable JavaScript and cookies to continue');
@@ -468,6 +476,8 @@ class _SourceCatalogBrowserPageState
         rawItems.addAll(data['list'] as List);
       } else if (parsed['list'] is List) {
         rawItems.addAll(parsed['list'] as List);
+      } else if (parsed['items'] is List) {
+        rawItems.addAll(parsed['items'] as List);
       } else if (parsed['sources'] is List) {
         rawItems.addAll(parsed['sources'] as List);
       } else if (parsed['bookSources'] is List) {

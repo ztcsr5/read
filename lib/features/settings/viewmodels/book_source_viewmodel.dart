@@ -110,13 +110,17 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
         },
       );
       final body = utf8.decode(response.bodyBytes, allowMalformed: true);
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+      if (_looksLikeJson(body)) {
+        await importFromJson(body, originalUrl: normalizedUrl);
+        return;
+      }
       if (_looksLikeCloudflareChallenge(body)) {
         throw Exception(
           '内容是 Cloudflare/JS 验证页，不是书源 JSON。请用内置浏览器验证后下载 JSON，或选择本地 JSON 文件导入。',
         );
-      }
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
       }
       if (!_looksLikeJson(body)) {
         throw Exception('返回内容不是 JSON，可能是网页仓库入口、验证码或站点拒绝访问。可尝试内置浏览器导入。');
@@ -130,11 +134,12 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
   Future<void> importFromJson(String jsonString, {String? originalUrl}) async {
     state = state.copyWith(isLoading: true, error: null, message: null);
     try {
-      if (_looksLikeCloudflareChallenge(jsonString)) {
+      if (!_looksLikeJson(_normalizeImportJsonText(jsonString)) &&
+          _looksLikeCloudflareChallenge(jsonString)) {
         throw Exception('内容是 Cloudflare 验证页，不是书源 JSON。请在浏览器下载 JSON 后导入。');
       }
 
-      final parsed = jsonDecode(jsonString);
+      final parsed = jsonDecode(_normalizeImportJsonText(jsonString));
       final list = _normalizeImportItems(parsed);
 
       var bookCount = 0;
@@ -310,6 +315,16 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
   }
 
   bool _looksLikeCloudflareChallenge(String text) {
+    final normalized = _normalizeImportJsonText(text);
+    if (_looksLikeJson(normalized)) {
+      try {
+        jsonDecode(normalized);
+        return false;
+      } on FormatException {
+        // Fall through and check whether the failed payload is actually a
+        // challenge page. Some source rules legitimately contain CF words.
+      }
+    }
     return text.contains('/cdn-cgi/challenge-platform') ||
         text.contains('Just a moment') ||
         text.contains('Enable JavaScript and cookies to continue') ||
@@ -318,8 +333,64 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
   }
 
   bool _looksLikeJson(String text) {
-    final trimmed = text.trimLeft();
+    final trimmed = _stripBom(text).trimLeft();
     return trimmed.startsWith('{') || trimmed.startsWith('[');
+  }
+
+  String _normalizeImportJsonText(String text) {
+    var normalized = _stripBom(text).trim();
+    if (normalized.length >= 2 &&
+        normalized.startsWith('"') &&
+        normalized.endsWith('"')) {
+      try {
+        final decoded = jsonDecode(normalized);
+        if (decoded is String) normalized = _stripBom(decoded).trim();
+      } catch (_) {
+        // Keep the original text if this was not a JSON-encoded string.
+      }
+    }
+    return _extractFirstJsonValue(normalized) ?? normalized;
+  }
+
+  String _stripBom(String text) {
+    return text.startsWith('\ufeff') ? text.substring(1) : text;
+  }
+
+  String? _extractFirstJsonValue(String text) {
+    final src = _stripBom(text).trim();
+    final start = src.indexOf(RegExp(r'[\[{]'));
+    if (start < 0) return null;
+
+    final stack = <int>[];
+    var inString = false;
+    var escaping = false;
+
+    for (var i = start; i < src.length; i++) {
+      final code = src.codeUnitAt(i);
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+        } else if (code == 0x5c) {
+          escaping = true;
+        } else if (code == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (code == 0x22) {
+        inString = true;
+      } else if (code == 0x5b) {
+        stack.add(0x5d);
+      } else if (code == 0x7b) {
+        stack.add(0x7d);
+      } else if (code == 0x5d || code == 0x7d) {
+        if (stack.isEmpty || stack.last != code) return null;
+        stack.removeLast();
+        if (stack.isEmpty) return src.substring(start, i + 1);
+      }
+    }
+    return null;
   }
 
   String _decodeJsonBytes(List<int> bytes) {
@@ -337,6 +408,7 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
       if (data is List) return data;
       if (data is Map && data['list'] is List) return data['list'] as List;
       if (parsed['list'] is List) return parsed['list'] as List;
+      if (parsed['items'] is List) return parsed['items'] as List;
       if (parsed['bookSources'] is List) return parsed['bookSources'] as List;
       if (parsed['sources'] is List) return parsed['sources'] as List;
       if (parsed['bookSource'] is List) return parsed['bookSource'] as List;

@@ -48,6 +48,78 @@ void main() {
     expect(vm.state.rssSources, isEmpty);
   });
 
+  test('does not treat valid source json as cloudflare page', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+
+    await vm.importFromJson(
+      jsonEncode([
+        {
+          'bookSourceName': 'CF keyword source',
+          'bookSourceUrl': 'https://cf.example.com',
+          'searchUrl': '/search?q={{key}}',
+          'ruleSearch': {
+            'bookList': 'data.list',
+            'name': 'title',
+            'bookUrl': 'url',
+            'debug': 'challenge-form /cdn-cgi/challenge-platform',
+          },
+        },
+      ]),
+    );
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    expect(vm.state.sources.single.bookSourceName, 'CF keyword source');
+  });
+
+  test(
+    'imports browser text json with nested arrays and cloudflare words',
+    () async {
+      final vm = BookSourceViewModel(BookRepository(null));
+
+      await vm.importFromJson('''
+page header
+[
+  {
+    "bookSourceName": "Nested CF source",
+    "bookSourceUrl": "https://nested.example.com",
+    "searchUrl": "/search?q={{key}}",
+    "exploreUrl": [{"title":"榜单","url":"/rank/{{page}}"}],
+    "ruleSearch": {
+      "bookList": "data.list",
+      "name": "title",
+      "bookUrl": "url",
+      "debug": "challenge-form /cdn-cgi/challenge-platform"
+    }
+  }
+]
+page footer
+''');
+
+      expect(vm.state.error, isNull);
+      expect(vm.state.sources, hasLength(1));
+      expect(vm.state.sources.single.bookSourceName, 'Nested CF source');
+    },
+  );
+
+  test('imports json extracted from browser page text', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+    final payload = jsonEncode([
+      {
+        'bookSourceName': 'Browser extracted source',
+        'bookSourceUrl': 'https://browser.example.com',
+        'searchUrl': '/search?q={{key}}',
+        'ruleSearch': {'bookList': 'data.list', 'name': 'title'},
+      },
+    ]);
+
+    await vm.importFromJson('header text\n$payload\nfooter text');
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    expect(vm.state.sources.single.bookSourceName, 'Browser extracted source');
+  });
+
   test('imports book source aliases from shared json', () async {
     final vm = BookSourceViewModel(BookRepository(null));
 
@@ -75,6 +147,27 @@ void main() {
     expect(vm.state.sources.single.bookSourceName, 'Alias Source');
     expect(vm.state.sources.single.ruleSearch, contains('bookList'));
     expect(vm.state.sources.single.ruleContent, contains('data.content'));
+  });
+
+  test('imports sources from items wrapper', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+
+    await vm.importFromJson(
+      jsonEncode({
+        'items': [
+          {
+            'bookSourceName': 'Items wrapped source',
+            'bookSourceUrl': 'https://items.example.com',
+            'searchUrl': '/search?q={{key}}',
+            'ruleSearch': {'bookList': 'data.list', 'name': 'title'},
+          },
+        ],
+      }),
+    );
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    expect(vm.state.sources.single.bookSourceName, 'Items wrapped source');
   });
 
   test('imports source json from bytes', () async {

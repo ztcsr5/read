@@ -249,6 +249,20 @@ class BookRepository {
         .findAll();
   }
 
+  Future<void> deleteChaptersForBook(int bookId) async {
+    if (isar == null) {
+      _mockChapters.removeWhere((c) => c.bookId == bookId);
+      return;
+    }
+    await isar!.writeTxn(() async {
+      await isar!
+          .collection<Chapter>()
+          .filter()
+          .bookIdEqualTo(bookId)
+          .deleteAll();
+    });
+  }
+
   // --- RssSource Methods ---
 
   Future<int> saveRssSource(RssSource source) async {
