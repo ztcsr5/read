@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../models/book_source.dart';
+import 'legado_js_engine.dart';
 
 class LegadoHttpRequest {
   final String url;
@@ -24,16 +25,24 @@ class LegadoRequestBuilder {
     String keyword, {
     int page = 1,
   }) {
-    final searchUrl = replaceVariables(
+    String searchUrl = replaceVariables(
       source.searchUrl!,
       keyword: keyword,
       page: page,
       source: source,
     );
+
+    if (searchUrl.startsWith('@js:') || searchUrl.startsWith('<js>')) {
+      searchUrl = LegadoJsEngine().evaluate(searchUrl, variables: {
+        'keyword': keyword,
+        'page': page,
+      });
+    }
+
     final embedded = splitEmbeddedConfig(searchUrl);
     final resolved = resolveUrl(source.bookSourceUrl, embedded.url);
     if (embedded.config.isEmpty) return resolved;
-    return '$resolved,${jsonEncode(embedded.config)}';
+    return '\$resolved,\${jsonEncode(embedded.config)}';
   }
 
   static LegadoHttpRequest buildRequest(
@@ -170,6 +179,49 @@ class LegadoRequestBuilder {
     final headers = <String, dynamic>{};
     final text = rawHeaders.trim();
     if (text.isEmpty) return headers;
+
+    // 🚨 【修复核心】：拦截 JavaScript 规则，交由 JS 引擎执行
+    if (text.startsWith('@js:') ||
+        text.startsWith('<js>') ||
+        text.contains('java.')) {
+      try {
+        final jsOutput = LegadoJsEngine().evaluate(text);
+        if (jsOutput.isNotEmpty) {
+          try {
+            final json = jsonDecode(jsOutput);
+            if (json is Map) {
+              final jsHeaders = <String, dynamic>{};
+              json.forEach((key, value) {
+                jsHeaders[key.toString()] = value.toString();
+              });
+              return jsHeaders;
+            }
+          } catch (_) {}
+
+          final jsHeaders = <String, dynamic>{};
+          final normalized = jsOutput.replaceAll(r'\n', '\n');
+          for (final line in normalized.split(RegExp(r'[\r\n]+'))) {
+            final separator = line.indexOf(':');
+            if (separator <= 0) continue;
+            final key = line.substring(0, separator).trim();
+            final value = line.substring(separator + 1).trim();
+            if (key.isNotEmpty && value.isNotEmpty && !key.contains(' ') && !key.contains('=')) {
+              jsHeaders[key] = value;
+            }
+          }
+          if (jsHeaders.isNotEmpty) return jsHeaders;
+        }
+      } catch (e) {
+        print('JS Header Eval Error: \$e');
+      }
+      return {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      };
+    }
+
     try {
       final json = jsonDecode(text);
       if (json is Map) {
@@ -188,7 +240,12 @@ class LegadoRequestBuilder {
       if (separator <= 0) continue;
       final key = line.substring(0, separator).trim();
       final value = line.substring(separator + 1).trim();
-      if (key.isNotEmpty && value.isNotEmpty) {
+
+      // 🚨 【安全校验】：过滤掉包含空格或等号的非法 Key，防止 Dio 抛出 FormatException
+      if (key.isNotEmpty &&
+          value.isNotEmpty &&
+          !key.contains(' ') &&
+          !key.contains('=')) {
         headers[key] = value;
       }
     }

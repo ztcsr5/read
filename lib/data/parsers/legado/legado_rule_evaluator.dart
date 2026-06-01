@@ -1,10 +1,19 @@
+import 'dart:convert';
 import 'package:html/dom.dart';
 import 'package:json_path/json_path.dart';
 import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
+import 'legado_js_engine.dart';
 
 class LegadoRuleEvaluator {
   static String extractJsonValue(dynamic json, String rule) {
     if (rule.isEmpty) return '';
+    if (isJsOnlyRule(rule)) {
+      final jsonStr = json is String ? json : jsonEncode(json);
+      return applyPostProcessors(
+        LegadoJsEngine().evaluate(rule, variables: {'result': jsonStr}),
+        rule,
+      );
+    }
     if (json is Map && rule.contains('{{')) {
       return applyPostProcessors(_interpolateJsonTemplate(json, rule), rule);
     }
@@ -27,6 +36,17 @@ class LegadoRuleEvaluator {
 
   static List<dynamic> extractJsonNodes(dynamic json, String rule) {
     if (rule.isEmpty) return const [];
+    if (isJsOnlyRule(rule)) {
+      final jsonStr = json is String ? json : jsonEncode(json);
+      final jsOutput = LegadoJsEngine().evaluate(rule, variables: {'result': jsonStr});
+      try {
+        final decoded = jsonDecode(jsOutput);
+        if (decoded is List) return decoded;
+        return [decoded];
+      } catch (_) {
+        return [jsOutput];
+      }
+    }
     final nodes = <dynamic>[];
     try {
       final alternatives = rule.split(RegExp(r'\|\||&&'));
@@ -45,6 +65,12 @@ class LegadoRuleEvaluator {
 
   static String extractHtmlValue(Element node, String rule) {
     if (rule.isEmpty) return '';
+    if (isJsOnlyRule(rule)) {
+      return applyPostProcessors(
+        LegadoJsEngine().evaluate(rule, variables: {'result': node.outerHtml}),
+        rule,
+      );
+    }
     final alternatives = rule.split(RegExp(r'\|\||&&'));
     for (final part in alternatives) {
       final value = _extractSingleHtmlValue(node, part);
@@ -174,8 +200,28 @@ class LegadoRuleEvaluator {
 
   static String applyPostProcessors(String value, String rule) {
     var output = value;
+
+    if (rule.contains('@get:')) {
+      final key = rule.split('@get:')[1].split(RegExp(r'[@#]')).first.trim();
+      final getRes = LegadoJsEngine().evaluate('java.get("$key")');
+      if (getRes.isNotEmpty) output = getRes;
+    }
+
+    if (rule.contains('@js:')) {
+      final jsPart = '@js:' + rule.split('@js:')[1].split('##').first;
+      output = LegadoJsEngine().evaluate(jsPart, variables: {'result': output});
+    } else if (rule.contains('<js>')) {
+      final jsPart = '<js>' + rule.split('<js>')[1].split('</js>').first + '</js>';
+      output = LegadoJsEngine().evaluate(jsPart, variables: {'result': output});
+    }
+
+    if (rule.contains('@put:')) {
+      final key = rule.split('@put:')[1].split(RegExp(r'[@#]')).first.trim();
+      LegadoJsEngine().evaluate('java.put("$key", result)', variables: {'result': output});
+    }
+
     if (rule.contains('##')) {
-      final parts = rule.split('##');
+      final parts = rule.substring(rule.indexOf('##')).split('##');
       final processors = parts.skip(1).toList();
       for (var index = 0; index < processors.length; index += 2) {
         final pattern = processors[index];

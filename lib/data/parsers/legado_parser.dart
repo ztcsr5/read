@@ -14,6 +14,7 @@ import '../models/book_source.dart';
 import '../models/chapter.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
+import 'legado/cloudflare_interceptor.dart';
 import 'legado/legado_request_builder.dart';
 import 'legado/legado_rule_evaluator.dart';
 
@@ -40,6 +41,7 @@ class LegadoParser {
         return client;
       },
     );
+    dio.interceptors.add(CloudflareInterceptor());
     return dio;
   }
 
@@ -65,9 +67,9 @@ class LegadoParser {
           _containsJsRule(source.ruleToc) ||
           _containsJsRule(source.ruleContent)) {
         steps.add(
-          const LegadoTestStep.skip(
-            'JS 规则',
-            '检测到 @js/<js>/java.* 规则；当前版本会跳过 JS 片段，复杂源可能需要后续 JSCore 支持。',
+          const LegadoTestStep.ok(
+            'JS 引擎',
+            '检测到 @js/<js>/java.* 规则，将使用 QuickJS 引擎执行。',
           ),
         );
       }
@@ -162,7 +164,6 @@ class LegadoParser {
     String keyword,
   ) async {
     if (source.searchUrl == null || source.ruleSearch == null) return [];
-    if (_isJsOnlyRule(source.searchUrl!)) return [];
 
     final response = await _request(
       source,

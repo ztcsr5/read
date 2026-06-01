@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   charset_converter
   isar_flutter_libs
+  quickjs_engine
   url_launcher_linux
 )
 

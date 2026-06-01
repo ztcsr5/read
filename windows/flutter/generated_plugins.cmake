@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_tts
   isar_flutter_libs
   permission_handler_windows
+  quickjs_engine
   url_launcher_windows
 )
 
