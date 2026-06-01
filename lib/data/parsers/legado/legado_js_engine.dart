@@ -177,10 +177,13 @@ class LegadoJsEngine {
 
     try {
       final result = _runtime!.evaluate(codeToRun);
+      if (result.isError) {
+        throw Exception(result.stringResult);
+      }
       return result.stringResult;
     } catch (e) {
       print('JS Eval failed: \$e');
-      return '';
+      throw Exception('JS执行异常: \$e');
     }
   }
 

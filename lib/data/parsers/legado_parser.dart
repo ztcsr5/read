@@ -98,7 +98,7 @@ class LegadoParser {
         return LegadoTestReport(steps: steps);
       }
 
-      final firstBook = books.first;
+      var firstBook = books.first;
       steps.add(
         LegadoTestStep.ok(
           '搜索结果',
@@ -109,6 +109,7 @@ class LegadoParser {
 
       if (source.ruleBookInfo != null && source.ruleBookInfo!.isNotEmpty) {
         final detail = await parseBookInfo(source, firstBook);
+        firstBook = detail;
         steps.add(
           LegadoTestStep.ok(
             '书籍详情',
@@ -654,6 +655,9 @@ class LegadoParser {
     String url, {
     String? keyword,
   }) async {
+    if (url.trim().isEmpty) {
+      throw Exception('请求 URL 为空 (可能是由于 JS 执行异常或书源未配置有效链接)');
+    }
     final request = _buildRequest(source, url, keyword: keyword);
     final response = await _dio.request<dynamic>(
       request.url,
