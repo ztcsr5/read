@@ -42,9 +42,40 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
         ),
       ),
       child: SafeArea(
-        child: book == null
-            ? const Center(child: CupertinoActivityIndicator())
-            : Column(
+        child: state.error != null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        CupertinoIcons.exclamationmark_circle,
+                        size: 48,
+                        color: CupertinoColors.destructiveRed,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        state.error!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      const SizedBox(height: 20),
+                      CupertinoButton.filled(
+                        child: const Text('重试'),
+                        onPressed: () {
+                          ref
+                              .read(readerViewModelProvider(widget.bookId).notifier)
+                              .loadBook(widget.bookId);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : book == null
+                ? const Center(child: CupertinoActivityIndicator())
+                : Column(
                 children: [
                   Expanded(
                     child: ListView(

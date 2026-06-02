@@ -13,14 +13,16 @@ import '../viewmodels/book_source_viewmodel.dart';
 class SourceCheckResult {
   final BookSource source;
   final bool isSuccess;
-  final String message;
-  final int timeMs;
+  final int booksCount;
+  final String? errorMessage;
+  final int durationInMs;
 
   SourceCheckResult({
     required this.source,
     required this.isSuccess,
-    required this.message,
-    required this.timeMs,
+    this.booksCount = 0,
+    this.errorMessage,
+    required this.durationInMs,
   });
 }
 
@@ -82,22 +84,41 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       final source = widget.sources[index];
       final watch = Stopwatch()..start();
       var success = false;
-      var msg = '';
+      var booksCount = 0;
+      String? errorMessage;
 
       try {
         // 搜索通用字进行验证
         final books = await LegadoParser.searchBooks(source, '天')
             .timeout(const Duration(seconds: 15));
         if (books.isNotEmpty) {
-          success = true;
-          msg = '成功搜索到 \${books.length} 本书';
+          final book = books.first;
+          List<Chapter> chapters = [];
+          try {
+            // 限制获取前 1~5 个章节以提高检测性能，同时触发目录解析逻辑
+            chapters = await LegadoParser.getChapterList(source, book, limit: 5)
+                .timeout(const Duration(seconds: 15));
+          } catch (_) {
+            // 目录获取异常，视为结果为空或失败
+          }
+
+          if (chapters.isNotEmpty) {
+            final firstChapter = chapters.first;
+            final chapterUrl = firstChapter.url ?? firstChapter.content ?? '';
+            if (chapterUrl.trim().isNotEmpty) {
+              success = true;
+              booksCount = books.length;
+            } else {
+              errorMessage = '解析成功但结果为空';
+            }
+          } else {
+            errorMessage = '解析成功但结果为空';
+          }
         } else {
-          msg = '解析成功但结果为空';
+          errorMessage = '解析成功但结果为空';
         }
       } catch (e) {
-        msg = e.toString().replaceFirst('Exception: ', '');
-        // 防止错误信息太长
-        if (msg.length > 50) msg = '\${msg.substring(0, 50)}...';
+        errorMessage = e.toString().replaceFirst('Exception: ', '');
       }
 
       watch.stop();
@@ -108,8 +129,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             SourceCheckResult(
               source: source,
               isSuccess: success,
-              message: msg,
-              timeMs: watch.elapsedMilliseconds,
+              booksCount: booksCount,
+              errorMessage: errorMessage,
+              durationInMs: watch.elapsedMilliseconds,
             ),
           );
           if (success) {
@@ -160,7 +182,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         context: context,
         builder: (context) => CupertinoAlertDialog(
           title: const Text('禁用完成'),
-          content: Text('已成功禁用 \${failedSources.length} 个失效书源。'),
+          content: Text('已成功禁用 ${failedSources.length} 个失效书源。'),
           actions: [
             CupertinoDialogAction(
               child: const Text('确定'),
@@ -245,7 +267,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 ),
               ),
               Text(
-                '\$checked / \$total',
+                '$checked / $total',
                 style: const TextStyle(
                   color: CupertinoColors.systemGrey,
                   fontSize: 16,
@@ -336,7 +358,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                       ),
                     ),
                     Text(
-                      '\${result.timeMs}ms',
+                      "${result.durationInMs}ms",
                       style: const TextStyle(
                         fontSize: 12,
                         color: CupertinoColors.systemGrey2,
@@ -346,7 +368,11 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  result.message,
+                  result.isSuccess
+                      ? "成功搜索到 ${result.booksCount} 本书"
+                      : result.errorMessage != null && result.errorMessage!.length > 50
+                          ? "${result.errorMessage!.substring(0, 50)}..."
+                          : "${result.errorMessage}",
                   style: TextStyle(
                     fontSize: 13,
                     color: result.isSuccess

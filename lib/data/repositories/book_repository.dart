@@ -53,9 +53,14 @@ class BookRepository {
       }
       return book.id;
     }
-    return await isar!.writeTxn(() async {
-      return await isar!.collection<Book>().put(book);
-    });
+    try {
+      return await isar!.writeTxn(() async {
+        return await isar!.collection<Book>().put(book);
+      });
+    } catch (e) {
+      debugPrint('BookRepository.saveBook error: $e');
+      return book.id;
+    }
   }
 
   /// Save or update a book group. Returns the auto-incremented ID.
@@ -72,9 +77,14 @@ class BookRepository {
       }
       return group.id;
     }
-    return await isar!.writeTxn(() async {
-      return await isar!.collection<BookGroup>().put(group);
-    });
+    try {
+      return await isar!.writeTxn(() async {
+        return await isar!.collection<BookGroup>().put(group);
+      });
+    } catch (e) {
+      debugPrint('BookRepository.saveBookGroup error: $e');
+      return group.id;
+    }
   }
 
   /// Delete a book group
@@ -83,9 +93,13 @@ class BookRepository {
       _mockGroups.removeWhere((g) => g.id == groupId);
       return;
     }
-    await isar!.writeTxn(() async {
-      await isar!.collection<BookGroup>().delete(groupId);
-    });
+    try {
+      await isar!.writeTxn(() async {
+        await isar!.collection<BookGroup>().delete(groupId);
+      });
+    } catch (e) {
+      debugPrint('BookRepository.deleteBookGroup error: $e');
+    }
   }
 
   /// Get all book groups
@@ -102,9 +116,13 @@ class BookRepository {
       _mockChapters.addAll(chapters);
       return;
     }
-    await isar!.writeTxn(() async {
-      await isar!.collection<Chapter>().putAll(chapters);
-    });
+    try {
+      await isar!.writeTxn(() async {
+        await isar!.collection<Chapter>().putAll(chapters);
+      });
+    } catch (e) {
+      debugPrint('BookRepository.saveChapters error: $e');
+    }
   }
 
   /// Get all saved books.
@@ -134,31 +152,35 @@ class BookRepository {
       _mockBookmarks.removeWhere((b) => b.bookId == bookId);
       return;
     }
-    await isar!.writeTxn(() async {
-      // Delete the book itself
-      await isar!.collection<Book>().delete(bookId);
+    try {
+      await isar!.writeTxn(() async {
+        // Delete the book itself
+        await isar!.collection<Book>().delete(bookId);
 
-      // Delete associated chapters
-      await isar!
-          .collection<Chapter>()
-          .filter()
-          .bookIdEqualTo(bookId)
-          .deleteAll();
+        // Delete associated chapters
+        await isar!
+            .collection<Chapter>()
+            .filter()
+            .bookIdEqualTo(bookId)
+            .deleteAll();
 
-      // Delete associated reading progress
-      await isar!
-          .collection<ReadingProgress>()
-          .filter()
-          .bookIdEqualTo(bookId)
-          .deleteAll();
+        // Delete associated reading progress
+        await isar!
+            .collection<ReadingProgress>()
+            .filter()
+            .bookIdEqualTo(bookId)
+            .deleteAll();
 
-      // Delete associated bookmarks
-      await isar!
-          .collection<Bookmark>()
-          .filter()
-          .bookIdEqualTo(bookId)
-          .deleteAll();
-    });
+        // Delete associated bookmarks
+        await isar!
+            .collection<Bookmark>()
+            .filter()
+            .bookIdEqualTo(bookId)
+            .deleteAll();
+      });
+    } catch (e) {
+      debugPrint('BookRepository.deleteBook error: $e');
+    }
   }
 
   /// Update the reading progress for a book.
@@ -198,41 +220,45 @@ class BookRepository {
       }
       return;
     }
-    await isar!.writeTxn(() async {
-      var progress = await isar!
-          .collection<ReadingProgress>()
-          .filter()
-          .bookIdEqualTo(bookId)
-          .findFirst();
+    try {
+      await isar!.writeTxn(() async {
+        var progress = await isar!
+            .collection<ReadingProgress>()
+            .filter()
+            .bookIdEqualTo(bookId)
+            .findFirst();
 
-      if (progress == null) {
-        progress = ReadingProgress(
-          bookId: bookId,
-          chapterIndex: chapterIndex,
-          charOffset: position,
-          scrollPosition: scrollPosition,
-          percentage: percentage,
-          lastReadAt: DateTime.now(),
-        );
-      } else {
-        progress.chapterIndex = chapterIndex;
-        progress.charOffset = position;
-        progress.scrollPosition = scrollPosition;
-        progress.percentage = percentage;
-        progress.lastReadAt = DateTime.now();
-      }
+        if (progress == null) {
+          progress = ReadingProgress(
+            bookId: bookId,
+            chapterIndex: chapterIndex,
+            charOffset: position,
+            scrollPosition: scrollPosition,
+            percentage: percentage,
+            lastReadAt: DateTime.now(),
+          );
+        } else {
+          progress.chapterIndex = chapterIndex;
+          progress.charOffset = position;
+          progress.scrollPosition = scrollPosition;
+          progress.percentage = percentage;
+          progress.lastReadAt = DateTime.now();
+        }
 
-      await isar!.collection<ReadingProgress>().put(progress);
+        await isar!.collection<ReadingProgress>().put(progress);
 
-      final book = await isar!.collection<Book>().get(bookId);
-      if (book != null) {
-        book.currentChapter = chapterIndex;
-        book.currentPosition = scrollPosition;
-        book.readingProgress = percentage;
-        book.lastReadTime = DateTime.now();
-        await isar!.collection<Book>().put(book);
-      }
-    });
+        final book = await isar!.collection<Book>().get(bookId);
+        if (book != null) {
+          book.currentChapter = chapterIndex;
+          book.currentPosition = scrollPosition;
+          book.readingProgress = percentage;
+          book.lastReadTime = DateTime.now();
+          await isar!.collection<Book>().put(book);
+        }
+      });
+    } catch (e) {
+      debugPrint('BookRepository.updateReadingProgress error: $e');
+    }
   }
 
   /// Get all chapters for a given book ID.
@@ -254,13 +280,17 @@ class BookRepository {
       _mockChapters.removeWhere((c) => c.bookId == bookId);
       return;
     }
-    await isar!.writeTxn(() async {
-      await isar!
-          .collection<Chapter>()
-          .filter()
-          .bookIdEqualTo(bookId)
-          .deleteAll();
-    });
+    try {
+      await isar!.writeTxn(() async {
+        await isar!
+            .collection<Chapter>()
+            .filter()
+            .bookIdEqualTo(bookId)
+            .deleteAll();
+      });
+    } catch (e) {
+      debugPrint('BookRepository.deleteChaptersForBook error: $e');
+    }
   }
 
   // --- RssSource Methods ---

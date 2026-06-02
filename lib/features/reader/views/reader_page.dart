@@ -489,6 +489,39 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   Widget _buildReadingContent(Color bgColor, Color textColor) {
     final readerState = ref.watch(readerViewModelProvider(widget.bookId));
 
+    if (readerState.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                CupertinoIcons.exclamationmark_circle,
+                size: 64,
+                color: CupertinoColors.destructiveRed,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                readerState.error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: textColor),
+              ),
+              const SizedBox(height: 24),
+              CupertinoButton.filled(
+                onPressed: () {
+                  ref
+                      .read(readerViewModelProvider(widget.bookId).notifier)
+                      .loadBook(widget.bookId);
+                },
+                child: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (readerState.isLoading && readerState.items.isEmpty) {
       return const Center(child: CupertinoActivityIndicator());
     }

@@ -332,10 +332,25 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       if (book == null) throw Exception('书籍不存在');
 
       book.lastReadTime = DateTime.now();
-      await _bookRepository.saveBook(book);
+      try {
+        await _bookRepository.saveBook(book);
+      } catch (e) {
+        print('Database Error saving book in loadBook: $e. Retaining in memory.');
+      }
 
-      List<Chapter> chapters = await _bookRepository.getChaptersForBook(id);
-      List<Bookmark> bookmarks = await _bookRepository.getBookmarks(id);
+      List<Chapter> chapters = [];
+      try {
+        chapters = await _bookRepository.getChaptersForBook(id);
+      } catch (e) {
+        print('Database Error reading chapters: $e. Using empty catalog.');
+      }
+
+      List<Bookmark> bookmarks = [];
+      try {
+        bookmarks = await _bookRepository.getBookmarks(id);
+      } catch (e) {
+        print('Database Error reading bookmarks: $e. Using empty bookmarks.');
+      }
 
       // 在线书籍如果还没拉取过目录，则去爬取
       if (chapters.isEmpty && book.isFromSource && book.sourceUrl != null) {
@@ -344,11 +359,20 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         if (sourceId != null && isar != null) {
           final source = await isar.bookSources.get(sourceId);
           if (source != null) {
-            chapters = await LegadoParser.getChapterList(source, book);
-            if (chapters.isNotEmpty) {
-              await isar.writeTxn(() async {
-                await isar.chapters.putAll(chapters);
-              });
+            try {
+              chapters = await LegadoParser.getChapterList(source, book);
+              if (chapters.isNotEmpty) {
+                try {
+                  await isar.writeTxn(() async {
+                    await isar.chapters.putAll(chapters);
+                  });
+                } catch (e) {
+                  // 容错与缓存隔离：数据库存储失败，不阻塞内存数据加载
+                  print('Database Error during catalog persistence: $e. Falling back to memory-only catalog.');
+                }
+              }
+            } catch (e) {
+              print('Error fetching catalog from source: $e');
             }
           }
         }
@@ -763,9 +787,21 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         )
         ..lastReadTime = DateTime.now();
 
-      await _bookRepository.saveBook(updatedBook);
-      await _bookRepository.deleteChaptersForBook(updatedBook.id);
-      await _bookRepository.saveChapters(chapters);
+      try {
+        await _bookRepository.saveBook(updatedBook);
+      } catch (e) {
+        print('Database Error saving book in switchBookSource: $e. Continuing.');
+      }
+      try {
+        await _bookRepository.deleteChaptersForBook(updatedBook.id);
+      } catch (e) {
+        print('Database Error deleting chapters in switchBookSource: $e. Continuing.');
+      }
+      try {
+        await _bookRepository.saveChapters(chapters);
+      } catch (e) {
+        print('Database Error saving chapters in switchBookSource: $e. Continuing.');
+      }
 
       state = state.copyWith(
         book: updatedBook,
@@ -931,9 +967,13 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
             );
             // 存回本地以免重复请求
             chapter.content = textContent;
-            await isar.writeTxn(() async {
-              await isar.chapters.put(chapter);
-            });
+            try {
+              await isar.writeTxn(() async {
+                await isar.chapters.put(chapter);
+              });
+            } catch (e) {
+              print('Database Error caching chapter content: $e. Retaining in memory.');
+            }
           }
         }
       }

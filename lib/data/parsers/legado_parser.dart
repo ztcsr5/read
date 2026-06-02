@@ -346,8 +346,9 @@ class LegadoParser {
   /// 获取目录。
   static Future<List<Chapter>> getChapterList(
     BookSource source,
-    Book book,
-  ) async {
+    Book book, {
+    int? limit,
+  }) async {
     final ruleTocStr = source.ruleToc;
     if (ruleTocStr == null) return [];
 
@@ -355,69 +356,151 @@ class LegadoParser {
     var listRule = _firstRule(rule, const ['chapterList', 'list']);
     if (listRule == null) return [];
 
-    var response = await _request(source, book.filePath);
-    response = await _followTocUrl(source, book.filePath, response, rule);
-    var data = response.data;
-    final prepared = await _prepareDataForRule(
-      source,
-      data,
-      listRule,
-      baseUrl: response.realUri.toString(),
-    );
-    data = prepared.data;
-    listRule = prepared.rule;
     final chapters = <Chapter>[];
+    String currentUrl = book.filePath;
+    final visitedUrls = <String>{};
 
-    if (listRule.isEmpty && _looksLikeJsonData(data, null)) {
-      return _parseChaptersByJsonFallback(
-        data,
-        rule,
+    var currentResponse = await _request(source, book.filePath);
+    currentResponse = await _followTocUrl(source, book.filePath, currentResponse, rule);
+    
+    var currentUrlStr = currentResponse.realUri.toString();
+    currentUrlStr = currentUrlStr
+        .replaceAll('\n', '')
+        .replaceAll('\r', '')
+        .replaceAll('%0A', '')
+        .replaceAll('%0D', '')
+        .replaceAll('%0a', '')
+        .replaceAll('%0d', '')
+        .trim();
+    
+    var data = currentResponse.data;
+
+    while (true) {
+      if (currentUrlStr.isEmpty || visitedUrls.contains(currentUrlStr)) {
+        break;
+      }
+      visitedUrls.add(currentUrlStr);
+
+      final prepared = await _prepareDataForRule(
         source,
-        book,
-        response.realUri.toString(),
+        data,
+        listRule,
+        baseUrl: currentUrlStr,
       );
-    }
+      final pageData = prepared.data;
+      final pageListRule = prepared.rule;
 
-    if (_isJsonRule(listRule) && _looksLikeJsonData(data, listRule)) {
-      try {
-        final jsonData = data is String ? jsonDecode(data) : data;
-        var index = 0;
-        for (final node in _extractJsonNodes(jsonData, listRule)) {
-          if (node is! Map) continue;
-          final item = node.map(
-            (key, value) => MapEntry(key.toString(), value),
-          );
-          final title = _extractJsonValue(
-            item,
-            _sourceScopedRule(
-              _firstRule(rule, const [
-                    'chapterName',
-                    'name',
-                    'title',
-                    'ChapterName',
-                    'N',
-                  ]) ??
-                  '',
-              source,
-            ),
-          );
-          final url = _extractJsonValue(
-            item,
-            _sourceScopedRule(
-              _firstRule(rule, const [
-                    'chapterUrl',
-                    'url',
-                    'link',
-                    'ChapterUrl',
-                    'C',
-                  ]) ??
-                  '',
-              source,
-            ),
-          );
-          final fullUrl = _resolveUrl(response.realUri.toString(), url);
+      final pageChapters = <Chapter>[];
+      if (pageListRule.isEmpty && _looksLikeJsonData(pageData, null)) {
+        pageChapters.addAll(_parseChaptersByJsonFallback(
+          pageData,
+          rule,
+          source,
+          book,
+          currentUrlStr,
+          limit: limit,
+        ));
+      } else if (_isJsonRule(pageListRule) && _looksLikeJsonData(pageData, pageListRule)) {
+        try {
+          final jsonData = pageData is String ? jsonDecode(pageData) : pageData;
+          var index = chapters.length;
+          for (final node in _extractJsonNodes(jsonData, pageListRule)) {
+            if (limit != null && (chapters.length + pageChapters.length) >= limit) break;
+            if (node is! Map) continue;
+            final item = node.map(
+              (key, value) => MapEntry(key.toString(), value),
+            );
+            final title = _extractJsonValue(
+              item,
+              _sourceScopedRule(
+                _firstRule(rule, const [
+                      'chapterName',
+                      'name',
+                      'title',
+                      'ChapterName',
+                      'N',
+                    ]) ??
+                    '',
+                source,
+              ),
+            );
+            final url = _extractJsonValue(
+              item,
+              _sourceScopedRule(
+                _firstRule(rule, const [
+                      'chapterUrl',
+                      'url',
+                      'link',
+                      'ChapterUrl',
+                      'C',
+                    ]) ??
+                    '',
+                source,
+              ),
+            );
+            final fullUrl = _resolveUrl(currentUrlStr, url);
 
-          chapters.add(
+            pageChapters.add(
+              Chapter(
+                bookId: book.id,
+                title: title,
+                index: index++,
+                content: fullUrl,
+                url: fullUrl,
+                wordCount: 0,
+                isDownloaded: false,
+              ),
+            );
+          }
+          if (pageChapters.isEmpty) {
+            pageChapters.addAll(_parseChaptersByJsonFallback(
+              pageData,
+              rule,
+              source,
+              book,
+              currentUrlStr,
+              limit: limit,
+            ));
+          }
+        } catch (_) {
+          pageChapters.addAll(_parseChaptersByJsonFallback(
+            pageData,
+            rule,
+            source,
+            book,
+            currentUrlStr,
+            limit: limit,
+          ));
+        }
+      } else if (_isJsOnlyRule(pageListRule) && _looksLikeJsonData(pageData, pageListRule)) {
+        pageChapters.addAll(_parseChaptersByJsonFallback(
+          pageData,
+          rule,
+          source,
+          book,
+          currentUrlStr,
+          limit: limit,
+        ));
+      } else {
+        final document = parse(pageData.toString());
+        final nodes = _queryAll(document, pageListRule);
+        var index = chapters.length;
+        for (final node in nodes) {
+          if (limit != null && (chapters.length + pageChapters.length) >= limit) break;
+          final titleRule = _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '';
+          final title = _extractHtmlValue(
+            node,
+            _sourceScopedRule(titleRule, source),
+          );
+          final urlRule = _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '';
+          final url = _extractHtmlValue(
+            node,
+            _sourceScopedRule(urlRule, source),
+          );
+          if (title.trim().isEmpty && url.trim().isEmpty) continue;
+          final fullUrl = _resolveUrl(currentUrlStr, url);
+
+          pageChapters.add(
             Chapter(
               bookId: book.id,
               title: title,
@@ -429,66 +512,72 @@ class LegadoParser {
             ),
           );
         }
-        if (chapters.isNotEmpty) return chapters;
-      } catch (_) {
-        return _parseChaptersByJsonFallback(
-          data,
-          rule,
-          source,
-          book,
-          response.realUri.toString(),
-        );
+        if (pageChapters.isEmpty) {
+          pageChapters.addAll(_parseChaptersByJsonFallback(
+            pageData,
+            rule,
+            source,
+            book,
+            currentUrlStr,
+            limit: limit,
+          ));
+        }
+      }
+
+      chapters.addAll(pageChapters);
+
+      if (limit != null && chapters.length >= limit) {
+        break;
+      }
+
+      // 提取下一页目录 URL
+      final nextRule = _firstRule(rule, const ['nextPageUrl', 'nextUrl']);
+      if (nextRule == null || nextRule.isEmpty) {
+        break;
+      }
+
+      String nextPage = '';
+      if (_looksLikeJsonData(pageData, nextRule) && _isJsonRule(nextRule)) {
+        try {
+          final jsonData = pageData is String ? jsonDecode(pageData) : pageData;
+          nextPage = _extractJsonValue(jsonData, nextRule);
+        } catch (_) {
+          nextPage = '';
+        }
+      } else {
+        final document = parse(pageData.toString());
+        final root = document.documentElement ?? document.body;
+        if (root != null) nextPage = _extractHtmlValue(root, nextRule);
+      }
+
+      nextPage = nextPage
+          .replaceAll('\n', '')
+          .replaceAll('\r', '')
+          .replaceAll('%0A', '')
+          .replaceAll('%0D', '')
+          .replaceAll('%0a', '')
+          .replaceAll('%0d', '')
+          .trim();
+      if (nextPage.isEmpty) {
+        break;
+      }
+
+      final nextUrlResolved = _resolveUrl(currentUrlStr, nextPage);
+      if (nextUrlResolved == currentUrlStr || visitedUrls.contains(nextUrlResolved)) {
+        break;
+      }
+
+      try {
+        final nextResponse = await _request(source, nextUrlResolved);
+        currentUrlStr = nextUrlResolved;
+        data = nextResponse.data;
+      } catch (e) {
+        print('Error fetching next page of catalog: $e');
+        break;
       }
     }
 
-    if (_isJsOnlyRule(listRule) && _looksLikeJsonData(data, listRule)) {
-      return _parseChaptersByJsonFallback(
-        data,
-        rule,
-        source,
-        book,
-        response.realUri.toString(),
-      );
-    }
-
-    final document = parse(data.toString());
-    final nodes = _queryAll(document, listRule);
-    var index = 0;
-    for (final node in nodes) {
-      final titleRule = _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '';
-      final title = _extractHtmlValue(
-        node,
-        _sourceScopedRule(titleRule, source),
-      );
-      final urlRule = _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '';
-      final url = _extractHtmlValue(
-        node,
-        _sourceScopedRule(urlRule, source),
-      );
-      if (title.trim().isEmpty && url.trim().isEmpty) continue;
-      final fullUrl = _resolveUrl(response.realUri.toString(), url);
-
-      chapters.add(
-        Chapter(
-          bookId: book.id,
-          title: title,
-          index: index++,
-          content: fullUrl,
-          url: fullUrl,
-          wordCount: 0,
-          isDownloaded: false,
-        ),
-      );
-    }
-
-    if (chapters.isNotEmpty) return chapters;
-    return _parseChaptersByJsonFallback(
-      data,
-      rule,
-      source,
-      book,
-      response.realUri.toString(),
-    );
+    return chapters;
   }
 
   static Future<String> getChapterContent(
@@ -509,9 +598,23 @@ class LegadoParser {
     try {
       final parts = <String>[];
       var currentUrl = chapterUrl;
-      var response = await _request(source, currentUrl);
+      final visitedUrls = <String>{};
 
-      for (var page = 0; page < 5; page++) {
+      while (true) {
+        currentUrl = currentUrl
+            .replaceAll('\n', '')
+            .replaceAll('\r', '')
+            .replaceAll('%0A', '')
+            .replaceAll('%0D', '')
+            .replaceAll('%0a', '')
+            .replaceAll('%0d', '')
+            .trim();
+        if (currentUrl.isEmpty || visitedUrls.contains(currentUrl)) {
+          break;
+        }
+        visitedUrls.add(currentUrl);
+
+        var response = await _request(source, currentUrl);
         response = await _followContentUrl(source, currentUrl, response, rule);
         final prepared = await _prepareDataForRule(
           source,
@@ -519,16 +622,28 @@ class LegadoParser {
           contentRule,
           baseUrl: currentUrl,
         );
-        parts.add(_extractContentFromResponse(prepared.data, prepared.rule));
+        final contentText = _extractContentFromResponse(prepared.data, prepared.rule);
+        parts.add(contentText);
 
         final nextUrl = _extractNextContentUrl(
           response.realUri.toString(),
           response.data,
           rule,
         );
-        if (nextUrl == null || nextUrl == currentUrl) break;
-        currentUrl = nextUrl;
-        response = await _request(source, currentUrl);
+        if (nextUrl == null) break;
+
+        final cleanedNextUrl = nextUrl
+            .replaceAll('\n', '')
+            .replaceAll('\r', '')
+            .replaceAll('%0A', '')
+            .replaceAll('%0D', '')
+            .replaceAll('%0a', '')
+            .replaceAll('%0d', '')
+            .trim();
+        if (cleanedNextUrl.isEmpty || cleanedNextUrl == currentUrl || visitedUrls.contains(cleanedNextUrl)) {
+          break;
+        }
+        currentUrl = cleanedNextUrl;
       }
 
       final content = parts
@@ -537,7 +652,7 @@ class LegadoParser {
           .join('\n');
       return content.trim().isEmpty ? '解析失败：正文为空' : content.trim();
     } catch (e) {
-      return '解析失败：\${e.toString()}';
+      return '解析失败：${e.toString()}';
     }
   }
 
@@ -1489,8 +1604,9 @@ class LegadoParser {
     Map<String, dynamic> rule,
     BookSource source,
     Book book,
-    String baseUrl,
-  ) {
+    String baseUrl, {
+    int? limit,
+  }) {
     try {
       final jsonData = data is String ? jsonDecode(data) : data;
       final candidates = <dynamic>[
@@ -1537,6 +1653,7 @@ class LegadoParser {
       final chapters = <Chapter>[];
       var index = 0;
       for (final raw in list.whereType<Map>()) {
+        if (limit != null && chapters.length >= limit) break;
         final item = _stringKeyMap(raw);
         final title = _firstText(item, const [
           'chapterName',
