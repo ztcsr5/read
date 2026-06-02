@@ -422,6 +422,34 @@ void main() {
         '123',
       );
     });
+
+    test('sanitizes non-standard Legado CSS selectors', () {
+      expect(LegadoRuleEvaluator.sanitizeCssSelector('.info li.0 a'), '.info li.0 a');
+      expect(LegadoRuleEvaluator.sanitizeCssSelector('div:eq(0) a'), 'div.0 a');
+      expect(LegadoRuleEvaluator.sanitizeCssSelector('div:eq(-1) a'), 'div.-1 a');
+      expect(LegadoRuleEvaluator.sanitizeCssSelector('.info .0 a'), '.info *.0 a');
+    });
+
+    test('supports JSoup-like element self-matching', () {
+      final document = parse('<a href="/test">link</a>');
+      final node = document.querySelector('a')!;
+      // Even if selector is "a" and the element is "a", it matches itself
+      expect(LegadoRuleEvaluator.extractHtmlValue(node, 'a@href'), '/test');
+    });
+
+    test('supports JSoup-like attribute fallback to descendants', () {
+      final document = parse('''
+        <li class="item">
+          <a href="/target">link</a>
+          <img src="/image.png" alt="cover"/>
+        </li>
+      ''');
+      final node = document.querySelector('.item')!;
+      // li has no href directly, falls back to sub-a's href
+      expect(LegadoRuleEvaluator.extractHtmlValue(node, 'href'), '/target');
+      // li has no src directly, falls back to sub-img's src
+      expect(LegadoRuleEvaluator.extractHtmlValue(node, 'src'), '/image.png');
+    });
   });
 
   group('LegadoJsEngine', () {

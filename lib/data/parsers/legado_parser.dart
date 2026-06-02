@@ -423,6 +423,7 @@ class LegadoParser {
               title: title,
               index: index++,
               content: fullUrl,
+              url: fullUrl,
               wordCount: 0,
               isDownloaded: false,
             ),
@@ -454,13 +455,15 @@ class LegadoParser {
     final nodes = _queryAll(document, listRule);
     var index = 0;
     for (final node in nodes) {
+      final titleRule = _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '';
       final title = _extractHtmlValue(
         node,
-        _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '',
+        _sourceScopedRule(titleRule, source),
       );
+      final urlRule = _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '';
       final url = _extractHtmlValue(
         node,
-        _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '',
+        _sourceScopedRule(urlRule, source),
       );
       if (title.trim().isEmpty && url.trim().isEmpty) continue;
       final fullUrl = _resolveUrl(response.realUri.toString(), url);
@@ -471,6 +474,7 @@ class LegadoParser {
           title: title,
           index: index++,
           content: fullUrl,
+          url: fullUrl,
           wordCount: 0,
           isDownloaded: false,
         ),
@@ -1548,12 +1552,14 @@ class LegadoParser {
           baseUrl,
         );
         if (title.isEmpty && url.isEmpty) continue;
+        final resolvedUrl = _resolveUrl(baseUrl, url);
         chapters.add(
           Chapter(
             bookId: book.id,
             title: title.isEmpty ? '第${index + 1}章' : title,
             index: index++,
-            content: _resolveUrl(baseUrl, url),
+            content: resolvedUrl,
+            url: resolvedUrl,
             wordCount: 0,
             isDownloaded: false,
           ),

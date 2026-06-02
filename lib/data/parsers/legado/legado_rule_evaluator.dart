@@ -428,11 +428,13 @@ class LegadoRuleEvaluator {
 
   static String cssRule(String rule) {
     return _normalizeCssSelector(
-      rule
-          .replaceAll('@css:', '')
-          .replaceAll('@get:', '')
-          .replaceAll(RegExp(r'@[a-zA-Z0-9_\-:]+$'), '')
-          .trim(),
+      sanitizeCssSelector(
+        rule
+            .replaceAll('@css:', '')
+            .replaceAll('@get:', '')
+            .replaceAll(RegExp(r'@[a-zA-Z0-9_\-:]+$'), '')
+            .trim(),
+      ),
     );
   }
 
@@ -624,10 +626,42 @@ class LegadoRuleEvaluator {
     ).replaceFirst('@json:', '').replaceFirst('json:', '').trim();
   }
 
+  static String sanitizeCssSelector(String selector) {
+    var output = selector.trim();
+    if (output.isEmpty) return output;
+
+    // Convert :eq(n) to .n
+    output = output.replaceAllMapped(
+      RegExp(r':eq\((-?\d+)\)'),
+      (match) {
+        final val = int.tryParse(match.group(1) ?? '') ?? 0;
+        return '.$val';
+      },
+    );
+
+    // Convert standalone .number to *.number
+    output = output.replaceAllMapped(
+      RegExp(r'(?<=^|\s)\.(\d+)\b'),
+      (match) => '*.' + match.group(1)!,
+    );
+
+    return output;
+  }
+
+  static bool _isDescendantOf(Element child, Element parent) {
+    var curr = child.parent;
+    while (curr != null) {
+      if (curr == parent) return true;
+      curr = curr.parent;
+    }
+    return false;
+  }
+
   static _HtmlRule _parseHtmlRule(String rule, {bool attrAllowed = true}) {
     var cleaned = stripPostProcessors(
       rule,
     ).replaceAll('@css:', '').replaceAll('@get:', '').trim();
+    cleaned = sanitizeCssSelector(cleaned);
     if (cleaned.isEmpty || cleaned == 'this') {
       return const _HtmlRule([], 'text');
     }
@@ -644,8 +678,21 @@ class LegadoRuleEvaluator {
         parts.length > 1 &&
         _isKnownAttributeToken(parts.last)) {
       parts.removeLast();
+    } else if (parts.length == 1 && _isAttributeToken(parts.first)) {
+      attr = parts.first;
+      parts.clear();
     }
-    return _HtmlRule(parts, attr);
+
+    final finalSelectors = <String>[];
+    for (final selector in parts) {
+      final subParts = selector
+          .split(RegExp(r'\s+'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty && s != '>');
+      finalSelectors.addAll(subParts);
+    }
+
+    return _HtmlRule(finalSelectors, attr);
   }
 
   static bool _isKnownAttributeToken(String token) {
@@ -678,7 +725,21 @@ class LegadoRuleEvaluator {
     final parsed = _parseSelectorIndex(rawSelector);
     final selector = _normalizeCssSelector(parsed.selector);
     if (selector.isEmpty || selector == 'this') return [node];
-    final nodes = node.querySelectorAll(selector);
+
+    List<Element> nodes;
+    try {
+      final parent = node.parent;
+      if (parent != null) {
+        final allMatches = parent.querySelectorAll(selector);
+        nodes = allMatches
+            .where((el) => el == node || _isDescendantOf(el, node))
+            .toList();
+      } else {
+        nodes = node.querySelectorAll(selector);
+      }
+    } catch (_) {
+      nodes = node.querySelectorAll(selector);
+    }
     if (parsed.sliceStart != null || parsed.sliceEnd != null) {
       return _slice(nodes, parsed.sliceStart, parsed.sliceEnd);
     }
@@ -752,18 +813,38 @@ class LegadoRuleEvaluator {
   }
 
   static String _htmlValue(Element target, String attrName) {
-    return switch (attrName) {
-      'text' => target.text.trim(),
-      'textNodes' =>
-        target.nodes
+    switch (attrName) {
+      case 'text':
+        return target.text.trim();
+      case 'textNodes':
+        return target.nodes
             .whereType<Text>()
             .map((node) => node.text.trim())
             .where((text) => text.isNotEmpty)
-            .join('\n'),
-      'html' => target.innerHtml.trim(),
-      'outerHtml' => target.outerHtml.trim(),
-      _ => target.attributes[attrName] ?? '',
-    };
+            .join('\n');
+      case 'html':
+        return target.innerHtml.trim();
+      case 'outerHtml':
+        return target.outerHtml.trim();
+      default:
+        final direct = target.attributes[attrName];
+        if (direct != null && direct.isNotEmpty) return direct;
+
+        // Fallback: search descendants
+        if (attrName == 'href') {
+          final childHref = target.querySelector('a')?.attributes['href'];
+          if (childHref != null && childHref.isNotEmpty) return childHref;
+        }
+        if (const ['src', 'data-src', 'data-original', 'alt'].contains(attrName)) {
+          final childSrc = target.querySelector('img')?.attributes[attrName];
+          if (childSrc != null && childSrc.isNotEmpty) return childSrc;
+        }
+        for (final desc in target.querySelectorAll('*')) {
+          final val = desc.attributes[attrName];
+          if (val != null && val.isNotEmpty) return val;
+        }
+        return '';
+    }
   }
 
   static String _applyJsPostProcessors(String value, String rule) {
