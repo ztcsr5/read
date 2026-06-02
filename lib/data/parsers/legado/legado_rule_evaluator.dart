@@ -45,6 +45,18 @@ class LegadoRuleEvaluator {
     try {
       final alternatives = rule.split(RegExp(r'\|\||&&'));
       for (final part in alternatives) {
+        if (isJsOnlyRule(part)) {
+          try {
+            final jsonStr = json is String ? json : jsonEncode(json);
+            final value = LegadoJsEngine().evaluate(
+              part,
+              variables: {'result': jsonStr},
+            );
+            if (value.trim().isNotEmpty) return value.trim();
+          } catch (_) {}
+          continue;
+        }
+
         final cleaned = stripPostProcessors(part);
         if (cleaned.isEmpty) continue;
         var value = applyPostProcessors(
@@ -82,6 +94,24 @@ class LegadoRuleEvaluator {
     try {
       final alternatives = rule.split(RegExp(r'\|\||&&'));
       for (final part in alternatives) {
+        if (isJsOnlyRule(part)) {
+          try {
+            final jsonStr = json is String ? json : jsonEncode(json);
+            final value = LegadoJsEngine().evaluate(
+              part,
+              variables: {'result': jsonStr},
+            );
+            final decoded = jsonDecode(value);
+            if (decoded is List) {
+              nodes.addAll(decoded);
+            } else if (decoded != null) {
+              nodes.add(decoded);
+            }
+            if (nodes.isNotEmpty) return nodes;
+          } catch (_) {}
+          continue;
+        }
+
         final cleaned = stripPostProcessors(part);
         if (cleaned.isEmpty) continue;
         nodes.addAll(_extractNodesByJsonPath(json, cleaned));
@@ -200,12 +230,15 @@ class LegadoRuleEvaluator {
 
   static String stripPostProcessors(String rule) {
     var text = rule.trim();
+    final closeJs = text.lastIndexOf('</js>');
+    if (closeJs >= 0) {
+      final suffix = text.substring(closeJs + '</js>'.length).trim();
+      if (suffix.isNotEmpty) text = suffix;
+    }
     return text
         .split('\n')
         .first
         .split('@js:')
-        .first
-        .split('<js>')
         .first
         .split('@put:')
         .first
