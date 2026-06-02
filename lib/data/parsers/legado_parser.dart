@@ -1,14 +1,17 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
+ 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:json_path/json_path.dart';
+import 'package:webview_cookie_manager/webview_cookie_manager.dart' as wcm;
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:xml/xml.dart' as xml;
-
+ 
 import '../models/book.dart';
 import '../models/book_source.dart';
 import '../models/chapter.dart';
@@ -1028,6 +1031,219 @@ class LegadoParser {
     return LegadoRuleEvaluator.queryOne(node, rule);
   }
 
+  static bool _hasWebViewConfig(BookSource source, String url) {
+    try {
+      final embedded = LegadoRequestBuilder.splitEmbeddedConfig(url);
+      final config = <String, dynamic>{};
+      config.addAll(LegadoRequestBuilder.jsonConfig(source.customConfig));
+      config.addAll(embedded.config);
+      
+      final webViewVal = config['webView'] ?? config['webview'];
+      if (webViewVal != null) {
+        final str = webViewVal.toString().trim().toLowerCase();
+        return str == 'true' || str == '1';
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  static Future<String> _requestViaHeadlessWebView(
+    BookSource source,
+    String targetUrl,
+  ) async {
+    final embedded = LegadoRequestBuilder.splitEmbeddedConfig(targetUrl);
+    final urlStr = embedded.url;
+    final uri = Uri.parse(urlStr);
+    
+    final completer = Completer<String>();
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted);
+      
+    final config = <String, dynamic>{};
+    config.addAll(LegadoRequestBuilder.jsonConfig(source.customConfig));
+    config.addAll(embedded.config);
+    
+    final rawHeaders = config['headers'] ?? config['header'] ?? config['bookSourceHeader'];
+    Map<String, String> headersMap = {};
+    if (rawHeaders is Map) {
+      rawHeaders.forEach((k, v) => headersMap[k.toString()] = v.toString());
+    } else if (rawHeaders is String) {
+      final parsed = LegadoRequestBuilder.parseHeaderString(rawHeaders);
+      parsed.forEach((k, v) => headersMap[k.toString()] = v.toString());
+    }
+    
+    final ua = headersMap['User-Agent'] ?? headersMap['user-agent'] ?? config['userAgent'];
+    if (ua != null && ua.toString().isNotEmpty) {
+      await controller.setUserAgent(ua.toString());
+      LegadoSessionStore.setUserAgent(uri, ua.toString());
+    }
+    
+    controller.setNavigationDelegate(
+      NavigationDelegate(
+        onPageFinished: (url) async {
+          try {
+            final cookieManager = wcm.WebviewCookieManager();
+            final gotCookies = await cookieManager.getCookies(urlStr);
+            if (gotCookies.isNotEmpty) {
+              final cookieStr = gotCookies.map((c) => '${c.name}=${c.value}').join('; ');
+              LegadoSessionStore.setCookieString(uri, cookieStr);
+            }
+            
+            if (ua == null || ua.toString().isEmpty) {
+              final extractedUa = await controller.runJavaScriptReturningResult('navigator.userAgent');
+              final uaStr = extractedUa.toString().replaceAll('"', '').trim();
+              if (uaStr.isNotEmpty) {
+                LegadoSessionStore.setUserAgent(uri, uaStr);
+              }
+            }
+            
+            final result = await controller.runJavaScriptReturningResult('document.documentElement.outerHTML');
+            var html = result.toString();
+            if (html.startsWith('"') && html.endsWith('"')) {
+              try {
+                final decoded = jsonDecode(html);
+                if (decoded is String) html = decoded;
+              } catch (_) {
+                html = html.substring(1, html.length - 1)
+                  .replaceAll(r'\"', '"')
+                  .replaceAll(r'\\', r'\');
+              }
+            }
+            
+            if (!completer.isCompleted) {
+              await LegadoSessionStore.persistHost(uri);
+              completer.complete(html);
+            }
+          } catch (e) {
+            if (!completer.isCompleted) {
+              completer.completeError(e);
+            }
+          }
+        },
+        onNavigationRequest: (request) {
+          return NavigationDecision.navigate;
+        },
+        onWebResourceError: (error) {
+          print("Headless WebView resource error: ${error.description}");
+        },
+      ),
+    );
+    
+    final timeoutTimer = Timer(const Duration(seconds: 30), () {
+      if (!completer.isCompleted) {
+        completer.completeError(TimeoutException('Headless WebView request timed out for $urlStr'));
+      }
+    });
+    
+    try {
+      final optionsHeaders = <String, String>{};
+      headersMap.forEach((k, v) {
+        optionsHeaders[k] = v;
+      });
+      
+      final storedCookie = LegadoSessionStore.cookieHeaderFor(uri);
+      if (storedCookie != null && storedCookie.isNotEmpty) {
+        optionsHeaders['Cookie'] = storedCookie;
+        try {
+          final cookieManager = wcm.WebviewCookieManager();
+          final cookiesList = <Cookie>[];
+          for (final c in storedCookie.split(';')) {
+            final trimC = c.trim();
+            if (trimC.isEmpty) continue;
+            final eqIdx = trimC.indexOf('=');
+            if (eqIdx > 0) {
+              final name = trimC.substring(0, eqIdx).trim();
+              final value = trimC.substring(eqIdx + 1).trim();
+              if (name.isNotEmpty) {
+                cookiesList.add(
+                  Cookie(name, value)
+                    ..domain = uri.host
+                    ..path = '/',
+                );
+              }
+            }
+          }
+          if (cookiesList.isNotEmpty) {
+            await cookieManager.setCookies(cookiesList);
+          }
+        } catch (e) {
+          print('Failed to set WebView cookies: $e');
+        }
+      }
+      
+      await controller.loadRequest(
+        uri,
+        headers: optionsHeaders,
+      );
+      
+      final result = await completer.future;
+      timeoutTimer.cancel();
+      return result;
+    } catch (e) {
+      timeoutTimer.cancel();
+      rethrow;
+    }
+  }
+
+  static Future<String> executeFetch(
+    BookSource source,
+    String targetUrl, {
+    String? keyword,
+  }) async {
+    final hasWebView = _hasWebViewConfig(source, targetUrl);
+    if (hasWebView) {
+      print('Url config specifies webView. Routing to Headless WebView.');
+      return await _requestViaHeadlessWebView(source, targetUrl);
+    }
+    
+    try {
+      final request = _buildRequest(source, targetUrl, keyword: keyword);
+      final headers = Map<String, dynamic>.from(request.headers ?? const {});
+      LegadoSessionStore.apply(Uri.parse(request.url), headers);
+      
+      final response = await _dio.request<dynamic>(
+        request.url,
+        data: request.body,
+        options: Options(
+          method: request.method,
+          headers: headers.isEmpty ? null : headers,
+          responseType: ResponseType.bytes,
+        ),
+      );
+      LegadoSessionStore.rememberResponse(response.realUri, response.headers);
+      final bytes = response.data is List<int>
+          ? response.data as List<int>
+          : utf8.encode(response.data?.toString() ?? '');
+      final responseData = _decodeBytes(bytes, request.charset);
+      
+      if (_needsManualVerification(response.statusCode, responseData)) {
+        print('Dio response triggers verification. Downgrading to Headless WebView.');
+        return await _requestViaHeadlessWebView(source, targetUrl);
+      }
+      return responseData;
+    } on DioException catch (e) {
+      final isTlsOrConnectionError = e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          (e.message?.toLowerCase().contains('handshake') ?? false) ||
+          (e.message?.toLowerCase().contains('connection reset') ?? false);
+          
+      final isStatusCodeError = e.response != null &&
+          (e.response!.statusCode == 403 || e.response!.statusCode == 503);
+          
+      if (isTlsOrConnectionError || isStatusCodeError) {
+        print('Dio request failed (code: ${e.response?.statusCode}, err: ${e.message}). Falling back to Headless WebView.');
+        return await _requestViaHeadlessWebView(source, targetUrl);
+      } else {
+        rethrow;
+      }
+    } catch (e) {
+      print('Dio request generic error: $e. Falling back to Headless WebView.');
+      return await _requestViaHeadlessWebView(source, targetUrl);
+    }
+  }
+
   static Future<Response<dynamic>> _request(
     BookSource source,
     String url, {
@@ -1044,32 +1260,13 @@ class LegadoParser {
         requestOptions: RequestOptions(path: url),
       );
     }
-    final request = _buildRequest(source, url, keyword: keyword);
-    final headers = Map<String, dynamic>.from(request.headers ?? const {});
-    LegadoSessionStore.apply(Uri.parse(request.url), headers);
-    final response = await _dio.request<dynamic>(
-      request.url,
-      data: request.body,
-      options: Options(
-        method: request.method,
-        headers: headers.isEmpty ? null : headers,
-        responseType: ResponseType.bytes,
-      ),
+    
+    final responseData = await executeFetch(source, url, keyword: keyword);
+    return Response<dynamic>(
+      data: responseData,
+      statusCode: 200,
+      requestOptions: RequestOptions(path: url),
     );
-    LegadoSessionStore.rememberResponse(response.realUri, response.headers);
-    final bytes = response.data is List<int>
-        ? response.data as List<int>
-        : utf8.encode(response.data?.toString() ?? '');
-    response.data = _decodeBytes(bytes, request.charset);
-    if (_needsManualVerification(response.statusCode, response.data)) {
-      throw LegadoVerificationRequiredException(
-        sourceName: source.bookSourceName,
-        url: response.realUri.toString(),
-        statusCode: response.statusCode,
-        message: _verificationReason(response.data),
-      );
-    }
-    return response;
   }
 
   static LegadoHttpRequest _buildRequest(

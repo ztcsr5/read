@@ -39,11 +39,19 @@ class LegadoRuleEvaluator {
         return '';
       }
     }
-    if (json is Map && _containsJsonTemplate(rule)) {
-      return applyPostProcessors(_interpolateJsonTemplate(json, rule), rule);
+
+    var ruleText = rule;
+    if (json is Map || json is List) {
+      if (_containsJsonTemplate(ruleText)) {
+        return applyPostProcessors(_interpolateJsonTemplate(json, ruleText), ruleText, originalJson: json);
+      }
+      if (_containsNonBracketJsonPath(ruleText)) {
+        ruleText = _interpolateNonBracketJsonPath(json, ruleText);
+      }
     }
+
     try {
-      final alternatives = rule.split(RegExp(r'\|\||&&'));
+      final alternatives = ruleText.split(RegExp(r'\|\||&&'));
       for (final part in alternatives) {
         if (isJsOnlyRule(part)) {
           try {
@@ -62,9 +70,10 @@ class LegadoRuleEvaluator {
         var value = applyPostProcessors(
           _extractSingleJsonValue(json, cleaned),
           part,
+          originalJson: json,
         );
-        if (value.isEmpty && !cleaned.contains(RegExp(r'[@\/\.\]\$]'))) {
-          value = applyPostProcessors(cleaned, part);
+        if (value.isEmpty && !cleaned.contains(r'$')) {
+          value = applyPostProcessors(cleaned, part, originalJson: json);
         }
         if (value.isNotEmpty) return value;
       }
@@ -253,16 +262,103 @@ class LegadoRuleEvaluator {
     return value.replaceAll(RegExp(r'<[^>]+>'), '').trim();
   }
 
-  static String applyPostProcessors(String value, String rule) {
+  static String applyPostProcessors(String value, String rule, {dynamic originalJson}) {
+    var output = value;
+    final lines = rule.split(RegExp(r'[\r\n]+')).map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+    if (lines.isEmpty) return output.trim();
+
+    // If it's a single line, use original post processor logic
+    if (lines.length == 1) {
+      return _applySingleLinePostProcessors(output, rule, originalJson: originalJson);
+    }
+
+    // For multi-line, process lines 1..N as sequential operations on 'output'
+    for (var i = 1; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.isEmpty) continue;
+
+      if (line.contains('@get:')) {
+        final key = line.split('@get:')[1].split(RegExp(r'[@#]')).first.trim();
+        try {
+          final cached = LegadoJsEngine().evaluate('java.get("$key")');
+          if (cached.trim().isNotEmpty) output = cached;
+        } catch (_) {}
+      }
+
+      if (line.startsWith('<js>') || line.contains('</js>') || line.startsWith('@js:')) {
+        try {
+          final jsPart = line.startsWith('@js:')
+              ? line
+              : '<js>${line.split('<js>')[1].split('</js>').first}</js>';
+          final evaluated = LegadoJsEngine().evaluate(
+            jsPart,
+            variables: {'result': output},
+          );
+          if (evaluated.trim().isNotEmpty) output = evaluated;
+        } catch (_) {}
+      } else if (line.contains('@put:')) {
+        final key = line.split('@put:')[1].split(RegExp(r'[@#]')).first.trim();
+        try {
+          LegadoJsEngine().evaluate(
+            'java.put("$key", result)',
+            variables: {'result': output},
+          );
+        } catch (_) {}
+      } else if (line.startsWith('##')) {
+        final parts = line.split('##');
+        final processors = parts.skip(1).toList();
+        for (var idx = 0; idx < processors.length; idx += 2) {
+          final pattern = processors[idx];
+          if (pattern.isEmpty) continue;
+          final replacement = idx + 1 < processors.length ? processors[idx + 1] : '';
+          try {
+            output = output.replaceAll(RegExp(pattern), replacement);
+          } catch (_) {
+            output = output.replaceAll(pattern, replacement);
+          }
+        }
+      } else {
+        // It's a template or plain string/URL
+        if (line.contains('{result}') || line.contains('{{result}}')) {
+          output = line.replaceAll('{result}', output).replaceAll('{{result}}', output);
+        } else if (line.contains('{}') || line.contains('{{}}')) {
+          output = line.replaceAll('{}', output).replaceAll('{{}}', output);
+        } else if (line.contains('{') && originalJson != null) {
+          final mappedLine = line.replaceAll('result', output);
+          output = _interpolateJsonTemplate(originalJson is Map ? originalJson : {}, mappedLine);
+        } else if (line.startsWith('http') || line.startsWith('/') || line.contains('/') || line.contains('=')) {
+          // If it's a URL or prefix, append the output
+          if (line.endsWith('=')) {
+            output = '$line$output';
+          } else if (line.contains('?')) {
+            if (line.endsWith('?') || line.endsWith('&')) {
+              output = '$line$output';
+            } else {
+              output = '$line&$output';
+            }
+          } else {
+            output = '$line$output';
+          }
+        } else {
+          // Default: treat as prefix/template
+          output = '$line$output';
+        }
+      }
+      
+      output = _applyJsPostProcessors(output, line);
+    }
+
+    return output.trim();
+  }
+
+  static String _applySingleLinePostProcessors(String value, String rule, {dynamic originalJson}) {
     var output = value;
     if (rule.contains('@get:')) {
       final key = rule.split('@get:')[1].split(RegExp(r'[@#]')).first.trim();
       try {
         final cached = LegadoJsEngine().evaluate('java.get("$key")');
         if (cached.trim().isNotEmpty) output = cached;
-      } catch (_) {
-        // Keep the current value if the embedded engine is unavailable.
-      }
+      } catch (_) {}
     }
 
     if (rule.contains('@js:') || rule.contains('<js>')) {
@@ -275,9 +371,7 @@ class LegadoRuleEvaluator {
           variables: {'result': output},
         );
         if (evaluated.trim().isNotEmpty) output = evaluated;
-      } catch (_) {
-        // Specialized Dart fallbacks below cover common Legado java.* helpers.
-      }
+      } catch (_) {}
     }
 
     if (rule.contains('@put:')) {
@@ -287,9 +381,7 @@ class LegadoRuleEvaluator {
           'java.put("$key", result)',
           variables: {'result': output},
         );
-      } catch (_) {
-        // Cache bridge is best-effort.
-      }
+      } catch (_) {}
     }
 
     if (rule.contains('##')) {
@@ -752,6 +844,33 @@ class LegadoRuleEvaluator {
     } catch (_) {
       return '';
     }
+  }
+
+  static bool _isPureJsonPath(String rule) {
+    final trimmed = rule.trim();
+    return (trimmed.startsWith(r'$') || trimmed.startsWith('@json:') || trimmed.startsWith('json:')) &&
+        !trimmed.contains(' ') &&
+        !trimmed.contains('/') &&
+        !trimmed.contains('{') &&
+        !trimmed.contains('}');
+  }
+
+  static bool _containsNonBracketJsonPath(String rule) {
+    if (_isPureJsonPath(rule)) return false;
+    return rule.contains(r'$.');
+  }
+
+  static String _interpolateNonBracketJsonPath(dynamic json, String rule) {
+    if (json == null) return rule;
+    var output = rule;
+    final regex = RegExp(r'\$\.[A-Za-z0-9_\.\[\]\*]+');
+    final matches = regex.allMatches(rule).toList();
+    for (final match in matches.reversed) {
+      final path = match.group(0)!;
+      final val = _extractSingleJsonValue(json, path);
+      output = output.replaceRange(match.start, match.end, val);
+    }
+    return output;
   }
 }
 

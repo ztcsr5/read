@@ -184,17 +184,84 @@ class LegadoRequestBuilder {
   }
 
   static String resolveUrl(String baseUrl, String url) {
-    if (url.trim().isEmpty || url.startsWith('data:') || url.startsWith('javascript:')) return url.trim();
-    final cleanBase = cleanBaseUrl(baseUrl);
+    if (url.trim().isEmpty) return '';
+    if (url.startsWith('data:') || url.startsWith('javascript:')) return url.trim();
+
+    // 1. Separate Legado config
+    final embedded = splitEmbeddedConfig(url);
+    var cleanUrl = embedded.url.trim();
+    final configMap = embedded.config;
+
+    // Check if cleanUrl contains obvious rule syntax like rule markers
+    if (cleanUrl.contains(r'$.') ||
+        cleanUrl.contains('@css') ||
+        cleanUrl.contains('xpath:') ||
+        cleanUrl.contains('{{') ||
+        cleanUrl.contains('}}')) {
+      return ''; // Invalid URL
+    }
+
+    // Normalize backslashes to slashes
+    cleanUrl = cleanUrl.replaceAll('\\', '/');
+
+    // 2. Resolve relative path
+    String resolvedUrl = '';
     try {
-      final uri = Uri.parse(url.trim());
-      if (uri.hasScheme) return url.trim();
-      return Uri.parse(cleanBase).resolveUri(uri).toString();
+      final baseUri = Uri.parse(cleanBaseUrl(baseUrl).trim());
+      
+      // Check if cleanUrl is already absolute
+      final cleanUri = Uri.parse(cleanUrl);
+      if (cleanUri.hasScheme) {
+        resolvedUrl = cleanUrl;
+      } else {
+        if (cleanUrl.startsWith('//')) {
+          final scheme = baseUri.hasScheme ? baseUri.scheme : 'https';
+          resolvedUrl = '$scheme:$cleanUrl';
+        } else {
+          resolvedUrl = baseUri.resolveUri(cleanUri).toString();
+        }
+      }
     } catch (_) {
-      final cleanUrl = url.trim();
-      return cleanUrl.startsWith('http')
-          ? cleanUrl
-          : '${cleanBase.replaceAll(RegExp(r'/+$'), '')}/$cleanUrl';
+      try {
+        final encodedUrl = Uri.encodeFull(cleanUrl);
+        final baseUri = Uri.parse(cleanBaseUrl(baseUrl).trim());
+        final cleanUri = Uri.parse(encodedUrl);
+        if (cleanUri.hasScheme) {
+          resolvedUrl = encodedUrl;
+        } else {
+          if (encodedUrl.startsWith('//')) {
+            final scheme = baseUri.hasScheme ? baseUri.scheme : 'https';
+            resolvedUrl = '$scheme:$encodedUrl';
+          } else {
+            resolvedUrl = baseUri.resolveUri(cleanUri).toString();
+          }
+        }
+      } catch (_) {
+        final baseStr = cleanBaseUrl(baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
+        if (cleanUrl.startsWith('http')) {
+          resolvedUrl = cleanUrl;
+        } else if (cleanUrl.startsWith('//')) {
+          final baseUri = Uri.tryParse(baseStr);
+          final scheme = (baseUri != null && baseUri.hasScheme) ? baseUri.scheme : 'https';
+          resolvedUrl = '$scheme:$cleanUrl';
+        } else if (cleanUrl.startsWith('/')) {
+          final baseUri = Uri.tryParse(baseStr);
+          if (baseUri != null && baseUri.hasScheme) {
+            resolvedUrl = '${baseUri.scheme}://${baseUri.host}$cleanUrl';
+          } else {
+            resolvedUrl = '$baseStr$cleanUrl';
+          }
+        } else {
+          resolvedUrl = '$baseStr/$cleanUrl';
+        }
+      }
+    }
+
+    // 3. Re-append config
+    if (configMap.isEmpty) {
+      return resolvedUrl;
+    } else {
+      return '$resolvedUrl,${jsonEncode(configMap)}';
     }
   }
 
