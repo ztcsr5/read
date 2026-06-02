@@ -1,33 +1,20 @@
 import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-class CloudflareInterceptor extends Interceptor {
-  // 缓存提取到的 Cookie 和 UA
-  static final Map<String, String> _clearanceCookies = {};
-  static final Map<String, String> _userAgents = {};
+import 'legado_session_store.dart';
 
+class CloudflareInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    final host = options.uri.host;
-    if (_clearanceCookies.containsKey(host)) {
-      final existingCookie = options.headers['Cookie'] as String? ?? '';
-      final cfCookie = _clearanceCookies[host]!;
-      if (!existingCookie.contains(cfCookie)) {
-        options.headers['Cookie'] = existingCookie.isEmpty
-            ? cfCookie
-            : '$existingCookie; $cfCookie';
-      }
-    }
-    if (_userAgents.containsKey(host)) {
-      options.headers['User-Agent'] = _userAgents[host];
-    }
+    LegadoSessionStore.apply(options.uri, options.headers);
     handler.next(options);
   }
 
   @override
   void onResponse(Response response, ResponseInterceptorHandler handler) {
-    // 检查是否是被拦截的 CF 页面
+    LegadoSessionStore.rememberResponse(response.realUri, response.headers);
     if (_isCloudflareChallenge(response)) {
       _bypassCloudflare(response, handler);
     } else {
@@ -37,29 +24,31 @@ class CloudflareInterceptor extends Interceptor {
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
-    if (err.response != null && _isCloudflareChallenge(err.response!)) {
-      _bypassCloudflare(err.response!, handler);
+    final response = err.response;
+    if (response != null && _isCloudflareChallenge(response)) {
+      _bypassCloudflare(response, handler);
     } else {
       handler.next(err);
     }
   }
 
   bool _isCloudflareChallenge(Response response) {
-    if (response.statusCode == 503 || response.statusCode == 403) {
-      final data = response.data?.toString() ?? '';
-      return data.contains('cf-browser-verification') ||
-          data.contains('Just a moment') ||
-          data.contains('/cdn-cgi/challenge-platform');
+    if (response.statusCode != 503 && response.statusCode != 403) {
+      return false;
     }
-    return false;
+    final data = response.data?.toString() ?? '';
+    return data.contains('cf-browser-verification') ||
+        data.contains('Just a moment') ||
+        data.contains('/cdn-cgi/challenge-platform') ||
+        data.contains('challenge-form') ||
+        data.contains('Enable JavaScript and cookies');
   }
 
-  void _bypassCloudflare(Response originalResponse, dynamic handler) async {
-    final url = originalResponse.requestOptions.uri.toString();
-    final host = originalResponse.requestOptions.uri.host;
-
-    print('触发 Cloudflare 5秒盾，尝试使用 WebView 嗅探: $url');
-
+  Future<void> _bypassCloudflare(
+    Response originalResponse,
+    dynamic handler,
+  ) async {
+    final uri = originalResponse.requestOptions.uri;
     final completer = Completer<bool>();
     late final WebViewController controller;
 
@@ -67,95 +56,83 @@ class CloudflareInterceptor extends Interceptor {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (String currentUrl) async {
-            // 检查是否拿到 cf_clearance
+          onPageFinished: (_) async {
             try {
               final cookies = await controller.runJavaScriptReturningResult(
                 'document.cookie',
               );
-              final cookieStr = (cookies as String).replaceAll('"', '');
-
-              if (cookieStr.contains('cf_clearance')) {
-                final cfCookieMatch = RegExp(
-                  r'cf_clearance=[^;]+',
-                ).firstMatch(cookieStr);
-                if (cfCookieMatch != null) {
-                  _clearanceCookies[host] = cfCookieMatch.group(0)!;
-                  final ua = await controller.runJavaScriptReturningResult(
-                    'navigator.userAgent',
-                  );
-                  _userAgents[host] = (ua as String).replaceAll('"', '');
-                  print('成功提取 cf_clearance: ${_clearanceCookies[host]}');
-                  if (!completer.isCompleted) completer.complete(true);
-                }
-              } else {
-                // 判断页面内容是否已经跳过了 challenge
-                final content = await controller.runJavaScriptReturningResult(
-                  'document.documentElement.outerHTML',
-                );
-                if (!content.toString().contains('cf-browser-verification') &&
-                    !content.toString().contains('Just a moment')) {
-                  print('✅ 页面似乎已跳过 CF 盾，但未找到 cf_clearance');
-                  if (!completer.isCompleted) completer.complete(false);
-                }
+              final cookieStr = cookies.toString().replaceAll('"', '');
+              if (cookieStr.isNotEmpty) {
+                LegadoSessionStore.setCookieString(uri, cookieStr);
               }
-            } catch (e) {
-              print('WebView 嗅探异常: $e');
+
+              final ua = await controller.runJavaScriptReturningResult(
+                'navigator.userAgent',
+              );
+              LegadoSessionStore.setUserAgent(
+                uri,
+                ua.toString().replaceAll('"', ''),
+              );
+
+              final content = await controller.runJavaScriptReturningResult(
+                'document.documentElement.outerHTML',
+              );
+              final html = content.toString();
+              final solved =
+                  cookieStr.contains('cf_clearance') ||
+                  (!html.contains('cf-browser-verification') &&
+                      !html.contains('Just a moment') &&
+                      !html.contains('/cdn-cgi/challenge-platform'));
+              if (solved && !completer.isCompleted) {
+                completer.complete(true);
+              }
+            } catch (_) {
+              // Keep waiting until timeout or a later navigation finishes.
             }
           },
         ),
       );
 
-    // 设置超时 15 秒
-    Timer(const Duration(seconds: 15), () {
-      if (!completer.isCompleted) {
-        print('❌ Cloudflare 嗅探超时');
-        completer.complete(false);
-      }
+    Timer(const Duration(seconds: 18), () {
+      if (!completer.isCompleted) completer.complete(false);
     });
 
-    await controller.loadRequest(Uri.parse(url));
-
+    await controller.loadRequest(uri);
     final success = await completer.future;
+    if (!success) {
+      _returnOriginal(originalResponse, handler);
+      return;
+    }
 
-    if (success) {
-      // 重试原请求
-      final dio = Dio();
-      final options = originalResponse.requestOptions;
-
-      final existingCookie = options.headers['Cookie'] as String? ?? '';
-      final cfCookie = _clearanceCookies[host]!;
-      options.headers['Cookie'] = existingCookie.isEmpty
-          ? cfCookie
-          : '$existingCookie; $cfCookie';
-      options.headers['User-Agent'] = _userAgents[host];
-
-      try {
-        final retryResponse = await dio.fetch(options);
-        if (handler is ErrorInterceptorHandler) {
-          handler.resolve(retryResponse);
-        } else if (handler is ResponseInterceptorHandler) {
-          handler.next(retryResponse);
-        }
-      } on DioException catch (e) {
-        if (handler is ErrorInterceptorHandler) {
-          handler.next(e);
-        } else if (handler is ResponseInterceptorHandler) {
-          handler.next(e.response ?? originalResponse);
-        }
-      }
-    } else {
-      // 失败，返回原响应
+    final dio = Dio();
+    final options = originalResponse.requestOptions;
+    LegadoSessionStore.apply(options.uri, options.headers);
+    try {
+      final retryResponse = await dio.fetch(options);
       if (handler is ErrorInterceptorHandler) {
-        handler.next(
-          DioException(
-            requestOptions: originalResponse.requestOptions,
-            response: originalResponse,
-          ),
-        );
+        handler.resolve(retryResponse);
       } else if (handler is ResponseInterceptorHandler) {
-        handler.next(originalResponse);
+        handler.next(retryResponse);
       }
+    } on DioException catch (e) {
+      if (handler is ErrorInterceptorHandler) {
+        handler.next(e);
+      } else if (handler is ResponseInterceptorHandler) {
+        handler.next(e.response ?? originalResponse);
+      }
+    }
+  }
+
+  void _returnOriginal(Response originalResponse, dynamic handler) {
+    if (handler is ErrorInterceptorHandler) {
+      handler.next(
+        DioException(
+          requestOptions: originalResponse.requestOptions,
+          response: originalResponse,
+        ),
+      );
+    } else if (handler is ResponseInterceptorHandler) {
+      handler.next(originalResponse);
     }
   }
 }

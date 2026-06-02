@@ -164,6 +164,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     onTap: _clearCache,
                   ),
                   CupertinoListTile(
+                    title: const Text('阅读历史'),
+                    leading: const Icon(CupertinoIcons.clock),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: () => context.push('/reading_history'),
+                  ),
+                  CupertinoListTile(
                     title: const Text('关于阅读'),
                     leading: const Icon(CupertinoIcons.info_circle),
                     trailing: const CupertinoListTileChevron(),

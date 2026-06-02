@@ -95,9 +95,9 @@ class ReaderState {
     this.titleSpacing = 24.0,
     this.paragraphSpacing = 18.0,
     this.topPadding = 28.0,
-    this.bottomPadding = 32.0,
+    this.bottomPadding = 18.0,
     this.paragraphIndent = 2,
-    this.footerHeight = 80.0,
+    this.footerHeight = 26.0,
     this.fontFamily = 'system',
     this.fontWeightIndex = -1,
     this.pagePadding = 24.0,
@@ -331,6 +331,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       final book = await _bookRepository.getBookById(id);
       if (book == null) throw Exception('书籍不存在');
 
+      book.lastReadTime = DateTime.now();
+      await _bookRepository.saveBook(book);
+
       List<Chapter> chapters = await _bookRepository.getChaptersForBook(id);
       List<Bookmark> bookmarks = await _bookRepository.getBookmarks(id);
 
@@ -527,7 +530,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     state = state.copyWith(currentChapterIndex: index, scrollPosition: 0);
 
     // 目录跳转必须从目标章节标题开始，避免加载上一章造成视觉错位。
-    await _loadCurrentChapter(includePrevious: false);
+    await _loadCurrentChapter(includePrevious: true);
   }
 
   /// 跳转到指定书签
@@ -809,16 +812,34 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
   /// 切换 TTS 播放状态
   void toggleTts() {
+    toggleTtsFromItem(null);
+  }
+
+  void toggleTtsFromItem(ReaderItem? startItem) {
     if (state.isPlayingTts) {
       _ttsService.stop();
       state = state.copyWith(isPlayingTts: false, ttsPlayingItemIndex: -1);
     } else {
       // 从当前屏幕顶部最近的 Item 开始读（为了简便，如果还没指定，从第一个开始）
-      int startIndex = state.ttsPlayingItemIndex >= 0
-          ? state.ttsPlayingItemIndex
-          : 0;
+      var startIndex = startItem == null ? -1 : _indexOfReaderItem(startItem);
+      if (startIndex < 0 && state.ttsPlayingItemIndex >= 0) {
+        startIndex = state.ttsPlayingItemIndex;
+      }
+      if (startIndex < 0) startIndex = 0;
       _playTtsItem(startIndex);
     }
+  }
+
+  int _indexOfReaderItem(ReaderItem target) {
+    return state.items.indexWhere(
+      (item) =>
+          identical(item, target) ||
+          (item.chapterIndex == target.chapterIndex &&
+              item.paragraphIndex == target.paragraphIndex &&
+              item.charOffset == target.charOffset &&
+              item.isTitle == target.isTitle &&
+              item.isDivider == target.isDivider),
+    );
   }
 
   void _playTtsItem(int index) {

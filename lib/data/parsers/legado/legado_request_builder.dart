@@ -43,8 +43,8 @@ class LegadoRequestBuilder {
             'key': keyword,
             'page': page,
             'source': {
-              'key': cleanBaseUrl(source.bookSourceUrl),
-              'bookSourceUrl': cleanBaseUrl(source.bookSourceUrl),
+              'key': _sourceValue(source, 'key'),
+              'bookSourceUrl': _sourceValue(source, 'key'),
             },
           },
         );
@@ -125,12 +125,17 @@ class LegadoRequestBuilder {
   }) {
     final encoded = Uri.encodeComponent(keyword);
     final rawKey = keyword;
-    final baseUrl = source == null ? '' : cleanBaseUrl(source.bookSourceUrl);
+    final baseUrl = source == null ? '' : _sourceValue(source, 'key');
     final sourceKey = _sourceValue(source, 'key');
-    return _replaceJavaHelpers(
-          _replaceEncodedPlaceholders(text),
+    return _replaceScriptBlocks(
+          _replaceJavaHelpers(
+            _replaceEncodedPlaceholders(text),
+            keyword: keyword,
+            page: page,
+          ),
           keyword: keyword,
           page: page,
+          source: source,
         )
         .replaceAllMapped(RegExp(r'\{\{page([+-]\d+)\}\}'), (match) {
           final offset = int.tryParse(match.group(1) ?? '') ?? 0;
@@ -147,6 +152,8 @@ class LegadoRequestBuilder {
         .replaceAll('{{searchKeyRaw}}', keyword)
         .replaceAll('{{page}}', page.toString())
         .replaceAll('{{source.key}}', sourceKey)
+        .replaceAll('{{source.getKey()}}', sourceKey)
+        .replaceAll('{{source.getKey}}', sourceKey)
         .replaceAll('{{source.bookSourceUrl}}', baseUrl)
         .replaceAll('{{baseUrl}}', baseUrl)
         .replaceAll('{key}', encoded)
@@ -154,6 +161,11 @@ class LegadoRequestBuilder {
         .replaceAll('{searchKey}', encoded)
         .replaceAll('{keyRaw}', rawKey)
         .replaceAll('{page}', page.toString())
+        .replaceAll('{source.key}', sourceKey)
+        .replaceAll('{source.getKey()}', sourceKey)
+        .replaceAll('{source.getKey}', sourceKey)
+        .replaceAll('{source.bookSourceUrl}', baseUrl)
+        .replaceAll('{baseUrl}', baseUrl)
         .replaceAll('%s', encoded);
   }
 
@@ -291,6 +303,11 @@ class LegadoRequestBuilder {
     final value = text.trimLeft();
     return value.startsWith('@js:') ||
         value.startsWith('<js>') ||
+        value.startsWith('var ') ||
+        value.contains('var headers') ||
+        value.contains('var heders') ||
+        value.contains('headers =') ||
+        value.contains('heders =') ||
         value.contains('</js>') ||
         value.contains('java.') ||
         value.contains('JSON.stringify') ||
@@ -416,7 +433,9 @@ class LegadoRequestBuilder {
     required int page,
   }) {
     return text.replaceAllMapped(
-      RegExp(r'\{\{java\.(base64Encode|md5Encode)\((.*?)\)\}\}'),
+      RegExp(
+        r'\{\{java\.(base64Encode|base64Decode|base64DecodeToString|hexDecodeToString|md5Encode|encodeURI|encodeURIComponent|decodeURI|decodeURIComponent)\((.*?)\)\}\}',
+      ),
       (match) {
         final helper = match.group(1) ?? '';
         final expression = match.group(2) ?? '';
@@ -425,12 +444,104 @@ class LegadoRequestBuilder {
           keyword: keyword,
           page: page,
         );
-        if (helper == 'md5Encode') {
-          return md5.convert(utf8.encode(value)).toString();
+        switch (helper) {
+          case 'md5Encode':
+            return md5.convert(utf8.encode(value)).toString();
+          case 'base64Encode':
+            return base64Encode(utf8.encode(value));
+          case 'base64Decode':
+          case 'base64DecodeToString':
+            return utf8.decode(base64Decode(value), allowMalformed: true);
+          case 'hexDecodeToString':
+            return _hexDecodeToString(value);
+          case 'encodeURI':
+            return Uri.encodeFull(value);
+          case 'encodeURIComponent':
+            return Uri.encodeComponent(value);
+          case 'decodeURI':
+            return Uri.decodeFull(value);
+          case 'decodeURIComponent':
+            return Uri.decodeComponent(value);
         }
-        return base64Encode(utf8.encode(value));
+        return value;
       },
     );
+  }
+
+  static String _replaceScriptBlocks(
+    String text, {
+    required String keyword,
+    required int page,
+    BookSource? source,
+  }) {
+    return text.replaceAllMapped(RegExp(r'\{\{([\s\S]*?)\}\}'), (match) {
+      final script = match.group(1) ?? '';
+      if (!_looksLikeInlineScript(script)) return match.group(0) ?? '';
+      try {
+        final baseUrl = source == null
+            ? ''
+            : cleanBaseUrl(source.bookSourceUrl);
+        final value = LegadoJsEngine().evaluate(
+          script,
+          variables: {
+            'keyword': keyword,
+            'key': keyword,
+            'page': page,
+            'source': {'key': baseUrl, 'bookSourceUrl': baseUrl},
+          },
+        );
+        return value.trim();
+      } catch (_) {
+        return '';
+      }
+    });
+  }
+
+  static bool _looksLikeInlineScript(String script) {
+    final text = script.trim();
+    if (text.isEmpty) return false;
+    if (RegExp(
+      r'^source\.(key|bookSourceUrl|getKey|getKey\(\))$',
+    ).hasMatch(text)) {
+      return false;
+    }
+    return text.contains('\n') ||
+        text.contains(';') ||
+        text.contains('var ') ||
+        text.contains('let ') ||
+        text.contains('const ') ||
+        text.contains('java.') ||
+        text.contains('return ') ||
+        text.contains('=>');
+  }
+
+  static String _hexDecodeToString(String value) {
+    final text = value.trim();
+    if (text.startsWith('data:')) {
+      final parts = text.split(',');
+      if (parts.length >= 3 && parts[1].toLowerCase() == 'base64') {
+        try {
+          return utf8.decode(base64Decode(parts[2]), allowMalformed: true);
+        } catch (_) {
+          return value;
+        }
+      }
+    }
+    final hexText = text.replaceAll(RegExp(r'\s+'), '');
+    if (hexText.isEmpty ||
+        hexText.length.isOdd ||
+        !RegExp(r'^[0-9a-fA-F]+$').hasMatch(hexText)) {
+      return value;
+    }
+    try {
+      final bytes = <int>[];
+      for (var i = 0; i < hexText.length; i += 2) {
+        bytes.add(int.parse(hexText.substring(i, i + 2), radix: 16));
+      }
+      return utf8.decode(bytes, allowMalformed: true);
+    } catch (_) {
+      return value;
+    }
   }
 
   static String? _buildBody(
@@ -524,6 +635,12 @@ class LegadoRequestBuilder {
         output.write(keyword);
       } else if (value == 'page') {
         output.write(page);
+      } else if (value == 'java.encodeURI(key)') {
+        output.write(Uri.encodeFull(keyword));
+      } else if (value == 'java.encodeURIComponent(key)') {
+        output.write(Uri.encodeComponent(keyword));
+      } else if (value == 'java.md5Encode(key)') {
+        output.write(md5.convert(utf8.encode(keyword)).toString());
       } else if (value.length >= 2 &&
           ((value.startsWith('"') && value.endsWith('"')) ||
               (value.startsWith("'") && value.endsWith("'")))) {
@@ -535,12 +652,12 @@ class LegadoRequestBuilder {
 
   static String _sourceValue(BookSource? source, String key) {
     if (source == null) return '';
-    final config = jsonConfig(source.customConfig);
-    final direct = config[key] ?? config['source.$key'];
-    if (direct != null) return direct.toString();
     if (key == 'key') {
       return cleanBaseUrl(source.bookSourceUrl).replaceAll(RegExp(r'/+$'), '');
     }
+    final config = jsonConfig(source.customConfig);
+    final direct = config[key] ?? config['source.$key'];
+    if (direct != null) return direct.toString();
     return '';
   }
 }

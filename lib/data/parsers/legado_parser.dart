@@ -15,8 +15,10 @@ import '../models/chapter.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
 import 'legado/cloudflare_interceptor.dart';
+import 'legado/legado_js_engine.dart';
 import 'legado/legado_request_builder.dart';
 import 'legado/legado_rule_evaluator.dart';
+import 'legado/legado_session_store.dart';
 
 /// 基础的开源阅读 (Legado) 规则解析器。
 class LegadoParser {
@@ -164,19 +166,47 @@ class LegadoParser {
     BookSource source,
     String keyword,
   ) async {
+    final firstPage = await _searchBooksPage(source, keyword, page: 1);
+    if (firstPage.isNotEmpty ||
+        !(source.searchUrl?.contains('page') ?? false)) {
+      return firstPage;
+    }
+    return _searchBooksPage(source, keyword, page: 0);
+  }
+
+  static Future<List<Book>> _searchBooksPage(
+    BookSource source,
+    String keyword, {
+    required int page,
+  }) async {
     if (source.searchUrl == null || source.ruleSearch == null) return [];
 
     final response = await _request(
       source,
-      _buildSearchUrl(source, keyword),
+      _buildSearchUrl(source, keyword, page: page),
       keyword: keyword,
     );
-    final data = response.data;
+    var data = response.data;
 
     final rule = _ruleMap(source.ruleSearch);
-    final bookListRule = _firstRule(rule, const ['bookList', 'list']);
+    var bookListRule = _firstRule(rule, const ['bookList', 'list']);
+    if (bookListRule != null) {
+      final prepared = await _prepareDataForRule(
+        source,
+        data,
+        bookListRule,
+        baseUrl: response.realUri.toString(),
+        keyword: keyword,
+      );
+      data = prepared.data;
+      bookListRule = prepared.rule;
+    }
 
     final results = <Book>[];
+    if ((bookListRule == null || bookListRule.isEmpty) &&
+        _looksLikeJsonData(data, null)) {
+      return _parseBooksByJsonFallback(data, rule, source);
+    }
     if (bookListRule != null &&
         _isJsonRule(bookListRule) &&
         _looksLikeJsonData(data, bookListRule)) {
@@ -213,7 +243,7 @@ class LegadoParser {
       results.add(_parseBookFromHtmlNode(node, rule, source));
     }
 
-    return results;
+    return results.where((book) => book.title.trim().isNotEmpty).toList();
   }
 
   /// 获取书籍详情信息。
@@ -224,16 +254,28 @@ class LegadoParser {
 
     final rule = _ruleMap(source.ruleBookInfo);
     final response = await _request(source, book.filePath);
-    final data = response.data;
+    var data = response.data;
     final initRule = _firstRule(rule, const ['init']);
-    final sampleRule =
-        initRule ?? rule.values.whereType<String>().firstOrNull ?? '';
+    final preparedInit = initRule == null
+        ? null
+        : await _prepareDataForRule(
+            source,
+            data,
+            initRule,
+            baseUrl: response.realUri.toString(),
+          );
+    if (preparedInit != null) {
+      data = preparedInit.data;
+    }
+    final sampleRule = preparedInit?.rule.isNotEmpty == true
+        ? preparedInit!.rule
+        : initRule ?? rule.values.whereType<String>().firstOrNull ?? '';
 
     if (_isJsonRule(sampleRule) && _looksLikeJsonData(data, sampleRule)) {
       final jsonData = data is String ? jsonDecode(data) : data;
-      final root = initRule == null
+      final root = initRule == null || sampleRule.isEmpty
           ? jsonData
-          : _extractJsonNodes(jsonData, initRule).firstOrNull ?? jsonData;
+          : _extractJsonNodes(jsonData, sampleRule).firstOrNull ?? jsonData;
       if (root is Map<String, dynamic>) {
         return _mergeBookInfo(
           book,
@@ -254,9 +296,9 @@ class LegadoParser {
     }
 
     final document = parse(data.toString());
-    final root = initRule == null
+    final root = initRule == null || sampleRule.isEmpty
         ? document.documentElement ?? document.body
-        : _queryOne(document, initRule) ??
+        : _queryOne(document, sampleRule) ??
               document.documentElement ??
               document.body;
     if (root == null) return book;
@@ -276,13 +318,31 @@ class LegadoParser {
     if (ruleTocStr == null) return [];
 
     final rule = _ruleMap(ruleTocStr);
-    final listRule = _firstRule(rule, const ['chapterList', 'list']);
+    var listRule = _firstRule(rule, const ['chapterList', 'list']);
     if (listRule == null) return [];
 
     var response = await _request(source, book.filePath);
     response = await _followTocUrl(source, book.filePath, response, rule);
-    final data = response.data;
+    var data = response.data;
+    final prepared = await _prepareDataForRule(
+      source,
+      data,
+      listRule,
+      baseUrl: response.realUri.toString(),
+    );
+    data = prepared.data;
+    listRule = prepared.rule;
     final chapters = <Chapter>[];
+
+    if (listRule.isEmpty && _looksLikeJsonData(data, null)) {
+      return _parseChaptersByJsonFallback(
+        data,
+        rule,
+        source,
+        book,
+        response.realUri.toString(),
+      );
+    }
 
     if (_isJsonRule(listRule) && _looksLikeJsonData(data, listRule)) {
       try {
@@ -296,14 +356,28 @@ class LegadoParser {
           final title = _extractJsonValue(
             item,
             _sourceScopedRule(
-              _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '',
+              _firstRule(rule, const [
+                    'chapterName',
+                    'name',
+                    'title',
+                    'ChapterName',
+                    'N',
+                  ]) ??
+                  '',
               source,
             ),
           );
           final url = _extractJsonValue(
             item,
             _sourceScopedRule(
-              _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '',
+              _firstRule(rule, const [
+                    'chapterUrl',
+                    'url',
+                    'link',
+                    'ChapterUrl',
+                    'C',
+                  ]) ??
+                  '',
               source,
             ),
           );
@@ -397,12 +471,17 @@ class LegadoParser {
 
     for (var page = 0; page < 5; page++) {
       response = await _followContentUrl(source, currentUrl, response, rule);
-      final data = response.data;
-      parts.add(_extractContentFromResponse(data, contentRule));
+      final prepared = await _prepareDataForRule(
+        source,
+        response.data,
+        contentRule,
+        baseUrl: currentUrl,
+      );
+      parts.add(_extractContentFromResponse(prepared.data, prepared.rule));
 
       final nextUrl = _extractNextContentUrl(
         response.realUri.toString(),
-        data,
+        response.data,
         rule,
       );
       if (nextUrl == null || nextUrl == currentUrl) break;
@@ -418,6 +497,7 @@ class LegadoParser {
   }
 
   static String _extractContentFromResponse(dynamic data, String contentRule) {
+    if (contentRule.trim().isEmpty) return data.toString().trim();
     if (_isJsonRule(contentRule) && _looksLikeJsonData(data, contentRule)) {
       final jsonData = data is String ? jsonDecode(data) : data;
       return _extractJsonValue(jsonData, contentRule);
@@ -456,9 +536,19 @@ class LegadoParser {
         _sourceScopedRule(
           _ruleOrKey(rule['name'], item, [
             'name',
+            'Name',
             'title',
+            'Title',
             'bookName',
+            'BookName',
             'book_name',
+            'bookTitle',
+            'BookTitle',
+            'articleName',
+            'novelName',
+            'novel_name',
+            'original_title',
+            'bName',
           ]),
           source,
         ),
@@ -470,9 +560,15 @@ class LegadoParser {
         _sourceScopedRule(
           _ruleOrKey(rule['author'], item, [
             'author',
+            'Author',
             'authorName',
+            'AuthorName',
+            'author_name',
             'writer',
             'writerName',
+            'writer_name',
+            'original_author',
+            'penName',
           ]),
           source,
         ),
@@ -484,9 +580,15 @@ class LegadoParser {
         _sourceScopedRule(
           _ruleOrKey(rule['coverUrl'], item, [
             'coverUrl',
+            'CoverUrl',
             'cover',
+            'Cover',
+            'cover_url',
             'picUrl',
+            'pic',
             'imgUrl',
+            'imageUrl',
+            'thumb',
             'image',
             'coverPath',
           ]),
@@ -501,13 +603,27 @@ class LegadoParser {
         _sourceScopedRule(
           _ruleOrKey(bookUrlRule, item, [
             'bookUrl',
+            'BookUrl',
             'url',
+            'Url',
             'detailUrl',
+            'detail_url',
+            'book_url',
             'tocUrl',
             'catalogUrl',
             'bookId',
+            'BookId',
             'book_id',
+            'book_id',
+            'bookID',
+            'book_id',
+            'articleid',
+            'articleId',
+            'novelId',
+            'novel_id',
+            'nid',
             'id',
+            'Id',
           ]),
           source,
         ),
@@ -587,12 +703,16 @@ class LegadoParser {
 
   static String _sourceScopedRule(String rule, BookSource source) {
     if (rule.isEmpty) return '';
-    final baseUrl = LegadoRequestBuilder.cleanBaseUrl(source.bookSourceUrl);
+    final baseUrl = LegadoRequestBuilder.cleanBaseUrl(
+      source.bookSourceUrl,
+    ).replaceAll(RegExp(r'/+$'), '');
     return rule
         .replaceAll('{{source.bookSourceUrl}}', baseUrl)
         .replaceAll('{source.bookSourceUrl}', baseUrl)
         .replaceAll('{{source.key}}', baseUrl)
         .replaceAll('{source.key}', baseUrl)
+        .replaceAll('{{source.getKey()}}', baseUrl)
+        .replaceAll('{source.getKey()}', baseUrl)
         .replaceAll('{{baseUrl}}', baseUrl)
         .replaceAll('{baseUrl}', baseUrl);
   }
@@ -694,6 +814,96 @@ class LegadoParser {
     return _resolveUrl(baseUrl, nextUrl);
   }
 
+  static Future<({dynamic data, String rule})> _prepareDataForRule(
+    BookSource source,
+    dynamic data,
+    String rule, {
+    String? baseUrl,
+    String? keyword,
+  }) async {
+    final block = _leadingJsBlock(rule);
+    if (block == null) return (data: data, rule: rule);
+
+    final resultText = data is String ? data : jsonEncode(data);
+    final variables = _jsVariables(
+      source,
+      result: resultText,
+      baseUrl: baseUrl,
+      keyword: keyword,
+    );
+    try {
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        block.script,
+        variables: variables,
+        ajax: (request) =>
+            _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+      );
+      return (data: output, rule: block.suffix);
+    } catch (_) {
+      return (data: data, rule: block.suffix.isEmpty ? rule : block.suffix);
+    }
+  }
+
+  static ({String script, String suffix})? _leadingJsBlock(String rule) {
+    final text = rule.trimLeft();
+    if (text.startsWith('<js>')) {
+      final close = text.indexOf('</js>');
+      if (close < 0) return (script: text, suffix: '');
+      final end = close + '</js>'.length;
+      return (
+        script: text.substring(0, end),
+        suffix: text.substring(end).trim(),
+      );
+    }
+    if (text.startsWith('@js:')) {
+      return (script: text, suffix: '');
+    }
+    return null;
+  }
+
+  static Map<String, dynamic> _jsVariables(
+    BookSource source, {
+    String result = '',
+    String? baseUrl,
+    String? keyword,
+  }) {
+    final sourceUrl = LegadoRequestBuilder.cleanBaseUrl(
+      source.bookSourceUrl,
+    ).replaceAll(RegExp(r'/+$'), '');
+    return {
+      'result': result,
+      'baseUrl': baseUrl ?? sourceUrl,
+      'key': keyword ?? '',
+      'keyword': keyword ?? '',
+      'source': {
+        'key': sourceUrl,
+        'bookSourceUrl': sourceUrl,
+        'bookSourceName': source.bookSourceName,
+      },
+    };
+  }
+
+  static Future<String> _ajaxForJs(
+    BookSource source,
+    String request, {
+    String? baseUrl,
+    String? keyword,
+  }) async {
+    final resolved = _resolveRequestUrl(
+      baseUrl ?? source.bookSourceUrl,
+      request,
+    );
+    final response = await _request(source, resolved, keyword: keyword);
+    return response.data?.toString() ?? '';
+  }
+
+  static String _resolveRequestUrl(String baseUrl, String request) {
+    final embedded = LegadoRequestBuilder.splitEmbeddedConfig(request);
+    final resolved = _resolveUrl(baseUrl, embedded.url);
+    if (embedded.config.isEmpty) return resolved;
+    return '$resolved,${jsonEncode(embedded.config)}';
+  }
+
   static String _extractJsonValue(dynamic json, String jsonPath) {
     return LegadoRuleEvaluator.extractJsonValue(json, jsonPath);
   }
@@ -722,16 +932,27 @@ class LegadoParser {
     if (url.trim().isEmpty) {
       throw Exception('请求 URL 为空 (可能是由于 JS 执行异常或书源未配置有效链接)');
     }
+    final dataPayload = _decodeDataPayload(url);
+    if (dataPayload != null) {
+      return Response<dynamic>(
+        data: dataPayload,
+        statusCode: 200,
+        requestOptions: RequestOptions(path: url),
+      );
+    }
     final request = _buildRequest(source, url, keyword: keyword);
+    final headers = Map<String, dynamic>.from(request.headers ?? const {});
+    LegadoSessionStore.apply(Uri.parse(request.url), headers);
     final response = await _dio.request<dynamic>(
       request.url,
       data: request.body,
       options: Options(
         method: request.method,
-        headers: request.headers,
+        headers: headers.isEmpty ? null : headers,
         responseType: ResponseType.bytes,
       ),
     );
+    LegadoSessionStore.rememberResponse(response.realUri, response.headers);
     final bytes = response.data is List<int>
         ? response.data as List<int>
         : utf8.encode(response.data?.toString() ?? '');
@@ -747,8 +968,12 @@ class LegadoParser {
     return LegadoRequestBuilder.buildRequest(source, url, keyword: keyword);
   }
 
-  static String _buildSearchUrl(BookSource source, String keyword) {
-    return LegadoRequestBuilder.buildSearchUrl(source, keyword);
+  static String _buildSearchUrl(
+    BookSource source,
+    String keyword, {
+    int page = 1,
+  }) {
+    return LegadoRequestBuilder.buildSearchUrl(source, keyword, page: page);
   }
 
   static String _resolveUrl(String baseUrl, String url) {
@@ -817,14 +1042,42 @@ class LegadoParser {
         if (jsonData is Map) jsonData['data'],
         if (jsonData is Map && jsonData['data'] is Map)
           jsonData['data']['list'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['data'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['books'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['bookList'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['items'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['records'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['rows'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['result'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['results'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['searchList'],
         if (jsonData is Map) jsonData['list'],
         if (jsonData is Map) jsonData['books'],
+        if (jsonData is Map) jsonData['bookList'],
         if (jsonData is Map) jsonData['items'],
+        if (jsonData is Map) jsonData['records'],
+        if (jsonData is Map) jsonData['rows'],
+        if (jsonData is Map) jsonData['result'],
+        if (jsonData is Map) jsonData['results'],
+        if (jsonData is Map) jsonData['searchList'],
+        if (jsonData is Map) jsonData['novels'],
         ..._findLikelyBookLists(jsonData),
         jsonData,
       ];
-      final list = candidates.whereType<List>().firstOrNull;
-      if (list == null) return [];
+      final list = candidates.whereType<List>().firstWhere(
+        (items) => items.whereType<Map>().any(_looksLikeBookMap),
+        orElse: () => const [],
+      );
+      if (list.isEmpty) return [];
       return list
           .whereType<Map>()
           .map((item) => _parseBookFromJson(_stringKeyMap(item), rule, source))
@@ -850,9 +1103,29 @@ class LegadoParser {
         if (jsonData is Map && jsonData['data'] is Map)
           jsonData['data']['chapterList'],
         if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['chapter_list'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['catalog'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['catalogList'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['volumeList'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['records'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['rows'],
+        if (jsonData is Map && jsonData['data'] is Map)
+          jsonData['data']['items'],
+        if (jsonData is Map && jsonData['data'] is Map)
           jsonData['data']['list'],
         if (jsonData is Map) jsonData['chapters'],
         if (jsonData is Map) jsonData['chapterList'],
+        if (jsonData is Map) jsonData['chapter_list'],
+        if (jsonData is Map) jsonData['catalog'],
+        if (jsonData is Map) jsonData['catalogList'],
+        if (jsonData is Map) jsonData['volumeList'],
+        if (jsonData is Map) jsonData['records'],
+        if (jsonData is Map) jsonData['rows'],
         if (jsonData is Map) jsonData['list'],
         if (jsonData is Map) jsonData['items'],
         ..._findLikelyChapterLists(jsonData),
@@ -870,9 +1143,12 @@ class LegadoParser {
         final item = _stringKeyMap(raw);
         final title = _firstText(item, const [
           'chapterName',
+          'chapter_name',
           'name',
           'title',
           'chapterTitle',
+          'chapter_title',
+          'chapter_title_name',
           'volumeName',
         ]);
         final url = _chapterUrlFromFallbackItem(
@@ -923,11 +1199,13 @@ class LegadoParser {
       'path',
       'content',
       'contentUrl',
+      'chapter_url',
+      'chapter_url_full',
       'href',
     ]);
     if (direct.isNotEmpty) return direct;
 
-    final id = _firstText(item, const ['chapterId', 'id', 'cid']);
+    final id = _firstText(item, const ['chapterId', 'chapter_id', 'id', 'cid']);
     if (id.isEmpty) return '';
     final uri = Uri.tryParse(book.filePath);
     if (uri != null &&
@@ -1016,16 +1294,29 @@ class LegadoParser {
   static bool _looksLikeBookMap(Map<dynamic, dynamic> item) {
     return item.containsKey('title') ||
         item.containsKey('bookName') ||
+        item.containsKey('book_name') ||
+        item.containsKey('bookTitle') ||
+        item.containsKey('articleName') ||
+        item.containsKey('novelName') ||
         item.containsKey('name') ||
         item.containsKey('bookId') ||
+        item.containsKey('book_id') ||
+        item.containsKey('novelId') ||
+        item.containsKey('cover') ||
+        item.containsKey('summary') ||
+        item.containsKey('intro') ||
         item.containsKey('author');
   }
 
   static bool _looksLikeChapterMap(Map<dynamic, dynamic> item) {
     return item.containsKey('chapterName') ||
+        item.containsKey('chapter_name') ||
         item.containsKey('chapterTitle') ||
+        item.containsKey('chapter_title') ||
         item.containsKey('chapterUrl') ||
+        item.containsKey('chapter_url') ||
         item.containsKey('chapterId') ||
+        item.containsKey('chapter_id') ||
         item.containsKey('cid') ||
         item.containsKey('path') ||
         item.containsKey('contentUrl') ||
@@ -1043,6 +1334,28 @@ class LegadoParser {
       return gbk.decode(bytes);
     }
     return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  static String? _decodeDataPayload(String url) {
+    final trimmed = url.trim();
+    if (!trimmed.startsWith('data:')) return null;
+    final comma = trimmed.indexOf(',');
+    if (comma < 0) return '';
+    final meta = trimmed.substring(5, comma).toLowerCase();
+    var payload = trimmed.substring(comma + 1);
+    final nextComma = payload.indexOf(',');
+    if (nextComma >= 0 &&
+        payload.substring(nextComma + 1).trim().startsWith('{')) {
+      payload = payload.substring(0, nextComma);
+    }
+    try {
+      if (meta.contains('base64')) {
+        return utf8.decode(base64Decode(payload), allowMalformed: true);
+      }
+      return Uri.decodeComponent(payload);
+    } catch (_) {
+      return payload;
+    }
   }
 
   // --- RSS Parsing ---

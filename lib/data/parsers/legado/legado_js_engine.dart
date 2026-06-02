@@ -1,8 +1,10 @@
 import 'dart:convert';
+
 import 'package:quickjs_engine/quickjs_engine.dart';
 
 class LegadoJsEngine {
   static final LegadoJsEngine _instance = LegadoJsEngine._internal();
+
   factory LegadoJsEngine() => _instance;
 
   JavascriptRuntime? _runtime;
@@ -16,56 +18,144 @@ class LegadoJsEngine {
     }
   }
 
+  bool get isAvailable => _runtime != null;
+
   void _initJavaObject() {
-    // 注入 Legado 依赖的 JS 桥接对象和 Polyfill
-    final jsCode = '''
+    final jsCode = r'''
       var __java_store = {};
-      
+      var __b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+
+      if (typeof btoa === "undefined") {
+        var btoa = function(input) {
+          var str = String(input || "");
+          var output = "";
+          for (var block = 0, charCode, i = 0, map = __b64chars;
+              str.charAt(i | 0) || (map = "=", i % 1);
+              output += map.charAt(63 & block >> 8 - i % 1 * 8)) {
+            charCode = str.charCodeAt(i += 3 / 4);
+            if (charCode > 0xFF) throw new Error("btoa failed");
+            block = block << 8 | charCode;
+          }
+          return output;
+        };
+      }
+
+      if (typeof atob === "undefined") {
+        var atob = function(input) {
+          var str = String(input || "").replace(/=+$/, "");
+          var output = "";
+          if (str.length % 4 == 1) throw new Error("atob failed");
+          for (var bc = 0, bs, buffer, i = 0;
+              buffer = str.charAt(i++);
+              ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer,
+                bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+            buffer = __b64chars.indexOf(buffer);
+          }
+          return output;
+        };
+      }
+
+      function __utf8ToBase64(str) {
+        return btoa(unescape(encodeURIComponent(String(str || ""))));
+      }
+
+      function __base64ToUtf8(str) {
+        return decodeURIComponent(escape(atob(String(str || ""))));
+      }
+
+      function __jsonPathValue(sourceValue, path) {
+        var sourceText = sourceValue;
+        try {
+          if (typeof sourceText === "string") sourceText = JSON.parse(sourceText);
+        } catch(e) {
+          return "";
+        }
+        var cleaned = String(path || "").replace(/^\$\.?/, "");
+        if (!cleaned) return sourceText == null ? "" : String(sourceText);
+        cleaned = cleaned.replace(/\[(\d+)\]/g, ".$1");
+        var current = sourceText;
+        var parts = cleaned.split(".");
+        for (var i = 0; i < parts.length; i++) {
+          var key = parts[i];
+          if (!key) continue;
+          if (Array.isArray(current)) {
+            var index = parseInt(key, 10);
+            if (isNaN(index) || index < 0 || index >= current.length) return "";
+            current = current[index];
+          } else if (current && Object.prototype.hasOwnProperty.call(current, key)) {
+            current = current[key];
+          } else {
+            return "";
+          }
+        }
+        if (current == null) return "";
+        if (typeof current === "object") return JSON.stringify(current);
+        return String(current);
+      }
+
       var java = {
         put: function(key, value) {
-          __java_store[key] = value;
+          __java_store[String(key)] = value;
           return value;
         },
         get: function(key) {
-          return __java_store[key] || "";
+          var value = __java_store[String(key)];
+          return value == null ? "" : value;
         },
         getString: function(key) {
-          return this.get(key);
+          var text = String(key || "");
+          if (text.indexOf("$") === 0 && typeof result !== "undefined") {
+            return __jsonPathValue(result, text);
+          }
+          return String(this.get(key));
         },
         ajax: function(urlStr) {
-          try {
-            var url = urlStr;
-            var options = {};
-            if (urlStr.indexOf(",") > 0) {
-              var parts = urlStr.split(",");
-              url = parts[0];
-              try {
-                options = JSON.parse(parts.slice(1).join(","));
-              } catch(e) {}
-            }
-            var xhr = new XMLHttpRequest();
-            var method = options.method ? options.method.toUpperCase() : "GET";
-            // 第三个参数为 false 表示同步请求
-            xhr.open(method, url, false); 
-            if (options.headers) {
-              for (var k in options.headers) {
-                xhr.setRequestHeader(k, options.headers[k]);
-              }
-            }
-            xhr.send(options.body || null);
-            return xhr.responseText;
-          } catch(e) {
-            return e.toString();
-          }
+          return "";
+        },
+        post: function(urlStr, body) {
+          return java.ajax(String(urlStr || "") + "," + JSON.stringify({ method: "POST", body: body || "" }));
+        },
+        connect: function(urlStr) {
+          var u = String(urlStr || "");
+          var chain = {
+            header: function() { return chain; },
+            headers: function() { return chain; },
+            cookies: function() { return chain; },
+            timeout: function() { return chain; },
+            ignoreContentType: function() { return chain; },
+            followRedirects: function() { return chain; },
+            get: function() { return chain; },
+            post: function() { return chain; },
+            raw: function() { return chain; },
+            request: function() { return chain; },
+            body: function() { return ""; },
+            url: function() { return u; },
+            toString: function() { return u; }
+          };
+          return chain;
         },
         base64Encode: function(str) {
-          return btoa(unescape(encodeURIComponent(str)));
+          return __utf8ToBase64(str);
         },
         base64Decode: function(str) {
-          return decodeURIComponent(escape(atob(str)));
+          return __base64ToUtf8(str);
+        },
+        base64DecodeToString: function(str) {
+          return __base64ToUtf8(str);
+        },
+        encodeURI: function(str) {
+          return encodeURI(String(str || ""));
+        },
+        encodeURIComponent: function(str) {
+          return encodeURIComponent(String(str || ""));
+        },
+        decodeURI: function(str) {
+          return decodeURI(String(str || ""));
+        },
+        decodeURIComponent: function(str) {
+          return decodeURIComponent(String(str || ""));
         },
         md5Encode: function(string) {
-          // 极简 JS MD5 实现
           function md5cycle(x, k) {
             var a = x[0], b = x[1], c = x[2], d = x[3];
             a = ff(a, b, c, d, k[0], 7, -680876936); d = ff(d, a, b, c, k[1], 12, -389564586); c = ff(c, d, a, b, k[2], 17, 606105819); b = ff(b, c, d, a, k[3], 22, -1044525330);
@@ -113,25 +203,82 @@ class LegadoJsEngine {
             return str;
           }
           function md5(s) {
-            var state = md51(unescape(encodeURIComponent(s))), str = '', i;
+            var state = md51(unescape(encodeURIComponent(String(s || "")))), str = '', i;
             for (i = 0; i < 4; i++) str += hex(state[i]);
             return str;
           }
           return md5(string);
         },
+        hexDecodeToString: function(input) {
+          var text = String(input || "");
+          if (text.indexOf("data:") === 0) {
+            var parts = text.split(",");
+            if (parts.length >= 3 && parts[1].toLowerCase() === "base64") {
+              return java.base64Decode(parts[2]);
+            }
+          }
+          var hex = text.replace(/\s+/g, "");
+          if (!hex || hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) return text;
+          var out = "";
+          for (var i = 0; i < hex.length; i += 2) {
+            out += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+          }
+          try { return decodeURIComponent(escape(out)); } catch(e) { return out; }
+        },
+        t2s: function(str) { return String(str || ""); },
+        s2t: function(str) { return String(str || ""); },
+        toNumChapter: function(str) { return String(str || ""); },
+        log: function() { return ""; },
+        toast: function() { return ""; },
+        longToast: function() { return ""; },
         timeFormat: function(timestamp) {
-          return new Date(timestamp).toLocaleString();
+          return new Date(Number(timestamp || 0)).toLocaleString();
+        },
+        timeFormatUTC: function(timestamp) {
+          return new Date(Number(timestamp || 0)).toISOString().replace("T", " ").substring(0, 19);
+        },
+        currentTimeMillis: function() {
+          return Date.now();
+        },
+        randomUUID: function() {
+          var d = Date.now();
+          return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
+            var r = (d + Math.random() * 16) % 16 | 0;
+            d = Math.floor(d / 16);
+            return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+          });
         }
       };
 
       var cookie = {
         getCookie: function(url) { return ""; },
-        setCookie: function(url, c) { }
+        getKey: function(url, key) { return ""; },
+        setCookie: function(url, c) { },
+        removeCookie: function(url) { }
       };
-      
+
       var cache = {
         getFromCache: function(key) { return ""; },
         putInCache: function(key, value, time) { }
+      };
+
+      function Map(key) {
+        if (typeof key === "string") return java.get(key);
+        return {};
+      }
+
+      var CryptoJS = {
+        MD5: function(value) {
+          return { toString: function() { return java.md5Encode(value); } };
+        },
+        enc: {
+          Utf8: { parse: function(value) { return String(value || ""); } },
+          Base64: {
+            stringify: function(value) { return java.base64Encode(value); },
+            parse: function(value) { return java.base64Decode(value); }
+          },
+          Hex: { parse: function(value) { return String(value || ""); } }
+        }
       };
     ''';
 
@@ -146,52 +293,171 @@ class LegadoJsEngine {
     }
   }
 
-  /// 执行一段 JS 代码
-  /// [jsCode] 可以带有 @js: 或 <js> 包裹
-  /// [variables] 会作为全局变量注入到上下文中，例如 baseUrl, result 等
   String evaluate(String jsCode, {Map<String, dynamic>? variables}) {
     if (_runtime == null) return '';
+    _injectVariables(variables);
 
-    if (variables != null) {
+    try {
+      final result = _runtime!.evaluate(_prepareCode(jsCode));
+      if (result.isError) throw Exception(result.stringResult);
+      return _stringifyResult(result);
+    } catch (e) {
+      print('JS Eval failed: $e');
+      throw Exception('JS执行异常: $e');
+    }
+  }
+
+  Future<String> evaluateWithAjax(
+    String jsCode, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+    int maxRequests = 12,
+  }) async {
+    if (_runtime == null) return '';
+
+    final cache = <String, String>{};
+    for (var attempt = 0; attempt <= maxRequests; attempt++) {
+      _injectVariables(variables);
+      _installAjaxTrap(cache);
       try {
-        variables.forEach((key, value) {
-          final encodedValue = jsonEncode(value);
-          _runtime!.evaluate('var $key = $encodedValue;');
-        });
-
-        // Add polyfill for source.getKey()
-        _runtime!.evaluate('''
-          if (typeof source !== 'undefined' && source !== null) {
-            source.getKey = function() { return source.key; };
-          }
-        ''');
+        final result = _runtime!.evaluate(_prepareCode(jsCode));
+        if (result.isError) throw Exception(result.stringResult);
+        return _stringifyResult(result);
       } catch (e) {
-        print('JS variables injection failed: $e');
+        final request = _extractAjaxRequest(e.toString());
+        if (request == null || cache.containsKey(request)) rethrow;
+        cache[request] = await ajax(request);
       }
     }
+    throw Exception('JS ajax requests exceeded $maxRequests');
+  }
 
-    String codeToRun = jsCode.trim();
+  void _injectVariables(Map<String, dynamic>? variables) {
+    if (_runtime == null || variables == null) return;
+    try {
+      variables.forEach((key, value) {
+        _runtime!.evaluate('var $key = ${jsonEncode(value)};');
+      });
+      _runtime!.evaluate(r'''
+        if (typeof source !== 'undefined' && source !== null) {
+          source.getKey = function() { return source.key || source.bookSourceUrl || ""; };
+          source.getLoginInfoMap = function() { return {}; };
+        }
+      ''');
+    } catch (e) {
+      print('JS variables injection failed: $e');
+    }
+  }
+
+  String _prepareCode(String jsCode) {
+    var codeToRun = jsCode.trim();
     if (codeToRun.startsWith('@js:')) {
       codeToRun = codeToRun.substring(4);
     } else if (codeToRun.startsWith('<js>') && codeToRun.endsWith('</js>')) {
       codeToRun = codeToRun.substring(4, codeToRun.length - 5);
     }
 
-    // 处理包含 return 但没有包在函数里的情况
     if (codeToRun.contains('return ') && !codeToRun.contains('function')) {
       codeToRun = '(function() { $codeToRun })()';
     }
+    return codeToRun;
+  }
 
+  void _installAjaxTrap(Map<String, String> cache) {
+    if (_runtime == null) return;
+    _runtime!.evaluate('''
+      var __legado_ajax_cache = ${jsonEncode(cache)};
+      java.ajax = function(urlStr) {
+        var url = String(urlStr || "");
+        if (Object.prototype.hasOwnProperty.call(__legado_ajax_cache, url)) {
+          return __legado_ajax_cache[url];
+        }
+        throw new Error("__LEGADO_AJAX__" + url);
+      };
+      java.post = function(urlStr, body) {
+        var payload = String(urlStr || "") + "," + JSON.stringify({ method: "POST", body: body || "" });
+        return java.ajax(payload);
+      };
+      java.connect = function(urlStr) {
+        var u = String(urlStr || "");
+        var config = { method: "GET", headers: {} };
+        var chain = {
+          header: function(k, v) {
+            if (k != null) config.headers[String(k)] = String(v == null ? "" : v);
+            return chain;
+          },
+          headers: function(value) {
+            if (typeof value === "string") {
+              try { value = JSON.parse(value); } catch(e) { value = {}; }
+            }
+            if (value) {
+              for (var k in value) config.headers[String(k)] = String(value[k]);
+            }
+            return chain;
+          },
+          cookie: function(value) {
+            if (value != null) config.headers.Cookie = String(value);
+            return chain;
+          },
+          cookies: function(value) {
+            if (value != null) config.headers.Cookie = String(value);
+            return chain;
+          },
+          timeout: function() { return chain; },
+          ignoreContentType: function() { return chain; },
+          followRedirects: function() { return chain; },
+          get: function() { config.method = "GET"; return chain; },
+          post: function(body) { config.method = "POST"; config.body = body == null ? "" : String(body); return chain; },
+          data: function(body) { config.body = body == null ? "" : String(body); return chain; },
+          requestBody: function(body) { config.body = body == null ? "" : String(body); return chain; },
+          raw: function() { return chain; },
+          request: function() { return chain; },
+          body: function() {
+            var payload = Object.keys(config.headers).length || config.method !== "GET" || config.body
+              ? u + "," + JSON.stringify(config)
+              : u;
+            return java.ajax(payload);
+          },
+          execute: function() { return chain.body(); },
+          url: function() { return u; },
+          toString: function() { return u; }
+        };
+        return chain;
+      };
+    ''');
+  }
+
+  String? _extractAjaxRequest(String error) {
+    final marker = error.indexOf('__LEGADO_AJAX__');
+    if (marker < 0) return null;
+    final request = error
+        .substring(marker + '__LEGADO_AJAX__'.length)
+        .replaceFirst(RegExp(r'^[\s:]+'), '')
+        .replaceFirst(RegExp(r'[\s\)]+$'), '')
+        .trim();
+    return request.isEmpty ? null : request;
+  }
+
+  String _stringifyResult(dynamic result) {
+    final text = result.stringResult?.toString() ?? '';
     try {
-      final result = _runtime!.evaluate(codeToRun);
-      if (result.isError) {
-        throw Exception(result.stringResult);
+      final jsonText = _runtime?.jsonStringify(result).trim() ?? '';
+      if (jsonText.isNotEmpty && jsonText != 'undefined') {
+        if (jsonText.startsWith('{') || jsonText.startsWith('[')) {
+          return jsonText;
+        }
+        if (text.isEmpty ||
+            text == '[object Object]' ||
+            text.startsWith('[object')) {
+          final decoded = jsonDecode(jsonText);
+          if (decoded is String) return decoded;
+          return jsonText;
+        }
       }
-      return result.stringResult;
-    } catch (e) {
-      print('JS Eval failed: $e');
-      throw Exception('JS执行异常: $e');
+    } catch (_) {
+      // Keep stringResult.
     }
+    return text;
   }
 
   void dispose() {

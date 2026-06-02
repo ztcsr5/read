@@ -9,6 +9,7 @@ import '../features/bookshelf/viewmodels/bookshelf_viewmodel.dart';
 import '../features/explore/views/explore_page.dart';
 import '../features/settings/views/settings_page.dart';
 import '../features/settings/views/about_page.dart';
+import '../features/settings/views/reading_history_page.dart';
 import '../features/settings/views/source_management_page.dart';
 import '../features/settings/views/source_catalog_browser_page.dart';
 import '../features/settings/views/source_test_page.dart';
@@ -144,6 +145,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: rootNavigatorKey,
         pageBuilder: (context, state) =>
             const CupertinoPage(child: AboutPage()),
+      ),
+      GoRoute(
+        path: '/reading_history',
+        parentNavigatorKey: rootNavigatorKey,
+        pageBuilder: (context, state) =>
+            const CupertinoPage(child: ReadingHistoryPage()),
       ),
       GoRoute(
         path: '/purify',

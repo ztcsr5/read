@@ -172,59 +172,62 @@ class _ReaderSettingsPanelState extends ConsumerState<ReaderSettingsPanel> {
         Wrap(
           spacing: 10,
           runSpacing: 12,
-          children: ReaderBackground.values.map((bg) {
-            final isSelected = state.background == bg;
-            final color = bg == ReaderBackground.custom
-                ? state.customBackgroundColor
-                : bg.color;
-            return GestureDetector(
-              onTap: () {
-                if (bg == ReaderBackground.custom) {
-                  _showCustomBackgroundPicker(context, ref, bookId);
-                } else {
-                  ref
-                      .read(readerViewModelProvider(bookId).notifier)
-                      .setBackground(bg);
-                }
-              },
-              child: SizedBox(
-                width: 54,
-                child: Column(
-                  children: [
-                    Container(
-                      width: 46,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected
-                              ? AppColors.primaryPurple
-                              : (isDark
-                                    ? const Color(0xFF38383A)
-                                    : CupertinoColors.systemGrey5),
-                          width: isSelected ? 2.5 : 1.0,
+          children: ReaderBackground.values
+              .where((bg) => bg != ReaderBackground.custom)
+              .map((bg) {
+                final isSelected = state.background == bg;
+                final color = bg == ReaderBackground.custom
+                    ? state.customBackgroundColor
+                    : bg.color;
+                return GestureDetector(
+                  onTap: () {
+                    if (bg == ReaderBackground.custom) {
+                      _showCustomBackgroundPicker(context, ref, bookId);
+                    } else {
+                      ref
+                          .read(readerViewModelProvider(bookId).notifier)
+                          .setBackground(bg);
+                    }
+                  },
+                  child: SizedBox(
+                    width: 54,
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected
+                                  ? AppColors.primaryPurple
+                                  : (isDark
+                                        ? const Color(0xFF38383A)
+                                        : CupertinoColors.systemGrey5),
+                              width: isSelected ? 2.5 : 1.0,
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 5),
+                        Text(
+                          bg.label,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isDark
+                                ? CupertinoColors.systemGrey2
+                                : CupertinoColors.systemGrey,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      bg.label,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: isDark
-                            ? CupertinoColors.systemGrey2
-                            : CupertinoColors.systemGrey,
-                        fontWeight: isSelected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
+                  ),
+                );
+              })
+              .toList(),
         ),
       ],
     );

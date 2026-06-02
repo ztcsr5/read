@@ -258,8 +258,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (targetPage == page) return;
     await _pageController.animateToPage(
       targetPage,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
+      duration: const Duration(milliseconds: 190),
+      curve: Curves.easeOut,
     );
   }
 
@@ -450,6 +450,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
           // 设置面板
           if (_showSettings)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => setState(() => _showSettings = false),
+              ),
+            ),
+
+          if (_showSettings)
             Positioned(
               bottom: 0,
               left: 0,
@@ -559,7 +567,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     return PageView.builder(
       controller: _pageController,
-      physics: const PageScrollPhysics(parent: BouncingScrollPhysics()),
+      physics: const PageScrollPhysics(),
       itemCount: pages.length,
       onPageChanged: (index) {
         _lastPagedPageIndex = index;
@@ -670,7 +678,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   double _estimateItemHeight(ReaderItem item, ReaderState state, double width) {
-    if (item.isDivider) return 82;
+    if (item.isDivider) return 34;
     if (item.isTitle) {
       final titleSize = (state.fontSize + 7).clamp(24.0, 38.0);
       final metaSize = (state.fontSize - 6).clamp(11.0, 14.0);
@@ -687,14 +695,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: width);
-      return state.topPadding +
-          AppDimensions.paddingLarge +
-          6 +
+      return AppDimensions.paddingLarge +
           metaSize * 1.2 +
           16 +
           titlePainter.height +
           state.titleSpacing +
-          18;
+          12;
     }
 
     final displayText = state.paragraphIndent > 0
@@ -864,12 +870,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (target.charOffset == 0 &&
         state.items[targetIndex].isTitle &&
         _scrollController.hasClients) {
-      _scrollController.jumpTo(0);
+      if (targetIndex == 0) {
+        _scrollController.jumpTo(0);
+      } else if (keyContext != null) {
+        Scrollable.ensureVisible(
+          keyContext,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          alignment: 0,
+        );
+      }
     } else if (keyContext != null) {
       Scrollable.ensureVisible(
         keyContext,
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
         alignment: 0,
       );
     }
@@ -896,7 +911,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     // 分割线
     if (item.isDivider) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 40),
+        padding: const EdgeInsets.symmetric(vertical: 16),
         child: Center(
           child: Container(
             width: 60,
@@ -915,8 +930,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         padding: EdgeInsets.only(
           left: state.pagePadding,
           right: state.pagePadding,
-          top: state.topPadding + AppDimensions.paddingLarge + 6,
-          bottom: state.titleSpacing + 18,
+          top: AppDimensions.paddingLarge,
+          bottom: state.titleSpacing + 12,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1044,15 +1059,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (index == -1) {
       return MediaQuery.boldTextOf(context) ? FontWeight.w700 : FontWeight.w400;
     }
-    if (index == 1) return FontWeight.w600;
-    if (index == 2) return FontWeight.w800;
+    if (index == 1) return FontWeight.w700;
+    if (index == 2) return FontWeight.w900;
     return FontWeight.w400;
   }
 
   double _fontWeightValue(int index) {
     if (index == -1) return MediaQuery.boldTextOf(context) ? 700 : 400;
-    if (index == 1) return 600;
-    if (index == 2) return 800;
+    if (index == 1) return 700;
+    if (index == 2) return 900;
     return 400;
   }
 
@@ -1180,7 +1195,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             CupertinoActionSheetAction(
                               onPressed: () {
                                 Navigator.pop(context);
-                                _showContentFormatSettings(pageContext);
+                                pageContext.push('/purify');
                               },
                               child: const Text('文本内容格式'),
                             ),
@@ -1243,6 +1258,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  // ignore: unused_element
   void _showContentFormatSettings(BuildContext pageContext) {
     final state = ref.read(readerViewModelProvider(widget.bookId));
     showCupertinoModalPopup(
@@ -1531,7 +1547,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                               .read(
                                 readerViewModelProvider(widget.bookId).notifier,
                               )
-                              .toggleTts();
+                              .toggleTtsFromItem(_currentReaderItem());
                         },
                       ),
                       _buildToolButton(

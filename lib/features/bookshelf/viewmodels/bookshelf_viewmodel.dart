@@ -64,7 +64,7 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
         });
 
       state = state.copyWith(
-        allBooks: books,
+        allBooks: recent,
         recentBooks: recent.take(5).toList(), // top 5 recent
         groups: groups,
         isLoading: false,

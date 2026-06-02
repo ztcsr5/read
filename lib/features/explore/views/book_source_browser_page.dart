@@ -129,7 +129,30 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
         } catch (_) {
           target = book;
         }
-        final id = await ref.read(bookRepositoryProvider).saveBook(target);
+        target
+          ..isFromSource = true
+          ..sourceUrl = widget.source.id.toString()
+          ..lastReadTime = DateTime.now();
+        final repo = ref.read(bookRepositoryProvider);
+        final id = await repo.saveBook(target);
+        target.id = id;
+        try {
+          final chapters = await LegadoParser.getChapterList(
+            widget.source,
+            target,
+          ).timeout(const Duration(seconds: 12));
+          if (chapters.isNotEmpty) {
+            for (final chapter in chapters) {
+              chapter.bookId = id;
+            }
+            await repo.deleteChaptersForBook(id);
+            await repo.saveChapters(chapters);
+            target.totalChapters = chapters.length;
+            await repo.saveBook(target);
+          }
+        } catch (_) {
+          // 目录失败不阻止进入阅读页，阅读页还会再尝试一次。
+        }
         if (!mounted) return;
         setState(() => _isLoading = false);
         context.push('/reader/$id');

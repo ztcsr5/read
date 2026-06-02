@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:read/data/models/book_source.dart';
+import 'package:read/data/parsers/legado/legado_js_engine.dart';
 import 'package:read/data/parsers/legado/legado_request_builder.dart';
 import 'package:read/data/parsers/legado/legado_rule_evaluator.dart';
+import 'package:read/data/parsers/legado/legado_session_store.dart';
 
 void main() {
   group('LegadoRequestBuilder', () {
@@ -19,7 +21,7 @@ void main() {
 
       expect(
         url,
-        'https://example.com/api/search?key=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9&page=3&site=site-a',
+        'https://example.com/api/search?key=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9&page=3&site=https://example.com/api',
       );
     });
 
@@ -32,6 +34,42 @@ void main() {
       final url = LegadoRequestBuilder.buildSearchUrl(source, 'abc');
 
       expect(url, 'https://example.com/api/search?key=abc');
+    });
+
+    test('replaces source getKey and java encode helpers', () {
+      final source = BookSource()
+        ..bookSourceName = 'Test'
+        ..bookSourceUrl = 'https://example.com/api/';
+
+      final text = LegadoRequestBuilder.replaceVariables(
+        '{{source.getKey()}}/search?q={{java.encodeURIComponent(key)}}',
+        keyword: '斗破 苍穹',
+        source: source,
+      );
+
+      expect(
+        text,
+        'https://example.com/api/search?q=%E6%96%97%E7%A0%B4%20%E8%8B%8D%E7%A9%B9',
+      );
+    });
+
+    test('evaluates inline javascript search url blocks', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'Test'
+        ..bookSourceUrl = 'https://example.com/api/';
+
+      final text = LegadoRequestBuilder.replaceVariables(
+        '{{var host=source.getKey(); host + "/search?q=" + java.encodeURIComponent(key) + "&p=" + page}}',
+        keyword: '斗破 苍穹',
+        page: 2,
+        source: source,
+      );
+
+      expect(
+        text,
+        'https://example.com/api/search?q=%E6%96%97%E7%A0%B4%20%E8%8B%8D%E7%A9%B9&p=2',
+      );
     });
 
     test('builds request from embedded config', () {
@@ -113,6 +151,15 @@ void main() {
 
       expect(headers['User-Agent'], 'MobileUA');
       expect(headers.keys, everyElement(matches(RegExp(r'^[^\s=]+$'))));
+    });
+
+    test('extracts loose var header objects without unsafe names', () {
+      final headers = LegadoRequestBuilder.parseHeaderString(
+        'var heders = {"User-Agent":"MobileUA","Referer":"https://example.com"}',
+      );
+
+      expect(headers['User-Agent'], 'MobileUA');
+      expect(headers['Referer'], 'https://example.com');
     });
 
     test('filters invalid header names and keeps valid loose headers', () {
@@ -322,6 +369,53 @@ void main() {
         }, r'chapterId@put:{chapterId:$.chapterId}'),
         '123',
       );
+    });
+  });
+
+  group('LegadoJsEngine', () {
+    test('supports java.getString json path and CryptoJS MD5', () {
+      final engine = LegadoJsEngine();
+      if (!engine.isAvailable) return;
+      final value = engine.evaluate(
+        'java.getString("\$.data.title") + "|" + CryptoJS.MD5("abc").toString()',
+        variables: {
+          'result': jsonEncode({
+            'data': {'title': '斗破苍穹'},
+          }),
+        },
+      );
+
+      expect(value, '斗破苍穹|900150983cd24fb0d6963f7d28e17f72');
+    });
+
+    test('resolves ajax calls through Dart callback', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>var data = JSON.parse(java.ajax("https://example.com/books")); data.list;</js>',
+        ajax: (_) async => jsonEncode({
+          'list': [
+            {'title': 'A'},
+          ],
+        }),
+      );
+
+      expect(jsonDecode(value), isA<List>());
+      expect((jsonDecode(value) as List).first['title'], 'A');
+    });
+  });
+
+  group('LegadoSessionStore', () {
+    test('applies stored cookies and user agent to headers', () {
+      final uri = Uri.parse('https://example.com/books');
+      LegadoSessionStore.setCookieString(uri, 'sid=1; Path=/; HttpOnly');
+      LegadoSessionStore.setUserAgent(uri, 'AgentA');
+
+      final headers = <String, dynamic>{'Cookie': 'a=b'};
+      LegadoSessionStore.apply(uri, headers);
+
+      expect(headers['Cookie'], contains('a=b'));
+      expect(headers['Cookie'], contains('sid=1'));
+      expect(headers['User-Agent'], 'AgentA');
     });
   });
 }

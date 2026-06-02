@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../widgets/ios_navigation_bar.dart';
-import '../../../app/theme/colors.dart';
 import '../viewmodels/explore_viewmodel.dart';
 import '../../../data/models/book.dart';
 import 'package:go_router/go_router.dart';
@@ -49,7 +48,27 @@ class ExplorePage extends ConsumerWidget {
                         viewModel.search(value);
                       },
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: CupertinoSlidingSegmentedControl<SearchMatchMode>(
+                        groupValue: state.searchMatchMode,
+                        children: const {
+                          SearchMatchMode.fuzzy: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 10),
+                            child: Text('模糊'),
+                          ),
+                          SearchMatchMode.precise: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 10),
+                            child: Text('精准'),
+                          ),
+                        },
+                        onValueChanged: (mode) {
+                          if (mode != null) viewModel.setSearchMatchMode(mode);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
 
                     // 书源管理入口
                     GestureDetector(
@@ -371,7 +390,7 @@ class ExplorePage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    book.author ?? '未知作者',
+                    book.author,
                     style: TextStyle(
                       fontSize: 13,
                       color: CupertinoColors.secondaryLabel.resolveFrom(
