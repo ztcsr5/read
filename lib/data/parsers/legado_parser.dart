@@ -1055,6 +1055,7 @@ class LegadoParser {
     BookSource source,
     String targetUrl,
   ) async {
+    targetUrl = targetUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
     final embedded = LegadoRequestBuilder.splitEmbeddedConfig(targetUrl);
     final urlStr = embedded.url;
     final uri = Uri.parse(urlStr);
@@ -1086,6 +1087,7 @@ class LegadoParser {
       NavigationDelegate(
         onPageFinished: (url) async {
           try {
+            await Future.delayed(const Duration(milliseconds: 1200));
             final cookieManager = wcm.WebviewCookieManager();
             final gotCookies = await cookieManager.getCookies(urlStr);
             if (gotCookies.isNotEmpty) {
@@ -1194,6 +1196,7 @@ class LegadoParser {
     String targetUrl, {
     String? keyword,
   }) async {
+    targetUrl = targetUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
     final hasWebView = _hasWebViewConfig(source, targetUrl);
     if (hasWebView) {
       print('Url config specifies webView. Routing to Headless WebView.');
@@ -1218,7 +1221,7 @@ class LegadoParser {
       final bytes = response.data is List<int>
           ? response.data as List<int>
           : utf8.encode(response.data?.toString() ?? '');
-      final responseData = _decodeBytes(bytes, request.charset);
+      final responseData = decodeBytes(bytes, request.charset, headers: response.headers.map);
       
       if (_needsManualVerification(response.statusCode, responseData)) {
         print('Dio response triggers verification. Downgrading to Headless WebView.');
@@ -1253,7 +1256,8 @@ class LegadoParser {
     String url, {
     String? keyword,
   }) async {
-    if (url.trim().isEmpty) {
+    url = url.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
+    if (url.isEmpty) {
       throw Exception('请求 URL 为空 (可能是由于 JS 执行异常或书源未配置有效链接)');
     }
     final dataPayload = _decodeDataPayload(url);
@@ -1723,10 +1727,51 @@ class LegadoParser {
             (item.containsKey('id') || item.containsKey('url')));
   }
 
-  static String _decodeBytes(List<int> bytes, String? charset) {
-    final normalized = charset?.toLowerCase().trim();
-    if (normalized == 'gbk' || normalized == 'gb2312') {
-      return gbk.decode(bytes);
+  static String detectCharset(List<int> bytes, String? initialCharset, Map<String, List<String>>? headers) {
+    if (initialCharset != null && initialCharset.isNotEmpty) {
+      return initialCharset;
+    }
+
+    if (headers != null) {
+      final contentType = headers['content-type'] ?? headers['Content-Type'];
+      if (contentType != null && contentType.isNotEmpty) {
+        final ctStr = contentType.join(' ').toLowerCase();
+        if (ctStr.contains('charset=gbk') || ctStr.contains('charset=gb2312')) {
+          return 'gbk';
+        }
+        if (ctStr.contains('charset=utf-8') || ctStr.contains('charset=utf8')) {
+          return 'utf-8';
+        }
+      }
+    }
+
+    if (bytes.isEmpty) return 'utf-8';
+    final sampleLength = bytes.length < 2048 ? bytes.length : 2048;
+    final sampleBytes = bytes.sublist(0, sampleLength);
+    final sampleStr = ascii.decode(
+      sampleBytes.map((b) => (b >= 0 && b <= 127) ? b : 63).toList(),
+    ).toLowerCase();
+
+    if (sampleStr.contains('charset=gbk') ||
+        sampleStr.contains('charset="gbk"') ||
+        sampleStr.contains("charset='gbk'") ||
+        sampleStr.contains('charset=gb2312') ||
+        sampleStr.contains('charset="gb2312"') ||
+        sampleStr.contains("charset='gb2312'")) {
+      return 'gbk';
+    }
+
+    return 'utf-8';
+  }
+
+  static String decodeBytes(List<int> bytes, String? charset, {Map<String, List<String>>? headers}) {
+    final detected = detectCharset(bytes, charset, headers).toLowerCase().trim();
+    if (detected == 'gbk' || detected == 'gb2312') {
+      try {
+        return gbk.decode(bytes);
+      } catch (_) {
+        return utf8.decode(bytes, allowMalformed: true);
+      }
     }
     return utf8.decode(bytes, allowMalformed: true);
   }

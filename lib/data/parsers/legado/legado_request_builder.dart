@@ -184,8 +184,10 @@ class LegadoRequestBuilder {
   }
 
   static String resolveUrl(String baseUrl, String url) {
-    if (url.trim().isEmpty) return '';
-    if (url.startsWith('data:') || url.startsWith('javascript:')) return url.trim();
+    baseUrl = baseUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
+    url = url.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
+    if (url.isEmpty) return '';
+    if (url.startsWith('data:') || url.startsWith('javascript:')) return url;
 
     // 1. Separate Legado config
     final embedded = splitEmbeddedConfig(url);
@@ -338,6 +340,7 @@ class LegadoRequestBuilder {
   static ({String url, Map<String, dynamic> config}) splitEmbeddedConfig(
     String url,
   ) {
+    url = url.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
     final comma = _findEmbeddedConfigComma(url);
     if (comma <= 0 || comma >= url.length - 1) return (url: url, config: {});
     final tail = url.substring(comma + 1).trimLeft();

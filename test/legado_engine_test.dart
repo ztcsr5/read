@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' show parse;
+import 'package:fast_gbk/fast_gbk.dart';
 import 'package:read/data/models/book_source.dart';
 import 'package:read/data/parsers/legado/legado_js_engine.dart';
 import 'package:read/data/parsers/legado/legado_request_builder.dart';
 import 'package:read/data/parsers/legado/legado_rule_evaluator.dart';
 import 'package:read/data/parsers/legado/legado_session_store.dart';
+import 'package:read/data/parsers/legado_parser.dart';
 
 void main() {
   group('LegadoRequestBuilder', () {
@@ -496,6 +498,38 @@ void main() {
       expect(headers['Cookie'], contains('a=b'));
       expect(headers['Cookie'], contains('sid=1'));
       expect(headers['User-Agent'], 'AgentA');
+    });
+  });
+
+  group('LegadoParser Robustness', () {
+    test('cleans URLs of trailing control characters and percent-encoded controls', () {
+      final baseUrl = 'https://example.com/api/\n\r%0A%0D';
+      final relativeUrl = 'search\n\r%0a%0d';
+      final resolved = LegadoRequestBuilder.resolveUrl(baseUrl, relativeUrl);
+      expect(resolved, 'https://example.com/api/search');
+      
+      final embedded = LegadoRequestBuilder.splitEmbeddedConfig('https://example.com/books\n\r%0A%0D,{"method":"POST"}');
+      expect(embedded.url, 'https://example.com/books');
+      expect(embedded.config['method'], 'POST');
+    });
+
+    test('auto-detects and decodes GBK encoding from headers or meta tags', () {
+      final utf8Text = '测试中文编码';
+      final gbkBytes = gbk.encode(utf8Text);
+
+      // 1. Detect from Headers
+      final decodedFromHeaders = LegadoParser.decodeBytes(
+        gbkBytes,
+        null,
+        headers: {'Content-Type': ['text/html; charset=gbk']},
+      );
+      expect(decodedFromHeaders, utf8Text);
+
+      // 2. Detect from HTML Meta Tag
+      final htmlPrefix = utf8.encode('<html><head><meta charset="gbk"></head><body>');
+      final combinedBytes = [...htmlPrefix, ...gbkBytes];
+      final decodedFromMeta = LegadoParser.decodeBytes(combinedBytes, null);
+      expect(decodedFromMeta, contains(utf8Text));
     });
   });
 }
