@@ -5,6 +5,7 @@ import 'package:flutter/material.dart' show LinearProgressIndicator, Divider, Co
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/models/book_source.dart';
+import '../../../data/models/chapter.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../../../widgets/ios_navigation_bar.dart';
