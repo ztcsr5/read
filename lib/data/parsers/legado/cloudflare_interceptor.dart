@@ -36,15 +36,26 @@ class CloudflareInterceptor extends Interceptor {
   }
 
   bool _isCloudflareChallenge(Response response) {
-    if (response.statusCode != 503 && response.statusCode != 403) {
-      return false;
-    }
-    final data = response.data?.toString() ?? '';
-    return data.contains('cf-browser-verification') ||
-        data.contains('Just a moment') ||
+    final statusCode = response.statusCode ?? 200;
+    final data = response.data?.toString().toLowerCase() ?? '';
+    
+    final isChallengeHtml = data.contains('cf-browser-verification') ||
         data.contains('/cdn-cgi/challenge-platform') ||
         data.contains('challenge-form') ||
-        data.contains('Enable JavaScript and cookies');
+        data.contains('just a moment') ||
+        data.contains('enable javascript and cookies') ||
+        data.contains('ddos protection by cloudflare') ||
+        data.contains('checking your browser') ||
+        data.contains('百度安全验证');
+
+    if (statusCode == 503 || statusCode == 403) {
+      final serverHeader = response.headers.value('server')?.toLowerCase() ?? '';
+      if (isChallengeHtml || serverHeader.contains('cloudflare') || serverHeader.contains('ddos-guard')) {
+        return true;
+      }
+    }
+    
+    return isChallengeHtml;
   }
 
   Future<void> _bypassCloudflare(
