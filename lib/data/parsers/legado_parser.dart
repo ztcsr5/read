@@ -167,9 +167,19 @@ class LegadoParser {
       );
 
       final chapterUrl = chapters.first.content ?? chapters.first.url ?? '';
+      if (chapterUrl.trim().isEmpty) {
+        steps.add(
+          const LegadoTestStep.fail(
+            '正文',
+            '章节链接解析为空，请检查 ruleToc.chapterUrl',
+          ),
+        );
+        return LegadoTestReport(steps: steps);
+      }
+
       final content = await getChapterContent(source, chapterUrl);
-      if (content.trim().isEmpty || content.contains('解析失败')) {
-        steps.add(LegadoTestStep.fail('正文', content));
+      if (content.isEmpty) {
+        steps.add(const LegadoTestStep.fail('正文', '没有解析出正文内容'));
       } else {
         steps.add(
           LegadoTestStep.ok('正文', '首章正文解析成功', sample: _sample(content)),

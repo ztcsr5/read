@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado/legado_request_builder.dart';
 import '../../../data/parsers/legado/legado_session_store.dart';
+import 'package:webview_cookie_manager/webview_cookie_manager.dart';
 
 class SourceVerificationPage extends StatefulWidget {
   final BookSource source;
@@ -202,21 +203,22 @@ class _SourceVerificationPageState extends State<SourceVerificationPage> {
 
   Future<void> _captureSession({required bool silent}) async {
     try {
-      final cookieResult = await _controller.runJavaScriptReturningResult(
-        'document.cookie',
-      );
+      final cookieManager = WebviewCookieManager();
+      final cookies = await cookieManager.getCookies(_currentUri.toString());
+      final cookieString = cookies.map((c) => '${c.name}=${c.value}').join('; ');
+
       final uaResult = await _controller.runJavaScriptReturningResult(
         'navigator.userAgent',
       );
       final htmlResult = await _controller.runJavaScriptReturningResult(
         'document.documentElement.outerHTML',
       );
-      final cookie = _jsString(cookieResult).trim();
       final ua = _jsString(uaResult).trim();
       final html = _jsString(htmlResult);
       final uri = _currentUri;
-      if (cookie.isNotEmpty) {
-        LegadoSessionStore.setCookieString(uri, cookie);
+      
+      if (cookieString.isNotEmpty) {
+        LegadoSessionStore.setCookieString(uri, cookieString);
       }
       if (ua.isNotEmpty) {
         LegadoSessionStore.setUserAgent(uri, ua);
