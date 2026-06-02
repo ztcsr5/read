@@ -198,7 +198,10 @@ class LegadoRequestBuilder {
   }
 
   static String cleanBaseUrl(String baseUrl) {
-    return baseUrl.split('##').first;
+    final withoutProcessor = baseUrl.split('##').first;
+    final fragment = withoutProcessor.indexOf('#');
+    if (fragment > 0) return withoutProcessor.substring(0, fragment);
+    return withoutProcessor;
   }
 
   static Map<String, dynamic> jsonConfig(String? customConfig) {
@@ -267,26 +270,42 @@ class LegadoRequestBuilder {
   static ({String url, Map<String, dynamic> config}) splitEmbeddedConfig(
     String url,
   ) {
-    final comma = url.indexOf(',{');
-    if (comma <= 0 || comma >= url.length - 1) {
-      return (url: url, config: {});
-    }
-    final tail = url.substring(comma + 1).trim();
-    if (!tail.startsWith('{')) {
-      if (_looksLikeScript(tail)) {
-        return (url: url.substring(0, comma), config: {});
-      }
-      return (url: url, config: {});
-    }
+    final comma = _findEmbeddedConfigComma(url);
+    if (comma <= 0 || comma >= url.length - 1) return (url: url, config: {});
+    final tail = url.substring(comma + 1).trimLeft();
     final configText = _extractLeadingJsonObject(tail);
-    if (configText == null) {
-      return (url: url.substring(0, comma), config: {});
-    }
-    try {
-      return (url: url.substring(0, comma), config: jsonConfig(configText));
-    } catch (_) {
+    if (configText == null) return (url: url, config: {});
+    final config = jsonConfig(configText);
+    if (config.isEmpty && configText.trim() != '{}')
       return (url: url, config: {});
+    return (url: url.substring(0, comma).trimRight(), config: config);
+  }
+
+  static int _findEmbeddedConfigComma(String text) {
+    var inString = false;
+    var escaping = false;
+    var quote = 0;
+    for (var i = 0; i < text.length; i++) {
+      final code = text.codeUnitAt(i);
+      if (inString) {
+        if (escaping) {
+          escaping = false;
+        } else if (code == 0x5c) {
+          escaping = true;
+        } else if (code == quote) {
+          inString = false;
+        }
+        continue;
+      }
+      if (code == 0x22 || code == 0x27) {
+        inString = true;
+        quote = code;
+      } else if (code == 0x2c) {
+        final tail = text.substring(i + 1).trimLeft();
+        if (tail.startsWith('{')) return i;
+      }
     }
+    return -1;
   }
 
   static bool _looksLikeScript(String tail) {

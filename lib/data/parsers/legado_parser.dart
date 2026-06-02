@@ -20,16 +20,37 @@ import 'legado/legado_request_builder.dart';
 import 'legado/legado_rule_evaluator.dart';
 import 'legado/legado_session_store.dart';
 
+class LegadoVerificationRequiredException implements Exception {
+  final String sourceName;
+  final String url;
+  final int? statusCode;
+  final String message;
+
+  const LegadoVerificationRequiredException({
+    required this.sourceName,
+    required this.url,
+    required this.message,
+    this.statusCode,
+  });
+
+  @override
+  String toString() {
+    final status = statusCode == null ? '' : ' HTTP $statusCode';
+    return '需要跳验证$status: $sourceName $url $message';
+  }
+}
+
 /// 基础的开源阅读 (Legado) 规则解析器。
 class LegadoParser {
   static final Dio _dio = _createDio();
+  static final Map<String, String> _jsLibraryCache = <String, String>{};
 
   static Dio _createDio() {
     final dio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 15),
         receiveTimeout: const Duration(seconds: 15),
-        validateStatus: (status) => status != null && status < 500,
+        validateStatus: (status) => status != null && status < 600,
         headers: {
           'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
@@ -60,7 +81,7 @@ class LegadoParser {
         return LegadoTestReport(steps: steps);
       }
 
-      final searchUrl = _buildSearchUrl(source, keyword);
+      final searchUrl = await _buildSearchUrlAsync(source, keyword);
       steps.add(LegadoTestStep.ok('搜索 URL', searchUrl));
 
       if (_containsJsRule(source.searchUrl) ||
@@ -183,7 +204,7 @@ class LegadoParser {
 
     final response = await _request(
       source,
-      _buildSearchUrl(source, keyword, page: page),
+      await _buildSearchUrlAsync(source, keyword, page: page),
       keyword: keyword,
     );
     var data = response.data;
@@ -835,6 +856,7 @@ class LegadoParser {
       final output = await LegadoJsEngine().evaluateWithAjax(
         block.script,
         variables: variables,
+        libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
         ajax: (request) =>
             _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
       );
@@ -866,21 +888,86 @@ class LegadoParser {
     String result = '',
     String? baseUrl,
     String? keyword,
+    int page = 1,
   }) {
     final sourceUrl = LegadoRequestBuilder.cleanBaseUrl(
       source.bookSourceUrl,
     ).replaceAll(RegExp(r'/+$'), '');
+    final sourceUri = Uri.tryParse(
+      sourceUrl.contains('://') ? sourceUrl : 'https://$sourceUrl',
+    );
+    final config = LegadoRequestBuilder.jsonConfig(source.customConfig);
     return {
       'result': result,
       'baseUrl': baseUrl ?? sourceUrl,
       'key': keyword ?? '',
       'keyword': keyword ?? '',
+      'page': page,
+      'cookieHeader': sourceUri == null
+          ? ''
+          : LegadoSessionStore.cookieHeaderFor(sourceUri) ?? '',
+      'userAgent': sourceUri == null
+          ? ''
+          : LegadoSessionStore.userAgentFor(sourceUri) ?? '',
       'source': {
         'key': sourceUrl,
         'bookSourceUrl': sourceUrl,
         'bookSourceName': source.bookSourceName,
+        'variable': config['variable'] ?? config['variableComment'] ?? '',
+        'customConfig': config,
       },
     };
+  }
+
+  static Iterable<String> _sourceLibraries(BookSource source) {
+    final config = LegadoRequestBuilder.jsonConfig(source.customConfig);
+    final jsLib = config['jsLib'];
+    if (jsLib == null) return const [];
+    if (jsLib is List) {
+      return jsLib.map((value) => value.toString());
+    }
+    return [jsLib.toString()];
+  }
+
+  static Future<List<String>> _sourceLibraryCodes(
+    BookSource source, {
+    String? baseUrl,
+  }) async {
+    final codes = <String>[];
+    for (final raw in _sourceLibraries(source)) {
+      final value = raw.trim();
+      if (value.isEmpty) continue;
+      if (!_looksLikeJsLibraryUrl(value)) {
+        codes.add(value);
+        continue;
+      }
+      final url = _resolveUrl(baseUrl ?? source.bookSourceUrl, value);
+      final cached = _jsLibraryCache[url];
+      if (cached != null) {
+        codes.add(cached);
+        continue;
+      }
+      try {
+        final response = await _request(source, url);
+        final code = response.data?.toString() ?? '';
+        if (code.trim().isNotEmpty) {
+          _jsLibraryCache[url] = code;
+          codes.add(code);
+        }
+      } catch (_) {
+        // A missing jsLib should not stop the whole source; the main rule may
+        // still work or the source test will show the later failing step.
+      }
+    }
+    return codes;
+  }
+
+  static bool _looksLikeJsLibraryUrl(String value) {
+    final lower = value.toLowerCase();
+    return lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('/') && lower.endsWith('.js') ||
+        lower.endsWith('.js') && !lower.contains('\n');
   }
 
   static Future<String> _ajaxForJs(
@@ -957,6 +1044,14 @@ class LegadoParser {
         ? response.data as List<int>
         : utf8.encode(response.data?.toString() ?? '');
     response.data = _decodeBytes(bytes, request.charset);
+    if (_needsManualVerification(response.statusCode, response.data)) {
+      throw LegadoVerificationRequiredException(
+        sourceName: source.bookSourceName,
+        url: response.realUri.toString(),
+        statusCode: response.statusCode,
+        message: _verificationReason(response.data),
+      );
+    }
     return response;
   }
 
@@ -968,12 +1063,91 @@ class LegadoParser {
     return LegadoRequestBuilder.buildRequest(source, url, keyword: keyword);
   }
 
-  static String _buildSearchUrl(
+  static bool _needsManualVerification(int? statusCode, dynamic data) {
+    final text = data?.toString() ?? '';
+    final lower = text.toLowerCase();
+    if (lower.contains('/cdn-cgi/challenge-platform') ||
+        lower.contains('just a moment') ||
+        lower.contains('cf-browser-verification') ||
+        lower.contains('challenge-form') ||
+        lower.contains('enable javascript and cookies') ||
+        lower.contains('cloudflare') &&
+            lower.contains('checking your browser')) {
+      return true;
+    }
+    if ((statusCode == 401 ||
+            statusCode == 403 ||
+            statusCode == 429 ||
+            statusCode == 503) &&
+        _looksLikeHtmlPage(text)) {
+      return true;
+    }
+    return false;
+  }
+
+  static bool _looksLikeHtmlPage(String text) {
+    final sample = text.trimLeft().toLowerCase();
+    return sample.startsWith('<!doctype html') ||
+        sample.startsWith('<html') ||
+        sample.contains('<title>') ||
+        sample.contains('<body');
+  }
+
+  static String _verificationReason(dynamic data) {
+    final text = data?.toString() ?? '';
+    if (text.toLowerCase().contains('cloudflare') ||
+        text.contains('/cdn-cgi/challenge-platform') ||
+        text.contains('Just a moment')) {
+      return '返回 Cloudflare/浏览器验证页';
+    }
+    return '返回登录、验证码或站点拒绝页';
+  }
+
+  static Future<String> _buildSearchUrlAsync(
     BookSource source,
     String keyword, {
     int page = 1,
-  }) {
-    return LegadoRequestBuilder.buildSearchUrl(source, keyword, page: page);
+  }) async {
+    final raw = source.searchUrl ?? '';
+    var searchUrl = LegadoRequestBuilder.replaceVariables(
+      raw,
+      keyword: keyword,
+      page: page,
+      source: source,
+    );
+    if (_isWholeJsRule(searchUrl)) {
+      final variables = _jsVariables(
+        source,
+        keyword: keyword,
+        page: page,
+        baseUrl: source.bookSourceUrl,
+      );
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        searchUrl,
+        variables: variables,
+        libraries: await _sourceLibraryCodes(
+          source,
+          baseUrl: source.bookSourceUrl,
+        ),
+        ajax: (request) => _ajaxForJs(
+          source,
+          request,
+          baseUrl: source.bookSourceUrl,
+          keyword: keyword,
+        ),
+      );
+      if (output.trim().isNotEmpty) searchUrl = output.trim();
+    }
+
+    final embedded = LegadoRequestBuilder.splitEmbeddedConfig(searchUrl);
+    final resolved = _resolveUrl(source.bookSourceUrl, embedded.url);
+    if (embedded.config.isEmpty) return resolved;
+    return '$resolved,${jsonEncode(embedded.config)}';
+  }
+
+  static bool _isWholeJsRule(String text) {
+    final value = text.trimLeft();
+    return value.startsWith('@js:') || value.startsWith('<js>');
   }
 
   static String _resolveUrl(String baseUrl, String url) {

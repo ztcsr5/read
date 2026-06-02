@@ -6,6 +6,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/models/rss_source.dart';
 import '../../../data/parsers/legado_parser.dart';
+import '../../../data/parsers/legado/legado_request_builder.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../../../data/repositories/source_repository.dart';
 
@@ -25,6 +26,9 @@ class ExploreState {
   final List<RssSource> rssSources;
   final int selectedTab;
   final SearchMatchMode searchMatchMode;
+  final BookSource? verificationSource;
+  final String verificationUrl;
+  final String lastQuery;
 
   ExploreState({
     this.isSearching = false,
@@ -33,6 +37,9 @@ class ExploreState {
     this.rssSources = const [],
     this.selectedTab = 0,
     this.searchMatchMode = SearchMatchMode.fuzzy,
+    this.verificationSource,
+    this.verificationUrl = '',
+    this.lastQuery = '',
   });
 
   ExploreState copyWith({
@@ -42,6 +49,10 @@ class ExploreState {
     List<RssSource>? rssSources,
     int? selectedTab,
     SearchMatchMode? searchMatchMode,
+    BookSource? verificationSource,
+    String? verificationUrl,
+    String? lastQuery,
+    bool clearVerificationSource = false,
   }) {
     return ExploreState(
       isSearching: isSearching ?? this.isSearching,
@@ -50,6 +61,13 @@ class ExploreState {
       rssSources: rssSources ?? this.rssSources,
       selectedTab: selectedTab ?? this.selectedTab,
       searchMatchMode: searchMatchMode ?? this.searchMatchMode,
+      verificationSource: clearVerificationSource
+          ? null
+          : verificationSource ?? this.verificationSource,
+      verificationUrl: clearVerificationSource
+          ? ''
+          : verificationUrl ?? this.verificationUrl,
+      lastQuery: lastQuery ?? this.lastQuery,
     );
   }
 }
@@ -83,7 +101,13 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     final query = keyword.trim();
     if (query.isEmpty) return;
 
-    state = state.copyWith(isSearching: true, error: '', searchResults: []);
+    state = state.copyWith(
+      isSearching: true,
+      error: '',
+      searchResults: [],
+      lastQuery: query,
+      clearVerificationSource: true,
+    );
 
     try {
       final sources = _searchableSources(await _repository.getAllBookSources());
@@ -97,6 +121,8 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
 
       final allResults = <Book>[];
       final seen = <String>{};
+      BookSource? verificationSource;
+      String verificationUrl = '';
       var tried = 0;
       final mode = state.searchMatchMode;
       final maxResults = mode == SearchMatchMode.precise ? 120 : 240;
@@ -121,6 +147,12 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                   })
                   .toList();
             } catch (e) {
+              if (verificationSource == null && _shouldOfferVerification(e)) {
+                verificationSource = source;
+                verificationUrl = e is LegadoVerificationRequiredException
+                    ? e.url
+                    : _sourceDefaultUrl(source);
+              }
               print('Search Error from ${source.bookSourceName}: $e');
               return <Book>[];
             }
@@ -147,6 +179,9 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       state = state.copyWith(
         isSearching: false,
         searchResults: allResults,
+        verificationSource: allResults.isEmpty ? verificationSource : null,
+        verificationUrl: allResults.isEmpty ? verificationUrl : '',
+        clearVerificationSource: allResults.isNotEmpty,
         error: allResults.isEmpty ? '已搜索 $tried 个启用书源，暂时没有搜到书籍' : '',
       );
     } catch (e) {
@@ -212,6 +247,15 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
         if (weight != 0) return weight;
         return a.bookSourceName.compareTo(b.bookSourceName);
       });
+  }
+
+  bool _shouldOfferVerification(Object error) =>
+      error is LegadoVerificationRequiredException;
+
+  String _sourceDefaultUrl(BookSource source) {
+    final base = LegadoRequestBuilder.cleanBaseUrl(source.bookSourceUrl);
+    if (base.startsWith('http')) return base;
+    return 'https://$base';
   }
 
   Future<BookSource?> _sourceForBook(Book book) async {

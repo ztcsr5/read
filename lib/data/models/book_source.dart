@@ -86,8 +86,17 @@ class BookSource {
       'body',
       'charset',
       'loginUrl',
+      'loginUi',
+      'jsLib',
+      'bookUrlPattern',
+      'enabledCookieJar',
+      'enabledExplore',
+      'loadWithBaseUrl',
+      'singleUrl',
       'bookSourceComment',
       'bookSourceHeader',
+      'variableComment',
+      'respondTime',
     ]) {
       if (json.containsKey(key) && json[key] != null) {
         customConfig[key] = json[key];

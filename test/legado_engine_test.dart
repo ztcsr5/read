@@ -36,6 +36,37 @@ void main() {
       expect(url, 'https://example.com/api/search?key=abc');
     });
 
+    test('cleans fragment suffixes from shared source base urls', () {
+      expect(
+        LegadoRequestBuilder.cleanBaseUrl('https://example.com/api#lcs'),
+        'https://example.com/api',
+      );
+      expect(
+        LegadoRequestBuilder.cleanBaseUrl('https://example.com/api##comment'),
+        'https://example.com/api',
+      );
+    });
+
+    test('splits embedded config with whitespace before json object', () {
+      final embedded = LegadoRequestBuilder.splitEmbeddedConfig(
+        'https://example.com/search, {"headers":{"Referer":"https://example.com"}}',
+      );
+
+      expect(embedded.url, 'https://example.com/search');
+      expect(embedded.config['headers'], isA<Map>());
+    });
+
+    test('keeps imported jsLib in source custom config', () {
+      final source = BookSource.fromJson({
+        'bookSourceName': 'JS Source',
+        'bookSourceUrl': 'https://example.com',
+        'jsLib': 'function sign(){return "ok";}',
+      });
+      final config = jsonDecode(source.customConfig!);
+
+      expect(config['jsLib'], contains('function sign'));
+    });
+
     test('replaces source getKey and java encode helpers', () {
       final source = BookSource()
         ..bookSourceName = 'Test'
@@ -273,6 +304,27 @@ void main() {
 
       expect(nodes, hasLength(2));
       expect((nodes.last as Map)['title'], 'B');
+    });
+
+    test('expands json list nodes through recursive descent', () {
+      final data = {
+        'payload': {
+          'nested': {
+            'bookList': [
+              {'name': 'A'},
+              {'name': 'B'},
+            ],
+          },
+        },
+      };
+
+      final nodes = LegadoRuleEvaluator.extractJsonNodes(
+        data,
+        r'$..bookList[*]',
+      );
+
+      expect(nodes, hasLength(2));
+      expect((nodes.first as Map)['name'], 'A');
     });
 
     test('interpolates json template values', () {

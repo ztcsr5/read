@@ -379,39 +379,112 @@ class LegadoRuleEvaluator {
   }
 
   static List<dynamic> _extractNodesManually(dynamic json, String rule) {
-    final cleaned = _cleanJsonRule(rule)
-        .replaceAll(RegExp(r'^\$\.?'), '')
-        .replaceAll('[*]', '')
-        .replaceAll('.*', '')
-        .trim();
+    final cleaned = _cleanJsonRule(
+      rule,
+    ).replaceAll(RegExp(r'^\$\.?'), '').replaceAll('.*', '').trim();
     if (cleaned.isEmpty) return [json];
+    if (cleaned.contains('..')) {
+      return _extractNodesRecursively(json, cleaned);
+    }
 
-    var current = <dynamic>[json];
-    for (final part in cleaned.split('.')) {
+    return _readJsonPathSegments([json], cleaned);
+  }
+
+  static List<dynamic> _extractNodesRecursively(dynamic json, String path) {
+    final deep = path.indexOf('..');
+    final prefix = path.substring(0, deep).replaceAll(RegExp(r'\.$'), '');
+    final suffix = path.substring(deep + 2).replaceAll(RegExp(r'^\.+'), '');
+    final roots = prefix.isEmpty
+        ? <dynamic>[json]
+        : _readJsonPathSegments([json], prefix);
+    if (suffix.isEmpty) return roots;
+
+    final dot = suffix.indexOf('.');
+    final first = dot < 0 ? suffix : suffix.substring(0, dot);
+    final rest = dot < 0 ? '' : suffix.substring(dot + 1);
+    final result = <dynamic>[];
+
+    void visit(dynamic node) {
+      final hits = _readJsonPathSegments([node], first);
+      for (final hit in hits) {
+        if (rest.isEmpty) {
+          result.add(hit);
+        } else {
+          result.addAll(_readJsonPathSegments([hit], rest));
+        }
+      }
+      if (node is Map) {
+        for (final child in node.values) {
+          visit(child);
+        }
+      } else if (node is List) {
+        for (final child in node) {
+          visit(child);
+        }
+      }
+    }
+
+    for (final root in roots) {
+      visit(root);
+    }
+    return result;
+  }
+
+  static List<dynamic> _readJsonPathSegments(List<dynamic> roots, String path) {
+    var current = roots;
+    for (final part in path.split('.')) {
       if (part.isEmpty) continue;
       final next = <dynamic>[];
-      final match = RegExp(r'^([^\[]+)(?:\[(\d+)\])?$').firstMatch(part);
-      final key = match?.group(1) ?? part;
-      final index = int.tryParse(match?.group(2) ?? '');
+      final match = RegExp(r'^([^\[]+)?(?:\[(\*|\d+)\])?$').firstMatch(part);
+      final key = (match?.group(1) ?? part).trim();
+      final indexToken = match?.group(2);
+      final index = int.tryParse(indexToken ?? '');
+      final wantsAll = indexToken == '*';
       for (final value in current) {
-        dynamic child;
-        if (value is Map) {
-          child = value[key] ?? value[key.toString()];
-        } else if (value is List && int.tryParse(key) != null) {
-          final listIndex = int.parse(key);
-          if (listIndex >= 0 && listIndex < value.length) {
-            child = value[listIndex];
+        final children = <dynamic>[];
+        if (key == '*' || key.isEmpty) {
+          if (value is List) {
+            children.addAll(value);
+          } else if (value is Map) {
+            children.addAll(value.values);
+          }
+        } else if (value is Map) {
+          final child = value[key] ?? value[key.toString()];
+          if (child != null) children.add(child);
+        } else if (value is List) {
+          final listIndex = int.tryParse(key);
+          if (listIndex != null) {
+            if (listIndex >= 0 && listIndex < value.length) {
+              children.add(value[listIndex]);
+            }
+          } else {
+            for (final element in value) {
+              if (element is Map) {
+                final child = element[key] ?? element[key.toString()];
+                if (child != null) children.add(child);
+              }
+            }
           }
         }
-        if (child == null) continue;
-        if (index != null) {
-          if (child is List && index >= 0 && index < child.length) {
-            next.add(child[index]);
+
+        for (final child in children) {
+          if (wantsAll) {
+            if (child is List) {
+              next.addAll(child);
+            } else if (child is Map) {
+              next.addAll(child.values);
+            } else {
+              next.add(child);
+            }
+          } else if (index != null) {
+            if (child is List && index >= 0 && index < child.length) {
+              next.add(child[index]);
+            }
+          } else if (child is List) {
+            next.addAll(child);
+          } else {
+            next.add(child);
           }
-        } else if (child is List) {
-          next.addAll(child);
-        } else {
-          next.add(child);
         }
       }
       current = next;

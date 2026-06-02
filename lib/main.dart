@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
 import 'app/database/database_provider.dart';
+import 'data/parsers/legado/legado_session_store.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   try {
     // 设置状态栏样式
     SystemChrome.setSystemUIOverlayStyle(
@@ -17,18 +19,15 @@ void main() async {
     );
 
     // 强制竖屏
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
     // 初始化数据库
     final isar = await DatabaseHelper.init();
+    await LegadoSessionStore.restorePersistedSessions();
 
     runApp(
       ProviderScope(
-        overrides: [
-          isarProvider.overrideWithValue(isar),
-        ],
+        overrides: [isarProvider.overrideWithValue(isar)],
         child: const ReadApp(),
       ),
     );

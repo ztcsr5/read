@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
@@ -86,6 +87,14 @@ class _SourceTestPageState extends State<SourceTestPage> {
                       child: Text(_isTesting ? '测试中...' : '开始测试'),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: CupertinoButton(
+                      onPressed: _isTesting ? null : _openVerification,
+                      child: const Text('跳验证 / 保存站点 Cookie'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -94,7 +103,7 @@ class _SourceTestPageState extends State<SourceTestPage> {
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 28, 20, 0),
                 child: Text(
-                  '会依次测试：搜索 URL、搜索结果、书籍详情、目录、正文。失败时会停在具体步骤，方便改规则。',
+                  '会依次测试：搜索 URL、搜索结果、书籍详情、目录、正文。遇到验证码、Cloudflare 或登录页时，可以先点“跳验证”完成验证后再重试。',
                   style: TextStyle(
                     fontSize: 16,
                     height: 1.45,
@@ -125,6 +134,16 @@ class _SourceTestPageState extends State<SourceTestPage> {
       _report = report;
       _isTesting = false;
     });
+  }
+
+  Future<void> _openVerification() async {
+    final result = await context.push<bool>(
+      '/source_verify',
+      extra: widget.source,
+    );
+    if (result == true && mounted) {
+      await _runTest();
+    }
   }
 
   Widget _buildStep(LegadoTestStep step) {

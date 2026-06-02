@@ -568,6 +568,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return PageView.builder(
       controller: _pageController,
       physics: const PageScrollPhysics(),
+      allowImplicitScrolling: true,
       itemCount: pages.length,
       onPageChanged: (index) {
         _lastPagedPageIndex = index;
@@ -587,25 +588,120 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       },
       itemBuilder: (context, pageIndex) {
         final page = pages[pageIndex];
-        return Padding(
-          padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + readerState.topPadding,
-            bottom: readerState.footerHeight + readerState.bottomPadding,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: page.entries.map((entry) {
-              return RepaintBoundary(
-                key: _itemKeys.putIfAbsent(entry.itemIndex, () => GlobalKey()),
-                child: _buildReaderItemView(
-                  entry.itemIndex,
-                  entry.item,
+        return _buildPageTurnWrapper(
+          pageIndex: pageIndex,
+          mode: readerState.mode,
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + readerState.topPadding,
+              bottom: readerState.bottomPadding,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ...page.entries.map((entry) {
+                  return RepaintBoundary(
+                    key: _itemKeys.putIfAbsent(
+                      entry.itemIndex,
+                      () => GlobalKey(),
+                    ),
+                    child: _buildReaderItemView(
+                      entry.itemIndex,
+                      entry.item,
+                      readerState,
+                      textColor,
+                      bgColor,
+                    ),
+                  );
+                }),
+                const Spacer(),
+                _buildPageFooter(
                   readerState,
+                  page,
+                  pageIndex,
+                  pages.length,
                   textColor,
-                  bgColor,
                 ),
-              );
-            }).toList(),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPageFooter(
+    ReaderState state,
+    _ReaderPageData page,
+    int pageIndex,
+    int pageCount,
+    Color textColor,
+  ) {
+    if (state.footerHeight <= 0) return const SizedBox.shrink();
+    final first = page.firstReadableItem?.item;
+    final chapter = first == null ? '' : '第${first.chapterIndex + 1}章';
+    final progress = pageCount <= 0
+        ? 0
+        : (((pageIndex + 1) / pageCount) * 100).clamp(0, 100).round();
+    return SizedBox(
+      height: state.footerHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            chapter,
+            style: TextStyle(
+              fontSize: 11,
+              color: textColor.withOpacity(0.55),
+              letterSpacing: 0,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '$progress%',
+            style: TextStyle(
+              fontSize: 11,
+              color: textColor.withOpacity(0.55),
+              letterSpacing: 0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPageTurnWrapper({
+    required int pageIndex,
+    required ReaderMode mode,
+    required Widget child,
+  }) {
+    if (mode != ReaderMode.cover) return child;
+    return AnimatedBuilder(
+      animation: _pageController,
+      child: child,
+      builder: (context, child) {
+        var page = _pageController.hasClients
+            ? _pageController.page ?? _lastPagedPageIndex.toDouble()
+            : _lastPagedPageIndex.toDouble();
+        final offset = pageIndex - page;
+        final width = MediaQuery.of(context).size.width;
+        final compensate = offset < 0 && offset > -1 ? -offset * width : 0.0;
+        final shadowOpacity = (1 - offset.abs()).clamp(0.0, 1.0) * 0.16;
+        return Transform.translate(
+          offset: Offset(compensate, 0),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              boxShadow: offset > 0 && offset < 1
+                  ? [
+                      BoxShadow(
+                        color: CupertinoColors.black.withOpacity(shadowOpacity),
+                        blurRadius: 18,
+                        offset: const Offset(-6, 0),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: child,
           ),
         );
       },
@@ -633,6 +729,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     for (var i = 0; i < state.items.length; i++) {
       final item = state.items[i];
+      if (item.isTitle && current.isNotEmpty) {
+        pages.add(_ReaderPageData(List.unmodifiable(current)));
+        current = <_ReaderPageEntry>[];
+        usedHeight = 0;
+      }
       final itemHeight = _estimateItemHeight(item, state, width);
       if (current.isNotEmpty && usedHeight + itemHeight > maxHeight) {
         pages.add(_ReaderPageData(List.unmodifiable(current)));
@@ -678,7 +779,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   double _estimateItemHeight(ReaderItem item, ReaderState state, double width) {
-    if (item.isDivider) return 34;
+    if (item.isDivider) return state.mode == ReaderMode.scroll ? 10 : 0;
     if (item.isTitle) {
       final titleSize = (state.fontSize + 7).clamp(24.0, 38.0);
       final metaSize = (state.fontSize - 6).clamp(11.0, 14.0);
@@ -910,11 +1011,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     // 分割线
     if (item.isDivider) {
+      if (state.mode != ReaderMode.scroll) {
+        return const SizedBox.shrink();
+      }
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.symmetric(vertical: 5),
         child: Center(
           child: Container(
-            width: 60,
+            width: 42,
             height: 1,
             color: textColor.withOpacity(0.1),
           ),

@@ -8,6 +8,7 @@ class LegadoJsEngine {
   factory LegadoJsEngine() => _instance;
 
   JavascriptRuntime? _runtime;
+  final Set<String> _loadedLibraryKeys = <String>{};
 
   LegadoJsEngine._internal() {
     try {
@@ -23,6 +24,7 @@ class LegadoJsEngine {
   void _initJavaObject() {
     final jsCode = r'''
       var __java_store = {};
+      var __cache_store = {};
       var __b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
       if (typeof btoa === "undefined") {
@@ -104,14 +106,46 @@ class LegadoJsEngine {
         },
         getString: function(key) {
           var text = String(key || "");
-          if (text.indexOf("$") === 0 && typeof result !== "undefined") {
+          var stored = this.get(text);
+          if (stored !== "") return String(stored);
+          if (typeof result !== "undefined" && (
+              text.indexOf("$") === 0 ||
+              text.indexOf(".") === 0 ||
+              text.indexOf(".") > 0 ||
+              text.indexOf("[") > 0)) {
             return __jsonPathValue(result, text);
           }
-          return String(this.get(key));
+          return arguments.length > 1 ? String(arguments[1] || "") : "";
+        },
+        getInt: function(key, def) {
+          var value = parseInt(java.getString(key, def == null ? "0" : def), 10);
+          return isNaN(value) ? Number(def || 0) : value;
+        },
+        getLong: function(key, def) {
+          return java.getInt(key, def);
+        },
+        getDouble: function(key, def) {
+          var value = parseFloat(java.getString(key, def == null ? "0" : def));
+          return isNaN(value) ? Number(def || 0) : value;
+        },
+        getStringList: function(key) {
+          var value = java.getString(key, "[]");
+          try {
+            var parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch(e) {
+            return value ? String(value).split(",") : [];
+          }
         },
         ajax: function(urlStr) {
           return "";
         },
+        getWebViewUA: function() {
+          return "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+        },
+        startBrowser: function() { return ""; },
+        startBrowserAwait: function() { return ""; },
+        openUrl: function() { return ""; },
         post: function(urlStr, body) {
           return java.ajax(String(urlStr || "") + "," + JSON.stringify({ method: "POST", body: body || "" }));
         },
@@ -258,8 +292,22 @@ class LegadoJsEngine {
       };
 
       var cache = {
-        getFromCache: function(key) { return ""; },
-        putInCache: function(key, value, time) { }
+        get: function(key) {
+          var value = __cache_store[String(key)];
+          return value == null ? "" : value;
+        },
+        put: function(key, value) {
+          __cache_store[String(key)] = value;
+          return value;
+        },
+        getFromCache: function(key) {
+          var value = __cache_store[String(key)];
+          return value == null ? "" : value;
+        },
+        putInCache: function(key, value, time) {
+          __cache_store[String(key)] = value;
+          return value;
+        }
       };
 
       function Map(key) {
@@ -310,6 +358,7 @@ class LegadoJsEngine {
   Future<String> evaluateWithAjax(
     String jsCode, {
     Map<String, dynamic>? variables,
+    Iterable<String> libraries = const [],
     required Future<String> Function(String request) ajax,
     int maxRequests = 12,
   }) async {
@@ -318,6 +367,7 @@ class LegadoJsEngine {
     final cache = <String, String>{};
     for (var attempt = 0; attempt <= maxRequests; attempt++) {
       _injectVariables(variables);
+      loadLibraries(libraries);
       _installAjaxTrap(cache);
       try {
         final result = _runtime!.evaluate(_prepareCode(jsCode));
@@ -332,6 +382,24 @@ class LegadoJsEngine {
     throw Exception('JS ajax requests exceeded $maxRequests');
   }
 
+  void loadLibraries(Iterable<String> libraries) {
+    if (_runtime == null) return;
+    for (final library in libraries) {
+      final code = library.trim();
+      if (code.isEmpty) continue;
+      final key = code.hashCode.toString();
+      if (_loadedLibraryKeys.contains(key)) continue;
+      try {
+        final result = _runtime!.evaluate(code);
+        if (!result.isError) {
+          _loadedLibraryKeys.add(key);
+        }
+      } catch (e) {
+        print('JS library load failed: $e');
+      }
+    }
+  }
+
   void _injectVariables(Map<String, dynamic>? variables) {
     if (_runtime == null || variables == null) return;
     try {
@@ -339,9 +407,46 @@ class LegadoJsEngine {
         _runtime!.evaluate('var $key = ${jsonEncode(value)};');
       });
       _runtime!.evaluate(r'''
+        if (typeof cookieHeader !== 'undefined') {
+          cookie.getCookie = function() {
+            return String(cookieHeader || "");
+          };
+          cookie.getKey = function(url, key) {
+            var name = String(key || "");
+            if (!name) return "";
+            var parts = String(cookieHeader || "").split(";");
+            for (var i = 0; i < parts.length; i++) {
+              var part = parts[i].trim();
+              var pos = part.indexOf("=");
+              if (pos <= 0) continue;
+              if (part.substring(0, pos).trim() === name) {
+                return part.substring(pos + 1).trim();
+              }
+            }
+            return "";
+          };
+        }
         if (typeof source !== 'undefined' && source !== null) {
           source.getKey = function() { return source.key || source.bookSourceUrl || ""; };
-          source.getLoginInfoMap = function() { return {}; };
+          source.getVariable = function() { return source.variable || ""; };
+          source.getVariableMap = function() {
+            var raw = source.variable || "";
+            var parsed = {};
+            if (raw) {
+              try { parsed = JSON.parse(raw); } catch(e) { parsed = {}; }
+            }
+            return {
+              get: function(k) {
+                var value = parsed[String(k)];
+                return value == null ? "" : value;
+              }
+            };
+          };
+          source.getLoginInfoMap = function() {
+            return {
+              get: function() { return ""; }
+            };
+          };
         }
       ''');
     } catch (e) {

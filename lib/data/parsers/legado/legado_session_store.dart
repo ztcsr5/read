@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LegadoSessionStore {
+  static const _prefsKey = 'legado.host.sessions.v1';
   static final Map<String, Map<String, String>> _cookiesByHost = {};
   static final Map<String, String> _userAgentsByHost = {};
 
@@ -14,7 +18,7 @@ class LegadoSessionStore {
           : _mergeCookieHeaders(existing, cookieHeader);
     }
     final ua = _userAgentsByHost[key];
-    if (ua != null && ua.isNotEmpty && !headers.containsKey('User-Agent')) {
+    if (ua != null && ua.isNotEmpty) {
       headers['User-Agent'] = ua;
     }
   }
@@ -64,10 +68,80 @@ class LegadoSessionStore {
     return jar.entries.map((entry) => '${entry.key}=${entry.value}').join('; ');
   }
 
+  static bool hasSessionFor(Uri uri) {
+    final key = _hostKey(uri);
+    return (_cookiesByHost[key]?.isNotEmpty ?? false) ||
+        (_userAgentsByHost[key]?.isNotEmpty ?? false);
+  }
+
   static void clearHost(Uri uri) {
     final key = _hostKey(uri);
     _cookiesByHost.remove(key);
     _userAgentsByHost.remove(key);
+  }
+
+  static Future<void> restorePersistedSessions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      decoded.forEach((host, value) {
+        if (value is! Map) return;
+        final cookies = value['cookies'];
+        final ua = value['userAgent'];
+        if (cookies is Map) {
+          _cookiesByHost[host.toString()] = cookies.map(
+            (key, value) => MapEntry(key.toString(), value.toString()),
+          );
+        }
+        if (ua is String && ua.trim().isNotEmpty) {
+          _userAgentsByHost[host.toString()] = ua.trim();
+        }
+      });
+    } catch (_) {
+      // Session persistence is best-effort.
+    }
+  }
+
+  static Future<void> persistHost(Uri uri) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final host = _hostKey(uri);
+      final raw = prefs.getString(_prefsKey);
+      final decoded = raw == null || raw.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(raw);
+      final data = decoded is Map<String, dynamic>
+          ? decoded
+          : decoded is Map
+          ? decoded.map((key, value) => MapEntry(key.toString(), value))
+          : <String, dynamic>{};
+      data[host] = {
+        'cookies': _cookiesByHost[host] ?? const <String, String>{},
+        'userAgent': _userAgentsByHost[host] ?? '',
+      };
+      await prefs.setString(_prefsKey, jsonEncode(data));
+    } catch (_) {
+      // Session persistence is best-effort.
+    }
+  }
+
+  static Future<void> clearPersistedHost(Uri uri) async {
+    clearHost(uri);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final data = decoded.map((key, value) => MapEntry(key.toString(), value));
+      data.remove(_hostKey(uri));
+      await prefs.setString(_prefsKey, jsonEncode(data));
+    } catch (_) {
+      // Session persistence is best-effort.
+    }
   }
 
   static String _hostKey(Uri uri) => uri.host.toLowerCase();

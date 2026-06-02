@@ -13,6 +13,7 @@ import '../features/settings/views/reading_history_page.dart';
 import '../features/settings/views/source_management_page.dart';
 import '../features/settings/views/source_catalog_browser_page.dart';
 import '../features/settings/views/source_test_page.dart';
+import '../features/settings/views/source_verification_page.dart';
 import '../features/settings/views/webview_import_page.dart';
 import '../features/explore/views/rss_source_articles_page.dart';
 import '../features/explore/views/rss_article_reader_page.dart';
@@ -100,6 +101,24 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) {
           final source = state.extra as BookSource;
           return CupertinoPage(child: SourceTestPage(source: source));
+        },
+      ),
+      GoRoute(
+        path: '/source_verify',
+        parentNavigatorKey: rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final extra = state.extra;
+          if (extra is Map<String, dynamic>) {
+            return CupertinoPage(
+              child: SourceVerificationPage(
+                source: extra['source'] as BookSource,
+                initialUrl: extra['url'] as String?,
+              ),
+            );
+          }
+          return CupertinoPage(
+            child: SourceVerificationPage(source: extra as BookSource),
+          );
         },
       ),
       GoRoute(

@@ -21,6 +21,8 @@ class BookSourceBrowserPage extends ConsumerStatefulWidget {
 class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
   final TextEditingController _controller = TextEditingController();
   bool _isLoading = false;
+  bool _needsVerification = false;
+  String _verificationUrl = '';
   String _message = '输入书名或作者，在当前书源内搜索。';
   List<Book> _books = const [];
 
@@ -68,13 +70,24 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
                 child: Padding(
                   padding: const EdgeInsets.all(36),
                   child: Center(
-                    child: Text(
-                      _message,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: CupertinoColors.secondaryLabel,
-                        height: 1.45,
-                      ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _message,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: CupertinoColors.secondaryLabel,
+                            height: 1.45,
+                          ),
+                        ),
+                        if (_needsVerification) ...[
+                          const SizedBox(height: 14),
+                          CupertinoButton.filled(
+                            onPressed: _openVerification,
+                            child: const Text('跳验证后重试'),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -97,66 +110,49 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
       _isLoading = true;
       _books = const [];
       _message = '';
+      _needsVerification = false;
+      _verificationUrl = '';
     });
     try {
       final books = await LegadoParser.searchBooks(widget.source, keyword);
       if (!mounted) return;
       setState(() {
         _books = books;
-        _message = books.isEmpty ? '当前书源没有搜到结果，可以用“书源测试”看具体失败位置。' : '';
+        _message = books.isEmpty ? '当前书源没有搜到结果，可以用“书源测试”查看具体失败位置。' : '';
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _message = '搜索失败：$e';
+        if (e is LegadoVerificationRequiredException) {
+          _needsVerification = true;
+          _verificationUrl = e.url;
+          _message = '当前书源返回验证页，请先完成站点验证。';
+        } else {
+          _message = '搜索失败：$e';
+        }
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _openVerification() async {
+    final result = await context.push<bool>(
+      '/source_verify',
+      extra: {
+        'source': widget.source,
+        'url': _verificationUrl.isEmpty ? null : _verificationUrl,
+      },
+    );
+    if (result == true && mounted) {
+      await _search();
     }
   }
 
   Widget _bookRow(Book book) {
     return CupertinoButton(
       padding: EdgeInsets.zero,
-      onPressed: () async {
-        setState(() {
-          _isLoading = true;
-          _message = '姝ｅ湪鎷夊彇涔︾睄璇︽儏...';
-        });
-        var target = book;
-        try {
-          target = await LegadoParser.parseBookInfo(widget.source, book);
-        } catch (_) {
-          target = book;
-        }
-        target
-          ..isFromSource = true
-          ..sourceUrl = widget.source.id.toString()
-          ..lastReadTime = DateTime.now();
-        final repo = ref.read(bookRepositoryProvider);
-        final id = await repo.saveBook(target);
-        target.id = id;
-        try {
-          final chapters = await LegadoParser.getChapterList(
-            widget.source,
-            target,
-          ).timeout(const Duration(seconds: 12));
-          if (chapters.isNotEmpty) {
-            for (final chapter in chapters) {
-              chapter.bookId = id;
-            }
-            await repo.deleteChaptersForBook(id);
-            await repo.saveChapters(chapters);
-            target.totalChapters = chapters.length;
-            await repo.saveBook(target);
-          }
-        } catch (_) {
-          // 目录失败不阻止进入阅读页，阅读页还会再尝试一次。
-        }
-        if (!mounted) return;
-        setState(() => _isLoading = false);
-        context.push('/reader/$id');
-      },
+      onPressed: () => _openBook(book),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
@@ -214,5 +210,45 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _openBook(Book book) async {
+    setState(() {
+      _isLoading = true;
+      _message = '正在解析书籍详情...';
+    });
+    var target = book;
+    try {
+      target = await LegadoParser.parseBookInfo(widget.source, book);
+    } catch (_) {
+      target = book;
+    }
+    target
+      ..isFromSource = true
+      ..sourceUrl = widget.source.id.toString()
+      ..lastReadTime = DateTime.now();
+    final repo = ref.read(bookRepositoryProvider);
+    final id = await repo.saveBook(target);
+    target.id = id;
+    try {
+      final chapters = await LegadoParser.getChapterList(
+        widget.source,
+        target,
+      ).timeout(const Duration(seconds: 12));
+      if (chapters.isNotEmpty) {
+        for (final chapter in chapters) {
+          chapter.bookId = id;
+        }
+        await repo.deleteChaptersForBook(id);
+        await repo.saveChapters(chapters);
+        target.totalChapters = chapters.length;
+        await repo.saveBook(target);
+      }
+    } catch (_) {
+      // Reading page can retry chapter parsing; opening should not be blocked.
+    }
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    context.push('/reader/$id');
   }
 }
