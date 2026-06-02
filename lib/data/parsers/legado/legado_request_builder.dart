@@ -184,16 +184,17 @@ class LegadoRequestBuilder {
   }
 
   static String resolveUrl(String baseUrl, String url) {
-    if (url.isEmpty || url.startsWith('data:')) return url;
+    if (url.trim().isEmpty || url.startsWith('data:') || url.startsWith('javascript:')) return url.trim();
     final cleanBase = cleanBaseUrl(baseUrl);
     try {
-      final uri = Uri.parse(url);
-      if (uri.hasScheme) return url;
-      return Uri.parse(cleanBase).resolve(url).toString();
+      final uri = Uri.parse(url.trim());
+      if (uri.hasScheme) return url.trim();
+      return Uri.parse(cleanBase).resolveUri(uri).toString();
     } catch (_) {
-      return url.startsWith('http')
-          ? url
-          : '${cleanBase.replaceAll(RegExp(r'/+$'), '')}/$url';
+      final cleanUrl = url.trim();
+      return cleanUrl.startsWith('http')
+          ? cleanUrl
+          : '${cleanBase.replaceAll(RegExp(r'/+$'), '')}/$cleanUrl';
     }
   }
 

@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../../app/routes.dart';
+import '../../../ui/widgets/cloudflare_dialog.dart';
 import 'legado_session_store.dart';
 
 class CloudflareInterceptor extends Interceptor {
@@ -52,6 +55,9 @@ class CloudflareInterceptor extends Interceptor {
     final completer = Completer<bool>();
     late final WebViewController controller;
 
+    final context = rootNavigatorKey.currentContext;
+    bool dialogOpen = false;
+
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
@@ -64,6 +70,7 @@ class CloudflareInterceptor extends Interceptor {
               final cookieStr = cookies.toString().replaceAll('"', '');
               if (cookieStr.isNotEmpty) {
                 LegadoSessionStore.setCookieString(uri, cookieStr);
+                LegadoSessionStore.persistHost(uri);
               }
 
               final ua = await controller.runJavaScriptReturningResult(
@@ -73,6 +80,7 @@ class CloudflareInterceptor extends Interceptor {
                 uri,
                 ua.toString().replaceAll('"', ''),
               );
+              LegadoSessionStore.persistHost(uri);
 
               final content = await controller.runJavaScriptReturningResult(
                 'document.documentElement.outerHTML',
@@ -85,6 +93,9 @@ class CloudflareInterceptor extends Interceptor {
                       !html.contains('/cdn-cgi/challenge-platform'));
               if (solved && !completer.isCompleted) {
                 completer.complete(true);
+                if (dialogOpen && context != null && context.mounted) {
+                  Navigator.of(context, rootNavigator: true).pop();
+                }
               }
             } catch (_) {
               // Keep waiting until timeout or a later navigation finishes.
@@ -93,11 +104,30 @@ class CloudflareInterceptor extends Interceptor {
         ),
       );
 
-    Timer(const Duration(seconds: 18), () {
-      if (!completer.isCompleted) completer.complete(false);
+    Timer(const Duration(seconds: 45), () {
+      if (!completer.isCompleted) {
+        completer.complete(false);
+        if (dialogOpen && context != null && context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+      }
     });
 
     await controller.loadRequest(uri);
+
+    if (context != null && context.mounted) {
+      dialogOpen = true;
+      await showCupertinoDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => CloudflareDialog(controller: controller),
+      );
+      dialogOpen = false;
+      if (!completer.isCompleted) {
+        completer.complete(false); // User closed dialog manually
+      }
+    }
+
     final success = await completer.future;
     if (!success) {
       _returnOriginal(originalResponse, handler);

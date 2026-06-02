@@ -364,6 +364,18 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                 ),
               );
             }),
+            if (_selectedTab == 0)
+              _smallAction('测源', () {
+                final idsToTest = selectedCount == 0 
+                    ? visibleBookSources.map((s) => s.id).toSet() 
+                    : _selectedBookSourceIds;
+                final sourcesToTest = visibleBookSources
+                    .where((s) => idsToTest.contains(s.id))
+                    .toList();
+                if (sourcesToTest.isNotEmpty) {
+                  context.push('/source_batch_check', extra: sourcesToTest);
+                }
+              }),
             _smallAction(
               '启用',
               selectedCount == 0 || _selectedTab == 2

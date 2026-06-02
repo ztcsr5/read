@@ -14,6 +14,7 @@ import '../features/settings/views/source_management_page.dart';
 import '../features/settings/views/source_catalog_browser_page.dart';
 import '../features/settings/views/source_test_page.dart';
 import '../features/settings/views/source_verification_page.dart';
+import '../features/settings/views/source_batch_check_page.dart';
 import '../features/settings/views/webview_import_page.dart';
 import '../features/explore/views/rss_source_articles_page.dart';
 import '../features/explore/views/rss_article_reader_page.dart';
@@ -26,8 +27,9 @@ import '../features/reader/views/reader_page.dart';
 import '../features/settings/views/purify_rules_page.dart';
 import '../features/explore/views/web_source_page.dart';
 
+final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
+
 final routerProvider = Provider<GoRouter>((ref) {
-  final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 
   return GoRouter(
     navigatorKey: rootNavigatorKey,
@@ -101,6 +103,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) {
           final source = state.extra as BookSource;
           return CupertinoPage(child: SourceTestPage(source: source));
+        },
+      ),
+      GoRoute(
+        path: '/source_batch_check',
+        parentNavigatorKey: rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final sources = state.extra as List<BookSource>;
+          return CupertinoPage(child: SourceBatchCheckPage(sources: sources));
         },
       ),
       GoRoute(

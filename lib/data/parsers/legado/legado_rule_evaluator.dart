@@ -47,10 +47,13 @@ class LegadoRuleEvaluator {
       for (final part in alternatives) {
         final cleaned = stripPostProcessors(part);
         if (cleaned.isEmpty) continue;
-        final value = applyPostProcessors(
+        var value = applyPostProcessors(
           _extractSingleJsonValue(json, cleaned),
           part,
         );
+        if (value.isEmpty && !cleaned.contains(RegExp(r'[@\/\.\]\$]'))) {
+          value = applyPostProcessors(cleaned, part);
+        }
         if (value.isNotEmpty) return value;
       }
       return '';
@@ -197,15 +200,12 @@ class LegadoRuleEvaluator {
 
   static String stripPostProcessors(String rule) {
     var text = rule.trim();
-    final closeJs = text.lastIndexOf('</js>');
-    if (closeJs >= 0) {
-      final suffix = text.substring(closeJs + '</js>'.length).trim();
-      if (suffix.isNotEmpty) text = suffix;
-    }
     return text
         .split('\n')
         .first
         .split('@js:')
+        .first
+        .split('<js>')
         .first
         .split('@put:')
         .first

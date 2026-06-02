@@ -484,47 +484,54 @@ class LegadoParser {
     );
   }
 
-  /// 获取正文。
   static Future<String> getChapterContent(
     BookSource source,
     String chapterUrl,
   ) async {
+    if (chapterUrl.trim().isEmpty) return '解析失败：章节链接为空';
+
     final ruleContentStr = source.ruleContent;
     if (ruleContentStr == null) return '解析规则缺失';
 
     final rule = _ruleMap(ruleContentStr);
     final contentRule = _firstRule(rule, const ['content', 'text']);
-    if (contentRule == null) return '正文规则缺失';
-
-    final parts = <String>[];
-    var currentUrl = chapterUrl;
-    var response = await _request(source, currentUrl);
-
-    for (var page = 0; page < 5; page++) {
-      response = await _followContentUrl(source, currentUrl, response, rule);
-      final prepared = await _prepareDataForRule(
-        source,
-        response.data,
-        contentRule,
-        baseUrl: currentUrl,
-      );
-      parts.add(_extractContentFromResponse(prepared.data, prepared.rule));
-
-      final nextUrl = _extractNextContentUrl(
-        response.realUri.toString(),
-        response.data,
-        rule,
-      );
-      if (nextUrl == null || nextUrl == currentUrl) break;
-      currentUrl = nextUrl;
-      response = await _request(source, currentUrl);
+    if (contentRule == null || contentRule.isEmpty) {
+      return '解析失败：未配置正文规则';
     }
 
-    final content = parts
-        .map((part) => _applyContentReplaceRegex(part, rule))
-        .where((part) => part.trim().isNotEmpty)
-        .join('\n');
-    return content.trim().isEmpty ? '瑙ｆ瀽澶辫触' : content.trim();
+    try {
+      final parts = <String>[];
+      var currentUrl = chapterUrl;
+      var response = await _request(source, currentUrl);
+
+      for (var page = 0; page < 5; page++) {
+        response = await _followContentUrl(source, currentUrl, response, rule);
+        final prepared = await _prepareDataForRule(
+          source,
+          response.data,
+          contentRule,
+          baseUrl: currentUrl,
+        );
+        parts.add(_extractContentFromResponse(prepared.data, prepared.rule));
+
+        final nextUrl = _extractNextContentUrl(
+          response.realUri.toString(),
+          response.data,
+          rule,
+        );
+        if (nextUrl == null || nextUrl == currentUrl) break;
+        currentUrl = nextUrl;
+        response = await _request(source, currentUrl);
+      }
+
+      final content = parts
+          .map((part) => _applyContentReplaceRegex(part, rule))
+          .where((part) => part.trim().isNotEmpty)
+          .join('\n');
+      return content.trim().isEmpty ? '解析失败：正文为空' : content.trim();
+    } catch (e) {
+      return '解析失败：\${e.toString()}';
+    }
   }
 
   static String _extractContentFromResponse(dynamic data, String contentRule) {
