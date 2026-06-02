@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show LinearProgressIndicator, Divider, Colors;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/models/book_source.dart';
@@ -143,7 +144,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
     final repo = ref.read(bookRepositoryProvider);
     for (final source in failedSources) {
       if (source.enabled) {
-        await repo.saveBookSource(source.copyWith(enabled: false));
+        source.enabled = false;
+        await repo.saveBookSource(source);
       }
     }
 
@@ -181,8 +183,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
 
     return CupertinoPageScaffold(
       backgroundColor: bgColor,
-      navigationBar: IosNavigationBar(
-        title: '一键测源',
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('一键测源'),
+        backgroundColor: CupertinoTheme.of(context).barBackgroundColor.withOpacity(0.9),
+        border: null,
         trailing: _isChecking
             ? const CupertinoActivityIndicator()
             : null,
@@ -198,7 +202,6 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 itemCount: _results.length,
                 separatorBuilder: (_, __) => const Divider(
                   height: 1,
-                  indent: 16,
                   color: CupertinoColors.systemGrey5,
                 ),
                 itemBuilder: (context, index) {
