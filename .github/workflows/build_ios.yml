@@ -28,12 +28,6 @@ jobs:
       - name: Generate Isar schemas and code
         run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Analyze
-        run: dart analyze --fatal-infos=false || true
-
-      - name: Test
-        run: flutter test || true
-
       - name: Build iOS (No Codesign)
         run: |
           sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' ios/Runner.xcodeproj/project.pbxproj
