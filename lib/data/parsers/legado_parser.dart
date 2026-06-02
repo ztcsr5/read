@@ -1071,6 +1071,7 @@ class LegadoParser {
         lower.contains('cf-browser-verification') ||
         lower.contains('challenge-form') ||
         lower.contains('enable javascript and cookies') ||
+        lower.contains('百度安全验证') ||
         lower.contains('cloudflare') &&
             lower.contains('checking your browser')) {
       return true;
@@ -1086,9 +1087,9 @@ class LegadoParser {
   }
 
   static bool _looksLikeHtmlPage(String text) {
-    final sample = text.trimLeft().toLowerCase();
-    return sample.startsWith('<!doctype html') ||
-        sample.startsWith('<html') ||
+    final sample = text.toLowerCase();
+    return sample.contains('<!doctype html') ||
+        sample.contains('<html') ||
         sample.contains('<title>') ||
         sample.contains('<body');
   }
