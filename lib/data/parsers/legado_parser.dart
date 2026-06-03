@@ -422,7 +422,7 @@ class LegadoParser {
                   'N',
                 ]) ??
                 '';
-            if (titleRule.isEmpty) titleRule = 'title';
+            if (titleRule.trim().isEmpty) titleRule = 'title';
             final title = _extractJsonValue(
               item,
               _sourceScopedRule(titleRule, source),
@@ -436,7 +436,7 @@ class LegadoParser {
                   'C',
                 ]) ??
                 '';
-            if (urlRule.isEmpty) urlRule = 'url';
+            if (urlRule.trim().isEmpty) urlRule = 'url';
             final url = _extractJsonValue(
               item,
               _sourceScopedRule(urlRule, source),
@@ -492,14 +492,14 @@ class LegadoParser {
           if (limit != null && (chapters.length + pageChapters.length) >= limit) break;
           
           var titleRule = _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '';
-          if (titleRule.isEmpty) titleRule = 'text'; // 默认脑补 'text'
+          if (titleRule.trim().isEmpty) titleRule = 'text'; // 默认脑补 'text'
           final title = _extractHtmlValue(
             node,
             _sourceScopedRule(titleRule, source),
           );
           
           var urlRule = _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '';
-          if (urlRule.isEmpty) urlRule = 'href'; // 默认脑补 'href'
+          if (urlRule.trim().isEmpty) urlRule = 'href'; // 默认脑补 'href'
           final url = _extractHtmlValue(
             node,
             _sourceScopedRule(urlRule, source),
@@ -695,17 +695,17 @@ class LegadoParser {
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<p[^>]*>', caseSensitive: false), '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'")
-        .replaceAll('&#039;', "'")
-        .replaceAll('&ldquo;', '“')
-        .replaceAll('&rdquo;', '”')
-        .replaceAll('&hellip;', '…')
-        .replaceAll('&mdash;', '—');
+        .replaceAll(RegExp(r'&nbsp;', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'&lt;', caseSensitive: false), '<')
+        .replaceAll(RegExp(r'&gt;', caseSensitive: false), '>')
+        .replaceAll(RegExp(r'&amp;', caseSensitive: false), '&')
+        .replaceAll(RegExp(r'&quot;', caseSensitive: false), '"')
+        .replaceAll(RegExp(r'&apos;', caseSensitive: false), "'")
+        .replaceAll(RegExp(r'&#039;', caseSensitive: false), "'")
+        .replaceAll(RegExp(r'&ldquo;', caseSensitive: false), '“')
+        .replaceAll(RegExp(r'&rdquo;', caseSensitive: false), '”')
+        .replaceAll(RegExp(r'&hellip;', caseSensitive: false), '…')
+        .replaceAll(RegExp(r'&mdash;', caseSensitive: false), '—');
         
     // 解码常见的 &#xxxx; 数字实体
     content = content.replaceAllMapped(RegExp(r'&#(\d+);'), (match) {
@@ -717,8 +717,8 @@ class LegadoParser {
       }
     });
     
-    // 解码 &#xXXXX; 十六进制实体
-    content = content.replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (match) {
+    // 解码 &#[xX]XXXX; 十六进制实体
+    content = content.replaceAllMapped(RegExp(r'&#[xX]([0-9a-fA-F]+);'), (match) {
       try {
         final code = int.parse(match.group(1)!, radix: 16);
         return String.fromCharCode(code);
@@ -1223,7 +1223,7 @@ class LegadoParser {
 
   static List<Element> _queryAll(Document document, String rule) {
     if (rule.trim().isEmpty) return [];
-    final alternatives = rule.split('||');
+    final alternatives = rule.split(RegExp(r'\|\|'));
     for (final alt in alternatives) {
       final trimmed = alt.trim();
       if (trimmed.isEmpty) continue;
@@ -1235,7 +1235,7 @@ class LegadoParser {
 
   static Element? _queryOne(dynamic node, String rule) {
     if (rule.trim().isEmpty) return null;
-    final alternatives = rule.split('||');
+    final alternatives = rule.split(RegExp(r'\|\|'));
     for (final alt in alternatives) {
       final trimmed = alt.trim();
       if (trimmed.isEmpty) continue;
@@ -1329,7 +1329,13 @@ class LegadoParser {
                 }
               }
               
-              if (html.contains('href') || html.contains('chapter') || html.contains('<li') || html.length > 5000) {
+              // 智能条件轮询，欺骗 WebKit 保证后台 Ajax 全速活跃并渲染出真正的骨架屏正文
+              if (html.contains('href') || 
+                  html.contains('chapter') || 
+                  html.contains('<li') || 
+                  html.contains('<p>') || 
+                  html.contains('</p>') || 
+                  html.length > 2000) {
                 break;
               }
               attempts++;
@@ -1363,10 +1369,10 @@ class LegadoParser {
       }
     });
     
-    // 配合业务层物理边缘欺骗性挂载，强行阻止 WebKit 将其挂起
-    final context = rootNavigatorKey.currentContext;
+    // 配合业务层物理边缘欺骗性挂载（以 1x1 物理挂载而非 Offstage），强行阻止 WebKit 将其挂起
+    final overlayState = rootNavigatorKey.currentState?.overlay;
     OverlayEntry? overlayEntry;
-    if (context != null) {
+    if (overlayState != null) {
       overlayEntry = OverlayEntry(
         builder: (context) => Positioned(
           bottom: -10,
@@ -1379,7 +1385,7 @@ class LegadoParser {
           ),
         ),
       );
-      Overlay.of(context).insert(overlayEntry);
+      overlayState.insert(overlayEntry);
     }
     
     try {
@@ -1474,13 +1480,17 @@ class LegadoParser {
           if (bodyStr.contains(keyword)) {
             bodyStr = bodyStr.replaceAll(keyword, gbkEncodedKeyword);
           }
-          final utf8EncodedKeyword = Uri.encodeComponent(keyword);
-          if (bodyStr.contains(utf8EncodedKeyword)) {
-            bodyStr = bodyStr.replaceAll(utf8EncodedKeyword, gbkEncodedKeyword);
+          final utf8EncodedKeywordUpper = Uri.encodeComponent(keyword).toUpperCase();
+          final utf8EncodedKeywordLower = Uri.encodeComponent(keyword).toLowerCase();
+          if (bodyStr.contains(utf8EncodedKeywordUpper)) {
+            bodyStr = bodyStr.replaceAll(utf8EncodedKeywordUpper, gbkEncodedKeyword);
+          }
+          if (bodyStr.contains(utf8EncodedKeywordLower)) {
+            bodyStr = bodyStr.replaceAll(utf8EncodedKeywordLower, gbkEncodedKeyword);
           }
           
-          // 转换为原始的 ASCII 字节流，防止被 Dio 默认的 UTF-8 二次编码转义破坏
-          requestData = Uint8List.fromList(ascii.encode(bodyStr));
+          // 转换为原始的 GBK 字节流，防止被 Dio 默认的 UTF-8 二次编码转义破坏
+          requestData = Uint8List.fromList(gbk.encode(bodyStr));
         }
       }
       
@@ -1591,8 +1601,6 @@ class LegadoParser {
         sample.contains('<title>') ||
         sample.contains('<body');
   }
-
-
 
   static Future<String> _buildSearchUrlAsync(
     BookSource source,
@@ -1852,7 +1860,6 @@ class LegadoParser {
     Book book,
     String baseUrl,
   ) {
-    // 专注于章节提取，不再使用未定义的 isBookInfo 三元判断
     final ruleValue = _firstRule(rule, const ['bookUrl', 'chapterUrl', 'url', 'link']);
     if (ruleValue != null && ruleValue.isNotEmpty) {
       final extracted = _extractJsonValue(
@@ -1999,9 +2006,9 @@ class LegadoParser {
             (item.containsKey('id') || item.containsKey('url')));
   }
 
-  static String detectCharset(List<int> bytes, String? initialCharset, Map<String, List<String>>? headers) {
-    if (initialCharset != null && initialCharset.isNotEmpty) {
-      return initialCharset;
+  static String detectCharset(List<int> bytes, String? charset, Map<String, List<String>>? headers) {
+    if (charset != null && charset.isNotEmpty) {
+      return charset;
     }
 
     var sniffBytes = bytes;
@@ -2016,7 +2023,7 @@ class LegadoParser {
     // 在嗅探前利用 GzipCodec 解压，防止乱码穿透探测器
     if (isGzip) {
       try {
-        sniffBytes = gzip.decode(bytes);
+        sniffBytes = GZipCodec().decode(bytes);
       } catch (_) {}
     }
 
@@ -2056,7 +2063,7 @@ class LegadoParser {
     if (bytes.isEmpty) return '';
     var contentBytes = bytes;
     
-    // 1. 强解 Gzip 逻辑：通过魔法头嗅探（1F 8B）
+    // 强解 Gzip 逻辑：通过魔法头嗅探（1F 8B）
     bool isGzip = false;
     if (bytes.length >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B) {
       isGzip = true;
@@ -2067,7 +2074,7 @@ class LegadoParser {
     
     if (isGzip) {
       try {
-        contentBytes = gzip.decode(bytes);
+        contentBytes = GZipCodec().decode(bytes);
       } catch (e) {
         print('Gzip decode error: $e');
       }
