@@ -40,6 +40,38 @@ class LegadoRuleEvaluator {
       }
     }
 
+    // Handle || (fallback)
+    if (rule.contains('||')) {
+      final parts = rule.split('||');
+      for (final part in parts) {
+        final val = extractJsonValue(json, part.trim());
+        if (val.isNotEmpty) return val;
+      }
+      return '';
+    }
+
+    // Handle && (splicing)
+    if (rule.contains('&&')) {
+      final parts = rule.split('&&');
+      final results = <String>[];
+      for (final part in parts) {
+        final val = extractJsonValue(json, part.trim());
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
+    // Handle %% (cross merge)
+    if (rule.contains('%%')) {
+      final parts = rule.split('%%');
+      final results = <String>[];
+      for (final part in parts) {
+        final val = extractJsonValue(json, part.trim());
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
     var ruleText = rule;
     if (json is Map || json is List) {
       if (_containsJsonTemplate(ruleText)) {
@@ -50,37 +82,17 @@ class LegadoRuleEvaluator {
       }
     }
 
-    try {
-      final alternatives = ruleText.split(RegExp(r'\|\||&&'));
-      for (final part in alternatives) {
-        if (isJsOnlyRule(part)) {
-          try {
-            final jsonStr = json is String ? json : jsonEncode(json);
-            final value = LegadoJsEngine().evaluate(
-              part,
-              variables: {'result': jsonStr},
-            );
-            if (value.trim().isNotEmpty) return value.trim();
-          } catch (_) {}
-          continue;
-        }
-
-        final cleaned = stripPostProcessors(part);
-        if (cleaned.isEmpty) continue;
-        var value = applyPostProcessors(
-          _extractSingleJsonValue(json, cleaned),
-          part,
-          originalJson: json,
-        );
-        if (value.isEmpty && !cleaned.contains(r'$')) {
-          value = applyPostProcessors(cleaned, part, originalJson: json);
-        }
-        if (value.isNotEmpty) return value;
-      }
-      return '';
-    } catch (_) {
-      return '';
+    final cleaned = stripPostProcessors(ruleText);
+    if (cleaned.isEmpty) return '';
+    var value = applyPostProcessors(
+      _extractSingleJsonValue(json, cleaned),
+      ruleText,
+      originalJson: json,
+    );
+    if (value.isEmpty && !cleaned.contains(r'$')) {
+      value = applyPostProcessors(cleaned, ruleText, originalJson: json);
     }
+    return value;
   }
 
   static List<dynamic> extractJsonNodes(dynamic json, String rule) {
@@ -99,51 +111,95 @@ class LegadoRuleEvaluator {
         return const [];
       }
     }
-    final nodes = <dynamic>[];
-    try {
-      final alternatives = rule.split(RegExp(r'\|\||&&'));
-      for (final part in alternatives) {
-        if (isJsOnlyRule(part)) {
-          try {
-            final jsonStr = json is String ? json : jsonEncode(json);
-            final value = LegadoJsEngine().evaluate(
-              part,
-              variables: {'result': jsonStr},
-            );
-            final decoded = jsonDecode(value);
-            if (decoded is List) {
-              nodes.addAll(decoded);
-            } else if (decoded != null) {
-              nodes.add(decoded);
-            }
-            if (nodes.isNotEmpty) return nodes;
-          } catch (_) {}
-          continue;
-        }
 
-        final cleaned = stripPostProcessors(part);
-        if (cleaned.isEmpty) continue;
-        nodes.addAll(_extractNodesByJsonPath(json, cleaned));
-        if (nodes.isEmpty) nodes.addAll(_extractNodesManually(json, cleaned));
-        if (nodes.isNotEmpty) return nodes;
+    // Handle || (fallback)
+    if (rule.contains('||')) {
+      final parts = rule.split('||');
+      for (final part in parts) {
+        final val = extractJsonNodes(json, part.trim());
+        if (val.isNotEmpty) return val;
       }
-    } catch (_) {
       return const [];
     }
+
+    // Handle && (splicing)
+    if (rule.contains('&&')) {
+      final parts = rule.split('&&');
+      final results = <dynamic>[];
+      for (final part in parts) {
+        results.addAll(extractJsonNodes(json, part.trim()));
+      }
+      return results;
+    }
+
+    // Handle %% (cross merge)
+    if (rule.contains('%%')) {
+      final parts = rule.split('%%');
+      final results = <dynamic>[];
+      for (final part in parts) {
+        results.addAll(extractJsonNodes(json, part.trim()));
+      }
+      return results;
+    }
+
+    final cleaned = stripPostProcessors(rule);
+    if (cleaned.isEmpty) return const [];
+    final nodes = <dynamic>[];
+    nodes.addAll(_extractNodesByJsonPath(json, cleaned));
+    if (nodes.isEmpty) nodes.addAll(_extractNodesManually(json, cleaned));
     return nodes;
   }
 
   static String extractHtmlValue(Element node, String rule) {
     if (rule.isEmpty) return '';
-    final alternatives = rule.split(RegExp(r'\|\||&&'));
-    for (final part in alternatives) {
-      final value = _extractSingleHtmlValue(node, part);
-      if (value.isNotEmpty) return value;
+
+    // Handle || (fallback)
+    if (rule.contains('||')) {
+      final parts = rule.split('||');
+      for (final part in parts) {
+        final val = extractHtmlValue(node, part.trim());
+        if (val.isNotEmpty) return val;
+      }
+      return '';
     }
-    return '';
+
+    // Handle && (splicing)
+    if (rule.contains('&&')) {
+      final parts = rule.split('&&');
+      final results = <String>[];
+      for (final part in parts) {
+        final val = extractHtmlValue(node, part.trim());
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
+    // Handle %% (cross merge)
+    if (rule.contains('%%')) {
+      final parts = rule.split('%%');
+      final results = <String>[];
+      for (final part in parts) {
+        final val = extractHtmlValue(node, part.trim());
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
+    return _extractSingleHtmlValue(node, rule);
   }
 
   static String _extractSingleHtmlValue(Element node, String rule) {
+    if (rule.contains('@@')) {
+      final parts = rule.split('@@');
+      final rawValue = _extractSingleHtmlValue(node, parts[0].trim());
+      if (rawValue.isEmpty) return '';
+      final doc = Document.html(rawValue);
+      final root = doc.body ?? doc.documentElement;
+      if (root == null) return '';
+      final remainingRule = parts.skip(1).join('@@');
+      return _extractSingleHtmlValue(root, remainingRule);
+    }
+
     if (isXPathRule(rule)) {
       try {
         final result = HtmlXPath.node(node).query(xpathRule(rule));
@@ -167,6 +223,38 @@ class LegadoRuleEvaluator {
   }
 
   static List<Element> queryAll(Document document, String rule) {
+    if (rule.isEmpty) return [];
+
+    // Handle || (fallback)
+    if (rule.contains('||')) {
+      final parts = rule.split('||');
+      for (final part in parts) {
+        final val = queryAll(document, part.trim());
+        if (val.isNotEmpty) return val;
+      }
+      return [];
+    }
+
+    // Handle && (splicing)
+    if (rule.contains('&&')) {
+      final parts = rule.split('&&');
+      final results = <Element>[];
+      for (final part in parts) {
+        results.addAll(queryAll(document, part.trim()));
+      }
+      return results;
+    }
+
+    // Handle %% (cross merge)
+    if (rule.contains('%%')) {
+      final parts = rule.split('%%');
+      final results = <Element>[];
+      for (final part in parts) {
+        results.addAll(queryAll(document, part.trim()));
+      }
+      return results;
+    }
+
     if (isXPathRule(rule)) {
       try {
         final root = document.documentElement;
@@ -193,6 +281,18 @@ class LegadoRuleEvaluator {
   }
 
   static Element? queryOne(dynamic node, String rule) {
+    if (rule.isEmpty) return null;
+
+    // Handle || (fallback)
+    if (rule.contains('||')) {
+      final parts = rule.split('||');
+      for (final part in parts) {
+        final val = queryOne(node, part.trim());
+        if (val != null) return val;
+      }
+      return null;
+    }
+
     if (isXPathRule(rule)) {
       try {
         final result = HtmlXPath.node(node as Node).query(xpathRule(rule));
@@ -267,12 +367,10 @@ class LegadoRuleEvaluator {
     final lines = rule.split(RegExp(r'[\r\n]+')).map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
     if (lines.isEmpty) return output.trim();
 
-    // If it's a single line, use original post processor logic
     if (lines.length == 1) {
       return _applySingleLinePostProcessors(output, rule, originalJson: originalJson);
     }
 
-    // For multi-line, process lines 1..N as sequential operations on 'output'
     for (var i = 1; i < lines.length; i++) {
       final line = lines[i];
       if (line.isEmpty) continue;
@@ -305,20 +403,29 @@ class LegadoRuleEvaluator {
           );
         } catch (_) {}
       } else if (line.startsWith('##')) {
-        final parts = line.split('##');
+        final bool onlyFirst = line.endsWith('###');
+        final String processingLine = onlyFirst ? line.substring(0, line.length - 1) : line;
+        final parts = processingLine.split('##');
         final processors = parts.skip(1).toList();
         for (var idx = 0; idx < processors.length; idx += 2) {
           final pattern = processors[idx];
           if (pattern.isEmpty) continue;
           final replacement = idx + 1 < processors.length ? processors[idx + 1] : '';
           try {
-            output = output.replaceAll(RegExp(pattern), replacement);
+            if (onlyFirst) {
+              output = output.replaceFirst(RegExp(pattern), replacement);
+            } else {
+              output = output.replaceAll(RegExp(pattern), replacement);
+            }
           } catch (_) {
-            output = output.replaceAll(pattern, replacement);
+            if (onlyFirst) {
+              output = output.replaceFirst(pattern, replacement);
+            } else {
+              output = output.replaceAll(pattern, replacement);
+            }
           }
         }
       } else {
-        // It's a template or plain string/URL
         if (line.contains('{result}') || line.contains('{{result}}')) {
           output = line.replaceAll('{result}', output).replaceAll('{{result}}', output);
         } else if (line.contains('{}') || line.contains('{{}}')) {
@@ -327,7 +434,6 @@ class LegadoRuleEvaluator {
           final mappedLine = line.replaceAll('result', output);
           output = _interpolateJsonTemplate(originalJson is Map ? originalJson : {}, mappedLine);
         } else if (line.startsWith('http') || line.startsWith('/') || line.contains('/') || line.contains('=')) {
-          // If it's a URL or prefix, append the output
           if (line.endsWith('=')) {
             output = '$line$output';
           } else if (line.contains('?')) {
@@ -340,7 +446,6 @@ class LegadoRuleEvaluator {
             output = '$line$output';
           }
         } else {
-          // Default: treat as prefix/template
           output = '$line$output';
         }
       }
@@ -385,7 +490,9 @@ class LegadoRuleEvaluator {
     }
 
     if (rule.contains('##')) {
-      final parts = rule.split('##');
+      final bool onlyFirst = rule.endsWith('###');
+      final String processingRule = onlyFirst ? rule.substring(0, rule.length - 1) : rule;
+      final parts = processingRule.split('##');
       final processors = parts.skip(1).toList();
       for (var index = 0; index < processors.length; index += 2) {
         final pattern = processors[index];
@@ -394,9 +501,17 @@ class LegadoRuleEvaluator {
             ? processors[index + 1]
             : '';
         try {
-          output = output.replaceAll(RegExp(pattern), replacement);
+          if (onlyFirst) {
+            output = output.replaceFirst(RegExp(pattern), replacement);
+          } else {
+            output = output.replaceAll(RegExp(pattern), replacement);
+          }
         } catch (_) {
-          output = output.replaceAll(pattern, replacement);
+          if (onlyFirst) {
+            output = output.replaceFirst(pattern, replacement);
+          } else {
+            output = output.replaceAll(pattern, replacement);
+          }
         }
       }
     }
@@ -440,14 +555,15 @@ class LegadoRuleEvaluator {
 
   static bool isXPathRule(String rule) {
     final value = rule.trim();
-    return value.startsWith('xpath:') ||
+    return value.startsWith('@xpath:') ||
+        value.startsWith('xpath:') ||
         value.startsWith('//') ||
         value.startsWith('./') ||
         value.startsWith('/');
   }
 
   static String xpathRule(String rule) {
-    return rule.replaceFirst('xpath:', '').trim();
+    return rule.replaceFirst('@xpath:', '').replaceFirst('xpath:', '').trim();
   }
 
   static String _extractSingleJsonValue(dynamic json, String rule) {
@@ -722,8 +838,8 @@ class LegadoRuleEvaluator {
   }
 
   static List<Element> _querySelectorStep(Element node, String rawSelector) {
-    final parsed = _parseSelectorIndex(rawSelector);
-    final selector = _normalizeCssSelector(parsed.selector);
+    final parsed = _parseIndexConfig(rawSelector);
+    final selector = _normalizeCssSelector(parsed.baseSelector);
     if (selector.isEmpty || selector == 'this') return [node];
 
     List<Element> nodes;
@@ -740,42 +856,75 @@ class LegadoRuleEvaluator {
     } catch (_) {
       nodes = node.querySelectorAll(selector);
     }
-    if (parsed.sliceStart != null || parsed.sliceEnd != null) {
+    
+    if (parsed.isSlice) {
       return _slice(nodes, parsed.sliceStart, parsed.sliceEnd);
     }
+    if (parsed.isMulti && parsed.multiIndexes != null) {
+      final result = <Element>[];
+      for (final idx in parsed.multiIndexes!) {
+        final nIdx = _normalizeIndex(idx, nodes.length);
+        if (nIdx >= 0 && nIdx < nodes.length) {
+          result.add(nodes[nIdx]);
+        }
+      }
+      return result;
+    }
     if (parsed.index != null) {
-      final index = _normalizeIndex(parsed.index!, nodes.length);
-      return index >= 0 && index < nodes.length ? [nodes[index]] : const [];
+      final idx = _normalizeIndex(parsed.index!, nodes.length);
+      return idx >= 0 && idx < nodes.length ? [nodes[idx]] : const [];
     }
     return nodes;
   }
 
-  static ({String selector, int? index, int? sliceStart, int? sliceEnd})
-  _parseSelectorIndex(String selector) {
+  static ({String baseSelector, bool isSlice, int? index, int? sliceStart, int? sliceEnd, bool isMulti, List<int>? multiIndexes})
+  _parseIndexConfig(String selector) {
+    // Slice: base!start:end
     final slice = RegExp(r'^(.+)!(-?\d*)?(?::(-?\d*)?)?$').firstMatch(selector);
     if (slice != null) {
       return (
-        selector: slice.group(1)?.trim() ?? selector,
+        baseSelector: slice.group(1)?.trim() ?? selector,
+        isSlice: true,
         index: null,
         sliceStart: int.tryParse(slice.group(2) ?? ''),
         sliceEnd: int.tryParse(slice.group(3) ?? ''),
+        isMulti: false,
+        multiIndexes: null,
       );
     }
 
+    // Multi: base.i1,i2,i3
+    final multi = RegExp(r'^(.+)\.((?:\d+)(?:,\d+)*)$').firstMatch(selector);
+    if (multi != null) {
+      return (
+        baseSelector: multi.group(1)?.trim() ?? selector,
+        isSlice: false,
+        index: null,
+        sliceStart: null,
+        sliceEnd: null,
+        isMulti: true,
+        multiIndexes: multi.group(2)!.split(',').map(int.parse).toList(),
+      );
+    }
+
+    // Index: base.i
     final index = RegExp(r'^(.+)\.(-?\d+)$').firstMatch(selector);
     if (index != null) {
       final base = index.group(1)?.trim() ?? selector;
       final number = int.tryParse(index.group(2) ?? '');
       if (number != null) {
         return (
-          selector: base,
+          baseSelector: base,
+          isSlice: false,
           index: number,
           sliceStart: null,
           sliceEnd: null,
+          isMulti: false,
+          multiIndexes: null,
         );
       }
     }
-    return (selector: selector, index: null, sliceStart: null, sliceEnd: null);
+    return (baseSelector: selector, isSlice: false, index: null, sliceStart: null, sliceEnd: null, isMulti: false, multiIndexes: null);
   }
 
   static List<Element> _slice(List<Element> nodes, int? start, int? end) {
@@ -797,6 +946,16 @@ class LegadoRuleEvaluator {
   static String _normalizeCssSelector(String selector) {
     var output = selector.trim();
     if (output == 'text') return 'this';
+    
+    // Handle class.name1 name2 name3 -> .name1.name2.name3
+    if (output.startsWith('class.')) {
+      final String classContent = output.substring(6);
+      final classes = classContent.split(RegExp(r'[\s\.]+')).where((s) => s.trim().isNotEmpty).toList();
+      if (classes.isNotEmpty) {
+        output = '.' + classes.join('.');
+      }
+    }
+
     output = output.replaceAllMapped(
       RegExp(r'\bid\.([A-Za-z0-9_\-]+)'),
       (match) => '#${match.group(1)}',
@@ -812,16 +971,31 @@ class LegadoRuleEvaluator {
     return output;
   }
 
+  static void _collectTextNodes(Node node, List<String> result) {
+    if (node is Text) {
+      final t = node.text.trim();
+      if (t.isNotEmpty) result.add(t);
+    } else {
+      for (final child in node.nodes) {
+        _collectTextNodes(child, result);
+      }
+    }
+  }
+
   static String _htmlValue(Element target, String attrName) {
     switch (attrName) {
       case 'text':
         return target.text.trim();
       case 'textNodes':
+        final list = <String>[];
+        _collectTextNodes(target, list);
+        return list.join('\n');
+      case 'ownText':
         return target.nodes
             .whereType<Text>()
-            .map((node) => node.text.trim())
-            .where((text) => text.isNotEmpty)
-            .join('\n');
+            .map((node) => node.text)
+            .join('')
+            .trim();
       case 'html':
         return target.innerHtml.trim();
       case 'outerHtml':

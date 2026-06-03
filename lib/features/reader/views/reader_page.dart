@@ -52,6 +52,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   String? _pageCacheKey;
   List<_ReaderPageData>? _pageCache;
 
+  bool _hasSelection = false;
+  bool _hadSelectionOnPointerDown = false;
+  DateTime? _pointerDownTime;
+  Offset? _pointerDownPosition;
+  bool _isPointerDrag = false;
+
   // 动画控制器
   late AnimationController _overlayAnimController;
   late Animation<double> _overlayAnimation;
@@ -193,9 +199,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
-  void _handleReaderTap(TapUpDetails details) {
+  void _handleReaderTap(Offset position) {
     final size = MediaQuery.of(context).size;
-    final position = details.localPosition;
     final col = (position.dx / (size.width / 3)).clamp(0, 2).floor();
     final row = (position.dy / (size.height / 3)).clamp(0, 2).floor();
     final zone = row * 3 + col;
@@ -406,23 +411,58 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       child: Stack(
         children: [
           // 主阅读区域 — 无限滑动
-          GestureDetector(
+          Listener(
             behavior: HitTestBehavior.translucent,
-            onTapUp: _handleReaderTap,
-            onHorizontalDragEnd: (details) {
-              if (details.primaryVelocity != null &&
-                  details.primaryVelocity! > 650) {
-                _goBack();
+            onPointerDown: (event) {
+              _pointerDownTime = DateTime.now();
+              _pointerDownPosition = event.localPosition;
+              _isPointerDrag = false;
+              _hadSelectionOnPointerDown = _hasSelection;
+            },
+            onPointerMove: (event) {
+              if (_pointerDownPosition != null) {
+                final distance = (event.localPosition - _pointerDownPosition!).distance;
+                if (distance > 15) {
+                  _isPointerDrag = true;
+                }
               }
             },
-            child: MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                boldText: readerState.fontWeightIndex == -1
-                    ? MediaQuery.boldTextOf(context)
-                    : false,
-              ),
-              child: SelectionArea(
-                child: _buildReadingContent(bgColor, textColor),
+            onPointerUp: (event) {
+              if (_pointerDownTime != null && _pointerDownPosition != null && !_isPointerDrag) {
+                final duration = DateTime.now().difference(_pointerDownTime!);
+                final distance = (event.localPosition - _pointerDownPosition!).distance;
+                if (duration.inMilliseconds < 300 && distance < 15) {
+                  if (!_hadSelectionOnPointerDown) {
+                    _handleReaderTap(event.localPosition);
+                  }
+                }
+              }
+            },
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onHorizontalDragEnd: (details) {
+                if (details.primaryVelocity != null &&
+                    details.primaryVelocity! > 650) {
+                  _goBack();
+                }
+              },
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  boldText: readerState.fontWeightIndex == -1
+                      ? MediaQuery.boldTextOf(context)
+                      : false,
+                ),
+                child: SelectionArea(
+                  onSelectionChanged: (content) {
+                    final hasSel = content != null && content.plainText.isNotEmpty;
+                    if (_hasSelection != hasSel) {
+                      setState(() {
+                        _hasSelection = hasSel;
+                      });
+                    }
+                  },
+                  child: _buildReadingContent(bgColor, textColor),
+                ),
               ),
             ),
           ),

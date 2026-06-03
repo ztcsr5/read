@@ -140,10 +140,16 @@ class LegadoJsEngine {
 
       var java = {
         put: function(key, value) {
+          if (typeof key === "string" && (key.indexOf("http://") === 0 || key.indexOf("https://") === 0)) {
+            return java.ajax(key + "," + JSON.stringify({ method: "PUT", body: value || "" }));
+          }
           sendMessage("java_put", JSON.stringify({key: String(key), value: value}));
           return value;
         },
         get: function(key) {
+          if (typeof key === "string" && (key.indexOf("http://") === 0 || key.indexOf("https://") === 0)) {
+            return this.ajax(key);
+          }
           var value = sendMessage("java_get", String(key));
           return value == null ? "" : value;
         },
@@ -273,8 +279,35 @@ class LegadoJsEngine {
             d = Math.floor(d / 16);
             return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
           });
+        },
+        uuid: function() {
+          return this.randomUUID();
+        },
+        now: function() {
+          return this.currentTimeMillis();
         }
       };
+
+      function kv_get(key) {
+        return java.get(key);
+      }
+      function kv_put(key, value) {
+        return java.put(key, value);
+      }
+      function regex_replace(input, pattern, replace) {
+        var str = String(input || "");
+        var pat = String(pattern || "");
+        var rep = String(replace || "");
+        try {
+          var regex = new RegExp(pat, "g");
+          return str.replace(regex, rep);
+        } catch(e) {
+          return str;
+        }
+      }
+      function strip_ws(input) {
+        return String(input || "").replace(/\s+/g, "");
+      }
 
       var cookie = {
         getCookie: function(url) { return ""; },
@@ -396,9 +429,30 @@ class LegadoJsEngine {
   }
 
   void _injectVariables(Map<String, dynamic>? variables) {
-    if (_runtime == null || variables == null) return;
+    if (_runtime == null) return;
+    final Map<String, dynamic> vars = <String, dynamic>{};
+    if (variables != null) {
+      vars.addAll(variables);
+    }
+
+    // Alias data flow
+    if (vars.containsKey('result') && !vars.containsKey('input')) vars['input'] = vars['result'];
+    if (vars.containsKey('result') && !vars.containsKey('src')) vars['src'] = vars['result'];
+    if (vars.containsKey('input') && !vars.containsKey('result')) vars['result'] = vars['input'];
+    if (vars.containsKey('input') && !vars.containsKey('src')) vars['src'] = vars['input'];
+    if (vars.containsKey('src') && !vars.containsKey('result')) vars['result'] = vars['src'];
+    if (vars.containsKey('src') && !vars.containsKey('input')) vars['input'] = vars['src'];
+
+    // Alias URL
+    if (vars.containsKey('baseUrl') && !vars.containsKey('base_url')) vars['base_url'] = vars['baseUrl'];
+    if (vars.containsKey('baseUrl') && !vars.containsKey('url')) vars['url'] = vars['baseUrl'];
+    if (vars.containsKey('base_url') && !vars.containsKey('baseUrl')) vars['baseUrl'] = vars['base_url'];
+    if (vars.containsKey('base_url') && !vars.containsKey('url')) vars['url'] = vars['base_url'];
+    if (vars.containsKey('url') && !vars.containsKey('baseUrl')) vars['baseUrl'] = vars['url'];
+    if (vars.containsKey('url') && !vars.containsKey('base_url')) vars['base_url'] = vars['url'];
+
     try {
-      variables.forEach((key, value) {
+      vars.forEach((key, value) {
         _runtime!.evaluate('var $key = ${jsonEncode(value)};');
       });
       _runtime!.evaluate(r'''
