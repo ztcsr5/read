@@ -71,7 +71,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
           parent: AlwaysScrollableScrollPhysics(),
         ),
         slivers: [
-          // 顶部导航栏 (带超大标题和右侧头像)
+          CupertinoSliverRefreshControl(
+            onRefresh: () async {
+              await viewModel.loadBooks();
+            },
+          ),
           CupertinoSliverNavigationBar(
             largeTitle: const Text(
               '主页',

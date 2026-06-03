@@ -567,12 +567,12 @@ class LegadoParser {
         break;
       }
 
-      try {
-        final nextResponse = await _request(source, nextUrlResolved);
-        currentUrlStr = nextUrlResolved;
-        data = nextResponse.data;
-      } catch (e) {
-        print('Error fetching next page of catalog: $e');
+      final nextResponse = await _request(source, nextUrlResolved);
+      currentUrlStr = nextUrlResolved;
+      data = nextResponse.data;
+
+      } catch (innerError) {
+        print('Error processing chapter list page: $innerError');
         break;
       }
     }
@@ -601,49 +601,58 @@ class LegadoParser {
       final visitedUrls = <String>{};
 
       while (true) {
-        currentUrl = currentUrl
-            .replaceAll('\n', '')
-            .replaceAll('\r', '')
-            .replaceAll('%0A', '')
-            .replaceAll('%0D', '')
-            .replaceAll('%0a', '')
-            .replaceAll('%0d', '')
-            .trim();
-        if (currentUrl.isEmpty || visitedUrls.contains(currentUrl)) {
+        try {
+          currentUrl = currentUrl
+              .replaceAll('\n', '')
+              .replaceAll('\r', '')
+              .replaceAll('%0A', '')
+              .replaceAll('%0D', '')
+              .replaceAll('%0a', '')
+              .replaceAll('%0d', '')
+              .trim();
+          if (currentUrl.isEmpty || visitedUrls.contains(currentUrl)) {
+            break;
+          }
+          visitedUrls.add(currentUrl);
+
+          var response = await _request(source, currentUrl);
+          response = await _followContentUrl(source, currentUrl, response, rule);
+          final prepared = await _prepareDataForRule(
+            source,
+            response.data,
+            contentRule,
+            baseUrl: currentUrl,
+          );
+          final contentText = _extractContentFromResponse(prepared.data, prepared.rule);
+          parts.add(contentText);
+
+          final nextUrl = _extractNextContentUrl(
+            response.realUri.toString(),
+            response.data,
+            rule,
+          );
+          if (nextUrl == null) break;
+
+          final cleanedNextUrl = nextUrl
+              .replaceAll('\n', '')
+              .replaceAll('\r', '')
+              .replaceAll('%0A', '')
+              .replaceAll('%0D', '')
+              .replaceAll('%0a', '')
+              .replaceAll('%0d', '')
+              .trim();
+          if (cleanedNextUrl.isEmpty || cleanedNextUrl == currentUrl || visitedUrls.contains(cleanedNextUrl)) {
+            break;
+          }
+          
+          final resolvedNextUrl = _resolveUrl(currentUrl, cleanedNextUrl);
+          if (resolvedNextUrl == currentUrl || visitedUrls.contains(resolvedNextUrl)) break;
+          
+          currentUrl = resolvedNextUrl;
+        } catch (innerError) {
+          print('Error processing chapter content page: $innerError');
           break;
         }
-        visitedUrls.add(currentUrl);
-
-        var response = await _request(source, currentUrl);
-        response = await _followContentUrl(source, currentUrl, response, rule);
-        final prepared = await _prepareDataForRule(
-          source,
-          response.data,
-          contentRule,
-          baseUrl: currentUrl,
-        );
-        final contentText = _extractContentFromResponse(prepared.data, prepared.rule);
-        parts.add(contentText);
-
-        final nextUrl = _extractNextContentUrl(
-          response.realUri.toString(),
-          response.data,
-          rule,
-        );
-        if (nextUrl == null) break;
-
-        final cleanedNextUrl = nextUrl
-            .replaceAll('\n', '')
-            .replaceAll('\r', '')
-            .replaceAll('%0A', '')
-            .replaceAll('%0D', '')
-            .replaceAll('%0a', '')
-            .replaceAll('%0d', '')
-            .trim();
-        if (cleanedNextUrl.isEmpty || cleanedNextUrl == currentUrl || visitedUrls.contains(cleanedNextUrl)) {
-          break;
-        }
-        currentUrl = cleanedNextUrl;
       }
 
       final content = parts

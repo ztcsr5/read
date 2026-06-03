@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:fast_gbk/fast_gbk.dart';
 
 import 'package:crypto/crypto.dart';
 
@@ -123,7 +124,26 @@ class LegadoRequestBuilder {
     int page = 1,
     BookSource? source,
   }) {
-    final encoded = Uri.encodeComponent(keyword);
+    final fullConfigStr = [
+      text,
+      source?.searchUrl ?? '',
+      source?.customConfig ?? ''
+    ].join(' ').toLowerCase();
+    
+    bool isGbk = fullConfigStr.contains('gbk') || fullConfigStr.contains('gb2312');
+    
+    String encoded;
+    if (isGbk) {
+      try {
+        final bytes = gbk.encode(keyword);
+        encoded = bytes.map((b) => '%${b.toRadixString(16).toUpperCase().padLeft(2, '0')}').join();
+      } catch (_) {
+        encoded = Uri.encodeComponent(keyword);
+      }
+    } else {
+      encoded = Uri.encodeComponent(keyword);
+    }
+
     final rawKey = keyword;
     final baseUrl = source == null ? '' : _sourceValue(source, 'key');
     final sourceKey = _sourceValue(source, 'key');

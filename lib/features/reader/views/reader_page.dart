@@ -420,7 +420,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     ? MediaQuery.boldTextOf(context)
                     : false,
               ),
-              child: _buildReadingContent(bgColor, textColor),
+              child: SelectionArea(
+                child: _buildReadingContent(bgColor, textColor),
+              ),
             ),
           ),
 
@@ -1137,13 +1139,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         top: paragraphTop,
         bottom: state.paragraphSpacing,
       ),
-      child: GestureDetector(
-        onLongPress: () {
-          Clipboard.setData(ClipboardData(text: item.text));
-          _showReaderMessage(context, '已复制段落到剪贴板');
-        },
-        child: Text(
-          displayText,
+      child: Text(
+        displayText,
         textAlign: state.isJustify ? TextAlign.justify : TextAlign.left,
         textHeightBehavior: const TextHeightBehavior(
           applyHeightToFirstAscent: false,
@@ -1167,7 +1164,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           letterSpacing: state.letterSpacing,
           leadingDistribution: TextLeadingDistribution.even,
         ),
-      ),
       ),
     );
   }
