@@ -1168,6 +1168,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           leadingDistribution: TextLeadingDistribution.even,
         ),
       ),
+      ),
     );
   }
 

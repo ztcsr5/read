@@ -146,7 +146,7 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
 
       final data = jsonDecode(jsonStr);
       if (data['error'] != null) {
-        _showError('提取失败: \${data['error']}');
+        _showError('提取失败: ${data["error"]}');
         return;
       }
 
@@ -164,7 +164,7 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
       )..ruleContent = 'body@html'; // 因为我们已经提取出 HTML，直接解析整个 body
 
       final mockBook = Book(
-        id: 'web_\${DateTime.now().millisecondsSinceEpoch}',
+        id: 'web_${DateTime.now().millisecondsSinceEpoch}',
         sourceId: mockSource.id,
         title: title,
         author: '网页抓取',
@@ -181,7 +181,7 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
       await bookRepo.saveBookSource(mockSource);
 
       if (mounted) {
-        context.push('/reader/\${mockBook.id}');
+        context.push('/reader/${mockBook.id}');
       }
     } catch (e) {
       if (mounted) Navigator.pop(context); // close dialog

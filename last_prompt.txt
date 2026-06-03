@@ -1,0 +1,37 @@
+<USER_REQUEST>
+你好！我的 Flutter 开源阅读器引擎目前已经通过了 35 项本地单测（编译与 CI/CD 全线全绿）。但在 iOS 真机复杂 5G 网络和系统的严格沙盒下，通过真机错误截图暴露出了解析层、网络层和业务持久化层的最后几处【真机环境代差级】阻断 Bug。
+
+为了彻底实现工业级通杀，并为未来的功能扩展打好地基，请扮演 Flutter/Dart 顶级全栈架构师，帮我针对性重构核心代码。请直接为我输出修改重构完成后、能够 100% 完整覆盖粘贴的完整 Dart 源码：
+
+---
+
+### 🧱 任务 1：加固与重构 `lib/data/parsers/legado_parser.dart`
+
+请对 `LegadoParser` 类进行以下硬核加固，完美合并高并发去重、转码、流式分页以及漫画架构预留：
+
+1. 修复 Gzip 乱码穿透探测器（解决部分源搜索返回 HTTP 200 但内容为空的问题）
+- 【问题核心】：真实真机网络中服务器返回的二进制流通常经过了 Gzip 压缩。这导致我们的前 2048 字节二进制嗅探器 `_detectCharset` 读取到的是高熵压缩乱码，无法正确正则匹配到 `<meta charset="gbk">` 等文本声明，从而误判编码导致选择器失明。
+- 【重构要求】：请在响应解码线中首要检查 `response.headers['content-encoding']`。如果是 gzip，必须先利用 `GZipCodec().decode(bytes)` 解压其前 4096 字节得到真实的 HTML 纯文本流后，再去执行二进制 Meta 标签字符集探测。
+
+2. 物理挂载 WebView 与动态 DOM 智能条件轮询（解决部分动态目录在真机后台空回、导致暂无目录的问题）
+- 【问题核心】：iOS WKWebView 在完全隐藏的后台离屏状态下，其 Ajax 异步请求会被 iOS 系统强行挂起限制，导致静态延迟形同虚设，捞回的是空壳 HTML。
+- 【重构要求（双层加固）】：
+  - A. 物理挂载欺骗：请提示或配合我在 `source_batch_check_page.dart` 以及正式阅读页的 Widget 树底层角落，利用 Positioned 或 Of
+<truncated 8260 bytes>
+SelectableText` / 监听 LongPress 手势，解锁长按自由选择、复制文本的能力。
+
+### 🧱 战区五：净化规则完善与全新“万能内置浏览器嗅探功能”（对应第 9, 13 点）
+11. 补齐本地净化规则的添加与“替换”选项：目前净化规则只支持链接导入，本地添加规则不仅报错，而且添加后字符会直接让正文凭空消失（变成了直接抹除）。请为本地净化规则界面补齐标准的“查找目标字符”与“替换为新字符（留空则为抹除）”的双向选项，并完善本地持久化存储。
+12. 【全新重磅功能：万能网页智能小说模式】：
+    - 【场景】：用户经常需要用内置浏览器去访问一些根本没有做书源的小众文章网站。
+    - 【功能设计】：请在 App 内集成一个基于 `webview_flutter` 的内置轻量浏览器。当用户输入网址自行访问时，在浏览器底部增加一个常驻按钮【智能识别为小说模式】。
+    - 【核心逻辑】：点击后，利用一套启发式 HTML 提取算法（如基于节点密度分析或 Readability 逻辑），自动把当前网页里的“文章标题”和“正文正文文本段落”精准爬取剥离出来，然后将这些干净的数据直接喂给我们已经写好的阅读器 UI 视图，强行将其转换成无广告、字体舒适的【小说标准阅读模式】。
+
+请综合上述 5 大战区的所有需求，为我重构并输出完全体的 `reader_viewmodel.dart`、`reader_page.dart` 以及底层相关的加固源码，确保逻辑无冲突，代码完整无占位符！
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-06-03T07:52:59+08:00.
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from Gemini 3.5 Flash (High) to Gemini 3.1 Pro (High). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>
