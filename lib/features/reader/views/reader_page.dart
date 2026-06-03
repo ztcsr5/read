@@ -1,5 +1,6 @@
 import 'dart:ui' show FontVariation, ImageFilter;
 
+import 'package:flutter/material.dart'; // 👈 像素级补上这一行！
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
