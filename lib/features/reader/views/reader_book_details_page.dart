@@ -193,12 +193,19 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
             ),
           ),
           const SizedBox(height: 14),
-          const Center(
-            child: Text(
-              '查看全部',
-              style: TextStyle(color: CupertinoColors.activeBlue, fontSize: 17),
+          if (book.isFromSource)
+            Center(
+              child: CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: () {
+                  // TODO: Implement view all sources
+                },
+                child: const Text(
+                  '查看全部',
+                  style: TextStyle(color: CupertinoColors.activeBlue, fontSize: 17),
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );

@@ -711,7 +711,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (mode != ReaderMode.cover) return child;
     return AnimatedBuilder(
       animation: _pageController,
-      child: child,
+      child: RepaintBoundary(child: child),
       builder: (context, child) {
         var page = _pageController.hasClients
             ? _pageController.page ?? _lastPagedPageIndex.toDouble()
@@ -1137,8 +1137,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         top: paragraphTop,
         bottom: state.paragraphSpacing,
       ),
-      child: Text(
-        displayText,
+      child: GestureDetector(
+        onLongPress: () {
+          Clipboard.setData(ClipboardData(text: item.text));
+          _showReaderMessage(context, '已复制段落到剪贴板');
+        },
+        child: Text(
+          displayText,
         textAlign: state.isJustify ? TextAlign.justify : TextAlign.left,
         textHeightBehavior: const TextHeightBehavior(
           applyHeightToFirstAscent: false,

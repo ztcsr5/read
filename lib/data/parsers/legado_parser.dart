@@ -531,7 +531,7 @@ class LegadoParser {
       }
 
       // 提取下一页目录 URL
-      final nextRule = _firstRule(rule, const ['nextPageUrl', 'nextUrl']);
+      final nextRule = _firstRule(rule, const ['nextTocUrl', 'nextPageUrl', 'nextUrl']);
       if (nextRule == null || nextRule.isEmpty) {
         break;
       }
@@ -650,7 +650,32 @@ class LegadoParser {
           .map((part) => _applyContentReplaceRegex(part, rule))
           .where((part) => part.trim().isNotEmpty)
           .join('\n');
-      return content.trim().isEmpty ? '解析失败：正文为空' : content.trim();
+          
+      var finalContent = content.trim();
+      if (finalContent.isEmpty) {
+        try {
+          print('正文解析为空，尝试 Headless WebView 二次抓取...');
+          final fallbackHtml = await _requestViaHeadlessWebView(source, chapterUrl);
+          final prepared = await _prepareDataForRule(source, fallbackHtml, contentRule, baseUrl: chapterUrl);
+          final fallbackText = _extractContentFromResponse(prepared.data, prepared.rule);
+          finalContent = _applyContentReplaceRegex(fallbackText, rule).trim();
+        } catch (_) {}
+      }
+      
+      if (finalContent.isEmpty) return '解析失败：正文为空';
+      
+      finalContent = finalContent
+          .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
+          .replaceAll(RegExp(r'<p[^>]*>', caseSensitive: false), '')
+          .replaceAll('&nbsp;', ' ')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&apos;', "'");
+          
+      return finalContent.trim();
     } catch (e) {
       return '解析失败：${e.toString()}';
     }
@@ -1218,16 +1243,28 @@ class LegadoParser {
               }
             }
             
-            final result = await controller.runJavaScriptReturningResult('document.documentElement.outerHTML');
-            var html = result.toString();
-            if (html.startsWith('"') && html.endsWith('"')) {
-              try {
-                final decoded = jsonDecode(html);
-                if (decoded is String) html = decoded;
-              } catch (_) {
-                html = html.substring(1, html.length - 1)
-                  .replaceAll(r'\"', '"')
-                  .replaceAll(r'\\', r'\');
+            String html = '';
+            int attempts = 0;
+            while (attempts < 3) {
+              final result = await controller.runJavaScriptReturningResult('document.documentElement.outerHTML');
+              html = result.toString();
+              if (html.startsWith('"') && html.endsWith('"')) {
+                try {
+                  final decoded = jsonDecode(html);
+                  if (decoded is String) html = decoded;
+                } catch (_) {
+                  html = html.substring(1, html.length - 1)
+                    .replaceAll(r'\"', '"')
+                    .replaceAll(r'\\', r'\');
+                }
+              }
+              
+              if (html.contains('href') || html.contains('chapter') || html.contains('<li') || html.length > 5000) {
+                break;
+              }
+              attempts++;
+              if (attempts < 3) {
+                await Future.delayed(const Duration(milliseconds: 1000));
               }
             }
             
@@ -1312,6 +1349,14 @@ class LegadoParser {
     String? keyword,
   }) async {
     targetUrl = targetUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
+    
+    // 漫画源前置降级与底层通用扩展预留
+    if ((source.bookSourceType != null && source.bookSourceType! > 0) || 
+        source.ruleContent?.contains('@css:img') == true ||
+        source.ruleContent?.contains('@js:return java.getElements') == true) {
+      throw Exception('暂不支持漫画类书源解析（功能扩充预留中）');
+    }
+
     final hasWebView = _hasWebViewConfig(source, targetUrl);
     if (hasWebView) {
       print('Url config specifies webView. Routing to Headless WebView.');
@@ -1882,15 +1927,35 @@ class LegadoParser {
   }
 
   static String decodeBytes(List<int> bytes, String? charset, {Map<String, List<String>>? headers}) {
-    final detected = detectCharset(bytes, charset, headers).toLowerCase().trim();
-    if (detected == 'gbk' || detected == 'gb2312') {
+    if (bytes.isEmpty) return '';
+    var contentBytes = bytes;
+    
+    // 1. 强解 Gzip 逻辑：通过魔法头嗅探（1F 8B）
+    bool isGzip = false;
+    if (bytes.length >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B) {
+      isGzip = true;
+    } else if (headers != null) {
+      final encoding = headers['content-encoding']?.join(',')?.toLowerCase() ?? '';
+      if (encoding.contains('gzip')) isGzip = true;
+    }
+    
+    if (isGzip) {
       try {
-        return gbk.decode(bytes);
-      } catch (_) {
-        return utf8.decode(bytes, allowMalformed: true);
+
+        contentBytes = gzip.decode(bytes);
+      } catch (e) {
+        print('Gzip decode error: ');
       }
     }
-    return utf8.decode(bytes, allowMalformed: true);
+    final detected = detectCharset(contentBytes, charset, headers).toLowerCase().trim();
+    if (detected == 'gbk' || detected == 'gb2312') {
+      try {
+        return gbk.decode(contentBytes);
+      } catch (_) {
+        return utf8.decode(contentBytes, allowMalformed: true);
+      }
+    }
+    return utf8.decode(contentBytes, allowMalformed: true);
   }
 
   static String? _decodeDataPayload(String url) {

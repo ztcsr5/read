@@ -107,16 +107,26 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             final firstChapter = chapters.first;
             final chapterUrl = firstChapter.url ?? firstChapter.content ?? '';
             if (chapterUrl.trim().isNotEmpty) {
-              success = true;
-              booksCount = books.length;
+              try {
+                final content = await LegadoParser.getChapterContent(source, chapterUrl)
+                    .timeout(const Duration(seconds: 15));
+                if (content.length > 50 && !content.contains('解析失败')) {
+                  success = true;
+                  booksCount = books.length;
+                } else {
+                  errorMessage = '正文过短或解析失败';
+                }
+              } catch (_) {
+                errorMessage = '正文解析异常';
+              }
             } else {
-              errorMessage = '解析成功但结果为空';
+              errorMessage = '章节链接为空';
             }
           } else {
-            errorMessage = '解析成功但结果为空';
+            errorMessage = '目录解析失败';
           }
         } else {
-          errorMessage = '解析成功但结果为空';
+          errorMessage = '搜索结果为空';
         }
       } catch (e) {
         errorMessage = e.toString().replaceFirst('Exception: ', '');

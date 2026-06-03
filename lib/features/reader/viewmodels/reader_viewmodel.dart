@@ -362,10 +362,11 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
             try {
               chapters = await LegadoParser.getChapterList(source, book);
               if (chapters.isNotEmpty) {
+                for (var c in chapters) {
+                  c.bookId = book.id;
+                }
                 try {
-                  await isar.writeTxn(() async {
-                    await isar.chapters.putAll(chapters);
-                  });
+                  await _bookRepository.saveChapters(chapters);
                 } catch (e) {
                   // 容错与缓存隔离：数据库存储失败，不阻塞内存数据加载
                   print('Database Error during catalog persistence: $e. Falling back to memory-only catalog.');
@@ -378,14 +379,20 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         }
       }
 
-      // Load current chapter + 2 next chapters for smooth scrolling
+      if (book.totalChapters != chapters.length) {
+        book.totalChapters = chapters.length;
+        await _bookRepository.saveBook(book);
+      }
+
+      // Load current chapter + 2 next chapters, and 1 previous chapter for smooth scrolling
       int currentIdx = book.currentChapter;
+      int startIndex = (currentIdx - 1).clamp(0, chapters.length);
       int endIndex = (currentIdx + 3).clamp(0, chapters.length);
-      final initialLoaded = chapters.sublist(currentIdx, endIndex);
+      final initialLoaded = chapters.sublist(startIndex, endIndex);
 
       final initialItems = await _flattenChapters(
         initialLoaded,
-        currentIdx,
+        startIndex,
         book,
       );
 
@@ -779,6 +786,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         oldChapterTitle,
       ).clamp(0, chapters.length - 1);
       updatedBook
+        ..totalChapters = chapters.length
         ..currentChapter = currentIndex
         ..currentPosition = 0
         ..readingProgress = ((currentIndex + 1) / chapters.length).clamp(
@@ -1032,6 +1040,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
   String _normalizeChapterContent(String content, String title) {
     final lines = content
+        .replaceAll(RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false), '')
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
         .replaceAll('\uFEFF', '')

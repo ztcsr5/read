@@ -52,7 +52,11 @@ class LegadoJsEngine {
         final String input = args?.toString() ?? '';
         final bytes = utf8.encode(input);
         final digest = md5.convert(bytes);
-        return digest.toString();
+        return digest.toString().toLowerCase();
+      });
+
+      _runtime!.onMessage('java_time', (dynamic args) {
+        return DateTime.now().millisecondsSinceEpoch;
       });
     } catch (e) {
       print('JS Engine Initialization Error: $e');
@@ -260,7 +264,7 @@ class LegadoJsEngine {
           return new Date(Number(timestamp || 0)).toISOString().replace("T", " ").substring(0, 19);
         },
         currentTimeMillis: function() {
-          return Date.now();
+          return sendMessage("java_time", "");
         },
         randomUUID: function() {
           var d = Date.now();

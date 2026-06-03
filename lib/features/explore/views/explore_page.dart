@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'web_browser_page.dart';
 
 import '../../../data/models/book.dart';
 import '../../../data/models/rss_source.dart';
@@ -57,9 +58,30 @@ class ExplorePage extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CupertinoSearchTextField(
+                            CupertinoSearchTextField(
                 placeholder: '搜索书名或作者',
                 onSubmitted: viewModel.search,
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: CupertinoButton(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  color: CupertinoColors.activeBlue.withOpacity(0.1),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(CupertinoIcons.globe, size: 20, color: CupertinoColors.activeBlue),
+                      SizedBox(width: 8),
+                      Text('智能网页小说模式', style: TextStyle(color: CupertinoColors.activeBlue, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(CupertinoPageRoute(
+                      builder: (context) => const WebBrowserPage(),
+                    ));
+                  },
+                ),
               ),
               const SizedBox(height: 10),
               Align(

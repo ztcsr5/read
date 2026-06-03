@@ -239,28 +239,44 @@ class _PurifyRulesPageState extends ConsumerState<PurifyRulesPage> {
                   horizontal: 16,
                   vertical: 4,
                 ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF2C2C2E)
-                        : CupertinoColors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: CupertinoListTile(
-                    title: Text(
-                      rule,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                child: Dismissible(
+                  key: Key(rule),
+                  direction: DismissDirection.endToStart,
+                  onDismissed: (direction) {
+                    ref.read(purifyRulesProvider.notifier).removeRule(rule);
+                  },
+                  background: Container(
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.destructiveRed,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    trailing: CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      child: const Icon(
-                        CupertinoIcons.minus_circle_fill,
-                        color: CupertinoColors.destructiveRed,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    child: const Icon(CupertinoIcons.delete, color: CupertinoColors.white),
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF2C2C2E)
+                          : CupertinoColors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: CupertinoListTile(
+                      title: Text(
+                        rule,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      onPressed: () {
-                        ref.read(purifyRulesProvider.notifier).removeRule(rule);
-                      },
+                      trailing: CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        child: const Icon(
+                          CupertinoIcons.minus_circle_fill,
+                          color: CupertinoColors.destructiveRed,
+                        ),
+                        onPressed: () {
+                          ref.read(purifyRulesProvider.notifier).removeRule(rule);
+                        },
+                      ),
                     ),
                   ),
                 ),
