@@ -156,24 +156,22 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
       final url = data['url'] as String;
 
       // 创建一个临时的 Mock BookSource 和 Book
-      final mockSource = BookSource(
-        id: 'web_extract',
-        name: '网页智能提取',
-        sourceUrl: url,
-        type: 0,
-        enabled: true,
-      )..ruleContent = 'body@html'; // 因为我们已经提取出 HTML，直接解析整个 body
+      final mockSource = BookSource()
+        ..bookSourceName = '网页智能提取'
+        ..bookSourceUrl = url
+        ..bookSourceType = 0
+        ..enabled = true
+        ..ruleContent = 'body@html'; // 因为我们已经提取出 HTML，直接解析整个 body
 
       final mockBook = Book(
-        id: 'web_${DateTime.now().millisecondsSinceEpoch}',
-        sourceId: mockSource.id,
         title: title,
         author: '网页抓取',
-        coverPath: '',
+        coverPath: null,
         filePath: url,
-        intro: url,
+        fileType: 'html',
         totalChapters: 1,
-        isLocal: true,
+        sourceUrl: url,
+        isFromSource: true,
       );
       mockBook.lastReadTime = DateTime.now();
 
