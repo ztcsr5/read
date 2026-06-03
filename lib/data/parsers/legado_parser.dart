@@ -313,7 +313,7 @@ class LegadoParser {
       if (root is Map<String, dynamic>) {
         return _mergeBookInfo(
           book,
-          _parseBookFromJson(root, rule, source, baseUrl: book.filePath),
+          _parseBookFromJson(root, rule, source, baseUrl: book.filePath, isBookInfo: true),
         );
       } else if (root is Map) {
         return _mergeBookInfo(
@@ -323,6 +323,7 @@ class LegadoParser {
             rule,
             source,
             baseUrl: book.filePath,
+            isBookInfo: true,
           ),
         );
       }
@@ -339,7 +340,7 @@ class LegadoParser {
 
     return _mergeBookInfo(
       book,
-      _parseBookFromHtmlNode(root, rule, source, baseUrl: book.filePath),
+      _parseBookFromHtmlNode(root, rule, source, baseUrl: book.filePath, isBookInfo: true),
     );
   }
 
@@ -723,6 +724,7 @@ class LegadoParser {
     Map<String, dynamic> rule,
     BookSource source, {
     String? baseUrl,
+    bool isBookInfo = false,
   }) {
     final name = _cleanRuleOutput(
       _extractJsonValue(
@@ -841,6 +843,7 @@ class LegadoParser {
     Map<String, dynamic> rule,
     BookSource source, {
     String? baseUrl,
+    bool isBookInfo = false,
   }) {
     final name = _extractHtmlValue(
       node,
@@ -854,9 +857,12 @@ class LegadoParser {
       node,
       _firstRule(rule, const ['coverUrl', 'cover']) ?? '',
     );
+    final bookUrlKeys = isBookInfo 
+        ? const ['tocUrl', 'catalogUrl'] 
+        : const ['bookUrl', 'tocUrl', 'catalogUrl', 'url'];
     final bookUrl = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['bookUrl', 'tocUrl', 'catalogUrl', 'url']) ?? '',
+      _firstRule(rule, bookUrlKeys) ?? '',
     );
     final base = baseUrl ?? source.bookSourceUrl;
 
@@ -1753,7 +1759,7 @@ class LegadoParser {
     Book book,
     String baseUrl,
   ) {
-    final ruleValue = _firstRule(rule, const ['chapterUrl', 'url', 'link']);
+    final ruleValue = _firstRule(rule, isBookInfo ? const ['tocUrl', 'catalogUrl'] : const ['bookUrl', 'chapterUrl', 'url', 'link']);
     if (ruleValue != null && ruleValue.isNotEmpty) {
       final extracted = _extractJsonValue(
         item,
@@ -1762,7 +1768,8 @@ class LegadoParser {
       if (extracted.trim().isNotEmpty) return extracted.trim();
     }
 
-    final direct = _firstText(item, const [
+    final direct = _firstText(item, isBookInfo ? const ['tocUrl', 'catalogUrl'] : const [
+      'bookUrl',
       'chapterUrl',
       'url',
       'link',
