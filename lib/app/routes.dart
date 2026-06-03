@@ -26,6 +26,7 @@ import '../data/models/source_catalog.dart';
 import '../features/reader/views/reader_page.dart';
 import '../features/settings/views/purify_rules_page.dart';
 import '../features/explore/views/web_source_page.dart';
+import '../features/explore/views/book_source_explore_page.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 
@@ -147,6 +148,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) {
           final source = state.extra as BookSource;
           return CupertinoPage(child: BookSourceBrowserPage(source: source));
+        },
+      ),
+      GoRoute(
+        path: '/source_explore',
+        parentNavigatorKey: rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final source = state.extra as BookSource;
+          return CupertinoPage(child: BookSourceExplorePage(source: source));
         },
       ),
       GoRoute(

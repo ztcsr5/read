@@ -116,10 +116,21 @@ class ExplorePage extends ConsumerWidget {
         ),
       ),
       if (state.isSearching)
-        const SliverToBoxAdapter(
+        SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.all(40),
-            child: CupertinoActivityIndicator(radius: 14),
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              children: [
+                const CupertinoActivityIndicator(radius: 14),
+                const SizedBox(height: 12),
+                CupertinoButton(
+                  child: const Text('取消搜索'),
+                  onPressed: () {
+                    viewModel.cancelSearch();
+                  },
+                ),
+              ],
+            ),
           ),
         )
       else if (state.error.isNotEmpty)

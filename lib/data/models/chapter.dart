@@ -21,6 +21,9 @@ class Chapter {
   bool isDownloaded;
   int wordCount;
 
+  bool get isCached => isDownloaded;
+  set isCached(bool val) => isDownloaded = val;
+
   Chapter({
     required this.bookId,
     required this.title,

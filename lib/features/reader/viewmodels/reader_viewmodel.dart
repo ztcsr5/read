@@ -66,6 +66,7 @@ class ReaderState {
   final bool keepScreenOn; // 屏幕常亮
   final bool volumeKeyTurn; // 音量键翻页
   final List<ReaderTapAction> tapZoneActions;
+  final String? customWallpaperPath;
 
   // 书签
   final List<Bookmark> bookmarks;
@@ -113,6 +114,7 @@ class ReaderState {
     this.autoScrollSpeed = 1.0,
     this.isPlayingTts = false,
     this.ttsPlayingItemIndex = -1,
+    this.customWallpaperPath,
   });
 
   ReaderState copyWith({
@@ -150,6 +152,7 @@ class ReaderState {
     double? autoScrollSpeed,
     bool? isPlayingTts,
     int? ttsPlayingItemIndex,
+    String? customWallpaperPath,
   }) {
     return ReaderState(
       book: book ?? this.book,
@@ -187,6 +190,7 @@ class ReaderState {
       autoScrollSpeed: autoScrollSpeed ?? this.autoScrollSpeed,
       isPlayingTts: isPlayingTts ?? this.isPlayingTts,
       ttsPlayingItemIndex: ttsPlayingItemIndex ?? this.ttsPlayingItemIndex,
+      customWallpaperPath: customWallpaperPath ?? this.customWallpaperPath,
     );
   }
 }
@@ -200,7 +204,8 @@ enum ReaderBackground {
   pink(Color(0xFFFCEFEF), '樱花粉'),
   gray(Color(0xFF333333), '深灰'),
   black(Color(0xFF111111), '极黑'),
-  custom(Color(0xFFF6F0E4), '自定义');
+  custom(Color(0xFFF6F0E4), '自定义'),
+  customImage(Color(0xFFF6F0E4), '自定义壁纸');
 
   final Color color;
   final String label;
@@ -215,6 +220,7 @@ enum ReaderBackground {
       case ReaderBackground.green:
       case ReaderBackground.pink:
       case ReaderBackground.custom:
+      case ReaderBackground.customImage:
         return const Color(0xFF2C2C2E);
       case ReaderBackground.gray:
         return const Color(0xFFEBEBF5);
@@ -237,6 +243,11 @@ extension ReaderBackgroundResolver on ReaderState {
     }
     if (background == ReaderBackground.custom) {
       return customBackgroundColor;
+    }
+    if (background == ReaderBackground.customImage) {
+      return brightness == Brightness.dark
+          ? const Color(0xFF111111)
+          : const Color(0xFFF9F9F9);
     }
     return background.color;
   }
@@ -413,6 +424,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
   Future<void> _loadReaderSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final customWallpaperPath = prefs.getString('reader.customWallpaperPath');
     final zoneNames = prefs.getStringList('reader.tapZoneActions');
     final savedBackgroundIndex = prefs.containsKey('reader.background.v2')
         ? prefs.getInt('reader.background.v2')
@@ -461,10 +473,11 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       ),
       mode:
           ReaderMode.values[(prefs.getInt('reader.mode') ?? state.mode.index)
-              .clamp(0, ReaderMode.values.length - 1)],
+               .clamp(0, ReaderMode.values.length - 1)],
       tapZoneActions: zones != null && zones.length == 9
           ? List.unmodifiable(zones)
           : null,
+      customWallpaperPath: customWallpaperPath,
     );
   }
 
@@ -495,6 +508,11 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       'reader.tapZoneActions',
       state.tapZoneActions.map((action) => action.name).toList(),
     );
+    if (state.customWallpaperPath != null) {
+      await prefs.setString('reader.customWallpaperPath', state.customWallpaperPath!);
+    } else {
+      await prefs.remove('reader.customWallpaperPath');
+    }
   }
 
   /// 加载下一章
@@ -1092,6 +1110,73 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       RegExp(r'[\s　:：，,。.！!？?、\-—_【】\[\]（）()]+'),
       '',
     );
+  }
+
+  Future<void> setCustomWallpaperPath(String path) async {
+    state = state.copyWith(
+      background: ReaderBackground.customImage,
+      customWallpaperPath: path,
+    );
+    await _saveReaderSettings();
+  }
+
+  Future<void> startDownloadChapters({int? limit}) async {
+    final book = state.book;
+    if (book == null || !book.isFromSource || book.sourceUrl == null) return;
+    final sourceId = int.tryParse(book.sourceUrl!);
+    final isar = _bookRepository.isar;
+    if (sourceId == null || isar == null) return;
+
+    final source = await isar.bookSources.get(sourceId);
+    if (source == null) return;
+
+    final startIdx = state.currentChapterIndex;
+    final allChapters = state.chapters;
+    
+    final toDownload = allChapters
+        .skip(startIdx)
+        .where((c) => !c.isDownloaded && c.content != null && c.content!.startsWith('http'))
+        .toList();
+
+    final limitList = limit != null ? toDownload.take(limit).toList() : toDownload;
+    if (limitList.isEmpty) return;
+
+    final int maxConcurrent = 3;
+    var index = 0;
+    
+    Future<void> worker() async {
+      while (index < limitList.length) {
+        final currentJobIndex = index++;
+        if (currentJobIndex >= limitList.length) break;
+        final chapter = limitList[currentJobIndex];
+        try {
+          final contentUrl = chapter.content!;
+          final content = await LegadoParser.getChapterContent(source, contentUrl);
+          
+          chapter.content = content;
+          chapter.isDownloaded = true;
+          chapter.wordCount = content.length;
+          
+          await isar.writeTxn(() async {
+            await isar.chapters.put(chapter);
+          });
+          
+          if (mounted) {
+            final updatedChapters = List<Chapter>.from(state.chapters);
+            final idx = updatedChapters.indexWhere((c) => c.id == chapter.id);
+            if (idx >= 0) {
+              updatedChapters[idx] = chapter;
+              state = state.copyWith(chapters: updatedChapters);
+            }
+          }
+        } catch (e) {
+          print('Failed to download chapter ${chapter.title}: $e');
+        }
+      }
+    }
+
+    final workers = List.generate(maxConcurrent, (_) => worker());
+    await Future.wait(workers);
   }
 }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/models/book.dart';
@@ -11,7 +12,7 @@ import '../../../data/repositories/book_repository.dart';
 import '../../../data/repositories/source_repository.dart';
 
 final exploreViewModelProvider =
-    StateNotifierProvider<ExploreViewModel, ExploreState>((ref) {
+    StateNotifierProvider.autoDispose<ExploreViewModel, ExploreState>((ref) {
       final repo = ref.watch(bookRepositoryProvider);
       final sourceRepo = ref.watch(sourceRepositoryProvider);
       return ExploreViewModel(repo, sourceRepo);
@@ -75,10 +76,23 @@ class ExploreState {
 class ExploreViewModel extends StateNotifier<ExploreState> {
   final BookRepository _repository;
   final SourceRepository _sourceRepository;
+  CancelToken? _searchCancelToken;
 
   ExploreViewModel(this._repository, this._sourceRepository)
     : super(ExploreState()) {
     loadRssSources();
+  }
+
+  @override
+  void dispose() {
+    _searchCancelToken?.cancel('User interrupted source switching');
+    super.dispose();
+  }
+
+  void cancelSearch() {
+    _searchCancelToken?.cancel('User interrupted source switching');
+    _searchCancelToken = null;
+    state = state.copyWith(isSearching: false);
   }
 
   void setTab(int index) {
@@ -100,6 +114,10 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
   Future<void> search(String keyword) async {
     final query = keyword.trim();
     if (query.isEmpty) return;
+
+    _searchCancelToken?.cancel('User interrupted source switching');
+    _searchCancelToken = CancelToken();
+    final currentCancelToken = _searchCancelToken!;
 
     state = state.copyWith(
       isSearching: true,
@@ -128,15 +146,19 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       final maxResults = mode == SearchMatchMode.precise ? 120 : 240;
 
       for (var start = 0; start < sources.length; start += 6) {
+        if (currentCancelToken.isCancelled) return;
         final batch = sources.skip(start).take(6).toList();
         tried += batch.length;
         final resultsLists = await Future.wait(
           batch.map((source) async {
             try {
+              if (currentCancelToken.isCancelled) return <Book>[];
               final books = await LegadoParser.searchBooks(
                 source,
                 query,
+                cancelToken: currentCancelToken,
               ).timeout(const Duration(seconds: 9));
+              if (currentCancelToken.isCancelled) return <Book>[];
               return books
                   .where((book) => _matchesSearchMode(book, query, mode))
                   .map((book) {
@@ -147,6 +169,9 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                   })
                   .toList();
             } catch (e) {
+              if (e is DioException && e.type == DioExceptionType.cancel) {
+                return <Book>[];
+              }
               if (verificationSource == null && _shouldOfferVerification(e)) {
                 verificationSource = source;
                 verificationUrl = e is LegadoVerificationRequiredException
@@ -158,6 +183,8 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
             }
           }),
         );
+
+        if (currentCancelToken.isCancelled) return;
 
         for (final list in resultsLists) {
           for (final book in list) {
@@ -176,6 +203,27 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
         if (allResults.length >= maxResults) break;
       }
 
+      if (currentCancelToken.isCancelled) return;
+
+      // 搜索双重优先排序算法
+      allResults.sort((a, b) {
+        // 第一维优先权重（精准匹配）
+        final aExact = a.title.trim() == query;
+        final bExact = b.title.trim() == query;
+        if (aExact != bExact) {
+          return aExact ? -1 : 1;
+        }
+
+        // 第二维优先权重（内容完整度）：章节数或字数降序
+        // 优先比较章节数 totalChapters 降序
+        if (a.totalChapters != b.totalChapters) {
+          return b.totalChapters.compareTo(a.totalChapters);
+        }
+
+        // 其次比较字数 (用 fileSize 存储) 降序
+        return b.fileSize.compareTo(a.fileSize);
+      });
+
       state = state.copyWith(
         isSearching: false,
         searchResults: allResults,
@@ -192,6 +240,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
   Future<int> addToBookshelf(Book book) async {
     var target = book
       ..isFromSource = true
+      ..isFavorite = true
       ..lastReadTime = DateTime.now();
 
     final source = await _sourceForBook(target);

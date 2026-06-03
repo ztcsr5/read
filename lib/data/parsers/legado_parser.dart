@@ -265,6 +265,14 @@ class LegadoParser {
       
       if (chapters.isEmpty) {
         tocLogs.add('警告：目录章节列表为空！请检查 ruleToc.chapterList。');
+        if (detailResponse != null) {
+          final dataStr = detailResponse.data?.toString() ?? '';
+          tocLogs.add('当前详情页 HTML 响应长度: ${dataStr.length}');
+          final sampleLength = dataStr.length > 1000 ? 1000 : dataStr.length;
+          if (sampleLength > 0) {
+            tocLogs.add('当前详情页 HTML 响应前缀取证 (前 1000 字符):\n${dataStr.substring(0, sampleLength)}');
+          }
+        }
         steps.add(
           LegadoTestStep.fail(
             '目录',
@@ -356,22 +364,122 @@ class LegadoParser {
     BookSource source,
     String keyword, {
     Response<dynamic>? preFetchedResponse,
+    CancelToken? cancelToken,
   }) async {
     if (preFetchedResponse != null) {
       return _parseBooksFromResponse(source, keyword, preFetchedResponse, page: 1);
     }
-    final firstPage = await _searchBooksPage(source, keyword, page: 1);
+    final firstPage = await _searchBooksPage(source, keyword, page: 1, cancelToken: cancelToken);
     if (firstPage.isNotEmpty ||
         !(source.searchUrl?.contains('page') ?? false)) {
       return firstPage;
     }
-    return _searchBooksPage(source, keyword, page: 0);
+    return _searchBooksPage(source, keyword, page: 0, cancelToken: cancelToken);
   }
+
+  /// 解析发现/分类页书籍。
+  static Future<List<Book>> parseExploreBooks(
+    BookSource source,
+    String targetUrl, {
+    required int page,
+  }) async {
+    final response = await _request(source, targetUrl);
+    final html = response.data?.toString() ?? '';
+    if (response.statusCode != 200 || 
+        html.contains("Bad Gateway") || 
+        html.contains("502 Error") || 
+        html.contains("502 Bad Gateway") ||
+        html.contains("503 Service Temporarily Unavailable") ||
+        html.contains("Nginx Error") ||
+        html.contains("Server Error") ||
+        (html.contains("Cloudflare") && html.contains("checking your browser"))) {
+      throw Exception("🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${response.statusCode})");
+    }
+    
+    var data = response.data;
+    
+    final exploreRuleStr = source.ruleExplore ?? source.ruleSearch;
+    if (exploreRuleStr == null) return [];
+    
+    final rule = _ruleMap(exploreRuleStr);
+    var bookListRule = _firstRule(rule, const ['bookList', 'list']);
+    bool reverseList = false;
+    if (bookListRule != null) {
+      final trimmed = bookListRule.trim();
+      if (trimmed.startsWith('+')) {
+        bookListRule = trimmed.substring(1).trim();
+      } else if (trimmed.startsWith('-')) {
+        bookListRule = trimmed.substring(1).trim();
+        reverseList = true;
+      }
+    }
+    
+    if (bookListRule != null) {
+      final prepared = await _prepareDataForRule(
+        source,
+        data,
+        bookListRule,
+        baseUrl: response.realUri.toString(),
+      );
+      data = prepared.data;
+      bookListRule = prepared.rule;
+    }
+    
+    final results = <Book>[];
+    if ((bookListRule == null || bookListRule.isEmpty) &&
+        _looksLikeJsonData(data, null)) {
+      results.addAll(_parseBooksByJsonFallback(data, rule, source));
+    } else if (bookListRule != null &&
+        _isJsonRule(bookListRule) &&
+        _looksLikeJsonData(data, bookListRule)) {
+      try {
+        final jsonData = data is String ? jsonDecode(data) : data;
+        var nodes = _extractJsonNodes(jsonData, bookListRule);
+        if (reverseList) {
+          nodes = nodes.reversed.toList();
+        }
+        for (final node in nodes) {
+          if (node is Map<String, dynamic>) {
+            results.add(_parseBookFromJson(node, rule, source, baseUrl: response.realUri.toString()));
+          } else if (node is Map) {
+            results.add(
+              _parseBookFromJson(
+                node.map((key, value) => MapEntry(key.toString(), value)),
+                rule,
+                source,
+                baseUrl: response.realUri.toString(),
+              ),
+            );
+          }
+        }
+        if (results.isEmpty) {
+          results.addAll(_parseBooksByJsonFallback(data, rule, source));
+        }
+      } catch (_) {
+        results.addAll(_parseBooksByJsonFallback(data, rule, source));
+      }
+    } else if (bookListRule == null || _looksLikeJsonData(data, bookListRule)) {
+      results.addAll(_parseBooksByJsonFallback(data, rule, source));
+    } else {
+      final document = parse(data.toString());
+      var nodes = _queryAll(document, bookListRule);
+      if (reverseList) {
+        nodes = nodes.reversed.toList();
+      }
+      for (final node in nodes) {
+        results.add(_parseBookFromHtmlNode(node, rule, source, baseUrl: response.realUri.toString()));
+      }
+    }
+    
+    return results.where((book) => book.title.trim().isNotEmpty).toList();
+  }
+
 
   static Future<List<Book>> _searchBooksPage(
     BookSource source,
     String keyword, {
     required int page,
+    CancelToken? cancelToken,
   }) async {
     if (source.searchUrl == null || source.ruleSearch == null) return [];
 
@@ -379,6 +487,7 @@ class LegadoParser {
       source,
       await _buildSearchUrlAsync(source, keyword, page: page),
       keyword: keyword,
+      cancelToken: cancelToken,
     );
     return _parseBooksFromResponse(source, keyword, response, page: page);
   }
@@ -389,6 +498,18 @@ class LegadoParser {
     Response<dynamic> response, {
     required int page,
   }) async {
+    final html = response.data?.toString() ?? '';
+    if (response.statusCode != 200 || 
+        html.contains("Bad Gateway") || 
+        html.contains("502 Error") || 
+        html.contains("502 Bad Gateway") ||
+        html.contains("503 Service Temporarily Unavailable") ||
+        html.contains("Nginx Error") ||
+        html.contains("Server Error") ||
+        (html.contains("Cloudflare") && html.contains("checking your browser"))) {
+      throw Exception("🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${response.statusCode})");
+    }
+    
     var data = response.data;
 
     final rule = _ruleMap(source.ruleSearch);
@@ -494,6 +615,17 @@ class LegadoParser {
 
     final rule = _ruleMap(source.ruleBookInfo);
     final response = preFetchedResponse ?? await _request(source, book.filePath);
+    final html = response.data?.toString() ?? '';
+    if (response.statusCode != 200 || 
+        html.contains("Bad Gateway") || 
+        html.contains("502 Error") || 
+        html.contains("502 Bad Gateway") ||
+        html.contains("503 Service Temporarily Unavailable") ||
+        html.contains("Nginx Error") ||
+        html.contains("Server Error") ||
+        (html.contains("Cloudflare") && html.contains("checking your browser"))) {
+      throw Exception("🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${response.statusCode})");
+    }
     var data = response.data;
     final initRule = _firstRule(rule, const ['init']);
     final preparedInit = initRule == null
@@ -569,6 +701,18 @@ class LegadoParser {
 
     var currentResponse = preFetchedResponse ?? await _request(source, book.filePath);
     currentResponse = await _followTocUrl(source, book.filePath, currentResponse, rule);
+    
+    final html = currentResponse.data?.toString() ?? '';
+    if (currentResponse.statusCode != 200 || 
+        html.contains("Bad Gateway") || 
+        html.contains("502 Error") || 
+        html.contains("502 Bad Gateway") ||
+        html.contains("503 Service Temporarily Unavailable") ||
+        html.contains("Nginx Error") ||
+        html.contains("Server Error") ||
+        (html.contains("Cloudflare") && html.contains("checking your browser"))) {
+      throw Exception("🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${currentResponse.statusCode})");
+    }
     
     var currentUrlStr = currentResponse.realUri.toString();
     currentUrlStr = currentUrlStr
@@ -720,6 +864,10 @@ class LegadoParser {
       } else {
         final document = parse(pageData.toString());
         final nodes = _queryAll(document, pageListRule);
+        if (nodes.isEmpty) {
+          debugPrint("🚨 [TOC爆红取证] 源码长度: ${document.outerHtml.length}");
+          debugPrint("🚨 [TOC残页片段]: ${document.outerHtml.substring(0, document.outerHtml.length > 1000 ? 1000 : document.outerHtml.length)}");
+        }
         var index = chapters.length;
         for (final node in nodes) {
           if (limit != null && (chapters.length + pageChapters.length) >= limit) break;
@@ -836,6 +984,17 @@ class LegadoParser {
 
       try {
         final nextResponse = await _request(source, nextUrlResolved);
+        final nextHtml = nextResponse.data?.toString() ?? '';
+        if (nextResponse.statusCode != 200 || 
+            nextHtml.contains("Bad Gateway") || 
+            nextHtml.contains("502 Error") || 
+            nextHtml.contains("502 Bad Gateway") ||
+            nextHtml.contains("503 Service Temporarily Unavailable") ||
+            nextHtml.contains("Nginx Error") ||
+            nextHtml.contains("Server Error") ||
+            (nextHtml.contains("Cloudflare") && nextHtml.contains("checking your browser"))) {
+          throw Exception("🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${nextResponse.statusCode})");
+        }
         currentUrlStr = nextUrlResolved;
         data = nextResponse.data;
       } catch (innerError) {
@@ -844,7 +1003,20 @@ class LegadoParser {
       }
     }
 
-    return chapters;
+    final uniqueChapters = <String, Chapter>{};
+    for (final c in chapters) {
+      final key = c.url ?? '';
+      if (key.isNotEmpty) {
+        uniqueChapters.putIfAbsent(key, () => c);
+      } else {
+        uniqueChapters['empty_url_${c.title}_${c.index}'] = c;
+      }
+    }
+    final resultList = uniqueChapters.values.toList();
+    for (int i = 0; i < resultList.length; i++) {
+      resultList[i].index = i;
+    }
+    return resultList;
   }
 
   static Future<String> getChapterContent(
@@ -883,6 +1055,17 @@ class LegadoParser {
           visitedUrls.add(currentUrl);
 
           var response = await _request(source, currentUrl);
+          final html = response.data?.toString() ?? '';
+          if (response.statusCode != 200 || 
+              html.contains("Bad Gateway") || 
+              html.contains("502 Error") || 
+              html.contains("502 Bad Gateway") ||
+              html.contains("503 Service Temporarily Unavailable") ||
+              html.contains("Nginx Error") ||
+              html.contains("Server Error") ||
+              (html.contains("Cloudflare") && html.contains("checking your browser"))) {
+            throw Exception("🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${response.statusCode})");
+          }
           response = await _followContentUrl(source, currentUrl, response, rule);
           
           var rawData = response.data.toString();
@@ -1121,7 +1304,9 @@ class LegadoParser {
         ),
       ),
     );
-    final bookUrlRule = rule['bookUrl'] ?? rule['tocUrl'] ?? rule['catalogUrl'];
+    final bookUrlRule = isBookInfo
+        ? (rule['tocUrl'] ?? rule['catalogUrl'] ?? rule['bookUrl'])
+        : (rule['bookUrl'] ?? rule['tocUrl'] ?? rule['catalogUrl']);
     final bookUrl = _cleanRuleOutput(
       _extractJsonValue(
         item,
@@ -1156,6 +1341,63 @@ class LegadoParser {
     );
     final base = baseUrl ?? source.bookSourceUrl;
 
+    // 提取 wordCount
+    final wordCountStr = _cleanRuleOutput(
+      _extractJsonValue(
+        item,
+        _sourceScopedRule(
+          _ruleOrKey(rule['wordCount'], item, [
+            'wordCount',
+            'WordCount',
+            'word_count',
+            'words',
+            'Words',
+            'size',
+            'Size',
+          ]),
+          source,
+        ),
+      ),
+    );
+
+    // 提取 lastChapter
+    final lastChapter = _cleanRuleOutput(
+      _extractJsonValue(
+        item,
+        _sourceScopedRule(
+          _ruleOrKey(rule['lastChapter'], item, [
+            'lastChapter',
+            'LastChapter',
+            'last_chapter',
+            'lastChapterName',
+            'latestChapter',
+          ]),
+          source,
+        ),
+      ),
+    );
+
+    int totalChapters = 0;
+    final chMatch = RegExp(r'第\s*(\d+)\s*[章|回]').firstMatch(lastChapter);
+    if (chMatch != null) {
+      totalChapters = int.tryParse(chMatch.group(1) ?? '') ?? 0;
+    } else {
+      final chMatch2 = RegExp(r'(\d+)\s*章').firstMatch(lastChapter);
+      if (chMatch2 != null) {
+        totalChapters = int.tryParse(chMatch2.group(1) ?? '') ?? 0;
+      }
+    }
+
+    int wordCount = 0;
+    if (wordCountStr.isNotEmpty) {
+      if (wordCountStr.contains('万')) {
+        final numPart = double.tryParse(wordCountStr.split('万').first.trim()) ?? 0;
+        wordCount = (numPart * 10000).toInt();
+      } else {
+        wordCount = int.tryParse(wordCountStr.replaceAll(RegExp(r'\D'), '')) ?? 0;
+      }
+    }
+
     return Book(
       title: name.isNotEmpty ? name : '未知',
       author: author,
@@ -1164,6 +1406,8 @@ class LegadoParser {
       coverPath: _resolveUrl(base, coverUrl),
       isFromSource: true,
       sourceUrl: source.id.toString(),
+      totalChapters: totalChapters,
+      fileSize: wordCount,
     );
   }
 
@@ -1195,6 +1439,36 @@ class LegadoParser {
     );
     final base = baseUrl ?? source.bookSourceUrl;
 
+    final wordCountStr = _extractHtmlValue(
+      node,
+      _firstRule(rule, const ['wordCount']) ?? '',
+    );
+    final lastChapter = _extractHtmlValue(
+      node,
+      _firstRule(rule, const ['lastChapter']) ?? '',
+    );
+
+    int totalChapters = 0;
+    final chMatch = RegExp(r'第\s*(\d+)\s*[章|回]').firstMatch(lastChapter);
+    if (chMatch != null) {
+      totalChapters = int.tryParse(chMatch.group(1) ?? '') ?? 0;
+    } else {
+      final chMatch2 = RegExp(r'(\d+)\s*章').firstMatch(lastChapter);
+      if (chMatch2 != null) {
+        totalChapters = int.tryParse(chMatch2.group(1) ?? '') ?? 0;
+      }
+    }
+
+    int wordCount = 0;
+    if (wordCountStr.isNotEmpty) {
+      if (wordCountStr.contains('万')) {
+        final numPart = double.tryParse(wordCountStr.split('万').first.trim()) ?? 0;
+        wordCount = (numPart * 10000).toInt();
+      } else {
+        wordCount = int.tryParse(wordCountStr.replaceAll(RegExp(r'\D'), '')) ?? 0;
+      }
+    }
+
     return Book(
       title: name.isNotEmpty ? name : '未知',
       author: author,
@@ -1203,6 +1477,8 @@ class LegadoParser {
       coverPath: _resolveUrl(base, coverUrl),
       isFromSource: true,
       sourceUrl: source.id.toString(),
+      totalChapters: totalChapters,
+      fileSize: wordCount,
     );
   }
 
@@ -1214,6 +1490,8 @@ class LegadoParser {
           ? origin.coverPath
           : detail.coverPath,
       filePath: detail.filePath.isEmpty ? origin.filePath : detail.filePath,
+      totalChapters: detail.totalChapters > 0 ? detail.totalChapters : origin.totalChapters,
+      fileSize: detail.fileSize > 0 ? detail.fileSize : origin.fileSize,
     );
   }
 
@@ -1581,8 +1859,9 @@ class LegadoParser {
 
   static Future<String> _requestViaHeadlessWebView(
     BookSource source,
-    String targetUrl,
-  ) async {
+    String targetUrl, {
+    CancelToken? cancelToken,
+  }) async {
     targetUrl = targetUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
     final embedded = LegadoRequestBuilder.splitEmbeddedConfig(targetUrl);
     final urlStr = embedded.url;
@@ -1606,16 +1885,39 @@ class LegadoParser {
     }
     
     final ua = headersMap['User-Agent'] ?? headersMap['user-agent'] ?? config['userAgent'];
-    if (ua != null && ua.toString().isNotEmpty) {
-      await controller.setUserAgent(ua.toString());
-      LegadoSessionStore.setUserAgent(uri, ua.toString());
+    var uaStr = ua?.toString();
+    if (uaStr == null || 
+        uaStr.isEmpty || 
+        uaStr.contains('Flutter') || 
+        uaStr.contains('Headless') || 
+        uaStr.contains('Kite') || 
+        uaStr.contains('flutter') || 
+        uaStr.contains('headless') || 
+        uaStr.contains('kite')) {
+      uaStr = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
     }
+    
+    await controller.setUserAgent(uaStr);
+    LegadoSessionStore.setUserAgent(uri, uaStr);
     
     controller.setNavigationDelegate(
       NavigationDelegate(
+        onPageStarted: (url) async {
+          try {
+            await controller.runJavaScript(
+              "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+            );
+          } catch (_) {}
+        },
         onPageFinished: (url) async {
           try {
             await Future.delayed(const Duration(milliseconds: 1200));
+            try {
+              await controller.runJavaScript(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+              );
+            } catch (_) {}
+
             final cookieManager = wcm.WebviewCookieManager();
             final gotCookies = await cookieManager.getCookies(urlStr);
             if (gotCookies.isNotEmpty) {
@@ -1625,15 +1927,41 @@ class LegadoParser {
             
             if (ua == null || ua.toString().isEmpty) {
               final extractedUa = await controller.runJavaScriptReturningResult('navigator.userAgent');
-              final uaStr = extractedUa.toString().replaceAll('"', '').trim();
-              if (uaStr.isNotEmpty) {
-                LegadoSessionStore.setUserAgent(uri, uaStr);
+              final extractedUaStr = extractedUa.toString().replaceAll('"', '').trim();
+              if (extractedUaStr.isNotEmpty) {
+                LegadoSessionStore.setUserAgent(uri, extractedUaStr);
               }
             }
             
             String html = '';
             int attempts = 0;
-            while (attempts < 3) {
+            int lastLength = 0;
+            int stableCount = 0;
+            
+            final searchRule = _ruleMap(source.ruleSearch);
+            final searchSelector = _extractCssSelector(_firstRule(searchRule, const ['bookList', 'list']));
+            
+            final tocRule = _ruleMap(source.ruleToc);
+            final tocSelector = _extractCssSelector(_firstRule(tocRule, const ['chapterList', 'list']));
+            
+            final contentRule = _ruleMap(source.ruleContent);
+            final contentSelector = _extractCssSelector(_firstRule(contentRule, const ['content', 'text']));
+            
+            final bookInfoRule = _ruleMap(source.ruleBookInfo);
+            final tocUrlRule = _firstRule(bookInfoRule, const ['tocUrl', 'catalogUrl']);
+            final isTocSameAsDetail = tocUrlRule == null || tocUrlRule.toString().trim().isEmpty;
+
+            while (attempts < 25) {
+              if (cancelToken?.isCancelled == true) {
+                if (!completer.isCompleted) {
+                  completer.completeError(DioException(
+                    requestOptions: RequestOptions(path: targetUrl),
+                    error: 'User interrupted source switching',
+                    type: DioExceptionType.cancel,
+                  ));
+                }
+                break;
+              }
               final result = await controller.runJavaScriptReturningResult('document.documentElement.outerHTML');
               html = result.toString();
               if (html.startsWith('"') && html.endsWith('"')) {
@@ -1647,21 +1975,89 @@ class LegadoParser {
                 }
               }
               
-              // 智能条件轮询，欺骗 WebKit 保证后台 Ajax 全速活跃并渲染出真正的骨架屏正文
-              if (html.contains('href') || 
-                  html.contains('chapter') || 
-                  html.contains('<li') || 
-                  html.contains('<p>') || 
-                  html.contains('</p>') || 
-                  html.length > 2000) {
+              final currentLength = html.length;
+              bool isSelectorMatch = false;
+              
+              if (tocSelector != null && 
+                  (targetUrl.contains('toc') || 
+                   targetUrl.contains('chapter') || 
+                   isTocSameAsDetail || 
+                   targetUrl.contains('/50045/'))) {
+                try {
+                  final evalResult = await controller.runJavaScriptReturningResult(
+                    "document.querySelectorAll('$tocSelector').length"
+                  );
+                  final count = int.tryParse(evalResult.toString()) ?? 0;
+                  if (count > 0) {
+                    isSelectorMatch = true;
+                  }
+                } catch (_) {}
+              }
+              
+              if (!isSelectorMatch && searchSelector != null && targetUrl.contains('search')) {
+                try {
+                  final evalResult = await controller.runJavaScriptReturningResult(
+                    "document.querySelectorAll('$searchSelector').length"
+                  );
+                  final count = int.tryParse(evalResult.toString()) ?? 0;
+                  if (count > 0) {
+                    isSelectorMatch = true;
+                  }
+                } catch (_) {}
+              }
+              
+              if (!isSelectorMatch && contentSelector != null) {
+                try {
+                  final evalResult = await controller.runJavaScriptReturningResult(
+                    "document.querySelectorAll('$contentSelector').length"
+                  );
+                  final count = int.tryParse(evalResult.toString()) ?? 0;
+                  if (count > 0) {
+                    isSelectorMatch = true;
+                  }
+                } catch (_) {}
+              }
+              
+              bool isStable = false;
+              if (lastLength > 0) {
+                final diff = (currentLength - lastLength).abs();
+                final changeRate = diff / lastLength;
+                if (changeRate <= 0.001) {
+                  stableCount++;
+                } else {
+                  stableCount = 0;
+                }
+                if (stableCount >= 2) {
+                  isStable = true;
+                }
+              }
+              lastLength = currentLength;
+
+              bool isFeatureMatch = false;
+              final isSearch = targetUrl.contains('search');
+              final isToc = targetUrl.contains('toc') || targetUrl.contains('chapter') || isTocSameAsDetail;
+              if (isSearch || isToc) {
+                final linkCount = RegExp(r'''href\s*=\s*["\'][^"\']+["\']''').allMatches(html).length;
+                if (linkCount > 10) {
+                  isFeatureMatch = true;
+                }
+              } else {
+                if (html.contains('</p>') || html.contains('<br')) {
+                  isFeatureMatch = true;
+                }
+              }
+
+              if (isSelectorMatch || (isFeatureMatch && isStable)) {
                 break;
               }
+              
               attempts++;
-              if (attempts < 3) {
-                await Future.delayed(const Duration(milliseconds: 1000));
-              }
+              await Future.delayed(const Duration(milliseconds: 400));
             }
             
+            if (cancelToken?.isCancelled == true) {
+              return;
+            }
             if (!completer.isCompleted) {
               await LegadoSessionStore.persistHost(uri);
               completer.complete(html);
@@ -1681,13 +2077,37 @@ class LegadoParser {
       ),
     );
     
-    final timeoutTimer = Timer(const Duration(seconds: 30), () {
+    final timeoutTimer = Timer(const Duration(seconds: 20), () async {
       if (!completer.isCompleted) {
-        completer.completeError(TimeoutException('Headless WebView request timed out for $urlStr'));
+        String htmlSnapshot = '';
+        try {
+          final result = await controller.runJavaScriptReturningResult('document.documentElement.outerHTML');
+          htmlSnapshot = result.toString();
+          if (htmlSnapshot.startsWith('"') && htmlSnapshot.endsWith('"')) {
+            try {
+              final decoded = jsonDecode(htmlSnapshot);
+              if (decoded is String) htmlSnapshot = decoded;
+            } catch (_) {
+              htmlSnapshot = htmlSnapshot.substring(1, htmlSnapshot.length - 1)
+                .replaceAll(r'\"', '"')
+                .replaceAll(r'\\', r'\');
+            }
+          }
+        } catch (e) {
+          htmlSnapshot = 'Failed to capture HTML snapshot: $e';
+        }
+        
+        final logMsg = '🚨 [Headless WebView 超时临终绝密取证] 目标 URL: $urlStr\n'
+            '🚨 [临终残页片段] (前1000字符):\n'
+            '${htmlSnapshot.substring(0, htmlSnapshot.length > 1000 ? 1000 : htmlSnapshot.length)}';
+        debugPrint(logMsg);
+        
+        completer.completeError(TimeoutException(
+          'Headless WebView request timed out for $urlStr\n$logMsg'
+        ));
       }
     });
     
-    // 配合业务层物理边缘欺骗性挂载（以 1x1 物理挂载而非 Offstage），强行阻止 WebKit 将其挂起
     final overlayState = rootNavigatorKey.currentState?.overlay;
     OverlayEntry? overlayEntry;
     if (overlayState != null) {
@@ -1758,10 +2178,30 @@ class LegadoParser {
     }
   }
 
+  /// 从 Legado 规则中清洗出纯净的 CSS 选择器（去除 @css:, @text, ## 等后缀）
+  static String? _extractCssSelector(String? rule) {
+    if (rule == null || rule.isEmpty) return null;
+    var css = rule.trim();
+    if (css.startsWith('@css:')) {
+      css = css.substring(5);
+    }
+    final atIndex = css.indexOf('@');
+    if (atIndex != -1) {
+      css = css.substring(0, atIndex);
+    }
+    final hashIndex = css.indexOf('##');
+    if (hashIndex != -1) {
+      css = css.substring(0, hashIndex);
+    }
+    css = css.trim();
+    return css.isEmpty ? null : css;
+  }
+
   static Future<String> executeFetch(
     BookSource source,
     String targetUrl, {
     String? keyword,
+    CancelToken? cancelToken,
   }) async {
     targetUrl = targetUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
     
@@ -1775,7 +2215,7 @@ class LegadoParser {
     final hasWebView = _hasWebViewConfig(source, targetUrl);
     if (hasWebView) {
       print('Url config specifies webView. Routing to Headless WebView.');
-      return await _requestViaHeadlessWebView(source, targetUrl);
+      return await _requestViaHeadlessWebView(source, targetUrl, cancelToken: cancelToken);
     }
     
     try {
@@ -1820,6 +2260,7 @@ class LegadoParser {
           headers: headers.isEmpty ? null : headers,
           responseType: ResponseType.bytes,
         ),
+        cancelToken: cancelToken,
       );
       LegadoSessionStore.rememberResponse(response.realUri, response.headers);
       final bytes = response.data is List<int>
@@ -1829,10 +2270,13 @@ class LegadoParser {
       
       if (_needsManualVerification(response.statusCode, responseData)) {
         print('Dio response triggers verification. Downgrading to Headless WebView.');
-        return await _requestViaHeadlessWebView(source, targetUrl);
+        return await _requestViaHeadlessWebView(source, targetUrl, cancelToken: cancelToken);
       }
       return responseData;
     } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        rethrow;
+      }
       final isTlsOrConnectionError = e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.sendTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
@@ -1845,13 +2289,13 @@ class LegadoParser {
           
       if (isTlsOrConnectionError || isStatusCodeError) {
         print('Dio request failed (code: ${e.response?.statusCode}, err: ${e.message}). Falling back to Headless WebView.');
-        return await _requestViaHeadlessWebView(source, targetUrl);
+        return await _requestViaHeadlessWebView(source, targetUrl, cancelToken: cancelToken);
       } else {
         rethrow;
       }
     } catch (e) {
       print('Dio request generic error: $e. Falling back to Headless WebView.');
-      return await _requestViaHeadlessWebView(source, targetUrl);
+      return await _requestViaHeadlessWebView(source, targetUrl, cancelToken: cancelToken);
     }
   }
 
@@ -1859,6 +2303,7 @@ class LegadoParser {
     BookSource source,
     String url, {
     String? keyword,
+    CancelToken? cancelToken,
   }) async {
     url = url.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
     if (url.isEmpty) {
@@ -1873,7 +2318,7 @@ class LegadoParser {
       );
     }
     
-    final responseData = await executeFetch(source, url, keyword: keyword);
+    final responseData = await executeFetch(source, url, keyword: keyword, cancelToken: cancelToken);
     return Response<dynamic>(
       data: responseData,
       statusCode: 200,
@@ -1969,6 +2414,10 @@ class LegadoParser {
 
   static String _resolveUrl(String baseUrl, String url) {
     return LegadoRequestBuilder.resolveUrl(baseUrl, url);
+  }
+
+  static String resolveUrl(String baseUrl, String url) {
+    return _resolveUrl(baseUrl, url);
   }
 
   static String _resolveBookUrl(String baseUrl, String url) {

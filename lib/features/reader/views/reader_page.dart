@@ -1,4 +1,5 @@
 import 'dart:ui' show FontVariation, ImageFilter;
+import 'dart:io';
 
 import 'package:flutter/material.dart'; // 👈 像素级补上这一行！
 import 'package:flutter/cupertino.dart';
@@ -18,6 +19,8 @@ import '../widgets/reader_settings_panel.dart';
 import '../views/reader_book_details_page.dart';
 import '../views/reader_toc_page.dart';
 import '../viewmodels/reader_viewmodel.dart';
+import '../../../data/repositories/book_repository.dart';
+import '../../bookshelf/viewmodels/bookshelf_viewmodel.dart';
 
 /// 阅读器页面 — 核心阅读体验
 ///
@@ -406,10 +409,40 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final bgColor = readerState.resolveBackgroundColor(brightness);
     final textColor = readerState.resolveTextColor(brightness);
 
-    return CupertinoPageScaffold(
-      backgroundColor: bgColor,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldPop = await _handleReaderPopAttempt();
+        if (shouldPop && context.mounted) {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            context.go('/bookshelf');
+          }
+        }
+      },
+      child: CupertinoPageScaffold(
+      backgroundColor: readerState.background == ReaderBackground.customImage ? CupertinoColors.transparent : bgColor,
       child: Stack(
         children: [
+          if (readerState.background == ReaderBackground.customImage &&
+              readerState.customWallpaperPath != null &&
+              File(readerState.customWallpaperPath!).existsSync()) ...[
+            Positioned.fill(
+              child: Image.file(
+                File(readerState.customWallpaperPath!),
+                fit: BoxFit.cover,
+              ),
+            ),
+            Positioned.fill(
+              child: Container(
+                color: brightness == Brightness.dark
+                    ? CupertinoColors.black.withOpacity(0.68)
+                    : CupertinoColors.white.withOpacity(0.85),
+              ),
+            ),
+          ],
           // 主阅读区域 — 无限滑动
           Listener(
             behavior: HitTestBehavior.translucent,
@@ -461,7 +494,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       });
                     }
                   },
-                  child: _buildReadingContent(bgColor, textColor),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: KeyedSubtree(
+                      key: ValueKey(readerState.isLoading && readerState.items.isEmpty ? 'skeleton' : 'content'),
+                      child: _buildReadingContent(bgColor, textColor),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -525,6 +564,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             ),
         ],
       ),
+    ),
     );
   }
 
@@ -566,7 +606,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     if (readerState.isLoading && readerState.items.isEmpty) {
-      return const Center(child: CupertinoActivityIndicator());
+      return _buildSkeletonScreen(bgColor, textColor, readerState);
     }
 
     if (readerState.mode != ReaderMode.scroll) {
@@ -880,9 +920,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           12;
     }
 
-    final displayText = state.paragraphIndent > 0
-        ? '${List.filled(state.paragraphIndent, '\u3000').join()}${item.text}'
-        : item.text;
+    final displayText = _formatDisplayText(item.text, state.paragraphIndent);
     final painter = TextPainter(
       text: TextSpan(
         text: displayText,
@@ -1168,9 +1206,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ? FontWeight.w600
         : getFontWeight(state.fontWeightIndex);
 
-    final displayText = state.paragraphIndent > 0
-        ? '${List.filled(state.paragraphIndent, '\u3000').join()}${item.text}'
-        : item.text;
+    final displayText = _formatDisplayText(item.text, state.paragraphIndent);
 
     // 普通正文段落
     return Padding(
@@ -1207,6 +1243,64 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ),
       ),
     );
+  }
+
+  String _formatDisplayText(String text, int paragraphIndent) {
+    var cleaned = text.replaceAll(RegExp(r'^[　\s]+'), '');
+    if (paragraphIndent > 0) {
+      return '${List.filled(paragraphIndent, "\u3000").join()}$cleaned';
+    }
+    return cleaned;
+  }
+
+  Widget _buildSkeletonScreen(Color bgColor, Color textColor, ReaderState state) {
+    final shimmerColor = textColor.withOpacity(0.06);
+    final highlightColor = textColor.withOpacity(0.12);
+    final topPad = MediaQuery.of(context).padding.top + state.topPadding;
+    final pagePad = state.pagePadding;
+
+    return Padding(
+      padding: EdgeInsets.only(top: topPad, left: pagePad, right: pagePad),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 24),
+          _shimmerBar(shimmerColor, highlightColor, width: 140, height: 14),
+          const SizedBox(height: 18),
+          _shimmerBar(shimmerColor, highlightColor, width: 220, height: 22),
+          const SizedBox(height: 36),
+          ...List.generate(12, (i) {
+            final widths = [1.0, 1.0, 0.92, 1.0, 0.88, 1.0, 0.95, 1.0, 0.78, 1.0, 1.0, 0.65];
+            return Padding(
+              padding: EdgeInsets.only(bottom: state.paragraphSpacing + 2),
+              child: _shimmerBar(
+                shimmerColor,
+                highlightColor,
+                widthFraction: widths[i],
+                height: state.fontSize * 0.8,
+              ),
+            );
+          }),
+          const SizedBox(height: 24),
+          const Center(child: CupertinoActivityIndicator()),
+        ],
+      ),
+    );
+  }
+
+  Widget _shimmerBar(Color base, Color highlight, {double? width, double? widthFraction, required double height}) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final w = width ?? (constraints.maxWidth * (widthFraction ?? 1.0));
+      return Container(
+        width: w,
+        height: height,
+        decoration: BoxDecoration(
+          color: base,
+          borderRadius: BorderRadius.circular(height / 2),
+        ),
+      ).animate(onPlay: (c) => c.repeat())
+        .shimmer(duration: 1200.ms, color: highlight);
+    });
   }
 
   TextStyle _readerTextStyle(
@@ -1419,23 +1513,74 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  void _goBack() {
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go('/bookshelf');
+  Future<bool> _handleReaderPopAttempt() async {
+    final state = ref.read(readerViewModelProvider(widget.bookId));
+    final book = state.book;
+    if (book == null) return true;
+
+    final repo = ref.read(bookRepositoryProvider);
+    final existing = await repo.getBookById(book.id);
+    if (existing == null || existing.isFavorite) {
+      return true;
+    }
+
+    final result = await showCupertinoDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('加入书架'),
+        content: const Text('是否将本书加入书架？'),
+        actions: [
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('不加入'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('加入'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      book.isFavorite = true;
+      await repo.saveBook(book);
+      ref.read(bookshelfViewModelProvider.notifier).loadBooks();
+      return true;
+    } else if (result == false) {
+      await repo.deleteBook(book.id);
+      ref.read(bookshelfViewModelProvider.notifier).loadBooks();
+      return true;
+    }
+    return false;
+  }
+
+  void _goBack() async {
+    final shouldPop = await _handleReaderPopAttempt();
+    if (shouldPop && mounted) {
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go('/bookshelf');
+      }
     }
   }
 
-  void _showBookDetails(BuildContext pageContext) {
+  Future<void> _showBookDetails(BuildContext pageContext) async {
     final state = ref.read(readerViewModelProvider(widget.bookId));
     final book = state.book;
     if (book == null) return;
-    Navigator.of(pageContext).push(
+    final target = await Navigator.of(pageContext).push<ReaderNavigationTarget>(
       CupertinoPageRoute(
         builder: (context) => ReaderBookDetailsPage(bookId: widget.bookId),
       ),
     );
+    if (target != null && pageContext.mounted) {
+      await _navigateToTarget(target);
+    }
   }
 
   // ignore: unused_element
@@ -1639,42 +1784,89 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 进度条
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppDimensions.paddingLarge,
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        '第 ${readerState.currentChapterIndex + 1} 章',
-                        style: TextStyle(color: secondary, fontSize: 12),
+                // 进度条 (章内滑页进度)
+                Builder(
+                  builder: (context) {
+                    final allPages = _buildReaderPages(readerState, MediaQuery.of(context).size);
+                    final chapterPages = allPages
+                        .where((p) => p.firstReadableItem?.item.chapterIndex == readerState.currentChapterIndex)
+                        .toList();
+                    
+                    int currentPageIndexInChapter = 0;
+                    if (readerState.mode != ReaderMode.scroll) {
+                      final currentAbsolutePageIndex = _pageController.hasClients
+                          ? (_pageController.page ?? _lastPagedPageIndex.toDouble()).round()
+                          : _lastPagedPageIndex;
+                      if (currentAbsolutePageIndex >= 0 && currentAbsolutePageIndex < allPages.length) {
+                        final currentPageData = allPages[currentAbsolutePageIndex];
+                        final idx = chapterPages.indexOf(currentPageData);
+                        if (idx >= 0) {
+                          currentPageIndexInChapter = idx;
+                        }
+                      }
+                    } else {
+                      final topItem = _findTopVisibleItem();
+                      if (topItem != null) {
+                        for (int i = 0; i < chapterPages.length; i++) {
+                          final page = chapterPages[i];
+                          if (page.entries.any((e) => e.item.paragraphIndex == topItem.paragraphIndex && e.item.chapterIndex == topItem.chapterIndex)) {
+                            currentPageIndexInChapter = i;
+                            break;
+                          }
+                        }
+                      }
+                    }
+
+                    final double sliderMax = (chapterPages.isEmpty ? 1 : chapterPages.length - 1).toDouble();
+                    final double sliderValue = currentPageIndexInChapter.clamp(0, sliderMax.toInt()).toDouble();
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppDimensions.paddingLarge,
                       ),
-                      Expanded(
-                        child: CupertinoSlider(
-                          value: progress.clamp(0.0, 1.0),
-                          onChanged: (value) {
-                            final state = ref.read(
-                              readerViewModelProvider(widget.bookId),
-                            );
-                            if (state.chapters.isEmpty) return;
-                            final chapterIndex =
-                                (value * (state.chapters.length - 1)).round();
-                            _navigateToTarget(
-                              ReaderNavigationTarget(
-                                chapterIndex: chapterIndex,
-                              ),
-                            );
-                          },
-                          activeColor: AppColors.primaryBlue,
-                        ),
+                      child: Row(
+                        children: [
+                          Text(
+                            '第 ${readerState.currentChapterIndex + 1} 章',
+                            style: TextStyle(color: secondary, fontSize: 12),
+                          ),
+                          Expanded(
+                            child: CupertinoSlider(
+                              value: sliderValue,
+                              min: 0.0,
+                              max: sliderMax <= 0.0 ? 1.0 : sliderMax,
+                              onChanged: sliderMax <= 0.0 ? null : (value) {
+                                final targetPageIdx = value.round();
+                                if (targetPageIdx >= 0 && targetPageIdx < chapterPages.length) {
+                                  if (readerState.mode != ReaderMode.scroll) {
+                                    final absIdx = allPages.indexOf(chapterPages[targetPageIdx]);
+                                    if (absIdx >= 0 && _pageController.hasClients) {
+                                      _lastPagedPageIndex = absIdx;
+                                      _pageController.jumpToPage(absIdx);
+                                      setState(() {});
+                                    }
+                                  } else {
+                                    final entry = chapterPages[targetPageIdx].firstReadableItem;
+                                    if (entry != null) {
+                                      _scrollToTarget(ReaderNavigationTarget(
+                                        chapterIndex: readerState.currentChapterIndex,
+                                        charOffset: entry.item.charOffset,
+                                      ));
+                                    }
+                                  }
+                                }
+                              },
+                              activeColor: AppColors.primaryBlue,
+                            ),
+                          ),
+                          Text(
+                            '${currentPageIndexInChapter + 1} / ${chapterPages.isEmpty ? 1 : chapterPages.length} 页',
+                            style: TextStyle(color: secondary, fontSize: 12),
+                          ),
+                        ],
                       ),
-                      Text(
-                        '${(progress * 100).toInt()}%',
-                        style: TextStyle(color: secondary, fontSize: 12),
-                      ),
-                    ],
-                  ),
+                    );
+                  }
                 ),
                 const SizedBox(height: 8),
                 // 工具栏按钮

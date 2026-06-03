@@ -45,14 +45,27 @@ class _ReaderTocPageState extends ConsumerState<ReaderTocPage> {
           },
         ),
         trailing: _tabIndex == 0
-            ? CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: () {
-                  setState(() {
-                    _isReversed = !_isReversed;
-                  });
-                },
-                child: Text(_isReversed ? '倒序' : '顺序'),
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: () {
+                      _showDownloadOptions(context, state);
+                    },
+                    child: const Icon(CupertinoIcons.cloud_download, size: 22),
+                  ),
+                  const SizedBox(width: 8),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: () {
+                      setState(() {
+                        _isReversed = !_isReversed;
+                      });
+                    },
+                    child: Text(_isReversed ? '倒序' : '顺序'),
+                  ),
+                ],
               )
             : null,
       ),
@@ -169,6 +182,14 @@ class _ReaderTocPageState extends ConsumerState<ReaderTocPage> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            if (chapter.isDownloaded) ...[
+                              const SizedBox(width: 8),
+                              const Icon(
+                                CupertinoIcons.checkmark_seal_fill,
+                                color: CupertinoColors.activeGreen,
+                                size: 16,
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -252,5 +273,59 @@ class _ReaderTocPageState extends ConsumerState<ReaderTocPage> {
         );
       },
     );
+  }
+  void _showDownloadOptions(BuildContext context, ReaderState state) {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (context) => CupertinoActionSheet(
+        title: const Text('下载缓存章节'),
+        message: const Text('支持多线程离线下载，可在后台持续下载正文。'),
+        actions: [
+          CupertinoActionSheetAction(
+            child: const Text('缓存后续 50 章'),
+            onPressed: () {
+              Navigator.pop(context);
+              _startDownload(state, limit: 50);
+            },
+          ),
+          CupertinoActionSheetAction(
+            child: const Text('下载全本章节'),
+            onPressed: () {
+              Navigator.pop(context);
+              _startDownload(state, limit: null);
+            },
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          isDefaultAction: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+      ),
+    );
+  }
+
+  void _startDownload(ReaderState state, {int? limit}) async {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('开始下载'),
+        content: Text(limit != null ? '正在后台下载后续 $limit 章...' : '正在后台下载全本章节...'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('好的'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+    
+    try {
+      await ref
+          .read(readerViewModelProvider(widget.bookId).notifier)
+          .startDownloadChapters(limit: limit);
+    } catch (e) {
+      print('Download error: $e');
+    }
   }
 }

@@ -52,7 +52,8 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
   Future<void> loadBooks() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final books = await _bookRepository.getAllBooks();
+      final allBooks = await _bookRepository.getAllBooks();
+      final books = allBooks.where((b) => b.isFavorite).toList();
       final groups = await _bookRepository.getAllBookGroups();
 
       // Sort for recent books based on lastReadTime (fallback to dateAdded)
@@ -100,6 +101,7 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
         }
 
         final book = parsedData['book'] as Book;
+        book.isFavorite = true;
         final chapters = parsedData['chapters'] as List<Chapter>;
 
         // 1. Save Book to DB to get its ID
@@ -149,6 +151,7 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
       }
 
       final book = parsedData['book'] as Book;
+      book.isFavorite = true;
       final chapters = parsedData['chapters'] as List<Chapter>;
       final bookId = await _bookRepository.saveBook(book);
       for (var chapter in chapters) {

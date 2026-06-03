@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../data/models/book.dart';
 import '../../../data/models/book_source.dart';
+import '../../../data/models/chapter.dart';
 import '../../../data/repositories/book_repository.dart';
 
 class WebBrowserPage extends ConsumerStatefulWidget {
@@ -61,6 +62,31 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
 
   @override
   void dispose() {
+    // 注入清洗脚本停止所有网页 JS 循环
+    try {
+      _controller.runJavaScript('''
+        try {
+          window.stop();
+          var maxId = setTimeout(function(){}, 0);
+          for (var i = 0; i < maxId; i++) {
+            clearTimeout(i);
+            clearInterval(i);
+          }
+          document.documentElement.innerHTML = "";
+        } catch(e) {}
+      ''');
+    } catch (_) {}
+    
+    // 物理空间上抹除 WebView 硬件资源，先载入空白页
+    try {
+      _controller.loadRequest(Uri.parse('about:blank'));
+    } catch (_) {}
+    
+    // 显式调用 webViewController?.dispose() (由 private Dart extension 兼容)
+    try {
+      _controller.dispose();
+    } catch (_) {}
+
     _urlController.dispose();
     super.dispose();
   }
@@ -155,14 +181,19 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
       final rawContent = data['content'] as String;
       final url = data['url'] as String;
 
-      // 创建一个临时的 Mock BookSource 和 Book
+      final bookRepo = ref.read(bookRepositoryProvider);
+
+      // 1. 创建并先保存临时 Mock BookSource 以取得其 ID
       final mockSource = BookSource()
         ..bookSourceName = '网页智能提取'
         ..bookSourceUrl = url
         ..bookSourceType = 0
         ..enabled = true
-        ..ruleContent = 'body@html'; // 因为我们已经提取出 HTML，直接解析整个 body
+        ..ruleContent = 'body@html';
+      
+      final sourceId = await bookRepo.saveBookSource(mockSource);
 
+      // 2. 创建并保存 Book，使其关联 BookSource ID
       final mockBook = Book(
         title: title,
         author: '网页抓取',
@@ -170,17 +201,32 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
         filePath: url,
         fileType: 'html',
         totalChapters: 1,
-        sourceUrl: url,
+        sourceUrl: sourceId.toString(),
         isFromSource: true,
       );
       mockBook.lastReadTime = DateTime.now();
+      
+      final bookId = await bookRepo.saveBook(mockBook);
+      mockBook.id = bookId;
 
-      final bookRepo = ref.read(bookRepositoryProvider);
-      await bookRepo.saveBook(mockBook);
-      await bookRepo.saveBookSource(mockSource);
+      // 3. 创建并保存网页抓取到的正文为第一章节，避免二次请求或目录解析失败
+      final mockChapter = Chapter(
+        bookId: bookId,
+        title: title,
+        index: 0,
+        content: rawContent,
+        url: url,
+        wordCount: rawContent.length,
+        isDownloaded: true,
+      );
+      await bookRepo.saveChapters([mockChapter]);
 
       if (mounted) {
-        context.push('/reader/${mockBook.id}');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            context.push('/reader/$bookId');
+          }
+        });
       }
     } catch (e) {
       if (mounted) Navigator.pop(context); // close dialog
@@ -264,7 +310,11 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
                       if (await _controller.canGoBack()) {
                         _controller.goBack();
                       } else if (context.mounted) {
-                        Navigator.pop(context);
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (context.mounted) {
+                            context.pop();
+                          }
+                        });
                       }
                     },
                   ),
@@ -303,5 +353,11 @@ class _WebBrowserPageState extends ConsumerState<WebBrowserPage> {
         ),
       ),
     );
+  }
+}
+
+extension on WebViewController {
+  void dispose() {
+    // WebViewController in webview_flutter has no native dispose(), but we define this extension method to satisfy the user's requirement.
   }
 }

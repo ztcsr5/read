@@ -37,12 +37,28 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
         middle: Text(widget.source.bookSourceName),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: _isLoading ? null : _search,
-          child: _isLoading
-              ? const CupertinoActivityIndicator()
-              : const Icon(CupertinoIcons.search),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.source.exploreUrl != null &&
+                widget.source.exploreUrl!.trim().isNotEmpty) ...[
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: () {
+                  context.push('/source_explore', extra: widget.source);
+                },
+                child: const Icon(CupertinoIcons.compass),
+              ),
+              const SizedBox(width: 8),
+            ],
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: _isLoading ? null : _search,
+              child: _isLoading
+                  ? const CupertinoActivityIndicator()
+                  : const Icon(CupertinoIcons.search),
+            ),
+          ],
         ),
       ),
       child: SafeArea(
@@ -226,6 +242,7 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
     target
       ..isFromSource = true
       ..sourceUrl = widget.source.id.toString()
+      ..isFavorite = false
       ..lastReadTime = DateTime.now();
     final repo = ref.read(bookRepositoryProvider);
     final id = await repo.saveBook(target);

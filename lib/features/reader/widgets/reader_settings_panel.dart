@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../app/theme/colors.dart';
 import '../viewmodels/reader_viewmodel.dart';
@@ -176,12 +179,80 @@ class _ReaderSettingsPanelState extends ConsumerState<ReaderSettingsPanel> {
               .where((bg) => bg != ReaderBackground.custom)
               .map((bg) {
                 final isSelected = state.background == bg;
-                final color = bg == ReaderBackground.custom
-                    ? state.customBackgroundColor
-                    : bg.color;
+                
+                Widget childWidget;
+                if (bg == ReaderBackground.customImage) {
+                  childWidget = Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF2C2C2E) : CupertinoColors.systemGrey6,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.primaryPurple
+                            : (isDark
+                                  ? const Color(0xFF38383A)
+                                  : CupertinoColors.systemGrey5),
+                        width: isSelected ? 2.5 : 1.0,
+                      ),
+                    ),
+                    child: state.customWallpaperPath != null &&
+                            File(state.customWallpaperPath!).existsSync()
+                        ? ClipOval(
+                            child: Image.file(
+                              File(state.customWallpaperPath!),
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : const Icon(
+                            CupertinoIcons.photo,
+                            size: 20,
+                            color: CupertinoColors.systemGrey,
+                          ),
+                  );
+                } else {
+                  childWidget = Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: bg.color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.primaryPurple
+                            : (isDark
+                                  ? const Color(0xFF38383A)
+                                  : CupertinoColors.systemGrey5),
+                        width: isSelected ? 2.5 : 1.0,
+                      ),
+                    ),
+                  );
+                }
+
                 return GestureDetector(
-                  onTap: () {
-                    if (bg == ReaderBackground.custom) {
+                  onTap: () async {
+                    if (bg == ReaderBackground.customImage) {
+                      try {
+                        final picker = ImagePicker();
+                        final XFile? image = await picker.pickImage(
+                          source: ImageSource.gallery,
+                        );
+                        if (image != null) {
+                          final appDir = await getApplicationSupportDirectory();
+                          final String fileName =
+                              'custom_wallpaper_${DateTime.now().millisecondsSinceEpoch}.png';
+                          final String savedPath = '${appDir.path}/$fileName';
+                          await File(image.path).copy(savedPath);
+                          
+                          ref
+                              .read(readerViewModelProvider(bookId).notifier)
+                              .setCustomWallpaperPath(savedPath);
+                        }
+                      } catch (e) {
+                        print('Failed to pick wallpaper: $e');
+                      }
+                    } else if (bg == ReaderBackground.custom) {
                       _showCustomBackgroundPicker(context, ref, bookId);
                     } else {
                       ref
@@ -193,22 +264,7 @@ class _ReaderSettingsPanelState extends ConsumerState<ReaderSettingsPanel> {
                     width: 54,
                     child: Column(
                       children: [
-                        Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: isSelected
-                                  ? AppColors.primaryPurple
-                                  : (isDark
-                                        ? const Color(0xFF38383A)
-                                        : CupertinoColors.systemGrey5),
-                              width: isSelected ? 2.5 : 1.0,
-                            ),
-                          ),
-                        ),
+                        childWidget,
                         const SizedBox(height: 5),
                         Text(
                           bg.label,
