@@ -592,6 +592,48 @@ void main() {
     });
 
     test(
+      'falls back to chapter-like html anchors when toc selector misses',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Fallback Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..ruleToc = jsonEncode({
+            'chapterList': '.missing-list a',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          });
+        final book = Book(
+          title: 'Book',
+          filePath: 'https://example.com/book/1',
+          fileType: 'online',
+          isFromSource: true,
+        );
+        final response = Response<dynamic>(
+          data: '''
+          <html><body>
+            <div class="chapter-list">
+              <a href="/book/1/1.html">第一章 开始</a>
+              <a href="/book/1/2.html">第二章 继续</a>
+            </div>
+          </body></html>
+        ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: book.filePath),
+        );
+
+        final chapters = await LegadoParser.getChapterList(
+          source,
+          book,
+          preFetchedResponse: response,
+        );
+
+        expect(chapters, hasLength(2));
+        expect(chapters.first.title, contains('第一章'));
+        expect(chapters.first.url, 'https://example.com/book/1/1.html');
+      },
+    );
+
+    test(
       'cleans URLs of trailing control characters and percent-encoded controls',
       () {
         final baseUrl = 'https://example.com/api/\n\r%0A%0D';

@@ -978,6 +978,17 @@ class LegadoParser {
           debugPrint(
             "🚨 [TOC残页片段]: ${document.outerHtml.substring(0, document.outerHtml.length > 1000 ? 1000 : document.outerHtml.length)}",
           );
+          pageChapters.addAll(
+            _parseChaptersByHtmlFallback(
+              pageData,
+              rule,
+              source,
+              book,
+              currentUrlStr,
+              startIndex: chapters.length,
+              limit: limit,
+            ),
+          );
         }
         var index = chapters.length;
         for (final node in nodes) {
@@ -1069,6 +1080,19 @@ class LegadoParser {
               limit: limit,
             ),
           );
+          if (pageChapters.isEmpty) {
+            pageChapters.addAll(
+              _parseChaptersByHtmlFallback(
+                pageData,
+                rule,
+                source,
+                book,
+                currentUrlStr,
+                startIndex: chapters.length,
+                limit: limit,
+              ),
+            );
+          }
         }
       }
 
@@ -2912,6 +2936,123 @@ class LegadoParser {
     } catch (_) {
       return [];
     }
+  }
+
+  static List<Chapter> _parseChaptersByHtmlFallback(
+    dynamic data,
+    Map<String, dynamic> rule,
+    BookSource source,
+    Book book,
+    String baseUrl, {
+    int startIndex = 0,
+    int? limit,
+  }) {
+    try {
+      final document = parse(data.toString());
+      document
+          .querySelectorAll('script, style, noscript, iframe, header, footer')
+          .forEach((element) => element.remove());
+
+      final anchors = document.querySelectorAll('a[href]');
+      final candidates = <({String title, String url, int score})>[];
+      for (final anchor in anchors) {
+        final title = anchor.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+        final href = anchor.attributes['href']?.trim() ?? '';
+        if (title.isEmpty || href.isEmpty) continue;
+        if (title.length > 80) continue;
+        if (_looksLikeNavigationLink(title, href)) continue;
+
+        var score = 0;
+        if (_looksLikeChapterTitle(title)) score += 8;
+        if (RegExp(r'\d+').hasMatch(href)) score += 2;
+        if (href.endsWith('.html') || href.endsWith('.htm')) score += 2;
+        final parentClass = anchor.parent?.className.toLowerCase() ?? '';
+        final parentId = anchor.parent?.id.toLowerCase() ?? '';
+        if (parentClass.contains('chapter') ||
+            parentClass.contains('catalog') ||
+            parentClass.contains('list') ||
+            parentClass.contains('mulu') ||
+            parentId.contains('chapter') ||
+            parentId.contains('catalog') ||
+            parentId.contains('list') ||
+            parentId.contains('mulu')) {
+          score += 4;
+        }
+        if (score < 8) continue;
+
+        candidates.add((
+          title: title,
+          url: _resolveUrl(baseUrl, href),
+          score: score,
+        ));
+      }
+
+      if (candidates.length < 2) return [];
+      final seen = <String>{};
+      final chapters = <Chapter>[];
+      var index = startIndex;
+      final formatJsRule = _firstRule(rule, const ['formatJs']);
+      for (final candidate in candidates) {
+        if (limit != null && chapters.length >= limit) break;
+        final key = '${candidate.title}|${candidate.url}';
+        if (!seen.add(key)) continue;
+        var title = candidate.title;
+        if (formatJsRule != null && formatJsRule.isNotEmpty) {
+          title = _applyFormatJsSync(
+            formatJsRule,
+            index: index,
+            title: title,
+            url: candidate.url,
+          );
+        }
+        chapters.add(
+          Chapter(
+            bookId: book.id,
+            title: title,
+            index: index++,
+            content: candidate.url,
+            url: candidate.url,
+            wordCount: 0,
+            isDownloaded: false,
+          ),
+        );
+      }
+      return chapters;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static bool _looksLikeChapterTitle(String title) {
+    final normalized = title.trim();
+    return RegExp(
+      r'^(第?\s*[0-9零一二三四五六七八九十百千万两〇]+[\s\.、_-]*(章|节|回|话|卷|集|部)|chapter\s*\d+)',
+      caseSensitive: false,
+    ).hasMatch(normalized);
+  }
+
+  static bool _looksLikeNavigationLink(String title, String href) {
+    final text = title.toLowerCase();
+    final url = href.toLowerCase();
+    const words = [
+      '首页',
+      '上一页',
+      '下一页',
+      '末页',
+      '返回',
+      '目录',
+      '书架',
+      '登录',
+      '注册',
+      '更多',
+      'home',
+      'next',
+      'prev',
+      'previous',
+      'last',
+      'back',
+    ];
+    return words.any((word) => text == word || url.endsWith('/$word'));
   }
 
   static List<Chapter> _parseChaptersByJsonFallback(
