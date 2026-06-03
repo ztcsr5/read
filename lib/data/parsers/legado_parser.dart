@@ -87,20 +87,50 @@ class LegadoParser {
         return LegadoTestReport(steps: steps);
       }
 
+      // 1. 搜索 URL
+      final urlLogs = <String>[
+        '配置的 searchUrl: ${source.searchUrl}',
+        '输入关键字: $keyword',
+      ];
       final searchUrl = await _buildSearchUrlAsync(source, keyword);
-      steps.add(LegadoTestStep.ok('搜索 URL', searchUrl));
+      urlLogs.add('构建后的搜索 URL: $searchUrl');
+      steps.add(LegadoTestStep.ok('搜索 URL', searchUrl, logs: urlLogs));
 
+      // 2. JS 引擎状态
       if (_containsJsRule(source.searchUrl) ||
           _containsJsRule(source.ruleSearch) ||
           _containsJsRule(source.ruleBookInfo) ||
           _containsJsRule(source.ruleToc) ||
           _containsJsRule(source.ruleContent)) {
+        final jsLogs = <String>[
+          '检查规则以判断是否使用 JS 运行环境:',
+          '  searchUrl 包含 JS: ${_containsJsRule(source.searchUrl)}',
+          '  ruleSearch 包含 JS: ${_containsJsRule(source.ruleSearch)}',
+          '  ruleBookInfo 包含 JS: ${_containsJsRule(source.ruleBookInfo)}',
+          '  ruleToc 包含 JS: ${_containsJsRule(source.ruleToc)}',
+          '  ruleContent 包含 JS: ${_containsJsRule(source.ruleContent)}',
+          '将开启 QuickJS 沙盒并在执行规则时自动注入上下文变量 (result, baseUrl, keyword, page 等)。',
+        ];
         steps.add(
-          const LegadoTestStep.ok(
+          LegadoTestStep.ok(
             'JS 引擎',
             '检测到 @js/<js>/java.* 规则，将使用 QuickJS 引擎执行。',
+            logs: jsLogs,
           ),
         );
+      }
+
+      // 3. 请求搜索页
+      final reqLogs = <String>[];
+      reqLogs.add('正在发起 HTTP 请求...');
+      reqLogs.add('目标 URL: $searchUrl');
+      
+      final reqObj = _buildRequest(source, searchUrl, keyword: keyword);
+      reqLogs.add('请求方法: ${reqObj.method}');
+      reqLogs.add('请求字符集: ${reqObj.charset}');
+      reqLogs.add('请求 Headers: ${reqObj.headers}');
+      if (reqObj.body != null) {
+        reqLogs.add('请求 Body: ${reqObj.body}');
       }
 
       final searchResponse = await _request(
@@ -108,91 +138,214 @@ class LegadoParser {
         searchUrl,
         keyword: keyword,
       );
+      
+      reqLogs.add('响应状态码: ${searchResponse.statusCode}');
+      reqLogs.add('真实响应 URL: ${searchResponse.realUri}');
+      reqLogs.add('响应 Headers:');
+      searchResponse.headers.forEach((name, values) {
+        reqLogs.add('  $name: ${values.join(", ")}');
+      });
+      
+      final detectedCharset = detectCharset(
+        searchResponse.data is List<int>
+            ? searchResponse.data as List<int>
+            : utf8.encode(searchResponse.data?.toString() ?? ''),
+        reqObj.charset,
+        searchResponse.headers.map,
+      );
+      reqLogs.add('嗅探/检测字符集: $detectedCharset');
+      
+      final sampleText = _sample(searchResponse.data);
+      reqLogs.add('响应内容前缀采样: $sampleText');
+
       steps.add(
         LegadoTestStep.ok(
           '请求搜索页',
           'HTTP ${searchResponse.statusCode}',
-          sample: _sample(searchResponse.data),
+          sample: sampleText,
+          logs: reqLogs,
         ),
       );
 
-      final books = await searchBooks(source, keyword);
+      // 4. 搜索结果
+      final searchResultLogs = <String>[];
+      searchResultLogs.add('正在解析书籍列表...');
+      final rule = _ruleMap(source.ruleSearch);
+      searchResultLogs.add('搜索规则 ruleSearch: ${source.ruleSearch}');
+      
+      final bookListRule = _firstRule(rule, const ['bookList', 'list']);
+      searchResultLogs.add('提取的书籍列表规则 (bookList): $bookListRule');
+
+      // 使用预获取的 Response，避免在数秒内请求同一搜索 URL 两次触发频率限制
+      final books = await searchBooks(source, keyword, preFetchedResponse: searchResponse);
+      searchResultLogs.add('解析得到的书籍数量: ${books.length}');
+      
       if (books.isEmpty) {
+        searchResultLogs.add('警告：书籍列表解析为空！可能是 bookList 规则未匹配，或者服务器返回了错误页面/频控保护页面。');
         steps.add(
-          const LegadoTestStep.fail(
+          LegadoTestStep.fail(
             '搜索结果',
             '没有解析出书籍，请检查 ruleSearch.bookList/name/bookUrl',
+            logs: searchResultLogs,
           ),
         );
         return LegadoTestReport(steps: steps);
       }
 
       var firstBook = books.first;
+      searchResultLogs.add('解析出首本书籍信息:');
+      searchResultLogs.add('  书名 (title): ${firstBook.title}');
+      searchResultLogs.add('  作者 (author): ${firstBook.author}');
+      searchResultLogs.add('  链接 (filePath): ${firstBook.filePath}');
+      searchResultLogs.add('  封面 (coverPath): ${firstBook.coverPath}');
+
       steps.add(
         LegadoTestStep.ok(
           '搜索结果',
           '解析到 ${books.length} 本，首本：${firstBook.title}',
           sample: '${firstBook.title}\n${firstBook.filePath}',
+          logs: searchResultLogs,
         ),
       );
 
+      // 5. 书籍详情
+      Response<dynamic>? detailResponse;
+      final detailLogs = <String>[];
       if (source.ruleBookInfo != null && source.ruleBookInfo!.isNotEmpty) {
-        final detail = await parseBookInfo(source, firstBook);
-        firstBook = detail;
+        detailLogs.add('配置了 ruleBookInfo 详情页规则。开始发起详情页请求...');
+        detailLogs.add('详情页 URL (filePath): ${firstBook.filePath}');
+        
+        detailResponse = await _request(source, firstBook.filePath);
+        detailLogs.add('详情页响应状态: ${detailResponse.statusCode}');
+        detailLogs.add('详情页真实 URL: ${detailResponse.realUri}');
+        detailLogs.add('详情页响应 Headers: ${detailResponse.headers.map}');
+        
+        final detailBook = await parseBookInfo(source, firstBook, preFetchedResponse: detailResponse);
+        firstBook = detailBook;
+        
+        detailLogs.add('详情页规则解析完毕，合并后书籍信息:');
+        detailLogs.add('  书名: ${firstBook.title}');
+        detailLogs.add('  作者: ${firstBook.author}');
+        detailLogs.add('  封面: ${firstBook.coverPath}');
+        detailLogs.add('  链接: ${firstBook.filePath}');
+        
         steps.add(
           LegadoTestStep.ok(
             '书籍详情',
-            detail.title,
-            sample: detail.coverPath ?? detail.filePath,
+            firstBook.title,
+            sample: firstBook.coverPath ?? firstBook.filePath,
+            logs: detailLogs,
           ),
         );
       } else {
+        detailLogs.add('未配置 ruleBookInfo 详情页规则，跳过详情页网络请求，使用搜索结果中的链接。');
         steps.add(
-          const LegadoTestStep.skip('书籍详情', '未配置 ruleBookInfo，使用搜索结果里的详情链接'),
+          LegadoTestStep.skip(
+            '书籍详情',
+            '未配置 ruleBookInfo，使用搜索结果里的详情链接',
+            logs: detailLogs,
+          ),
         );
       }
 
-      final chapters = await getChapterList(source, firstBook);
+      // 6. 目录列表
+      final tocLogs = <String>[];
+      tocLogs.add('开始获取目录章节列表...');
+      tocLogs.add('目录页/详情页链接: ${firstBook.filePath}');
+      tocLogs.add('目录规则 ruleToc: ${source.ruleToc}');
+      
+      // 复用详情页的 Response 缓存，大幅减少不必要的重复网络请求
+      final chapters = await getChapterList(
+        source,
+        firstBook,
+        preFetchedResponse: detailResponse,
+      );
+      
+      tocLogs.add('目录解析成功，共解析到 ${chapters.length} 个章节。');
+      
       if (chapters.isEmpty) {
+        tocLogs.add('警告：目录章节列表为空！请检查 ruleToc.chapterList。');
         steps.add(
-          const LegadoTestStep.fail(
+          LegadoTestStep.fail(
             '目录',
             '没有解析出章节，请检查 ruleToc.chapterList/chapterName/chapterUrl',
+            logs: tocLogs,
           ),
         );
         return LegadoTestReport(steps: steps);
       }
+
+      final firstChapter = chapters.first;
+      tocLogs.add('首章节解析结果:');
+      tocLogs.add('  章节标题 (title): ${firstChapter.title}');
+      tocLogs.add('  章节链接 (url): ${firstChapter.url}');
+      tocLogs.add('  章节内部指向链接 (content): ${firstChapter.content}');
 
       steps.add(
         LegadoTestStep.ok(
           '目录',
-          '解析到 ${chapters.length} 章，首章：${chapters.first.title}',
-          sample:
-              '${chapters.first.title}\n${chapters.first.content ?? chapters.first.url ?? ''}',
+          '解析到 ${chapters.length} 章，首章：${firstChapter.title}',
+          sample: '${firstChapter.title}\n${firstChapter.content ?? firstChapter.url ?? ''}',
+          logs: tocLogs,
         ),
       );
 
-      final chapterUrl = chapters.first.content ?? chapters.first.url ?? '';
+      // 7. 正文
+      final contentLogs = <String>[];
+      final chapterUrl = firstChapter.content ?? firstChapter.url ?? '';
+      contentLogs.add('开始获取章节正文内容...');
+      contentLogs.add('首章链接: $chapterUrl');
+      
       if (chapterUrl.trim().isEmpty) {
+        contentLogs.add('错误：首章链接解析为空，无法发起正文请求。请检查 ruleToc.chapterUrl。');
         steps.add(
-          const LegadoTestStep.fail(
+          LegadoTestStep.fail(
             '正文',
             '章节链接解析为空，请检查 ruleToc.chapterUrl',
+            logs: contentLogs,
           ),
         );
         return LegadoTestReport(steps: steps);
       }
 
+      contentLogs.add('正文规则 ruleContent: ${source.ruleContent}');
       final content = await getChapterContent(source, chapterUrl);
-      if (content.isEmpty) {
-        steps.add(const LegadoTestStep.fail('正文', '没有解析出正文内容'));
-      } else {
+      
+      if (content.isEmpty || content.startsWith('解析失败')) {
+        contentLogs.add('错误：正文解析失败或为空！返回值: $content');
         steps.add(
-          LegadoTestStep.ok('正文', '首章正文解析成功', sample: _sample(content)),
+          LegadoTestStep.fail(
+            '正文',
+            content.isEmpty ? '没有解析出正文内容' : content,
+            logs: contentLogs,
+          ),
+        );
+      } else {
+        contentLogs.add('正文解析成功！正文字数: ${content.length}');
+        contentLogs.add('正文前 500 字符采样:');
+        contentLogs.add(content.substring(0, content.length > 500 ? 500 : content.length));
+        
+        steps.add(
+          LegadoTestStep.ok(
+            '正文',
+            '首章正文解析成功',
+            sample: _sample(content),
+            logs: contentLogs,
+          ),
         );
       }
-    } catch (e) {
-      steps.add(LegadoTestStep.fail('异常', e.toString()));
+    } catch (e, stackTrace) {
+      steps.add(
+        LegadoTestStep.fail(
+          '异常',
+          e.toString(),
+          logs: [
+            '书源测试过程中抛出未捕获的异常:',
+            '异常内容: $e',
+            '异常调用栈:\n$stackTrace',
+          ],
+        ),
+      );
     }
 
     return LegadoTestReport(steps: steps);
@@ -201,8 +354,12 @@ class LegadoParser {
   /// 搜索书籍。
   static Future<List<Book>> searchBooks(
     BookSource source,
-    String keyword,
-  ) async {
+    String keyword, {
+    Response<dynamic>? preFetchedResponse,
+  }) async {
+    if (preFetchedResponse != null) {
+      return _parseBooksFromResponse(source, keyword, preFetchedResponse, page: 1);
+    }
     final firstPage = await _searchBooksPage(source, keyword, page: 1);
     if (firstPage.isNotEmpty ||
         !(source.searchUrl?.contains('page') ?? false)) {
@@ -223,6 +380,15 @@ class LegadoParser {
       await _buildSearchUrlAsync(source, keyword, page: page),
       keyword: keyword,
     );
+    return _parseBooksFromResponse(source, keyword, response, page: page);
+  }
+
+  static Future<List<Book>> _parseBooksFromResponse(
+    BookSource source,
+    String keyword,
+    Response<dynamic> response, {
+    required int page,
+  }) async {
     var data = response.data;
 
     final rule = _ruleMap(source.ruleSearch);
@@ -317,13 +483,17 @@ class LegadoParser {
   }
 
   /// 获取书籍详情信息。
-  static Future<Book> parseBookInfo(BookSource source, Book book) async {
+  static Future<Book> parseBookInfo(
+    BookSource source,
+    Book book, {
+    Response<dynamic>? preFetchedResponse,
+  }) async {
     if (source.ruleBookInfo == null || source.ruleBookInfo!.isEmpty) {
       return book;
     }
 
     final rule = _ruleMap(source.ruleBookInfo);
-    final response = await _request(source, book.filePath);
+    final response = preFetchedResponse ?? await _request(source, book.filePath);
     var data = response.data;
     final initRule = _firstRule(rule, const ['init']);
     final preparedInit = initRule == null
@@ -385,6 +555,7 @@ class LegadoParser {
     BookSource source,
     Book book, {
     int? limit,
+    Response<dynamic>? preFetchedResponse,
   }) async {
     final ruleTocStr = source.ruleToc;
     if (ruleTocStr == null) return [];
@@ -396,7 +567,7 @@ class LegadoParser {
     final chapters = <Chapter>[];
     final visitedUrls = <String>{};
 
-    var currentResponse = await _request(source, book.filePath);
+    var currentResponse = preFetchedResponse ?? await _request(source, book.filePath);
     currentResponse = await _followTocUrl(source, book.filePath, currentResponse, rule);
     
     var currentUrlStr = currentResponse.realUri.toString();
@@ -2534,36 +2705,41 @@ class LegadoTestStep {
   final String message;
   final String? sample;
   final LegadoStepStatus status;
+  final List<String> logs;
 
   const LegadoTestStep({
     required this.title,
     required this.message,
     this.sample,
     required this.status,
+    this.logs = const [],
   });
 
-  const LegadoTestStep.ok(String title, String message, {String? sample})
+  const LegadoTestStep.ok(String title, String message, {String? sample, List<String> logs = const []})
     : this(
         title: title,
         message: message,
         sample: sample,
         status: LegadoStepStatus.ok,
+        logs: logs,
       );
 
-  const LegadoTestStep.fail(String title, String message, {String? sample})
+  const LegadoTestStep.fail(String title, String message, {String? sample, List<String> logs = const []})
     : this(
         title: title,
         message: message,
         sample: sample,
         status: LegadoStepStatus.fail,
+        logs: logs,
       );
 
-  const LegadoTestStep.skip(String title, String message, {String? sample})
+  const LegadoTestStep.skip(String title, String message, {String? sample, List<String> logs = const []})
     : this(
         title: title,
         message: message,
         sample: sample,
         status: LegadoStepStatus.skip,
+        logs: logs,
       );
 }
 
