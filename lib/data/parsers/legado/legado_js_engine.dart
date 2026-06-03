@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
+import 'package:html/dom.dart';
+import 'package:html/parser.dart' show parse;
 
 class LegadoJsEngine {
   static final LegadoJsEngine _instance = LegadoJsEngine._internal();
@@ -12,6 +14,7 @@ class LegadoJsEngine {
   final Set<String> _loadedLibraryKeys = <String>{};
   Future<String> Function(String request)? _currentAjaxHandler;
   final Map<String, dynamic> _javaStorage = <String, dynamic>{};
+  final Map<String, Document> _jsoupDocuments = {};
 
   LegadoJsEngine._internal() {
     try {
@@ -28,6 +31,38 @@ class LegadoJsEngine {
           }
         }
         return '';
+      });
+
+      _runtime!.onMessage('jsoup_parse', (dynamic args) {
+        final html = args.toString();
+        final id = DateTime.now().microsecondsSinceEpoch.toString();
+        try {
+          _jsoupDocuments[id] = parse(html);
+          return id;
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('jsoup_select', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final id = data['id'].toString();
+          final selector = data['selector'].toString();
+          final doc = _jsoupDocuments[id];
+          if (doc != null) {
+            final elements = doc.querySelectorAll(selector);
+            final resultList = elements.map((el) => {
+              'text': el.text.trim(),
+              'html': el.outerHtml,
+              'attr': el.attributes,
+            }).toList();
+            return jsonEncode(resultList);
+          }
+        } catch (e) {
+          print('Jsoup select failed: $e');
+        }
+        return '[]';
       });
 
       _runtime!.onMessage('java_put', (dynamic args) {
@@ -353,6 +388,42 @@ class LegadoJsEngine {
           Hex: { parse: function(value) { return String(value || ""); } }
         }
       };
+
+      var org = {
+        jsoup: {
+          Jsoup: {
+            parse: function(html) {
+              var docId = sendMessage("jsoup_parse", String(html || ""));
+              var mockDoc = {
+                select: function(selector) {
+                  var rawResult = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
+                  var nodes = [];
+                  try {
+                    nodes = JSON.parse(rawResult);
+                  } catch(e) {}
+                  
+                  var wrapper = {
+                    text: function() { return nodes.map(n => n.text).join("\n"); },
+                    html: function() { return nodes.map(n => n.html).join("\n"); },
+                    attr: function(name) { return nodes.length > 0 ? String(nodes[0].attr[name] || "") : ""; },
+                    first: function() { return wrapper; },
+                    get: function(index) { return wrapper; },
+                    eq: function(index) { return wrapper; },
+                    size: function() { return nodes.length; },
+                    isEmpty: function() { return nodes.length === 0; }
+                  };
+                  return wrapper;
+                }
+              };
+              return mockDoc;
+            }
+          }
+        }
+      };
+
+      java.md5 = function(string) {
+        return this.md5Encode(string);
+      };
     ''';
 
     if (_runtime == null) return;
@@ -377,6 +448,8 @@ class LegadoJsEngine {
     } catch (e) {
       print('JS Eval failed: $e');
       throw Exception('JS执行异常: $e');
+    } finally {
+      _jsoupDocuments.clear();
     }
   }
 
@@ -407,6 +480,7 @@ class LegadoJsEngine {
       rethrow;
     } finally {
       _currentAjaxHandler = null;
+      _jsoupDocuments.clear();
     }
   }
 
@@ -513,11 +587,8 @@ class LegadoJsEngine {
 
     codeToRun = codeToRun.trim();
 
-    // Support await for java calls dynamically
-    codeToRun = codeToRun.replaceAllMapped(
-      RegExp(r'(?<!await\s+)java\.(ajax|post|connect|startBrowser)\b'),
-      (match) => 'await java.${match.group(1)}',
-    );
+    // Use JsCompatibilityTransformer to upgrade functions with java.ajax calls to async and insert await correctly
+    codeToRun = JsCompatibilityTransformer.transform(codeToRun);
 
     final hasAwait = codeToRun.contains('await');
 
@@ -529,9 +600,9 @@ class LegadoJsEngine {
         return clean.replaceFirst(RegExp(r'^\((async\s*)?\(\)'), '(async()');
       }
 
-      if (codeToRun.contains('return ')) {
+      if (codeToRun.contains('return ') && !codeToRun.startsWith('(async')) {
         return '(async function() { $codeToRun })()';
-      } else {
+      } else if (!codeToRun.startsWith('(async') && !codeToRun.startsWith('var') && !codeToRun.startsWith('let') && !codeToRun.startsWith('const')) {
         return '(async () => { return ($codeToRun); })()';
       }
     } else {
@@ -540,6 +611,66 @@ class LegadoJsEngine {
       }
     }
     return codeToRun;
+  }
+}
+
+class JsCompatibilityTransformer {
+  static String transform(String code) {
+    var transformed = code;
+    
+    // Check if we actually need to transform (contains java ajax/post/connect/startBrowser)
+    final hasJavaCall = RegExp(r'java\.(ajax|post|connect|startBrowser)\b').hasMatch(transformed);
+    if (!hasJavaCall) {
+      return transformed;
+    }
+
+    // 1. Convert standard functions: function(...) { or function name(...) {
+    transformed = transformed.replaceAllMapped(
+      RegExp(r'\bfunction\b(\s+\w+)?\s*\(([^)]*)\)'),
+      (match) {
+        final name = match.group(1) ?? '';
+        final params = match.group(2) ?? '';
+        final before = match.input.substring(0, match.start);
+        if (before.trim().endsWith('async')) {
+          return match.group(0)!;
+        }
+        return 'async function$name($params)';
+      },
+    );
+
+    // 2. Convert arrow functions with parameter list: (...) =>
+    transformed = transformed.replaceAllMapped(
+      RegExp(r'\(([^)]*)\)\s*=>'),
+      (match) {
+        final params = match.group(1) ?? '';
+        final before = match.input.substring(0, match.start);
+        if (before.trim().endsWith('async')) {
+          return match.group(0)!;
+        }
+        return 'async ($params) =>';
+      },
+    );
+
+    // 3. Convert single parameter arrow functions: param =>
+    transformed = transformed.replaceAllMapped(
+      RegExp(r'\b(?!(?:return|yield|await|throw|delete|typeof|void)\b)(\w+)\s*=>'),
+      (match) {
+        final param = match.group(1) ?? '';
+        final before = match.input.substring(0, match.start);
+        if (before.trim().endsWith('async')) {
+          return match.group(0)!;
+        }
+        return 'async $param =>';
+      },
+    );
+
+    // Now insert await for java calls that don't have it
+    transformed = transformed.replaceAllMapped(
+      RegExp(r'(?<!await\s+)java\.(ajax|post|connect|startBrowser)\b'),
+      (match) => 'await java.${match.group(1)}',
+    );
+
+    return transformed;
   }
 
   void _installAjaxTrap(Map<String, String> cache) {

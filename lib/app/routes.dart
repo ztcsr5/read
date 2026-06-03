@@ -27,6 +27,7 @@ import '../features/reader/views/reader_page.dart';
 import '../features/settings/views/purify_rules_page.dart';
 import '../features/explore/views/web_source_page.dart';
 import '../features/explore/views/book_source_explore_page.dart';
+import '../features/source_diagnostic/views/source_diagnostic_page.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 
@@ -156,6 +157,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) {
           final source = state.extra as BookSource;
           return CupertinoPage(child: BookSourceExplorePage(source: source));
+        },
+      ),
+      GoRoute(
+        path: '/source_diagnostic',
+        parentNavigatorKey: rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final source = state.extra as BookSource;
+          return CupertinoPage(child: SourceDiagnosticPage(source: source));
         },
       ),
       GoRoute(

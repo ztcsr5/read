@@ -7,6 +7,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/bookmark.dart';
 import '../../../data/repositories/book_repository.dart';
+import '../../../data/models/reading_progress.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../services/tts_service.dart';
@@ -41,6 +42,7 @@ class ReaderState {
   final List<ReaderItem> items; // Flattened paragraphs for SliverList
   final int currentChapterIndex;
   final double scrollPosition;
+  final int charOffset;
   final double readingProgress;
   final bool isLoading;
   final bool isLoadingMore;
@@ -86,6 +88,7 @@ class ReaderState {
     this.items = const [],
     this.currentChapterIndex = 0,
     this.scrollPosition = 0,
+    this.charOffset = 0,
     this.readingProgress = 0,
     this.isLoading = false,
     this.isLoadingMore = false,
@@ -124,6 +127,7 @@ class ReaderState {
     List<ReaderItem>? items,
     int? currentChapterIndex,
     double? scrollPosition,
+    int? charOffset,
     double? readingProgress,
     bool? isLoading,
     bool? isLoadingMore,
@@ -161,6 +165,7 @@ class ReaderState {
       items: items ?? this.items,
       currentChapterIndex: currentChapterIndex ?? this.currentChapterIndex,
       scrollPosition: scrollPosition ?? this.scrollPosition,
+      charOffset: charOffset ?? this.charOffset,
       readingProgress: readingProgress ?? this.readingProgress,
       isLoading: isLoading ?? this.isLoading,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
@@ -363,6 +368,16 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         print('Database Error reading bookmarks: $e. Using empty bookmarks.');
       }
 
+      int charOffset = 0;
+      try {
+        final progress = await _bookRepository.getReadingProgress(id);
+        if (progress != null) {
+          charOffset = progress.charOffset;
+        }
+      } catch (e) {
+        print('Database Error reading ReadingProgress: $e. Defaulting to 0.');
+      }
+
       // 在线书籍如果还没拉取过目录，则去爬取
       if (chapters.isEmpty && book.isFromSource && book.sourceUrl != null) {
         final sourceId = int.tryParse(book.sourceUrl!);
@@ -377,6 +392,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
                   c.bookId = book.id;
                 }
                 try {
+                  await _bookRepository.deleteChaptersForBook(book.id);
                   await _bookRepository.saveChapters(chapters);
                 } catch (e) {
                   // 容错与缓存隔离：数据库存储失败，不阻塞内存数据加载
@@ -413,6 +429,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         loadedChapters: initialLoaded,
         items: initialItems,
         currentChapterIndex: currentIdx,
+        charOffset: charOffset,
         readingProgress: book.readingProgress,
         bookmarks: bookmarks,
         isLoading: false,
@@ -637,6 +654,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       state = state.copyWith(
         book: book,
         currentChapterIndex: chapterIndex,
+        charOffset: charOffset,
         scrollPosition: scrollPosition,
         readingProgress: progress,
       );

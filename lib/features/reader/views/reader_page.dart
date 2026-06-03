@@ -42,7 +42,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   // 滚动控制器 — 无限滑动的核心
   final ScrollController _scrollController = ScrollController();
-  final PageController _pageController = PageController();
+  late final PageController _pageController;
   final Map<int, GlobalKey> _itemKeys = {};
 
   // UI 状态
@@ -54,6 +54,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   DateTime _lastProgressSaveAt = DateTime.fromMillisecondsSinceEpoch(0);
   String? _pageCacheKey;
   List<_ReaderPageData>? _pageCache;
+  Size? _screenSize;
 
   bool _hasSelection = false;
   bool _hadSelectionOnPointerDown = false;
@@ -85,6 +86,30 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _scrollController.addListener(_onScroll);
 
     // 初始加载由 Provider 创建时自动调用，无需手动
+    
+    // 从缓存状态中计算并初始化 _pageController 的 initialPage，解决退出重新进入只能向后翻页的 Bug
+    int initialPage = 0;
+    try {
+      final readerState = ref.read(readerViewModelProvider(widget.bookId));
+      if (readerState.items.isNotEmpty) {
+        final view = WidgetsBinding.instance.platformDispatcher.views.first;
+        final size = view.physicalSize / view.devicePixelRatio;
+        _screenSize = size;
+        final pages = _buildReaderPages(readerState, size);
+        initialPage = _pageIndexForTarget(
+          pages,
+          ReaderNavigationTarget(
+            chapterIndex: readerState.currentChapterIndex,
+            charOffset: readerState.charOffset,
+          ),
+        );
+        _lastPagedPageIndex = initialPage;
+        _didRestoreScrollPosition = true;
+      }
+    } catch (e) {
+      print('Error initializing PageController with cached state: $e');
+    }
+    _pageController = PageController(initialPage: initialPage);
 
     // 全屏沉浸模式
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -370,6 +395,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   @override
   Widget build(BuildContext context) {
+    _screenSize = MediaQuery.of(context).size;
     ref.listen<ReaderState>(readerViewModelProvider(widget.bookId), (
       previous,
       next,
@@ -397,7 +423,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           if (_pageController.hasClients) {
             final pages = _buildReaderPages(next, MediaQuery.of(context).size);
             _pageController.jumpToPage(
-              _pageIndexForChapter(pages, next.currentChapterIndex),
+              _pageIndexForTarget(
+                pages,
+                ReaderNavigationTarget(
+                  chapterIndex: next.currentChapterIndex,
+                  charOffset: next.charOffset,
+                ),
+              ),
             );
           }
         });
@@ -405,6 +437,35 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
 
     final readerState = ref.watch(readerViewModelProvider(widget.bookId));
+    
+    if (!_didRestoreScrollPosition && readerState.items.isNotEmpty) {
+      _didRestoreScrollPosition = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (readerState.mode != ReaderMode.scroll) {
+          if (_pageController.hasClients) {
+            final pages = _buildReaderPages(readerState, _screenSize ?? MediaQuery.of(context).size);
+            final targetPage = _pageIndexForTarget(
+              pages,
+              ReaderNavigationTarget(
+                chapterIndex: readerState.currentChapterIndex,
+                charOffset: readerState.charOffset,
+              ),
+            );
+            _lastPagedPageIndex = targetPage;
+            _pageController.jumpToPage(targetPage);
+            setState(() {});
+          }
+        } else {
+          if (_scrollController.hasClients && readerState.book != null) {
+            final max = _scrollController.position.maxScrollExtent;
+            _scrollController.jumpTo(
+              readerState.book!.currentPosition.clamp(0.0, max).toDouble(),
+            );
+          }
+        }
+      });
+    }
+
     final brightness = MediaQuery.platformBrightnessOf(context);
     final bgColor = readerState.resolveBackgroundColor(brightness);
     final textColor = readerState.resolveTextColor(brightness);
@@ -704,41 +765,45 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       },
       itemBuilder: (context, pageIndex) {
         final page = pages[pageIndex];
+        final padding = _getSystemPadding();
         return _buildPageTurnWrapper(
           pageIndex: pageIndex,
           mode: readerState.mode,
-          child: Padding(
-            padding: EdgeInsets.only(
-              top: MediaQuery.of(context).padding.top + readerState.topPadding,
-              bottom: readerState.bottomPadding,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ...page.entries.map((entry) {
-                  return RepaintBoundary(
-                    key: _itemKeys.putIfAbsent(
-                      entry.itemIndex,
-                      () => GlobalKey(),
-                    ),
-                    child: _buildReaderItemView(
-                      entry.itemIndex,
-                      entry.item,
-                      readerState,
-                      textColor,
-                      bgColor,
-                    ),
-                  );
-                }),
-                const Spacer(),
-                _buildPageFooter(
-                  readerState,
-                  page,
-                  pageIndex,
-                  pages.length,
-                  textColor,
-                ),
-              ],
+          child: Container(
+            color: bgColor,
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: padding.top + readerState.topPadding,
+                bottom: padding.bottom + readerState.bottomPadding + readerState.footerHeight,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...page.entries.map((entry) {
+                    return RepaintBoundary(
+                      key: _itemKeys.putIfAbsent(
+                        entry.itemIndex,
+                        () => GlobalKey(),
+                      ),
+                      child: _buildReaderItemView(
+                        entry.itemIndex,
+                        entry.item,
+                        readerState,
+                        textColor,
+                        bgColor,
+                      ),
+                    );
+                  }),
+                  const Spacer(),
+                  _buildPageFooter(
+                    readerState,
+                    page,
+                    pageIndex,
+                    pages.length,
+                    textColor,
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -755,7 +820,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   ) {
     if (state.footerHeight <= 0) return const SizedBox.shrink();
     final first = page.firstReadableItem?.item;
-    final chapter = first == null ? '' : '第${first.chapterIndex + 1}章';
+    final chapter = '';
     final progress = pageCount <= 0
         ? 0
         : (((pageIndex + 1) / pageCount) * 100).clamp(0, 100).round();
@@ -801,7 +866,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             : _lastPagedPageIndex.toDouble();
         final offset = pageIndex - page;
         final width = MediaQuery.of(context).size.width;
-        final compensate = offset < 0 && offset > -1 ? -offset * width : 0.0;
+        final compensate = offset < 0 ? -offset * width : 0.0;
         final shadowOpacity = (1 - offset.abs()).clamp(0.0, 1.0) * 0.16;
         return Transform.translate(
           offset: Offset(compensate, 0),
@@ -824,6 +889,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  EdgeInsets _getSystemPadding() {
+    if (mounted) {
+      final mediaQuery = MediaQuery.maybeOf(context);
+      if (mediaQuery != null) {
+        return mediaQuery.padding;
+      }
+    }
+    try {
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      return EdgeInsets.fromViewPadding(view.padding, view.devicePixelRatio);
+    } catch (_) {
+      return EdgeInsets.zero;
+    }
+  }
+
   List<_ReaderPageData> _buildReaderPages(ReaderState state, Size size) {
     if (state.items.isEmpty) return const [];
     final key = _pageLayoutCacheKey(state, size);
@@ -831,10 +911,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (_pageCacheKey == key && cached != null) return cached;
 
     final width = (size.width - state.pagePadding * 2).clamp(80.0, size.width);
+    final padding = _getSystemPadding();
     final height =
         size.height -
-        MediaQuery.of(context).padding.top -
-        MediaQuery.of(context).padding.bottom -
+        padding.top -
+        padding.bottom -
         state.topPadding -
         state.bottomPadding -
         state.footerHeight;
@@ -869,7 +950,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   String _pageLayoutCacheKey(ReaderState state, Size size) {
-    final padding = MediaQuery.of(context).padding;
+    final padding = _getSystemPadding();
+    final boldText = mounted ? MediaQuery.boldTextOf(context) : false;
     return [
       identityHashCode(state.items),
       state.items.length,
@@ -888,7 +970,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       state.paragraphIndent,
       state.pagePadding,
       state.fontWeightIndex,
-      MediaQuery.boldTextOf(context),
+      boldText,
       state.fontFamily,
       state.isJustify,
     ].join('|');
@@ -913,8 +995,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: width);
       return AppDimensions.paddingLarge +
-          metaSize * 1.2 +
-          16 +
           titlePainter.height +
           state.titleSpacing +
           12;
@@ -1005,7 +1085,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return _findTopVisibleItem() ??
           state.items[_lastVisibleItemIndex.clamp(0, state.items.length - 1)];
     }
-    final pages = _buildReaderPages(state, MediaQuery.of(context).size);
+    final pages = _buildReaderPages(state, _screenSize ?? const Size(375, 812));
     if (pages.isNotEmpty) {
       final page =
           pages[_lastPagedPageIndex.clamp(0, pages.length - 1).toInt()];
@@ -1143,7 +1223,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     // 标题
     if (item.isTitle) {
       final titleSize = (state.fontSize + 7).clamp(24.0, 38.0);
-      final metaSize = (state.fontSize - 6).clamp(11.0, 14.0);
       return Padding(
         padding: EdgeInsets.only(
           left: state.pagePadding,
@@ -1151,41 +1230,22 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           top: AppDimensions.paddingLarge,
           bottom: state.titleSpacing + 12,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '第 ${item.chapterIndex + 1} 章',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: metaSize,
-                fontWeight: FontWeight.w600,
-                fontVariations: const [FontVariation('wght', 600)],
-                color: textColor.withOpacity(0.7),
-                height: 1.2,
-                letterSpacing: 0,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              item.text,
-              style: TextStyle(
-                fontSize: titleSize,
-                fontWeight: FontWeight.w700,
-                fontVariations: const [FontVariation('wght', 700)],
-                fontFamilyFallback: const [
-                  'PingFang SC',
-                  'Heiti SC',
-                  'Noto Sans CJK SC',
-                  'Microsoft YaHei',
-                ],
-                color: textColor,
-                height: 1.22,
-                letterSpacing: 0,
-              ),
-            ),
-          ],
+        child: Text(
+          item.text,
+          style: TextStyle(
+            fontSize: titleSize,
+            fontWeight: FontWeight.w700,
+            fontVariations: const [FontVariation('wght', 700)],
+            fontFamilyFallback: const [
+              'PingFang SC',
+              'Heiti SC',
+              'Noto Sans CJK SC',
+              'Microsoft YaHei',
+            ],
+            color: textColor,
+            height: 1.22,
+            letterSpacing: 0,
+          ),
         ),
       );
     }
@@ -1823,45 +1883,52 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     return Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppDimensions.paddingLarge,
+                        vertical: 8,
                       ),
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            '第 ${readerState.currentChapterIndex + 1} 章',
-                            style: TextStyle(color: secondary, fontSize: 12),
-                          ),
-                          Expanded(
-                            child: CupertinoSlider(
-                              value: sliderValue,
-                              min: 0.0,
-                              max: sliderMax <= 0.0 ? 1.0 : sliderMax,
-                              onChanged: sliderMax <= 0.0 ? null : (value) {
-                                final targetPageIdx = value.round();
-                                if (targetPageIdx >= 0 && targetPageIdx < chapterPages.length) {
-                                  if (readerState.mode != ReaderMode.scroll) {
-                                    final absIdx = allPages.indexOf(chapterPages[targetPageIdx]);
-                                    if (absIdx >= 0 && _pageController.hasClients) {
-                                      _lastPagedPageIndex = absIdx;
-                                      _pageController.jumpToPage(absIdx);
-                                      setState(() {});
-                                    }
-                                  } else {
-                                    final entry = chapterPages[targetPageIdx].firstReadableItem;
-                                    if (entry != null) {
-                                      _scrollToTarget(ReaderNavigationTarget(
-                                        chapterIndex: readerState.currentChapterIndex,
-                                        charOffset: entry.item.charOffset,
-                                      ));
-                                    }
-                                  }
-                                }
-                              },
-                              activeColor: AppColors.primaryBlue,
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: () => _turnChapter(-1),
+                            child: Row(
+                              children: [
+                                Icon(CupertinoIcons.chevron_left, color: foreground, size: 16),
+                                const SizedBox(width: 4),
+                                Text('上一章', style: TextStyle(color: foreground, fontSize: 14)),
+                              ],
                             ),
                           ),
-                          Text(
-                            '${currentPageIndexInChapter + 1} / ${chapterPages.isEmpty ? 1 : chapterPages.length} 页',
-                            style: TextStyle(color: secondary, fontSize: 12),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '第 ${readerState.currentChapterIndex + 1} 章',
+                                  style: TextStyle(color: foreground, fontSize: 14, fontWeight: FontWeight.w600),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${currentPageIndexInChapter + 1} / ${chapterPages.isEmpty ? 1 : chapterPages.length} 页',
+                                  style: TextStyle(color: secondary, fontSize: 11),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                          CupertinoButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: () => _turnChapter(1),
+                            child: Row(
+                              children: [
+                                Text('下一章', style: TextStyle(color: foreground, fontSize: 14)),
+                                const SizedBox(width: 4),
+                                Icon(CupertinoIcons.chevron_right, color: foreground, size: 16),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -1887,25 +1954,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         },
                       ),
                       _buildToolButton(
-                        icon: CupertinoIcons.backward_end,
-                        label: '上一章',
+                        icon: CupertinoIcons.globe,
+                        label: '换源',
                         color: foreground,
                         onTap: () {
-                          _turnChapter(-1);
-                        },
-                      ),
-                      _buildToolButton(
-                        icon: CupertinoIcons.textformat_size,
-                        label: '字体',
-                        color: foreground,
-                        onTap: _toggleSettings,
-                      ),
-                      _buildToolButton(
-                        icon: CupertinoIcons.forward_end,
-                        label: '下一章',
-                        color: foreground,
-                        onTap: () {
-                          _turnChapter(1);
+                          _showSourceSwitcher(pageContext);
                         },
                       ),
                       _buildToolButton(
@@ -1929,6 +1982,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         label: readerState.autoScroll ? '暂停' : '自动',
                         color: foreground,
                         onTap: _toggleAutoScroll,
+                      ),
+                      _buildToolButton(
+                        icon: CupertinoIcons.settings,
+                        label: '设置',
+                        color: foreground,
+                        onTap: _toggleSettings,
                       ),
                     ],
                   ),

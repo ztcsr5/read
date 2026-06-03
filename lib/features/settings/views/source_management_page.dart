@@ -9,6 +9,8 @@ import '../../../data/models/rss_source.dart';
 import '../../../data/models/source_catalog.dart';
 import '../../../widgets/ios_navigation_bar.dart';
 import '../viewmodels/book_source_viewmodel.dart';
+import '../../../data/repositories/book_repository.dart';
+import '../../source_diagnostic/services/source_generator_service.dart';
 
 class SourceManagementPage extends ConsumerStatefulWidget {
   const SourceManagementPage({super.key});
@@ -193,7 +195,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
               if (_isManaging) {
                 _toggleSelection(_selectedBookSourceIds, source.id);
               } else {
-                context.push('/book_source', extra: source);
+                context.push('/source_explore', extra: source);
               }
             },
             title: Text(source.bookSourceName),
@@ -208,6 +210,15 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        child: const Icon(
+                          CupertinoIcons.waveform_path_ecg,
+                          color: Color(0xFF10B981),
+                        ),
+                        onPressed: () =>
+                            context.push('/source_diagnostic', extra: source),
+                      ),
                       CupertinoButton(
                         padding: EdgeInsets.zero,
                         child: const Icon(CupertinoIcons.checkmark_seal),
@@ -607,6 +618,15 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                             },
                           ),
                           const SizedBox(height: 8),
+                          CupertinoButton(
+                            child: const Text('一键自动生成书源'),
+                            onPressed: () {
+                              final url = inputText.trim();
+                              Navigator.pop(context);
+                              _generateBookSourceFromUrl(url, ref);
+                            },
+                          ),
+                          const SizedBox(height: 8),
                           CupertinoButton.filled(
                             child: const Text('自动识别并导入'),
                             onPressed: () {
@@ -625,6 +645,43 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
         );
       },
     );
+  }
+
+  Future<void> _generateBookSourceFromUrl(String url, WidgetRef ref) async {
+    final rootContext = context;
+    if (url.trim().isEmpty || !url.trim().startsWith('http')) {
+      _showAlert(context, '输入错误', '请输入以 http:// 或 https:// 开头的网站主页地址。');
+      return;
+    }
+
+    showCupertinoDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const CupertinoAlertDialog(
+        title: Text('分析与生成中'),
+        content: Padding(
+          padding: EdgeInsets.only(top: 12.0),
+          child: CupertinoActivityIndicator(),
+        ),
+      ),
+    );
+
+    try {
+      final generated = await SourceGeneratorService.generate(url);
+      final repo = ref.read(bookRepositoryProvider);
+      await repo.saveBookSource(generated);
+      await ref.read(bookSourceViewModelProvider.notifier).loadSources();
+      
+      if (rootContext.mounted) {
+        Navigator.pop(rootContext);
+        _showAlert(rootContext, '生成成功', '已自动识别网页结构并生成书源：${generated.bookSourceName}');
+      }
+    } catch (e) {
+      if (rootContext.mounted) {
+        Navigator.pop(rootContext);
+        _showAlert(rootContext, '生成失败', '自动识别或分析网站失败: $e');
+      }
+    }
   }
 
   Future<void> _pickAndImportJsonFile(WidgetRef ref) async {

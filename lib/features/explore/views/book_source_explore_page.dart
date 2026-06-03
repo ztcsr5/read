@@ -123,7 +123,24 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
     if (_groups.isEmpty) {
       return CupertinoPageScaffold(
         navigationBar: CupertinoNavigationBar(
-          middle: Text('${widget.source.bookSourceName} - 发现'),
+          middle: Text(widget.source.bookSourceName),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                child: const Icon(CupertinoIcons.search, size: 22),
+                onPressed: () {
+                  context.go('/explore');
+                },
+              ),
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                child: const Icon(CupertinoIcons.person_crop_circle, size: 22),
+                onPressed: () {},
+              ),
+            ],
+          ),
         ),
         child: const Center(
           child: Text(
@@ -138,7 +155,24 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
 
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        middle: Text('${widget.source.bookSourceName} - 发现'),
+        middle: Text(widget.source.bookSourceName),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              child: const Icon(CupertinoIcons.search, size: 22),
+              onPressed: () {
+                context.go('/explore');
+              },
+            ),
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              child: const Icon(CupertinoIcons.person_crop_circle, size: 22),
+              onPressed: () {},
+            ),
+          ],
+        ),
       ),
       child: SafeArea(
         child: Column(
@@ -191,57 +225,50 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
         // Grid of subcategories
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1C1C1E) : CupertinoColors.white,
-            border: const Border(
-              bottom: BorderSide(color: CupertinoColors.systemGrey5, width: 0.5),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '子分类标签',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: CupertinoColors.secondaryLabel,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: group.subCategories.map((sub) {
-                  final isSelected = sub == selected;
-                  return CupertinoButton(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minSize: 0,
-                    borderRadius: BorderRadius.circular(20),
-                    color: isSelected
-                        ? CupertinoColors.activeBlue
-                        : (isDark ? const Color(0xFF2C2C2E) : CupertinoColors.systemGrey6),
-                    onPressed: () {
-                      if (isSelected) return;
-                      setState(() {
-                        _selectedSub[groupIndex] = sub;
-                      });
-                      _loadBooks(groupIndex);
-                    },
-                    child: Text(
-                      sub.name,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                        color: isSelected
-                            ? CupertinoColors.white
-                            : CupertinoColors.label,
-                      ),
+          constraints: const BoxConstraints(maxHeight: 180),
+          width: double.infinity,
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 10,
+              children: group.subCategories.map((sub) {
+                final isSelected = sub == selected;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (isSelected) return;
+                    setState(() {
+                      _selectedSub[groupIndex] = sub;
+                    });
+                    _loadBooks(groupIndex);
+                  },
+                  child: RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: sub.name,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected
+                                ? (isDark ? CupertinoColors.activeBlue : const Color(0xFF1E88E5))
+                                : (isDark ? CupertinoColors.systemGrey : CupertinoColors.label.resolveFrom(context)),
+                          ),
+                        ),
+                        TextSpan(
+                          text: '  ·  ',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDark ? CupertinoColors.systemGrey3 : CupertinoColors.systemGrey4,
+                          ),
+                        ),
+                      ],
                     ),
-                  );
-                }).toList(),
-              ),
-            ],
+                  ),
+                );
+              }).toList(),
+            ),
           ),
         ),
         
@@ -325,6 +352,23 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
   }
 
   Widget _bookRow(Book book) {
+    final isDark = CupertinoTheme.of(context).brightness == Brightness.dark;
+    
+    // Clean up description if it is raw URL or empty
+    final String description;
+    if (book.filePath.isEmpty || 
+        book.filePath.startsWith('/') || 
+        book.filePath.startsWith('http') ||
+        book.filePath.contains('.')) {
+      description = '暂无简介，点击查看详情';
+    } else {
+      description = book.filePath;
+    }
+
+    final authorText = book.author.isEmpty ? '未知作者' : book.author;
+    final tagsText = book.tags.isNotEmpty ? book.tags.join(',') : '';
+    final infoText = tagsText.isNotEmpty ? '$authorText · $tagsText' : authorText;
+
     return CupertinoButton(
       padding: EdgeInsets.zero,
       onPressed: () => _openBook(book),
@@ -334,8 +378,8 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: BookCover(book: book, width: 58, height: 78, iconSize: 26),
+              borderRadius: BorderRadius.circular(8),
+              child: BookCover(book: book, width: 64, height: 86, iconSize: 28),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -346,30 +390,30 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                     book.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
+                    style: TextStyle(
+                      fontSize: 17,
                       fontWeight: FontWeight.w700,
-                      color: CupertinoColors.label,
+                      color: isDark ? CupertinoColors.white : CupertinoColors.black,
                     ),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 6),
                   Text(
-                    book.author.isEmpty ? '未知作者' : book.author,
+                    infoText,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: CupertinoColors.secondaryLabel,
+                      color: isDark ? CupertinoColors.systemGrey : CupertinoColors.secondaryLabel.resolveFrom(context),
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    book.filePath,
+                    description,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: CupertinoColors.secondaryLabel,
+                      color: isDark ? CupertinoColors.systemGrey3 : CupertinoColors.secondaryLabel.resolveFrom(context),
                       height: 1.3,
                     ),
                   ),

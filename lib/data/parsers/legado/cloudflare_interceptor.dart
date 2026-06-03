@@ -18,6 +18,29 @@ class CloudflareInterceptor extends Interceptor {
   // 域名过盾成功时间戳缓存，用于实现过盾冷却保护，防止短时间连续高频弹窗
   static final Map<String, DateTime> _lastBypassSuccessTime = {};
 
+  // 全局弹窗队列，防止不同域名并发请求导致多个 Cupertino 弹窗重叠 Navigator 冲突
+  static final List<Completer<void>> _dialogQueue = [];
+  static bool _isDialogShowing = false;
+
+  static Future<void> _waitForDialogTurn() async {
+    if (!_isDialogShowing) {
+      _isDialogShowing = true;
+      return;
+    }
+    final completer = Completer<void>();
+    _dialogQueue.add(completer);
+    await completer.future;
+  }
+
+  static void _releaseDialogTurn() {
+    if (_dialogQueue.isNotEmpty) {
+      final next = _dialogQueue.removeAt(0);
+      next.complete();
+    } else {
+      _isDialogShowing = false;
+    }
+  }
+
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     LegadoSessionStore.apply(options.uri, options.headers);
@@ -245,13 +268,26 @@ class CloudflareInterceptor extends Interceptor {
       await controller.loadRequest(uri);
 
       if (context != null && context.mounted) {
-        dialogOpen = true;
-        await showCupertinoDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => CloudflareDialog(controller: controller),
-        );
-        dialogOpen = false;
+        if (completer.isCompleted) {
+          timeoutTimer.cancel();
+          return completer.future;
+        }
+        await _waitForDialogTurn();
+        try {
+          if (completer.isCompleted) {
+            timeoutTimer.cancel();
+            return completer.future;
+          }
+          dialogOpen = true;
+          await showCupertinoDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => CloudflareDialog(controller: controller),
+          );
+        } finally {
+          dialogOpen = false;
+          _releaseDialogTurn();
+        }
         if (!completer.isCompleted) {
           completer.complete(false); // 用户手动关闭弹窗
         }

@@ -183,6 +183,22 @@ class BookRepository {
     }
   }
 
+  /// Get reading progress for a given book ID.
+  Future<ReadingProgress?> getReadingProgress(int bookId) async {
+    if (isar == null) {
+      try {
+        return _mockProgress.firstWhere((p) => p.bookId == bookId);
+      } catch (_) {
+        return null;
+      }
+    }
+    return await isar!
+        .collection<ReadingProgress>()
+        .filter()
+        .bookIdEqualTo(bookId)
+        .findFirst();
+  }
+
   /// Update the reading progress for a book.
   Future<void> updateReadingProgress(
     int bookId,

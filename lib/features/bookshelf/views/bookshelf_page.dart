@@ -63,6 +63,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         });
       }
     }
+    final booksWithUpdates = state.allBooks.where((book) {
+      return book.totalChapters > (book.currentChapter + 1) && book.totalChapters > 0;
+    }).toList();
 
     return CupertinoPageScaffold(
       backgroundColor: bgColor,
@@ -239,14 +242,14 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
             ),
           ),
 
-          // 列表视图 (封面在左，信息在右)
-          if (state.allBooks.isEmpty && !state.isLoading)
+          // 最新更新列表视图 (过滤有更新的书籍，封面在左，信息在右)
+          if (booksWithUpdates.isEmpty && !state.isLoading)
             const SliverToBoxAdapter(
               child: Center(
                 child: Padding(
                   padding: EdgeInsets.all(40.0),
                   child: Text(
-                    '书库空空如也\n点击右上角按钮导入书籍',
+                    '暂无更新书籍',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: CupertinoColors.systemGrey,
@@ -267,12 +270,12 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                   ),
                   child: _buildFavoriteCard(
                     context,
-                    state.allBooks[index],
+                    booksWithUpdates[index],
                     index,
                     isDark,
                   ),
                 );
-              }, childCount: state.allBooks.length),
+              }, childCount: booksWithUpdates.length),
             ),
 
           // 书架标签
@@ -524,17 +527,36 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 左侧封面 (固定大小，圆角)
-          Container(
-            width: 70,
-            height: 100,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                BookCover(book: book, width: 70, height: 100, iconSize: 30),
-              ],
-            ),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 70,
+                height: 100,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
+                clipBehavior: Clip.antiAlias,
+                child: BookCover(book: book, width: 70, height: 100, iconSize: 30),
+              ),
+              Positioned(
+                top: -3,
+                right: -3,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: const BoxDecoration(
+                    color: CupertinoColors.systemRed,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 2,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(width: 16),
           // 右侧信息
@@ -569,12 +591,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '共 ${book.totalChapters} 章',
-                  style: TextStyle(
+                  '更新到第 ${book.totalChapters} 章',
+                  style: const TextStyle(
                     fontSize: 12,
-                    color: isDark
-                        ? CupertinoColors.systemGrey2
-                        : CupertinoColors.systemGrey,
+                    fontWeight: FontWeight.w600,
+                    color: CupertinoColors.activeOrange,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

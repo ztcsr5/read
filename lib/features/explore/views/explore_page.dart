@@ -83,6 +83,8 @@ class ExplorePage extends ConsumerWidget {
                   },
                 ),
               ),
+              const SizedBox(height: 20),
+              _buildSourceCard(context),
               const SizedBox(height: 10),
               Align(
                 alignment: Alignment.centerRight,
@@ -103,8 +105,6 @@ class ExplorePage extends ConsumerWidget {
                   },
                 ),
               ),
-              const SizedBox(height: 20),
-              _buildSourceCard(context),
               const SizedBox(height: 30),
               const Text(
                 '搜索结果',

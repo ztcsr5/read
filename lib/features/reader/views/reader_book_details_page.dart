@@ -254,8 +254,8 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
         : '未读';
 
     final displayChapters = _isAscending
-        ? state.chapters.take(10).toList()
-        : state.chapters.reversed.take(10).toList();
+        ? state.chapters.take(100).toList()
+        : state.chapters.reversed.take(100).toList();
 
     return PopScope(
       canPop: false,
@@ -528,6 +528,36 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
                   );
                 },
               ),
+              if (state.chapters.length > 100) ...[
+                const SizedBox(height: 16),
+                Center(
+                  child: CupertinoButton(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                    color: Colors.blue.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(22),
+                    onPressed: _openFullToc,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Text(
+                          '查看全部章节',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(
+                          CupertinoIcons.chevron_right,
+                          color: Colors.blue,
+                          size: 16,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 36),
             ],
           ),

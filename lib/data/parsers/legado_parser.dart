@@ -74,6 +74,10 @@ class LegadoParser {
     return dio;
   }
 
+  static Future<String> buildSearchUrl(BookSource source, String keyword) => _buildSearchUrlAsync(source, keyword);
+
+  static Future<Response<dynamic>> fetchHtml(BookSource source, String url, {String? keyword}) => _request(source, url, keyword: keyword);
+
   /// 从搜索到正文逐步测试书源，方便定位是哪一段规则失效。
   static Future<LegadoTestReport> testSource(
     BookSource source,
@@ -2806,6 +2810,10 @@ class LegadoParser {
 
   static String detectCharset(List<int> bytes, String? charset, Map<String, List<String>>? headers) {
     if (charset != null && charset.isNotEmpty) {
+      final charsetLower = charset.toLowerCase();
+      if (charsetLower.contains('gbk') || charsetLower.contains('gb2312') || charsetLower.contains('gb18030')) {
+        return 'gbk';
+      }
       return charset;
     }
 
@@ -2829,7 +2837,7 @@ class LegadoParser {
       final contentType = headers['content-type'] ?? headers['Content-Type'];
       if (contentType != null && contentType.isNotEmpty) {
         final ctStr = contentType.join(' ').toLowerCase();
-        if (ctStr.contains('charset=gbk') || ctStr.contains('charset=gb2312')) {
+        if (ctStr.contains('charset=gbk') || ctStr.contains('charset=gb2312') || ctStr.contains('charset=gb18030')) {
           return 'gbk';
         }
         if (ctStr.contains('charset=utf-8') || ctStr.contains('charset=utf8')) {
@@ -2850,7 +2858,10 @@ class LegadoParser {
         sampleStr.contains("charset='gbk'") ||
         sampleStr.contains('charset=gb2312') ||
         sampleStr.contains('charset="gb2312"') ||
-        sampleStr.contains("charset='gb2312'")) {
+        sampleStr.contains("charset='gb2312'") ||
+        sampleStr.contains('charset=gb18030') ||
+        sampleStr.contains('charset="gb18030"') ||
+        sampleStr.contains("charset='gb18030'")) {
       return 'gbk';
     }
 
@@ -2878,7 +2889,7 @@ class LegadoParser {
       }
     }
     final detected = detectCharset(contentBytes, charset, headers).toLowerCase().trim();
-    if (detected == 'gbk' || detected == 'gb2312') {
+    if (detected == 'gbk' || detected == 'gb2312' || detected == 'gb18030') {
       try {
         return gbk.decode(contentBytes);
       } catch (_) {
