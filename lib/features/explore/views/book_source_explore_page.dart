@@ -2,7 +2,15 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/material.dart' show TabBar, TabBarView, Tab, TabController, Material, Colors, TabPageSelector;
+import 'package:flutter/material.dart'
+    show
+        TabBar,
+        TabBarView,
+        Tab,
+        TabController,
+        Material,
+        Colors,
+        TabPageSelector;
 
 import '../../../data/models/book.dart';
 import '../../../data/models/book_source.dart';
@@ -16,13 +24,15 @@ class BookSourceExplorePage extends ConsumerStatefulWidget {
   const BookSourceExplorePage({super.key, required this.source});
 
   @override
-  ConsumerState<BookSourceExplorePage> createState() => _BookSourceExplorePageState();
+  ConsumerState<BookSourceExplorePage> createState() =>
+      _BookSourceExplorePageState();
 }
 
-class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> with TickerProviderStateMixin {
+class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
+    with TickerProviderStateMixin {
   List<ExploreCategoryGroup> _groups = [];
   TabController? _tabController;
-  
+
   // Track selected subcategory and loaded books per category group index
   final Map<int, ExploreSubCategory?> _selectedSub = {};
   final Map<int, List<Book>> _books = {};
@@ -78,14 +88,17 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
     });
 
     final page = _currentPage[groupIndex] ?? 1;
-    
+
     // Replace {page} or {{page}} in URL
     var relativeUrl = sub.url
         .replaceAll('{{page}}', page.toString())
         .replaceAll('{page}', page.toString());
-        
+
     // Resolve absolute URL
-    final absoluteUrl = LegadoParser.resolveUrl(widget.source.bookSourceUrl, relativeUrl);
+    final absoluteUrl = LegadoParser.resolveUrl(
+      widget.source.bookSourceUrl,
+      relativeUrl,
+    );
 
     try {
       final newBooks = await LegadoParser.parseExploreBooks(
@@ -179,7 +192,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
           children: [
             if (_groups.length > 1)
               Container(
-                color: isDark ? const Color(0xFF1C1C1E) : CupertinoColors.systemGrey6,
+                color: isDark
+                    ? const Color(0xFF1C1C1E)
+                    : CupertinoColors.systemGrey6,
                 width: double.infinity,
                 child: Material(
                   color: Colors.transparent,
@@ -201,7 +216,10 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
             Expanded(
               child: TabBarView(
                 controller: _tabController,
-                children: List.generate(_groups.length, (index) => _buildCategoryTab(index)),
+                children: List.generate(
+                  _groups.length,
+                  (index) => _buildCategoryTab(index),
+                ),
               ),
             ),
           ],
@@ -250,17 +268,27 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                           text: sub.name,
                           style: TextStyle(
                             fontSize: 14,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                             color: isSelected
-                                ? (isDark ? CupertinoColors.activeBlue : const Color(0xFF1E88E5))
-                                : (isDark ? CupertinoColors.systemGrey : CupertinoColors.label.resolveFrom(context)),
+                                ? (isDark
+                                      ? CupertinoColors.activeBlue
+                                      : const Color(0xFF1E88E5))
+                                : (isDark
+                                      ? CupertinoColors.systemGrey
+                                      : CupertinoColors.label.resolveFrom(
+                                          context,
+                                        )),
                           ),
                         ),
                         TextSpan(
                           text: '  ·  ',
                           style: TextStyle(
                             fontSize: 14,
-                            color: isDark ? CupertinoColors.systemGrey3 : CupertinoColors.systemGrey4,
+                            color: isDark
+                                ? CupertinoColors.systemGrey3
+                                : CupertinoColors.systemGrey4,
                           ),
                         ),
                       ],
@@ -271,7 +299,7 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
             ),
           ),
         ),
-        
+
         // Books list
         Expanded(
           child: error.isNotEmpty
@@ -284,7 +312,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                         Text(
                           error,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: CupertinoColors.destructiveRed),
+                          style: const TextStyle(
+                            color: CupertinoColors.destructiveRed,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         CupertinoButton(
@@ -296,56 +326,63 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                   ),
                 )
               : booksList.isEmpty && !loading
-                  ? const Center(
-                      child: Text(
-                        '暂无书籍结果',
-                        style: TextStyle(color: CupertinoColors.secondaryLabel),
+              ? const Center(
+                  child: Text(
+                    '暂无书籍结果',
+                    style: TextStyle(color: CupertinoColors.secondaryLabel),
+                  ),
+                )
+              : CustomScrollView(
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      sliver: SliverList.builder(
+                        itemCount: booksList.length,
+                        itemBuilder: (context, i) => _bookRow(booksList[i]),
                       ),
-                    )
-                  : CustomScrollView(
-                      slivers: [
-                        SliverPadding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          sliver: SliverList.builder(
-                            itemCount: booksList.length,
-                            itemBuilder: (context, i) => _bookRow(booksList[i]),
+                    ),
+                    if (loading)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(child: CupertinoActivityIndicator()),
+                        ),
+                      )
+                    else if (hasMoreBooks && booksList.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                          child: CupertinoButton(
+                            color: CupertinoColors.activeBlue.withOpacity(0.1),
+                            onPressed: () =>
+                                _loadBooks(groupIndex, loadMore: true),
+                            child: const Text(
+                              '加载更多',
+                              style: TextStyle(
+                                color: CupertinoColors.activeBlue,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ),
-                        if (loading)
-                          const SliverToBoxAdapter(
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
-                              child: Center(child: CupertinoActivityIndicator()),
-                            ),
-                          )
-                        else if (hasMoreBooks && booksList.isNotEmpty)
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                              child: CupertinoButton(
-                                color: CupertinoColors.activeBlue.withOpacity(0.1),
-                                onPressed: () => _loadBooks(groupIndex, loadMore: true),
-                                child: const Text(
-                                  '加载更多',
-                                  style: TextStyle(color: CupertinoColors.activeBlue, fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ),
-                          )
-                        else if (booksList.isNotEmpty)
-                          const SliverToBoxAdapter(
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
-                              child: Center(
-                                child: Text(
-                                  '没有更多内容了',
-                                  style: TextStyle(fontSize: 13, color: CupertinoColors.secondaryLabel),
-                                ),
+                      )
+                    else if (booksList.isNotEmpty)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: Text(
+                              '没有更多内容了',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: CupertinoColors.secondaryLabel,
                               ),
                             ),
                           ),
-                      ],
-                    ),
+                        ),
+                      ),
+                  ],
+                ),
         ),
       ],
     );
@@ -353,11 +390,11 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
 
   Widget _bookRow(Book book) {
     final isDark = CupertinoTheme.of(context).brightness == Brightness.dark;
-    
+
     // Clean up description if it is raw URL or empty
     final String description;
-    if (book.filePath.isEmpty || 
-        book.filePath.startsWith('/') || 
+    if (book.filePath.isEmpty ||
+        book.filePath.startsWith('/') ||
         book.filePath.startsWith('http') ||
         book.filePath.contains('.')) {
       description = '暂无简介，点击查看详情';
@@ -367,7 +404,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
 
     final authorText = book.author.isEmpty ? '未知作者' : book.author;
     final tagsText = book.tags.isNotEmpty ? book.tags.join(',') : '';
-    final infoText = tagsText.isNotEmpty ? '$authorText · $tagsText' : authorText;
+    final infoText = tagsText.isNotEmpty
+        ? '$authorText · $tagsText'
+        : authorText;
 
     return CupertinoButton(
       padding: EdgeInsets.zero,
@@ -393,7 +432,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? CupertinoColors.white : CupertinoColors.black,
+                      color: isDark
+                          ? CupertinoColors.white
+                          : CupertinoColors.black,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -403,7 +444,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 13,
-                      color: isDark ? CupertinoColors.systemGrey : CupertinoColors.secondaryLabel.resolveFrom(context),
+                      color: isDark
+                          ? CupertinoColors.systemGrey
+                          : CupertinoColors.secondaryLabel.resolveFrom(context),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -413,7 +456,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? CupertinoColors.systemGrey3 : CupertinoColors.secondaryLabel.resolveFrom(context),
+                      color: isDark
+                          ? CupertinoColors.systemGrey3
+                          : CupertinoColors.secondaryLabel.resolveFrom(context),
                       height: 1.3,
                     ),
                   ),
@@ -436,26 +481,27 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
     showCupertinoDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const Center(child: CupertinoActivityIndicator(radius: 14)),
+      builder: (context) =>
+          const Center(child: CupertinoActivityIndicator(radius: 14)),
     );
-    
+
     var target = book;
     try {
       target = await LegadoParser.parseBookInfo(widget.source, book);
     } catch (_) {
       target = book;
     }
-    
+
     target
       ..isFromSource = true
       ..sourceUrl = widget.source.id.toString()
-      ..isFavorite = false
+      ..isFavorite = true
       ..lastReadTime = DateTime.now();
-      
+
     final repo = ref.read(bookRepositoryProvider);
     final id = await repo.saveBook(target);
     target.id = id;
-    
+
     try {
       final chapters = await LegadoParser.getChapterList(
         widget.source,
@@ -471,7 +517,7 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage> w
         await repo.saveBook(target);
       }
     } catch (_) {}
-    
+
     if (!mounted) return;
     Navigator.pop(context); // Close loading indicator
     context.push('/reader/$id');
@@ -504,7 +550,9 @@ List<ExploreCategoryGroup> parseExploreUrl(String exploreUrl) {
         final subCategories = <ExploreSubCategory>[];
         for (final item in decoded) {
           if (item is Map) {
-            final title = (item['title'] ?? item['name'] ?? '').toString().trim();
+            final title = (item['title'] ?? item['name'] ?? '')
+                .toString()
+                .trim();
             final url = (item['url'] ?? '').toString().trim();
             if (title.isNotEmpty && url.isNotEmpty) {
               subCategories.add(ExploreSubCategory(name: title, url: url));
@@ -512,7 +560,9 @@ List<ExploreCategoryGroup> parseExploreUrl(String exploreUrl) {
           }
         }
         if (subCategories.isNotEmpty) {
-          groups.add(ExploreCategoryGroup(name: '全部', subCategories: subCategories));
+          groups.add(
+            ExploreCategoryGroup(name: '全部', subCategories: subCategories),
+          );
           return groups;
         }
       }
@@ -525,41 +575,46 @@ List<ExploreCategoryGroup> parseExploreUrl(String exploreUrl) {
   for (final line in lines) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
-    
+
     final firstItem = trimmed.split('&&').first;
     final colonCount = '::'.allMatches(firstItem).length;
-    
+
     if (colonCount >= 2) {
       final firstDoubleColon = trimmed.indexOf('::');
       final categoryName = trimmed.substring(0, firstDoubleColon).trim();
       final subcategoriesPart = trimmed.substring(firstDoubleColon + 2).trim();
-      
+
       final subCategories = <ExploreSubCategory>[];
       for (final item in subcategoriesPart.split('&&')) {
         final parts = item.split('::');
         if (parts.length >= 2) {
-          subCategories.add(ExploreSubCategory(
-            name: parts[0].trim(),
-            url: parts[1].trim(),
-          ));
+          subCategories.add(
+            ExploreSubCategory(name: parts[0].trim(), url: parts[1].trim()),
+          );
         }
       }
       if (subCategories.isNotEmpty) {
-        groups.add(ExploreCategoryGroup(name: categoryName, subCategories: subCategories));
+        groups.add(
+          ExploreCategoryGroup(
+            name: categoryName,
+            subCategories: subCategories,
+          ),
+        );
       }
     } else {
       final subCategories = <ExploreSubCategory>[];
       for (final item in trimmed.split('&&')) {
         final parts = item.split('::');
         if (parts.length >= 2) {
-          subCategories.add(ExploreSubCategory(
-            name: parts[0].trim(),
-            url: parts[1].trim(),
-          ));
+          subCategories.add(
+            ExploreSubCategory(name: parts[0].trim(), url: parts[1].trim()),
+          );
         }
       }
       if (subCategories.isNotEmpty) {
-        groups.add(ExploreCategoryGroup(name: '全部', subCategories: subCategories));
+        groups.add(
+          ExploreCategoryGroup(name: '全部', subCategories: subCategories),
+        );
       }
     }
   }

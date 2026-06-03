@@ -15,6 +15,7 @@ import '../features/settings/views/source_catalog_browser_page.dart';
 import '../features/settings/views/source_test_page.dart';
 import '../features/settings/views/source_verification_page.dart';
 import '../features/settings/views/source_batch_check_page.dart';
+import '../features/settings/views/source_json_editor_page.dart';
 import '../features/settings/views/webview_import_page.dart';
 import '../features/explore/views/rss_source_articles_page.dart';
 import '../features/explore/views/rss_article_reader_page.dart';
@@ -32,7 +33,6 @@ import '../features/source_diagnostic/views/source_diagnostic_page.dart';
 final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 
 final routerProvider = Provider<GoRouter>((ref) {
-
   return GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/bookshelf',
@@ -165,6 +165,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) {
           final source = state.extra as BookSource;
           return CupertinoPage(child: SourceDiagnosticPage(source: source));
+        },
+      ),
+      GoRoute(
+        path: '/source_json_editor',
+        parentNavigatorKey: rootNavigatorKey,
+        pageBuilder: (context, state) {
+          final source = state.extra as BookSource;
+          return CupertinoPage(child: SourceJsonEditorPage(source: source));
         },
       ),
       GoRoute(

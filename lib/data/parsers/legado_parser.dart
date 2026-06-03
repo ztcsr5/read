@@ -762,7 +762,12 @@ class LegadoParser {
     if (ruleTocStr == null) return [];
 
     final rule = _ruleMap(ruleTocStr);
-    var listRule = _firstRule(rule, const ['chapterList', 'list']);
+    var listRule = _firstRule(rule, const [
+      'chapterList',
+      'chapterListTOC',
+      'chapterListToc',
+      'list',
+    ]);
     if (listRule == null) return [];
 
     final chapters = <Chapter>[];
@@ -775,6 +780,10 @@ class LegadoParser {
       book.filePath,
       currentResponse,
       rule,
+    );
+    currentResponse = await _retryShortenedDuplicatePathIfMissing(
+      source,
+      currentResponse,
     );
 
     final html = currentResponse.data?.toString() ?? '';
@@ -851,6 +860,8 @@ class LegadoParser {
             var titleRule =
                 _firstRule(rule, const [
                   'chapterName',
+                  'chapterNameTOC',
+                  'chapterNameToc',
                   'name',
                   'title',
                   'ChapterName',
@@ -866,6 +877,8 @@ class LegadoParser {
             var urlRule =
                 _firstRule(rule, const [
                   'chapterUrl',
+                  'chapterUrlTOC',
+                  'chapterUrlToc',
                   'url',
                   'link',
                   'ChapterUrl',
@@ -972,7 +985,14 @@ class LegadoParser {
             break;
 
           var titleRule =
-              _firstRule(rule, const ['chapterName', 'name', 'title']) ?? '';
+              _firstRule(rule, const [
+                'chapterName',
+                'chapterNameTOC',
+                'chapterNameToc',
+                'name',
+                'title',
+              ]) ??
+              '';
           if (titleRule.trim().isEmpty) titleRule = 'text'; // 默认脑补 'text'
           final title = _extractHtmlValue(
             node,
@@ -980,7 +1000,14 @@ class LegadoParser {
           );
 
           var urlRule =
-              _firstRule(rule, const ['chapterUrl', 'url', 'link']) ?? '';
+              _firstRule(rule, const [
+                'chapterUrl',
+                'chapterUrlTOC',
+                'chapterUrlToc',
+                'url',
+                'link',
+              ]) ??
+              '';
           if (urlRule.trim().isEmpty) urlRule = 'href'; // 默认脑补 'href'
           final url = _extractHtmlValue(
             node,
@@ -1054,6 +1081,8 @@ class LegadoParser {
       // 提取下一页目录 URL
       final nextRule = _firstRule(rule, const [
         'nextTocUrl',
+        'nextTocUrlTOC',
+        'nextTocUrlToc',
         'nextPageUrl',
         'nextUrl',
       ]);
@@ -1648,12 +1677,102 @@ class LegadoParser {
       coverPath: detail.coverPath?.isEmpty ?? true
           ? origin.coverPath
           : detail.coverPath,
-      filePath: detail.filePath.isEmpty ? origin.filePath : detail.filePath,
+      filePath: _selectBetterBookPath(origin.filePath, detail.filePath),
       totalChapters: detail.totalChapters > 0
           ? detail.totalChapters
           : origin.totalChapters,
       fileSize: detail.fileSize > 0 ? detail.fileSize : origin.fileSize,
     );
+  }
+
+  static String _selectBetterBookPath(String originPath, String detailPath) {
+    if (detailPath.isEmpty) return originPath;
+    if (originPath.isEmpty) return detailPath;
+
+    try {
+      final origin = Uri.parse(originPath);
+      final detail = Uri.parse(detailPath);
+      if (origin.hasScheme &&
+          detail.hasScheme &&
+          origin.host.toLowerCase() == detail.host.toLowerCase()) {
+        final originSegments = origin.pathSegments
+            .where((segment) => segment.trim().isNotEmpty)
+            .toList();
+        final detailSegments = detail.pathSegments
+            .where((segment) => segment.trim().isNotEmpty)
+            .toList();
+
+        if (originSegments.isNotEmpty &&
+            detailSegments.length == originSegments.length + 1 &&
+            _listStartsWith(detailSegments, originSegments) &&
+            detailSegments.last == originSegments.last) {
+          return originPath;
+        }
+      }
+    } catch (_) {
+      return detailPath;
+    }
+
+    return detailPath;
+  }
+
+  static bool _listStartsWith(List<String> list, List<String> prefix) {
+    if (prefix.length > list.length) return false;
+    for (var i = 0; i < prefix.length; i++) {
+      if (list[i] != prefix[i]) return false;
+    }
+    return true;
+  }
+
+  static Future<Response<dynamic>> _retryShortenedDuplicatePathIfMissing(
+    BookSource source,
+    Response<dynamic> response,
+  ) async {
+    if (!_looksLikeMissingPage(response.data?.toString() ?? '')) {
+      return response;
+    }
+
+    final fixedUrl = _trimRepeatedLastPathSegment(response.realUri.toString());
+    if (fixedUrl == null || fixedUrl == response.realUri.toString()) {
+      return response;
+    }
+
+    try {
+      final retry = await _request(source, fixedUrl);
+      if (!_looksLikeMissingPage(retry.data?.toString() ?? '')) {
+        return retry;
+      }
+    } catch (_) {
+      return response;
+    }
+
+    return response;
+  }
+
+  static String? _trimRepeatedLastPathSegment(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments
+          .where((segment) => segment.trim().isNotEmpty)
+          .toList();
+      if (segments.length < 2) return null;
+      if (segments.last != segments[segments.length - 2]) return null;
+
+      final shortened = segments.take(segments.length - 1).toList();
+      return uri.replace(pathSegments: shortened).toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _looksLikeMissingPage(String html) {
+    final lower = html.toLowerCase();
+    return lower.contains('<title>not found</title>') ||
+        lower.contains('<h1>not found</h1>') ||
+        lower.contains('404 not found') ||
+        lower.contains('页面不存在') ||
+        lower.contains('访问的页面不存在') ||
+        lower.contains('您访问的页面不存在');
   }
 
   static String _ruleOrKey(
@@ -1712,7 +1831,12 @@ class LegadoParser {
     Response<dynamic> response,
     Map<String, dynamic> rule,
   ) async {
-    final tocUrlRule = _firstRule(rule, const ['tocUrl', 'catalogUrl']);
+    final tocUrlRule = _firstRule(rule, const [
+      'tocUrl',
+      'catalogUrl',
+      'chapterListUrl',
+      'chapterListUrlTOC',
+    ]);
     if (tocUrlRule == null) return response;
     final data = response.data;
     String tocUrl = '';

@@ -164,6 +164,58 @@ class BookSource {
           : null
       ..customConfig = customConfig.isEmpty ? null : jsonEncode(customConfig);
   }
+
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{
+      'bookSourceName': bookSourceName,
+      'bookSourceUrl': bookSourceUrl,
+      'bookSourceType': bookSourceType,
+      'enabled': enabled,
+      'weight': weight,
+    };
+    void putString(String key, String? value) {
+      if (value != null && value.trim().isNotEmpty) map[key] = value;
+    }
+
+    void putJsonField(String key, String? value) {
+      if (value == null || value.trim().isEmpty) return;
+      try {
+        map[key] = jsonDecode(value);
+      } catch (_) {
+        map[key] = value;
+      }
+    }
+
+    putString('bookSourceGroup', bookSourceGroup);
+    putString('searchUrl', searchUrl);
+    putString('exploreUrl', exploreUrl);
+    putJsonField('ruleSearch', ruleSearch);
+    putJsonField('ruleBookInfo', ruleBookInfo);
+    putJsonField('ruleToc', ruleToc);
+    putJsonField('ruleContent', ruleContent);
+    putJsonField('ruleExplore', ruleExplore);
+    putJsonField('customConfig', customConfig);
+    return map;
+  }
+
+  BookSource duplicate() {
+    return BookSource()
+      ..id = id
+      ..bookSourceName = bookSourceName
+      ..bookSourceUrl = bookSourceUrl
+      ..bookSourceGroup = bookSourceGroup
+      ..bookSourceType = bookSourceType
+      ..searchUrl = searchUrl
+      ..enabled = enabled
+      ..weight = weight
+      ..exploreUrl = exploreUrl
+      ..ruleSearch = ruleSearch
+      ..ruleBookInfo = ruleBookInfo
+      ..ruleToc = ruleToc
+      ..ruleContent = ruleContent
+      ..ruleExplore = ruleExplore
+      ..customConfig = customConfig;
+  }
 }
 
 dynamic _firstValue(Map<String, dynamic> json, List<String> keys) {

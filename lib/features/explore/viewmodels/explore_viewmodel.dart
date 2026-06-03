@@ -143,11 +143,11 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       String verificationUrl = '';
       var tried = 0;
       final mode = state.searchMatchMode;
-      final maxResults = mode == SearchMatchMode.precise ? 120 : 240;
+      final maxResults = mode == SearchMatchMode.precise ? 240 : 500;
 
-      for (var start = 0; start < sources.length; start += 6) {
+      for (var start = 0; start < sources.length; start += 8) {
         if (currentCancelToken.isCancelled) return;
-        final batch = sources.skip(start).take(6).toList();
+        final batch = sources.skip(start).take(8).toList();
         tried += batch.length;
         final resultsLists = await Future.wait(
           batch.map((source) async {
@@ -157,7 +157,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                 source,
                 query,
                 cancelToken: currentCancelToken,
-              ).timeout(const Duration(seconds: 9));
+              ).timeout(const Duration(seconds: 16));
               if (currentCancelToken.isCancelled) return <Book>[];
               return books
                   .where((book) => _matchesSearchMode(book, query, mode))

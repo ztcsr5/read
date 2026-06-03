@@ -242,7 +242,7 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
     target
       ..isFromSource = true
       ..sourceUrl = widget.source.id.toString()
-      ..isFavorite = false
+      ..isFavorite = true
       ..lastReadTime = DateTime.now();
     final repo = ref.read(bookRepositoryProvider);
     final id = await repo.saveBook(target);

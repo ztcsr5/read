@@ -273,6 +273,28 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                 const SizedBox(height: 20),
               ],
 
+              if (state.message != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFF10B981).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Text(
+                    state.message!,
+                    style: const TextStyle(
+                      color: Color(0xFF10B981),
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
               if (state.report != null) ...[
                 _buildReportSection(
                   context,

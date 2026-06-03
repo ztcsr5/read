@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:fast_gbk/fast_gbk.dart';
@@ -10,6 +11,7 @@ import 'package:read/data/parsers/legado/legado_rule_evaluator.dart';
 import 'package:read/data/parsers/legado/legado_session_store.dart';
 import 'package:read/data/parsers/legado_parser.dart';
 import 'package:read/features/source_diagnostic/services/compatibility_analyzer.dart';
+import 'package:read/features/source_diagnostic/services/source_auto_repair_service.dart';
 
 void main() {
   group('LegadoRequestBuilder', () {
@@ -531,6 +533,64 @@ void main() {
   });
 
   group('LegadoParser Robustness', () {
+    test(
+      'keeps original book url when book info rule repeats last segment',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Biquge-like'
+          ..bookSourceUrl = 'https://www.biquge8.xyz'
+          ..ruleBookInfo = jsonEncode({
+            'name': 'h1@text',
+            'tocUrl': 'a.catalog@href',
+          });
+        final book = Book(
+          title: '万相之王',
+          author: '天蚕土豆',
+          filePath: 'https://www.biquge8.xyz/50045',
+          fileType: 'online',
+          isFromSource: true,
+        );
+        final response = Response<dynamic>(
+          data:
+              '<html><body><h1>万相之王</h1><a class="catalog" href="50045">目录</a></body></html>',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: book.filePath),
+        );
+
+        final parsed = await LegadoParser.parseBookInfo(
+          source,
+          book,
+          preFetchedResponse: response,
+        );
+
+        expect(parsed.filePath, 'https://www.biquge8.xyz/50045');
+      },
+    );
+
+    test('repairs TOC alias fields and preserves editable source json', () {
+      final source = BookSource()
+        ..bookSourceName = 'Alias Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterListTOC': '.chapter_list li a',
+          'chapterNameTOC': '@text',
+          'chapterUrlTOC': '@href',
+        });
+
+      final result = SourceAutoRepairService.repairWithReport(source);
+      final toc = jsonDecode(result.source.ruleToc!) as Map<String, dynamic>;
+
+      expect(toc['chapterList'], '.chapter_list li a');
+      expect(toc['chapterName'], '@text');
+      expect(toc['chapterUrl'], '@href');
+      expect(result.changes.join('\n'), contains('chapterListTOC'));
+
+      final exported = result.source.toJson();
+      final imported = BookSource.fromJson(exported);
+      expect(imported.bookSourceName, source.bookSourceName);
+      expect(imported.ruleToc, result.source.ruleToc);
+    });
+
     test(
       'cleans URLs of trailing control characters and percent-encoded controls',
       () {

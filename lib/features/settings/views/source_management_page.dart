@@ -211,6 +211,14 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       CupertinoButton(
+                        minSize: 32,
+                        padding: EdgeInsets.zero,
+                        child: const Icon(CupertinoIcons.doc_text),
+                        onPressed: () =>
+                            context.push('/source_json_editor', extra: source),
+                      ),
+                      CupertinoButton(
+                        minSize: 32,
                         padding: EdgeInsets.zero,
                         child: const Icon(
                           CupertinoIcons.waveform_path_ecg,
@@ -220,12 +228,14 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                             context.push('/source_diagnostic', extra: source),
                       ),
                       CupertinoButton(
+                        minSize: 32,
                         padding: EdgeInsets.zero,
                         child: const Icon(CupertinoIcons.checkmark_seal),
                         onPressed: () =>
                             context.push('/source_test', extra: source),
                       ),
                       CupertinoButton(
+                        minSize: 32,
                         padding: EdgeInsets.zero,
                         child: const Icon(
                           CupertinoIcons.trash,
@@ -377,8 +387,8 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
             }),
             if (_selectedTab == 0)
               _smallAction('测源', () {
-                final idsToTest = selectedCount == 0 
-                    ? visibleBookSources.map((s) => s.id).toSet() 
+                final idsToTest = selectedCount == 0
+                    ? visibleBookSources.map((s) => s.id).toSet()
                     : _selectedBookSourceIds;
                 final sourcesToTest = visibleBookSources
                     .where((s) => idsToTest.contains(s.id))
@@ -671,10 +681,14 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
       final repo = ref.read(bookRepositoryProvider);
       await repo.saveBookSource(generated);
       await ref.read(bookSourceViewModelProvider.notifier).loadSources();
-      
+
       if (rootContext.mounted) {
         Navigator.pop(rootContext);
-        _showAlert(rootContext, '生成成功', '已自动识别网页结构并生成书源：${generated.bookSourceName}');
+        _showAlert(
+          rootContext,
+          '生成成功',
+          '已自动识别网页结构并生成书源：${generated.bookSourceName}',
+        );
       }
     } catch (e) {
       if (rootContext.mounted) {

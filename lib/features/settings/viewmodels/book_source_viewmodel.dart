@@ -217,6 +217,17 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
     await loadSources();
   }
 
+  Future<void> saveSource(BookSource source) async {
+    state = state.copyWith(isLoading: true, error: null, message: null);
+    try {
+      await _repository.saveBookSource(source);
+      await loadSources();
+      state = state.copyWith(message: '书源 JSON 已保存');
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: '保存书源失败: $e');
+    }
+  }
+
   Future<void> deleteSources(Iterable<int> ids) async {
     state = state.copyWith(isLoading: true, error: null, message: null);
     try {
