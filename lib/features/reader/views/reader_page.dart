@@ -86,7 +86,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _scrollController.addListener(_onScroll);
 
     // 初始加载由 Provider 创建时自动调用，无需手动
-    
+
     // 从缓存状态中计算并初始化 _pageController 的 initialPage，解决退出重新进入只能向后翻页的 Bug
     int initialPage = 0;
     try {
@@ -437,13 +437,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     });
 
     final readerState = ref.watch(readerViewModelProvider(widget.bookId));
-    
+
     if (!_didRestoreScrollPosition && readerState.items.isNotEmpty) {
       _didRestoreScrollPosition = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (readerState.mode != ReaderMode.scroll) {
           if (_pageController.hasClients) {
-            final pages = _buildReaderPages(readerState, _screenSize ?? MediaQuery.of(context).size);
+            final pages = _buildReaderPages(
+              readerState,
+              _screenSize ?? MediaQuery.of(context).size,
+            );
             final targetPage = _pageIndexForTarget(
               pages,
               ReaderNavigationTarget(
@@ -484,148 +487,159 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         }
       },
       child: CupertinoPageScaffold(
-      backgroundColor: readerState.background == ReaderBackground.customImage ? CupertinoColors.transparent : bgColor,
-      child: Stack(
-        children: [
-          if (readerState.background == ReaderBackground.customImage &&
-              readerState.customWallpaperPath != null &&
-              File(readerState.customWallpaperPath!).existsSync()) ...[
-            Positioned.fill(
-              child: Image.file(
-                File(readerState.customWallpaperPath!),
-                fit: BoxFit.cover,
+        backgroundColor: readerState.background == ReaderBackground.customImage
+            ? CupertinoColors.transparent
+            : bgColor,
+        child: Stack(
+          children: [
+            if (readerState.background == ReaderBackground.customImage &&
+                readerState.customWallpaperPath != null &&
+                File(readerState.customWallpaperPath!).existsSync()) ...[
+              Positioned.fill(
+                child: Image.file(
+                  File(readerState.customWallpaperPath!),
+                  fit: BoxFit.cover,
+                ),
               ),
-            ),
-            Positioned.fill(
-              child: Container(
-                color: brightness == Brightness.dark
-                    ? CupertinoColors.black.withOpacity(0.68)
-                    : CupertinoColors.white.withOpacity(0.85),
+              Positioned.fill(
+                child: Container(
+                  color: brightness == Brightness.dark
+                      ? CupertinoColors.black.withOpacity(0.68)
+                      : CupertinoColors.white.withOpacity(0.85),
+                ),
               ),
-            ),
-          ],
-          // 主阅读区域 — 无限滑动
-          Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: (event) {
-              _pointerDownTime = DateTime.now();
-              _pointerDownPosition = event.localPosition;
-              _isPointerDrag = false;
-              _hadSelectionOnPointerDown = _hasSelection;
-            },
-            onPointerMove: (event) {
-              if (_pointerDownPosition != null) {
-                final distance = (event.localPosition - _pointerDownPosition!).distance;
-                if (distance > 15) {
-                  _isPointerDrag = true;
-                }
-              }
-            },
-            onPointerUp: (event) {
-              if (_pointerDownTime != null && _pointerDownPosition != null && !_isPointerDrag) {
-                final duration = DateTime.now().difference(_pointerDownTime!);
-                final distance = (event.localPosition - _pointerDownPosition!).distance;
-                if (duration.inMilliseconds < 300 && distance < 15) {
-                  if (!_hadSelectionOnPointerDown) {
-                    _handleReaderTap(event.localPosition);
+            ],
+            // 主阅读区域 — 无限滑动
+            Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (event) {
+                _pointerDownTime = DateTime.now();
+                _pointerDownPosition = event.localPosition;
+                _isPointerDrag = false;
+                _hadSelectionOnPointerDown = _hasSelection;
+              },
+              onPointerMove: (event) {
+                if (_pointerDownPosition != null) {
+                  final distance =
+                      (event.localPosition - _pointerDownPosition!).distance;
+                  if (distance > 15) {
+                    _isPointerDrag = true;
                   }
                 }
-              }
-            },
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragEnd: (details) {
-                if (details.primaryVelocity != null &&
-                    details.primaryVelocity! > 650) {
-                  _goBack();
+              },
+              onPointerUp: (event) {
+                if (_pointerDownTime != null &&
+                    _pointerDownPosition != null &&
+                    !_isPointerDrag) {
+                  final duration = DateTime.now().difference(_pointerDownTime!);
+                  final distance =
+                      (event.localPosition - _pointerDownPosition!).distance;
+                  if (duration.inMilliseconds < 300 && distance < 15) {
+                    if (!_hadSelectionOnPointerDown) {
+                      _handleReaderTap(event.localPosition);
+                    }
+                  }
                 }
               },
-              child: MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  boldText: readerState.fontWeightIndex == -1
-                      ? MediaQuery.boldTextOf(context)
-                      : false,
-                ),
-                child: SelectionArea(
-                  onSelectionChanged: (content) {
-                    final hasSel = content != null && content.plainText.isNotEmpty;
-                    if (_hasSelection != hasSel) {
-                      setState(() {
-                        _hasSelection = hasSel;
-                      });
-                    }
-                  },
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: KeyedSubtree(
-                      key: ValueKey(readerState.isLoading && readerState.items.isEmpty ? 'skeleton' : 'content'),
-                      child: _buildReadingContent(bgColor, textColor),
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onHorizontalDragEnd: (details) {
+                  if (details.primaryVelocity != null &&
+                      details.primaryVelocity! > 650) {
+                    _goBack();
+                  }
+                },
+                child: MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    boldText: readerState.fontWeightIndex == -1
+                        ? MediaQuery.boldTextOf(context)
+                        : false,
+                  ),
+                  child: SelectionArea(
+                    onSelectionChanged: (content) {
+                      final hasSel =
+                          content != null && content.plainText.isNotEmpty;
+                      if (_hasSelection != hasSel) {
+                        setState(() {
+                          _hasSelection = hasSel;
+                        });
+                      }
+                    },
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: KeyedSubtree(
+                        key: ValueKey(
+                          readerState.isLoading && readerState.items.isEmpty
+                              ? 'skeleton'
+                              : 'content',
+                        ),
+                        child: _buildReadingContent(bgColor, textColor),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // 顶部工具栏
-          if (_showOverlay)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: FadeTransition(
-                opacity: _overlayAnimation,
-                child: _buildTopBar(context),
+            // 顶部工具栏
+            if (_showOverlay)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: FadeTransition(
+                  opacity: _overlayAnimation,
+                  child: _buildTopBar(context),
+                ),
               ),
-            ),
 
-          // 底部工具栏
-          if (_showOverlay)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: FadeTransition(
-                opacity: _overlayAnimation,
-                child: _buildBottomBar(context),
+            // 底部工具栏
+            if (_showOverlay)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: FadeTransition(
+                  opacity: _overlayAnimation,
+                  child: _buildBottomBar(context),
+                ),
               ),
-            ),
 
-          // 设置面板
-          if (_showSettings)
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => setState(() => _showSettings = false),
+            // 设置面板
+            if (_showSettings)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() => _showSettings = false),
+                ),
               ),
-            ),
 
-          if (_showSettings)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: ReaderSettingsPanel(bookId: widget.bookId)
-                  .animate()
-                  .slideY(
-                    begin: 1.0,
-                    end: 0,
-                    duration: 300.ms,
-                    curve: Curves.easeOutCubic,
-                  ),
-            ),
+            if (_showSettings)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: ReaderSettingsPanel(bookId: widget.bookId)
+                    .animate()
+                    .slideY(
+                      begin: 1.0,
+                      end: 0,
+                      duration: 300.ms,
+                      curve: Curves.easeOutCubic,
+                    ),
+              ),
 
-          // 加载中指示器
-          if (readerState.isLoadingMore)
-            const Positioned(
-              bottom: 80,
-              left: 0,
-              right: 0,
-              child: Center(child: CupertinoActivityIndicator()),
-            ),
-        ],
+            // 加载中指示器
+            if (readerState.isLoadingMore)
+              const Positioned(
+                bottom: 80,
+                left: 0,
+                right: 0,
+                child: Center(child: CupertinoActivityIndicator()),
+              ),
+          ],
+        ),
       ),
-    ),
     );
   }
 
@@ -774,7 +788,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             child: Padding(
               padding: EdgeInsets.only(
                 top: padding.top + readerState.topPadding,
-                bottom: padding.bottom + readerState.bottomPadding + readerState.footerHeight,
+                bottom:
+                    padding.bottom +
+                    readerState.bottomPadding +
+                    readerState.footerHeight,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1313,7 +1330,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return cleaned;
   }
 
-  Widget _buildSkeletonScreen(Color bgColor, Color textColor, ReaderState state) {
+  Widget _buildSkeletonScreen(
+    Color bgColor,
+    Color textColor,
+    ReaderState state,
+  ) {
     final shimmerColor = textColor.withOpacity(0.06);
     final highlightColor = textColor.withOpacity(0.12);
     final topPad = MediaQuery.of(context).padding.top + state.topPadding;
@@ -1330,7 +1351,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           _shimmerBar(shimmerColor, highlightColor, width: 220, height: 22),
           const SizedBox(height: 36),
           ...List.generate(12, (i) {
-            final widths = [1.0, 1.0, 0.92, 1.0, 0.88, 1.0, 0.95, 1.0, 0.78, 1.0, 1.0, 0.65];
+            final widths = [
+              1.0,
+              1.0,
+              0.92,
+              1.0,
+              0.88,
+              1.0,
+              0.95,
+              1.0,
+              0.78,
+              1.0,
+              1.0,
+              0.65,
+            ];
             return Padding(
               padding: EdgeInsets.only(bottom: state.paragraphSpacing + 2),
               child: _shimmerBar(
@@ -1348,19 +1382,28 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  Widget _shimmerBar(Color base, Color highlight, {double? width, double? widthFraction, required double height}) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final w = width ?? (constraints.maxWidth * (widthFraction ?? 1.0));
-      return Container(
-        width: w,
-        height: height,
-        decoration: BoxDecoration(
-          color: base,
-          borderRadius: BorderRadius.circular(height / 2),
-        ),
-      ).animate(onPlay: (c) => c.repeat())
-        .shimmer(duration: 1200.ms, color: highlight);
-    });
+  Widget _shimmerBar(
+    Color base,
+    Color highlight, {
+    double? width,
+    double? widthFraction,
+    required double height,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = width ?? (constraints.maxWidth * (widthFraction ?? 1.0));
+        return Container(
+              width: w,
+              height: height,
+              decoration: BoxDecoration(
+                color: base,
+                borderRadius: BorderRadius.circular(height / 2),
+              ),
+            )
+            .animate(onPlay: (c) => c.repeat())
+            .shimmer(duration: 1200.ms, color: highlight);
+      },
+    );
   }
 
   TextStyle _readerTextStyle(
@@ -1847,18 +1890,30 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 // 进度条 (章内滑页进度)
                 Builder(
                   builder: (context) {
-                    final allPages = _buildReaderPages(readerState, MediaQuery.of(context).size);
+                    final allPages = _buildReaderPages(
+                      readerState,
+                      MediaQuery.of(context).size,
+                    );
                     final chapterPages = allPages
-                        .where((p) => p.firstReadableItem?.item.chapterIndex == readerState.currentChapterIndex)
+                        .where(
+                          (p) =>
+                              p.firstReadableItem?.item.chapterIndex ==
+                              readerState.currentChapterIndex,
+                        )
                         .toList();
-                    
+
                     int currentPageIndexInChapter = 0;
                     if (readerState.mode != ReaderMode.scroll) {
-                      final currentAbsolutePageIndex = _pageController.hasClients
-                          ? (_pageController.page ?? _lastPagedPageIndex.toDouble()).round()
+                      final currentAbsolutePageIndex =
+                          _pageController.hasClients
+                          ? (_pageController.page ??
+                                    _lastPagedPageIndex.toDouble())
+                                .round()
                           : _lastPagedPageIndex;
-                      if (currentAbsolutePageIndex >= 0 && currentAbsolutePageIndex < allPages.length) {
-                        final currentPageData = allPages[currentAbsolutePageIndex];
+                      if (currentAbsolutePageIndex >= 0 &&
+                          currentAbsolutePageIndex < allPages.length) {
+                        final currentPageData =
+                            allPages[currentAbsolutePageIndex];
                         final idx = chapterPages.indexOf(currentPageData);
                         if (idx >= 0) {
                           currentPageIndexInChapter = idx;
@@ -1869,7 +1924,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       if (topItem != null) {
                         for (int i = 0; i < chapterPages.length; i++) {
                           final page = chapterPages[i];
-                          if (page.entries.any((e) => e.item.paragraphIndex == topItem.paragraphIndex && e.item.chapterIndex == topItem.chapterIndex)) {
+                          if (page.entries.any(
+                            (e) =>
+                                e.item.paragraphIndex ==
+                                    topItem.paragraphIndex &&
+                                e.item.chapterIndex == topItem.chapterIndex,
+                          )) {
                             currentPageIndexInChapter = i;
                             break;
                           }
@@ -1877,8 +1937,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                       }
                     }
 
-                    final double sliderMax = (chapterPages.isEmpty ? 1 : chapterPages.length - 1).toDouble();
-                    final double sliderValue = currentPageIndexInChapter.clamp(0, sliderMax.toInt()).toDouble();
+                    final double sliderMax =
+                        (chapterPages.isEmpty ? 1 : chapterPages.length - 1)
+                            .toDouble();
+                    final double sliderValue = currentPageIndexInChapter
+                        .clamp(0, sliderMax.toInt())
+                        .toDouble();
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(
@@ -1893,9 +1957,19 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             onPressed: () => _turnChapter(-1),
                             child: Row(
                               children: [
-                                Icon(CupertinoIcons.chevron_left, color: foreground, size: 16),
+                                Icon(
+                                  CupertinoIcons.chevron_left,
+                                  color: foreground,
+                                  size: 16,
+                                ),
                                 const SizedBox(width: 4),
-                                Text('上一章', style: TextStyle(color: foreground, fontSize: 14)),
+                                Text(
+                                  '上一章',
+                                  style: TextStyle(
+                                    color: foreground,
+                                    fontSize: 14,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -1905,7 +1979,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                               children: [
                                 Text(
                                   '第 ${readerState.currentChapterIndex + 1} 章',
-                                  style: TextStyle(color: foreground, fontSize: 14, fontWeight: FontWeight.w600),
+                                  style: TextStyle(
+                                    color: foreground,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                   textAlign: TextAlign.center,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -1913,7 +1991,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                 const SizedBox(height: 2),
                                 Text(
                                   '${currentPageIndexInChapter + 1} / ${chapterPages.isEmpty ? 1 : chapterPages.length} 页',
-                                  style: TextStyle(color: secondary, fontSize: 11),
+                                  style: TextStyle(
+                                    color: secondary,
+                                    fontSize: 11,
+                                  ),
                                   textAlign: TextAlign.center,
                                 ),
                               ],
@@ -1924,16 +2005,26 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                             onPressed: () => _turnChapter(1),
                             child: Row(
                               children: [
-                                Text('下一章', style: TextStyle(color: foreground, fontSize: 14)),
+                                Text(
+                                  '下一章',
+                                  style: TextStyle(
+                                    color: foreground,
+                                    fontSize: 14,
+                                  ),
+                                ),
                                 const SizedBox(width: 4),
-                                Icon(CupertinoIcons.chevron_right, color: foreground, size: 16),
+                                Icon(
+                                  CupertinoIcons.chevron_right,
+                                  color: foreground,
+                                  size: 16,
+                                ),
                               ],
                             ),
                           ),
                         ],
                       ),
                     );
-                  }
+                  },
                 ),
                 const SizedBox(height: 8),
                 // 工具栏按钮
@@ -1958,7 +2049,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                         label: '换源',
                         color: foreground,
                         onTap: () {
-                          _showSourceSwitcher(pageContext);
+                          _showSourceSwitcher(context);
                         },
                       ),
                       _buildToolButton(

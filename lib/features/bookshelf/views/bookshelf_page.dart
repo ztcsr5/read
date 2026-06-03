@@ -64,7 +64,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       }
     }
     final booksWithUpdates = state.allBooks.where((book) {
-      return book.totalChapters > (book.currentChapter + 1) && book.totalChapters > 0;
+      return book.totalChapters > (book.currentChapter + 1) &&
+          book.totalChapters > 0;
     }).toList();
 
     return CupertinoPageScaffold(
@@ -533,9 +534,16 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
               Container(
                 width: 70,
                 height: 100,
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 clipBehavior: Clip.antiAlias,
-                child: BookCover(book: book, width: 70, height: 100, iconSize: 30),
+                child: BookCover(
+                  book: book,
+                  width: 70,
+                  height: 100,
+                  iconSize: 30,
+                ),
               ),
               Positioned(
                 top: -3,
@@ -548,7 +556,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black12,
+                        color: Color(0x1F000000),
                         blurRadius: 2,
                         spreadRadius: 1,
                       ),

@@ -4,25 +4,62 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_cookie_manager/webview_cookie_manager.dart' as wcm;
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../app/routes.dart';
 import '../../../ui/widgets/cloudflare_dialog.dart';
 import 'legado_session_store.dart';
 
-class CloudflareInterceptor extends Interceptor {
-  // 全局域名级 Completer 锁，防止并发请求导致 Cupertino 弹窗重叠死锁
-  static final Map<String, Completer<bool>> _activeBypassCompleters = {};
-  
-  // 域名过盾成功时间戳缓存，用于实现过盾冷却保护，防止短时间连续高频弹窗
-  static final Map<String, DateTime> _lastBypassSuccessTime = {};
+class CloudflareChallengeQueue {
+  CloudflareChallengeQueue._();
 
-  // 全局弹窗队列，防止不同域名并发请求导致多个 Cupertino 弹窗重叠 Navigator 冲突
-  static final List<Completer<void>> _dialogQueue = [];
-  static bool _isDialogShowing = false;
+  static final CloudflareChallengeQueue instance = CloudflareChallengeQueue._();
 
-  static Future<void> _waitForDialogTurn() async {
+  final Map<String, Completer<bool>> _activeByHost = {};
+  final Map<String, DateTime> _lastSuccessByHost = {};
+  final List<Completer<void>> _dialogQueue = [];
+  bool _isDialogShowing = false;
+
+  bool isCoolingDown(
+    String host, {
+    Duration cooldown = const Duration(seconds: 15),
+  }) {
+    final lastSuccess = _lastSuccessByHost[host.toLowerCase()];
+    return lastSuccess != null &&
+        DateTime.now().difference(lastSuccess) < cooldown;
+  }
+
+  Future<bool> runForHost(String host, Future<bool> Function() task) async {
+    final normalizedHost = host.toLowerCase();
+    final active = _activeByHost[normalizedHost];
+    if (active != null) return active.future;
+
+    final completer = Completer<bool>();
+    _activeByHost[normalizedHost] = completer;
+    try {
+      final success = await task();
+      if (success) _lastSuccessByHost[normalizedHost] = DateTime.now();
+      if (!completer.isCompleted) completer.complete(success);
+      return success;
+    } catch (_) {
+      if (!completer.isCompleted) completer.complete(false);
+      return false;
+    } finally {
+      _activeByHost.remove(normalizedHost);
+    }
+  }
+
+  Future<T> runDialog<T>(Future<T> Function() task) async {
+    await _waitForDialogTurn();
+    try {
+      return await task();
+    } finally {
+      _releaseDialogTurn();
+    }
+  }
+
+  Future<void> _waitForDialogTurn() async {
     if (!_isDialogShowing) {
       _isDialogShowing = true;
       return;
@@ -32,7 +69,7 @@ class CloudflareInterceptor extends Interceptor {
     await completer.future;
   }
 
-  static void _releaseDialogTurn() {
+  void _releaseDialogTurn() {
     if (_dialogQueue.isNotEmpty) {
       final next = _dialogQueue.removeAt(0);
       next.complete();
@@ -40,6 +77,11 @@ class CloudflareInterceptor extends Interceptor {
       _isDialogShowing = false;
     }
   }
+}
+
+class CloudflareInterceptor extends Interceptor {
+  static final CloudflareChallengeQueue _queue =
+      CloudflareChallengeQueue.instance;
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -70,23 +112,24 @@ class CloudflareInterceptor extends Interceptor {
   bool _isCloudflareChallenge(Response response) {
     final statusCode = response.statusCode ?? 200;
     final data = response.data?.toString().toLowerCase() ?? '';
-    
-    final isChallengeHtml = data.contains('cf-browser-verification') ||
+    final serverHeader = response.headers.value('server')?.toLowerCase() ?? '';
+
+    final isChallengeHtml =
+        data.contains('cf-browser-verification') ||
         data.contains('/cdn-cgi/challenge-platform') ||
         data.contains('challenge-form') ||
         data.contains('just a moment') ||
         data.contains('enable javascript and cookies') ||
         data.contains('ddos protection by cloudflare') ||
         data.contains('checking your browser') ||
-        data.contains('百度安全验证');
+        data.contains('\u767e\u5ea6\u5b89\u5168\u9a8c\u8bc1');
 
     if (statusCode == 503 || statusCode == 403) {
-      final serverHeader = response.headers.value('server')?.toLowerCase() ?? '';
-      if (isChallengeHtml || serverHeader.contains('cloudflare') || serverHeader.contains('ddos-guard')) {
-        return true;
-      }
+      return isChallengeHtml ||
+          serverHeader.contains('cloudflare') ||
+          serverHeader.contains('ddos-guard');
     }
-    
+
     return isChallengeHtml;
   }
 
@@ -97,56 +140,24 @@ class CloudflareInterceptor extends Interceptor {
     final uri = originalResponse.requestOptions.uri;
     final host = uri.host.toLowerCase();
 
-    // 1. 冷却时间保护逻辑：如果 15 秒内该域名刚刚成功过盾，则不重复弹窗，直接返回原始错误
-    final lastSuccess = _lastBypassSuccessTime[host];
-    if (lastSuccess != null && DateTime.now().difference(lastSuccess).inSeconds < 15) {
+    if (_queue.isCoolingDown(host)) {
       _returnOriginal(originalResponse, handler);
       return;
     }
 
-    Completer<bool>? activeCompleter;
-    bool isInitiator = false;
-
-    // 2. 检查该域名是否已经有过盾任务在执行
-    if (_activeBypassCompleters.containsKey(host)) {
-      activeCompleter = _activeBypassCompleters[host];
-    } else {
-      activeCompleter = Completer<bool>();
-      _activeBypassCompleters[host] = activeCompleter;
-      isInitiator = true;
-    }
-
-    bool success = false;
-
-    if (isInitiator) {
-      // 发起者请求：提取原始请求的 UA，注入 WebView 并拉起弹窗
+    final success = await _queue.runForHost(host, () async {
       final originalHeaders = originalResponse.requestOptions.headers;
-      final customUa = originalHeaders['User-Agent']?.toString() ?? 
-                       originalHeaders['user-agent']?.toString();
-
-      try {
-        success = await _showBypassDialog(uri, customUa: customUa);
-        if (success) {
-          _lastBypassSuccessTime[host] = DateTime.now(); // 记录过盾成功时间戳
-        }
-        activeCompleter!.complete(success);
-      } catch (e) {
-        activeCompleter!.complete(false);
-      } finally {
-        // 完成后移除锁
-        _activeBypassCompleters.remove(host);
-      }
-    } else {
-      // 并发跟随请求：原地等待发起者的过盾结果，直接复用其成果
-      success = await activeCompleter!.future;
-    }
+      final customUa =
+          originalHeaders['User-Agent']?.toString() ??
+          originalHeaders['user-agent']?.toString();
+      return _showBypassDialog(uri, customUa: customUa);
+    });
 
     if (!success) {
       _returnOriginal(originalResponse, handler);
       return;
     }
 
-    // 重试原网络请求
     final dio = Dio();
     dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
@@ -157,7 +168,6 @@ class CloudflareInterceptor extends Interceptor {
     );
 
     final options = originalResponse.requestOptions;
-    // 注入最新成功获取到的 Cookie 与 User-Agent
     LegadoSessionStore.apply(options.uri, options.headers);
     try {
       final retryResponse = await dio.fetch(options);
@@ -177,84 +187,78 @@ class CloudflareInterceptor extends Interceptor {
 
   Future<bool> _showBypassDialog(Uri uri, {String? customUa}) async {
     final completer = Completer<bool>();
-    late final WebViewController controller;
-
     final context = rootNavigatorKey.currentContext;
-    bool dialogOpen = false;
+    var dialogOpen = false;
 
-    controller = WebViewController()
+    final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted);
 
-    // 关键安全点：如果原始网络请求配置了自定义 User-Agent，强制 WebView 使用该 UA 以保证人机挑战绑定 UA 的一致性
     if (customUa != null && customUa.isNotEmpty) {
       await controller.setUserAgent(customUa);
       LegadoSessionStore.setUserAgent(uri, customUa);
     }
 
     controller.setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (_) async {
-            try {
-              // 1. 若原始请求没有 UA，则提取 Webview 的默认 User-Agent 进行同步
-              if (customUa == null || customUa.isEmpty) {
-                final ua = await controller.runJavaScriptReturningResult(
-                  'navigator.userAgent',
-                );
-                final uaStr = ua.toString().replaceAll('"', '').trim();
-                if (uaStr.isNotEmpty) {
-                  LegadoSessionStore.setUserAgent(uri, uaStr);
-                }
-              }
-
-              // 2. 利用 WebviewCookieManager 提取包含 HttpOnly 属性的完整 Cookie 环
-              final cookieManager = wcm.WebviewCookieManager();
-              final gotCookies = await cookieManager.getCookies(uri.toString());
-              
-              String cookieStr = '';
-              bool hasCfClearance = false;
-              if (gotCookies.isNotEmpty) {
-                cookieStr = gotCookies.map((c) => '${c.name}=${c.value}').join('; ');
-                hasCfClearance = gotCookies.any((c) => c.name == 'cf_clearance');
-                LegadoSessionStore.setCookieString(uri, cookieStr);
-              } else {
-                final jsCookies = await controller.runJavaScriptReturningResult(
-                  'document.cookie',
-                );
-                cookieStr = jsCookies.toString().replaceAll('"', '').trim();
-                if (cookieStr.isNotEmpty) {
-                  LegadoSessionStore.setCookieString(uri, cookieStr);
-                }
-              }
-
-              final content = await controller.runJavaScriptReturningResult(
-                'document.documentElement.outerHTML',
+      NavigationDelegate(
+        onPageFinished: (_) async {
+          try {
+            if (customUa == null || customUa.isEmpty) {
+              final ua = await controller.runJavaScriptReturningResult(
+                'navigator.userAgent',
               );
-              final html = content.toString();
-              
-              final solved = hasCfClearance ||
-                  (cookieStr.contains('cf_clearance') ||
-                  (!html.contains('cf-browser-verification') &&
-                      !html.contains('Just a moment') &&
-                      !html.contains('/cdn-cgi/challenge-platform') &&
-                      !html.contains('ddos protection by cloudflare') &&
-                      !html.contains('checking your browser') &&
-                      !html.contains('百度安全验证')));
-
-              if (solved && !completer.isCompleted) {
-                await LegadoSessionStore.persistHost(uri);
-                completer.complete(true);
-                if (dialogOpen && context != null && context.mounted) {
-                  Navigator.of(context, rootNavigator: true).pop();
-                }
+              final uaStr = ua.toString().replaceAll('"', '').trim();
+              if (uaStr.isNotEmpty) {
+                LegadoSessionStore.setUserAgent(uri, uaStr);
               }
-            } catch (_) {
-              // 忽略 JS 执行异常，继续等待页面完成或用户手动过盾
             }
-          },
-        ),
-      );
 
-    // 45 秒兜底超时器，确保 Completer 无论如何都会被解决，杜绝网络死锁
+            final cookieManager = wcm.WebviewCookieManager();
+            final gotCookies = await cookieManager.getCookies(uri.toString());
+
+            var cookieStr = '';
+            var hasCfClearance = false;
+            if (gotCookies.isNotEmpty) {
+              cookieStr = gotCookies
+                  .map((c) => '${c.name}=${c.value}')
+                  .join('; ');
+              hasCfClearance = gotCookies.any((c) => c.name == 'cf_clearance');
+              LegadoSessionStore.setCookieString(uri, cookieStr);
+            } else {
+              final jsCookies = await controller.runJavaScriptReturningResult(
+                'document.cookie',
+              );
+              cookieStr = jsCookies.toString().replaceAll('"', '').trim();
+              if (cookieStr.isNotEmpty) {
+                LegadoSessionStore.setCookieString(uri, cookieStr);
+              }
+            }
+
+            final content = await controller.runJavaScriptReturningResult(
+              'document.documentElement.outerHTML',
+            );
+            final html = content.toString().toLowerCase();
+
+            final solved =
+                hasCfClearance ||
+                cookieStr.contains('cf_clearance') ||
+                (!html.contains('cf-browser-verification') &&
+                    !html.contains('just a moment') &&
+                    !html.contains('/cdn-cgi/challenge-platform') &&
+                    !html.contains('ddos protection by cloudflare') &&
+                    !html.contains('checking your browser'));
+
+            if (solved && !completer.isCompleted) {
+              await LegadoSessionStore.persistHost(uri);
+              completer.complete(true);
+              if (dialogOpen && context != null && context.mounted) {
+                Navigator.of(context, rootNavigator: true).pop();
+              }
+            }
+          } catch (_) {}
+        },
+      ),
+    );
+
     final timeoutTimer = Timer(const Duration(seconds: 45), () {
       if (!completer.isCompleted) {
         completer.complete(false);
@@ -272,25 +276,27 @@ class CloudflareInterceptor extends Interceptor {
           timeoutTimer.cancel();
           return completer.future;
         }
-        await _waitForDialogTurn();
-        try {
+        await _queue.runDialog(() async {
           if (completer.isCompleted) {
             timeoutTimer.cancel();
-            return completer.future;
+            return;
           }
           dialogOpen = true;
-          await showCupertinoDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => CloudflareDialog(controller: controller),
-          );
-        } finally {
-          dialogOpen = false;
-          _releaseDialogTurn();
-        }
+          try {
+            await showCupertinoDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => CloudflareDialog(controller: controller),
+            );
+          } finally {
+            dialogOpen = false;
+          }
+        });
         if (!completer.isCompleted) {
-          completer.complete(false); // 用户手动关闭弹窗
+          completer.complete(false);
         }
+      } else if (!completer.isCompleted) {
+        completer.complete(false);
       }
     } catch (_) {
       if (!completer.isCompleted) {

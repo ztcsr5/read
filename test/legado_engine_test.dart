@@ -9,6 +9,7 @@ import 'package:read/data/parsers/legado/legado_request_builder.dart';
 import 'package:read/data/parsers/legado/legado_rule_evaluator.dart';
 import 'package:read/data/parsers/legado/legado_session_store.dart';
 import 'package:read/data/parsers/legado_parser.dart';
+import 'package:read/features/source_diagnostic/services/compatibility_analyzer.dart';
 
 void main() {
   group('LegadoRequestBuilder', () {
@@ -426,10 +427,19 @@ void main() {
     });
 
     test('sanitizes non-standard Legado CSS selectors', () {
-      expect(LegadoRuleEvaluator.sanitizeCssSelector('.info li.0 a'), '.info li.0 a');
+      expect(
+        LegadoRuleEvaluator.sanitizeCssSelector('.info li.0 a'),
+        '.info li.0 a',
+      );
       expect(LegadoRuleEvaluator.sanitizeCssSelector('div:eq(0) a'), 'div.0 a');
-      expect(LegadoRuleEvaluator.sanitizeCssSelector('div:eq(-1) a'), 'div.-1 a');
-      expect(LegadoRuleEvaluator.sanitizeCssSelector('.info .0 a'), '.info *.0 a');
+      expect(
+        LegadoRuleEvaluator.sanitizeCssSelector('div:eq(-1) a'),
+        'div.-1 a',
+      );
+      expect(
+        LegadoRuleEvaluator.sanitizeCssSelector('.info .0 a'),
+        '.info *.0 a',
+      );
     });
 
     test('supports JSoup-like element self-matching', () {
@@ -484,6 +494,25 @@ void main() {
       expect(jsonDecode(value), isA<List>());
       expect((jsonDecode(value) as List).first['title'], 'A');
     });
+
+    test('wraps top-level java.ajax snippets as async iife', () {
+      final code = JsCompatibilityTransformer.transform(
+        'var data = JSON.parse(java.ajax("https://example.com/books")); data.list;',
+      );
+
+      expect(code.trimLeft(), startsWith('(async function()'));
+      expect(code, contains('await java.ajax'));
+      expect(code, contains('return (data.list)'));
+    });
+
+    test('upgrades function java.ajax snippets to async functions', () {
+      final code = JsCompatibilityTransformer.transform(
+        '(function(){ return java.ajax("https://example.com/books"); })()',
+      );
+
+      expect(code, contains('async function'));
+      expect(code, contains('await java.ajax'));
+    });
   });
 
   group('LegadoSessionStore', () {
@@ -502,16 +531,21 @@ void main() {
   });
 
   group('LegadoParser Robustness', () {
-    test('cleans URLs of trailing control characters and percent-encoded controls', () {
-      final baseUrl = 'https://example.com/api/\n\r%0A%0D';
-      final relativeUrl = 'search\n\r%0a%0d';
-      final resolved = LegadoRequestBuilder.resolveUrl(baseUrl, relativeUrl);
-      expect(resolved, 'https://example.com/api/search');
-      
-      final embedded = LegadoRequestBuilder.splitEmbeddedConfig('https://example.com/books\n\r%0A%0D,{"method":"POST"}');
-      expect(embedded.url, 'https://example.com/books');
-      expect(embedded.config['method'], 'POST');
-    });
+    test(
+      'cleans URLs of trailing control characters and percent-encoded controls',
+      () {
+        final baseUrl = 'https://example.com/api/\n\r%0A%0D';
+        final relativeUrl = 'search\n\r%0a%0d';
+        final resolved = LegadoRequestBuilder.resolveUrl(baseUrl, relativeUrl);
+        expect(resolved, 'https://example.com/api/search');
+
+        final embedded = LegadoRequestBuilder.splitEmbeddedConfig(
+          'https://example.com/books\n\r%0A%0D,{"method":"POST"}',
+        );
+        expect(embedded.url, 'https://example.com/books');
+        expect(embedded.config['method'], 'POST');
+      },
+    );
 
     test('auto-detects and decodes GBK encoding from headers or meta tags', () {
       final utf8Text = '测试中文编码';
@@ -521,15 +555,68 @@ void main() {
       final decodedFromHeaders = LegadoParser.decodeBytes(
         gbkBytes,
         null,
-        headers: {'Content-Type': ['text/html; charset=gbk']},
+        headers: {
+          'Content-Type': ['text/html; charset=gbk'],
+        },
       );
       expect(decodedFromHeaders, utf8Text);
 
       // 2. Detect from HTML Meta Tag
-      final htmlPrefix = utf8.encode('<html><head><meta charset="gbk"></head><body>');
+      final htmlPrefix = utf8.encode(
+        '<html><head><meta charset="gbk"></head><body>',
+      );
       final combinedBytes = [...htmlPrefix, ...gbkBytes];
       final decodedFromMeta = LegadoParser.decodeBytes(combinedBytes, null);
       expect(decodedFromMeta, contains(utf8Text));
+    });
+
+    test('detects spaced GB family charsets and broken utf8 fallback', () {
+      final text = '斗破苍穹 第一章 测试中文';
+      final bytes = gbk.encode(text);
+
+      expect(
+        LegadoParser.decodeBytes(
+          bytes,
+          null,
+          headers: {
+            'content-type': ['text/html; charset = "gb2312"'],
+          },
+        ),
+        text,
+      );
+      expect(LegadoParser.decodeBytes(bytes, 'gb18030'), text);
+      expect(LegadoParser.decodeBytes(bytes, null), text);
+    });
+  });
+
+  group('CompatibilityAnalyzer', () {
+    test('detects advanced Legado compatibility risks', () {
+      final source = BookSource()
+        ..bookSourceName = 'Advanced'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl =
+            '<js>var data = java.ajax("https://example.com/search"); data</js>'
+        ..ruleSearch = jsonEncode({
+          'bookList': 'Jsoup.parse(result).select(".book")',
+          'name': '@get:{title}',
+          'bookUrl': '@put:{url:\$.url}',
+        })
+        ..customConfig = jsonEncode({
+          'charset': 'gb2312',
+          'header': 'cf_clearance=1',
+        });
+
+      final reasons = CompatibilityAnalyzer.analyze(
+        source,
+      ).map((issue) => issue.reason).join('\n');
+
+      expect(reasons, contains('JavaScript'));
+      expect(reasons, contains('java.ajax'));
+      expect(reasons, contains('Jsoup'));
+      expect(reasons, contains('GBK'));
+      expect(reasons, contains('@get'));
+      expect(reasons, contains('@put'));
+      expect(reasons, contains('验证'));
     });
   });
 }

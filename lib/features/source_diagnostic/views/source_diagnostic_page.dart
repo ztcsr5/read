@@ -13,11 +13,14 @@ class SourceDiagnosticPage extends ConsumerStatefulWidget {
   const SourceDiagnosticPage({super.key, required this.source});
 
   @override
-  ConsumerState<SourceDiagnosticPage> createState() => _SourceDiagnosticPageState();
+  ConsumerState<SourceDiagnosticPage> createState() =>
+      _SourceDiagnosticPageState();
 }
 
 class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
-  final TextEditingController _keywordController = TextEditingController(text: '斗破苍穹');
+  final TextEditingController _keywordController = TextEditingController(
+    text: '斗破苍穹',
+  );
 
   @override
   void dispose() {
@@ -40,21 +43,33 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(sourceDiagnosticViewModelProvider(widget.source));
-    final viewModel = ref.read(sourceDiagnosticViewModelProvider(widget.source).notifier);
+    final viewModel = ref.read(
+      sourceDiagnosticViewModelProvider(widget.source).notifier,
+    );
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final primaryBg = isDark ? const Color(0xFF121212) : const Color(0xFFF9F9FA);
+    final primaryBg = isDark
+        ? const Color(0xFF121212)
+        : const Color(0xFFF9F9FA);
     final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF2D2D2D) : const Color(0xFFE5E5EA);
+    final borderColor = isDark
+        ? const Color(0xFF2D2D2D)
+        : const Color(0xFFE5E5EA);
     final textColor = isDark ? Colors.white : const Color(0xFF1C1C1E);
-    final subTextColor = isDark ? const Color(0xFF8E8E93) : const Color(0xFF8A8A8F);
+    final subTextColor = isDark
+        ? const Color(0xFF8E8E93)
+        : const Color(0xFF8A8A8F);
 
     return Scaffold(
       backgroundColor: primaryBg,
       appBar: AppBar(
         title: Text(
           '书源诊断中心',
-          style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            color: textColor,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         backgroundColor: cardBg,
         elevation: 0,
@@ -115,7 +130,10 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFF007AFF).withOpacity(0.1),
                             borderRadius: BorderRadius.circular(6),
@@ -151,7 +169,10 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                       const SizedBox(height: 8),
                       Text(
                         '分组: ${state.source.bookSourceGroup}',
-                        style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 13),
+                        style: TextStyle(
+                          color: textColor.withOpacity(0.7),
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ],
@@ -171,7 +192,11 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                   children: [
                     Text(
                       '测试关键字',
-                      style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -182,10 +207,15 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                             placeholder: '请输入测试书籍名称',
                             style: TextStyle(color: textColor),
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                              color: isDark
+                                  ? const Color(0xFF2C2C2E)
+                                  : const Color(0xFFF2F2F7),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -195,14 +225,24 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                           borderRadius: BorderRadius.circular(8),
                           onPressed: state.isDiagnosing
                               ? null
-                              : () => viewModel.runDiagnosis(_keywordController.text),
+                              : () => viewModel.runDiagnosis(
+                                  _keywordController.text,
+                                ),
                           child: state.isDiagnosing
                               ? const SizedBox(
                                   width: 20,
                                   height: 20,
-                                  child: CupertinoActivityIndicator(color: Colors.white),
+                                  child: CupertinoActivityIndicator(
+                                    color: Colors.white,
+                                  ),
                                 )
-                              : const Text('开始诊断', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                              : const Text(
+                                  '开始诊断',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
                       ],
                     ),
@@ -218,18 +258,31 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFEF4444).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                    border: Border.all(
+                      color: const Color(0xFFEF4444).withOpacity(0.3),
+                    ),
                   ),
                   child: Text(
                     state.error!,
-                    style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13),
+                    style: const TextStyle(
+                      color: Color(0xFFEF4444),
+                      fontSize: 13,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
               ],
 
               if (state.report != null) ...[
-                _buildReportSection(context, state.report!, viewModel, cardBg, borderColor, textColor, subTextColor),
+                _buildReportSection(
+                  context,
+                  state.report!,
+                  viewModel,
+                  cardBg,
+                  borderColor,
+                  textColor,
+                  subTextColor,
+                ),
                 const SizedBox(height: 20),
               ],
 
@@ -239,30 +292,45 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
               if (state.history.isNotEmpty) ...[
                 Text(
                   '诊断历史记录',
-                  style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: state.history.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 10),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final h = state.history[index];
                     return GestureDetector(
                       onTap: () {
-                        ref.read(sourceDiagnosticViewModelProvider(widget.source).notifier).state =
-                            state.copyWith(report: h.report);
+                        ref
+                            .read(
+                              sourceDiagnosticViewModelProvider(
+                                widget.source,
+                              ).notifier,
+                            )
+                            .state = state.copyWith(
+                          report: h.report,
+                        );
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           color: cardBg,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: borderColor),
                         ),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.between,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -277,12 +345,22 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  h.createTime.toLocal().toString().substring(0, 19),
-                                  style: TextStyle(color: subTextColor, fontSize: 11),
+                                  h.createTime.toLocal().toString().substring(
+                                    0,
+                                    19,
+                                  ),
+                                  style: TextStyle(
+                                    color: subTextColor,
+                                    fontSize: 11,
+                                  ),
                                 ),
                               ],
                             ),
-                            const Icon(CupertinoIcons.chevron_right, size: 14, color: CupertinoColors.inactiveGray),
+                            const Icon(
+                              CupertinoIcons.chevron_right,
+                              size: 14,
+                              color: CupertinoColors.inactiveGray,
+                            ),
                           ],
                         ),
                       ),
@@ -321,7 +399,11 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
             children: [
               Text(
                 '兼容性综合得分',
-                style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 16),
               Stack(
@@ -334,7 +416,9 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                       value: report.score / 100.0,
                       strokeWidth: 8,
                       backgroundColor: Colors.grey.withOpacity(0.1),
-                      valueColor: AlwaysStoppedAnimation<Color>(_getScoreColor(report.score)),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        _getScoreColor(report.score),
+                      ),
                     ),
                   ),
                   Text(
@@ -364,10 +448,16 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
               const SizedBox(height: 12),
               CupertinoButton(
                 color: const Color(0xFF10B981),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 8,
+                ),
                 borderRadius: BorderRadius.circular(8),
                 onPressed: () => viewModel.applyAutoRepair(),
-                child: const Text('一键修复兼容性问题', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                child: const Text(
+                  '一键修复兼容性问题',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           ),
@@ -376,7 +466,11 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
 
         Text(
           '诊断流程明细',
-          style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: textColor,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         const SizedBox(height: 10),
         Container(
@@ -401,7 +495,11 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
 
         Text(
           '诊断故障与智能修复建议',
-          style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: textColor,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         const SizedBox(height: 10),
         if (report.issues.isEmpty)
@@ -415,9 +513,15 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
             ),
             child: Row(
               children: [
-                const Icon(CupertinoIcons.checkmark_circle_fill, color: Color(0xFF10B981)),
+                const Icon(
+                  CupertinoIcons.checkmark_circle_fill,
+                  color: Color(0xFF10B981),
+                ),
                 const SizedBox(width: 10),
-                Text('书源状况完美，暂未检测到兼容性问题。', style: TextStyle(color: textColor, fontSize: 13)),
+                Text(
+                  '书源状况完美，暂未检测到兼容性问题。',
+                  style: TextStyle(color: textColor, fontSize: 13),
+                ),
               ],
             ),
           )
@@ -429,14 +533,21 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
             separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final issue = report.issues[index];
-              final isHighRisk = issue.stage == 'overall' || issue.reason.contains('失败') || issue.reason.contains('空');
-              
+              final isHighRisk =
+                  issue.stage == 'overall' ||
+                  issue.reason.contains('失败') ||
+                  issue.reason.contains('空');
+
               return Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: cardBg,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: isHighRisk ? const Color(0xFFEF4444).withOpacity(0.3) : borderColor),
+                  border: Border.all(
+                    color: isHighRisk
+                        ? const Color(0xFFEF4444).withOpacity(0.3)
+                        : borderColor,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -444,15 +555,24 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: (isHighRisk ? const Color(0xFFEF4444) : const Color(0xFFF59E0B)).withOpacity(0.1),
+                            color:
+                                (isHighRisk
+                                        ? const Color(0xFFEF4444)
+                                        : const Color(0xFFF59E0B))
+                                    .withOpacity(0.1),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             issue.stage.toUpperCase(),
                             style: TextStyle(
-                              color: isHighRisk ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+                              color: isHighRisk
+                                  ? const Color(0xFFEF4444)
+                                  : const Color(0xFFF59E0B),
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),
@@ -462,7 +582,11 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                           const SizedBox(width: 6),
                           Text(
                             '字段: ${issue.field}',
-                            style: TextStyle(color: subTextColor, fontSize: 12, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                              color: subTextColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ],
@@ -470,14 +594,22 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                     const SizedBox(height: 8),
                     Text(
                       issue.reason,
-                      style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       '修复建议：${issue.suggestion}',
-                      style: TextStyle(color: textColor.withOpacity(0.8), fontSize: 13),
+                      style: TextStyle(
+                        color: textColor.withOpacity(0.8),
+                        fontSize: 13,
+                      ),
                     ),
-                    if (issue.htmlSnippet != null && issue.htmlSnippet!.isNotEmpty) ...[
+                    if (issue.htmlSnippet != null &&
+                        issue.htmlSnippet!.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Container(
                         width: double.infinity,
@@ -491,7 +623,9 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Text(
-                            issue.htmlSnippet!.length > 1000 ? '${issue.htmlSnippet!.substring(0, 1000)}...' : issue.htmlSnippet!,
+                            issue.htmlSnippet!.length > 1000
+                                ? '${issue.htmlSnippet!.substring(0, 1000)}...'
+                                : issue.htmlSnippet!,
                             style: const TextStyle(
                               fontFamily: 'monospace',
                               fontSize: 11,
@@ -501,18 +635,31 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
                         ),
                       ),
                     ],
-                    if (issue.suggestion.contains('可能替代') || issue.suggestion.contains('候补') || issue.suggestion.contains('检测到')) ...[
+                    if (issue.suggestion.contains('可能替代') ||
+                        issue.suggestion.contains('候补') ||
+                        issue.suggestion.contains('检测到')) ...[
                       const SizedBox(height: 12),
                       _buildSuggestedActions(issue, viewModel),
                     ],
-                    if (issue.reason.contains('目录反序') || (issue.stage == 'toc' && issue.reason.contains('目录'))) ...[
+                    if (issue.reason.contains('目录反序') ||
+                        (issue.stage == 'toc' &&
+                            issue.reason.contains('目录'))) ...[
                       const SizedBox(height: 12),
                       CupertinoButton(
                         color: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
                         borderRadius: BorderRadius.circular(6),
                         onPressed: () => viewModel.applyReverseChapters(),
-                        child: const Text('一键反转目录列表', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          '一键反转目录列表',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ],
                   ],
@@ -524,7 +671,10 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
     );
   }
 
-  Widget _buildSuggestedActions(DiagnosticIssue issue, SourceDiagnosticViewModel viewModel) {
+  Widget _buildSuggestedActions(
+    DiagnosticIssue issue,
+    SourceDiagnosticViewModel viewModel,
+  ) {
     final exp = RegExp(r'(?:\.|\#)[a-zA-Z0-9_\-\s\>\#\.\:\@\(\)]+');
     final matches = exp.allMatches(issue.suggestion);
     if (matches.isEmpty) return const SizedBox.shrink();
@@ -538,10 +688,15 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
           color: const Color(0xFF007AFF).withOpacity(0.1),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           borderRadius: BorderRadius.circular(6),
-          onPressed: () => viewModel.applyRuleSuggestion(issue.field ?? 'content', selector),
+          onPressed: () =>
+              viewModel.applyRuleSuggestion(issue.field ?? 'content', selector),
           child: Text(
             '应用 $selector',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF007AFF), fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Color(0xFF007AFF),
+              fontWeight: FontWeight.bold,
+            ),
           ),
         );
       }).toList(),
@@ -557,14 +712,18 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
           Text(
             success ? '正常' : '异常',
             style: TextStyle(
-              color: success ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+              color: success
+                  ? const Color(0xFF10B981)
+                  : const Color(0xFFEF4444),
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(width: 8),
           Icon(
-            success ? CupertinoIcons.checkmark_circle_fill : CupertinoIcons.xmark_circle_fill,
+            success
+                ? CupertinoIcons.checkmark_circle_fill
+                : CupertinoIcons.xmark_circle_fill,
             color: success ? const Color(0xFF10B981) : const Color(0xFFEF4444),
             size: 20,
           ),
