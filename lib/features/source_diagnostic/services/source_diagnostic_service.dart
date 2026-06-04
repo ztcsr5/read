@@ -8,7 +8,10 @@ import 'rule_suggest_engine.dart';
 import 'redesign_detector.dart';
 
 class SourceDiagnosticService {
-  static Future<DiagnosticReport> diagnose(BookSource source, String testKeyword) async {
+  static Future<DiagnosticReport> diagnose(
+    BookSource source,
+    String testKeyword,
+  ) async {
     final stopwatch = Stopwatch()..start();
     final report = await LegadoParser.testSource(source, testKeyword);
     stopwatch.stop();
@@ -23,6 +26,7 @@ class SourceDiagnosticService {
 
     for (final step in report.steps) {
       if (step.status == LegadoStepStatus.fail) {
+        final stepLogsText = step.logs.join('\n').toLowerCase();
         String stage = 'compatibility';
         String? field;
         String suggestion = '请检查规则配置。';
@@ -39,8 +43,14 @@ class SourceDiagnosticService {
         } else if (step.title.contains('目录')) {
           tocSuccess = false;
           stage = 'toc';
-          field = 'chapterList';
-          suggestion = '未解析出目录章节。请检查 chapterList 规则或编码是否正确。';
+          if (_looksLikeNotFoundSnippet(stepLogsText)) {
+            field = 'bookUrl';
+            suggestion =
+                '目录页/详情页返回 Not Found，优先检查 ruleSearch.bookUrl 或 ruleBookInfo.tocUrl 是否把详情链接拼错、截短或重复拼接。';
+          } else {
+            field = 'chapterList';
+            suggestion = '未解析出目录章节。请检查 chapterList 规则或编码是否正确。';
+          }
         } else if (step.title.contains('正文')) {
           contentSuccess = false;
           stage = 'content';
@@ -51,14 +61,16 @@ class SourceDiagnosticService {
           suggestion = '底层发起请求时出现未捕获异常，可能是连接超时、SSL 握手失败或 JS 语法错误。';
         }
 
-        issues.add(DiagnosticIssue(
-          stage: stage,
-          field: field,
-          rule: null,
-          reason: step.message,
-          suggestion: suggestion,
-          htmlSnippet: step.logs.join('\n'),
-        ));
+        issues.add(
+          DiagnosticIssue(
+            stage: stage,
+            field: field,
+            rule: null,
+            reason: step.message,
+            suggestion: suggestion,
+            htmlSnippet: step.logs.join('\n'),
+          ),
+        );
       }
     }
 
@@ -71,9 +83,16 @@ class SourceDiagnosticService {
       responseTimeMs: elapsedMs,
     );
 
-    // Run static compatibility checks
+    // Run static compatibility checks. These are hints, not hard failures.
     final staticIssues = CompatibilityAnalyzer.analyze(source);
-    issues.addAll(staticIssues);
+    final visibleStaticIssues = _visibleStaticIssues(
+      staticIssues,
+      searchSuccess: searchSuccess,
+      bookInfoSuccess: bookInfoSuccess,
+      tocSuccess: tocSuccess,
+      contentSuccess: contentSuccess,
+    );
+    issues.addAll(visibleStaticIssues);
 
     // Heuristics for rule extraction
     String getOldSelector(String? ruleJson, String fieldKey) {
@@ -88,8 +107,15 @@ class SourceDiagnosticService {
     // Dynamic checks & Redesign detection
     if (!searchSuccess) {
       try {
-        final searchUrl = await LegadoParser.buildSearchUrl(source, testKeyword);
-        final response = await LegadoParser.fetchHtml(source, searchUrl, keyword: testKeyword);
+        final searchUrl = await LegadoParser.buildSearchUrl(
+          source,
+          testKeyword,
+        );
+        final response = await LegadoParser.fetchHtml(
+          source,
+          searchUrl,
+          keyword: testKeyword,
+        );
         final html = response.data?.toString() ?? '';
         if (html.isNotEmpty) {
           // 1. Redesign detection
@@ -107,13 +133,15 @@ class SourceDiagnosticService {
             // 2. Simple candidate suggestion
             final suggestions = RuleSuggestEngine.suggestBookListRules(html);
             if (suggestions.isNotEmpty) {
-              issues.add(DiagnosticIssue(
-                stage: 'search',
-                field: 'bookList',
-                reason: '搜索结果为空：推荐候补 CSS 规则',
-                suggestion: '检测到可能替代的列表选择器：${suggestions.join("，")}',
-                htmlSnippet: 'HTML 长度: ${html.length}',
-              ));
+              issues.add(
+                DiagnosticIssue(
+                  stage: 'search',
+                  field: 'bookList',
+                  reason: '搜索结果为空：推荐候补 CSS 规则',
+                  suggestion: '检测到可能替代的列表选择器：${suggestions.join("，")}',
+                  htmlSnippet: 'HTML 长度: ${html.length}',
+                ),
+              );
             }
           }
         }
@@ -125,7 +153,10 @@ class SourceDiagnosticService {
         final books = await LegadoParser.searchBooks(source, testKeyword);
         if (books.isNotEmpty) {
           final firstBook = books.first;
-          final response = await LegadoParser.fetchHtml(source, firstBook.filePath);
+          final response = await LegadoParser.fetchHtml(
+            source,
+            firstBook.filePath,
+          );
           final html = response.data?.toString() ?? '';
           if (html.isNotEmpty) {
             final oldSel = getOldSelector(source.ruleToc, 'chapterList');
@@ -139,15 +170,19 @@ class SourceDiagnosticService {
             if (redesignIssues.isNotEmpty) {
               issues.addAll(redesignIssues);
             } else {
-              final suggestions = RuleSuggestEngine.suggestChapterListRules(html);
+              final suggestions = RuleSuggestEngine.suggestChapterListRules(
+                html,
+              );
               if (suggestions.isNotEmpty) {
-                issues.add(DiagnosticIssue(
-                  stage: 'toc',
-                  field: 'chapterList',
-                  reason: '目录解析失败：推荐候补 CSS 规则',
-                  suggestion: '检测到可能替代的目录选择器：${suggestions.join("，")}',
-                  htmlSnippet: 'HTML 长度: ${html.length}',
-                ));
+                issues.add(
+                  DiagnosticIssue(
+                    stage: 'toc',
+                    field: 'chapterList',
+                    reason: '目录解析失败：推荐候补 CSS 规则',
+                    suggestion: '检测到可能替代的目录选择器：${suggestions.join("，")}',
+                    htmlSnippet: 'HTML 长度: ${html.length}',
+                  ),
+                );
               }
             }
           }
@@ -159,7 +194,10 @@ class SourceDiagnosticService {
       try {
         final books = await LegadoParser.searchBooks(source, testKeyword);
         if (books.isNotEmpty) {
-          final chapters = await LegadoParser.getChapterList(source, books.first);
+          final chapters = await LegadoParser.getChapterList(
+            source,
+            books.first,
+          );
           if (chapters.isNotEmpty) {
             final firstChapter = chapters.first;
             final url = firstChapter.content ?? firstChapter.url ?? '';
@@ -178,15 +216,19 @@ class SourceDiagnosticService {
                 if (redesignIssues.isNotEmpty) {
                   issues.addAll(redesignIssues);
                 } else {
-                  final suggestions = RuleSuggestEngine.suggestContentRules(html);
+                  final suggestions = RuleSuggestEngine.suggestContentRules(
+                    html,
+                  );
                   if (suggestions.isNotEmpty) {
-                    issues.add(DiagnosticIssue(
-                      stage: 'content',
-                      field: 'content',
-                      reason: '正文解析失败：推荐候补 CSS 规则',
-                      suggestion: '检测到可能替代的正文选择器：${suggestions.join("，")}',
-                      htmlSnippet: 'HTML 长度: ${html.length}',
-                    ));
+                    issues.add(
+                      DiagnosticIssue(
+                        stage: 'content',
+                        field: 'content',
+                        reason: '正文解析失败：推荐候补 CSS 规则',
+                        suggestion: '检测到可能替代的正文选择器：${suggestions.join("，")}',
+                        htmlSnippet: 'HTML 长度: ${html.length}',
+                      ),
+                    );
                   }
                 }
               }
@@ -203,7 +245,7 @@ class SourceDiagnosticService {
     if (!tocSuccess) score -= 30;
     if (!contentSuccess) score -= 25;
 
-    for (final issue in staticIssues) {
+    for (final issue in visibleStaticIssues) {
       if (issue.reason.contains('同步网络请求')) {
         score -= 5;
       }
@@ -229,5 +271,78 @@ class SourceDiagnosticService {
       riskLevel: riskLevel,
       issues: issues,
     );
+  }
+
+  static List<DiagnosticIssue> _visibleStaticIssues(
+    List<DiagnosticIssue> issues, {
+    required bool searchSuccess,
+    required bool bookInfoSuccess,
+    required bool tocSuccess,
+    required bool contentSuccess,
+  }) {
+    return issues.where((issue) {
+      final hardFailure = _stageFailed(
+        issue.stage,
+        searchSuccess: searchSuccess,
+        bookInfoSuccess: bookInfoSuccess,
+        tocSuccess: tocSuccess,
+        contentSuccess: contentSuccess,
+      );
+      final reason = issue.reason;
+      final suggestion = issue.suggestion;
+
+      if (reason.contains('JavaScript') ||
+          suggestion.contains('QuickJS') ||
+          reason.contains('java.ajax') ||
+          reason.contains('java.connect') ||
+          reason.contains('Jsoup')) {
+        return hardFailure;
+      }
+
+      if (reason.contains('@get') || reason.contains('@put')) {
+        return hardFailure;
+      }
+
+      if (reason.contains('GBK') ||
+          reason.contains('GB2312') ||
+          reason.contains('GB18030')) {
+        return hardFailure;
+      }
+
+      return true;
+    }).toList();
+  }
+
+  static bool _stageFailed(
+    String stage, {
+    required bool searchSuccess,
+    required bool bookInfoSuccess,
+    required bool tocSuccess,
+    required bool contentSuccess,
+  }) {
+    switch (stage) {
+      case 'search':
+        return !searchSuccess;
+      case 'detail':
+        return !bookInfoSuccess;
+      case 'toc':
+        return !tocSuccess;
+      case 'content':
+        return !contentSuccess;
+      default:
+        return !searchSuccess ||
+            !bookInfoSuccess ||
+            !tocSuccess ||
+            !contentSuccess;
+    }
+  }
+
+  static bool _looksLikeNotFoundSnippet(String text) {
+    return text.contains('404 not found') ||
+        text.contains('<title>not found</title>') ||
+        text.contains('<h1>not found</h1>') ||
+        text.contains('页面不存在') ||
+        text.contains('访问的页面不存在') ||
+        text.contains('not found</title>');
   }
 }

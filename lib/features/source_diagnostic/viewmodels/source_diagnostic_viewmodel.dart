@@ -95,7 +95,10 @@ class SourceDiagnosticViewModel extends StateNotifier<SourceDiagnosticState> {
   Future<void> applyAutoRepair() async {
     state = state.copyWith(isDiagnosing: true, error: null, message: null);
     try {
-      final result = SourceAutoRepairService.repairWithReport(state.source);
+      final result = SourceAutoRepairService.repairWithReport(
+        state.source,
+        report: state.report,
+      );
       final repairedSource = result.source;
       await _repository.saveBookSource(repairedSource);
       final message = result.changes.isEmpty

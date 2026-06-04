@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:fast_gbk/fast_gbk.dart';
 import 'package:pointycastle/export.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
@@ -94,6 +95,59 @@ class LegadoJsEngine {
         final bytes = utf8.encode(input);
         final digest = md5.convert(bytes);
         return digest.toString().toLowerCase();
+      });
+
+      _runtime!.onMessage('java_hash', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _hashHex(
+            data['type']?.toString() ?? '',
+            data['value']?.toString() ?? '',
+          );
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_encode_type', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _encodeByType(
+            data['type']?.toString() ?? '',
+            data['value']?.toString() ?? '',
+          );
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_decode_type', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _decodeByType(
+            data['type']?.toString() ?? '',
+            data['value']?.toString() ?? '',
+          );
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_aes_base64_encode', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return jsonEncode(
+            _aesEncodeToMap(
+              data['value']?.toString() ?? '',
+              data['key']?.toString() ?? '',
+              data['iv']?.toString() ?? '',
+              data['mode']?.toString() ?? 'cbc',
+            ),
+          );
+        } catch (e) {
+          print('java_aes_base64_encode failed: $e');
+          return '{}';
+        }
       });
 
       _runtime!.onMessage('java_aes_base64_decode', (dynamic args) {
@@ -255,18 +309,45 @@ class LegadoJsEngine {
         },
         connect: function(urlStr) {
           var u = String(urlStr || "");
+          var config = { method: "GET", headers: {}, body: "" };
+          function payload() {
+            return Object.keys(config.headers).length || config.method !== "GET" || config.body
+              ? u + "," + JSON.stringify(config)
+              : u;
+          }
           var chain = {
-            header: function() { return chain; },
-            headers: function() { return chain; },
-            cookies: function() { return chain; },
+            header: function(k, v) {
+              if (k != null) config.headers[String(k)] = String(v == null ? "" : v);
+              return chain;
+            },
+            headers: function(value) {
+              if (typeof value === "string") {
+                try { value = JSON.parse(value); } catch(e) { value = {}; }
+              }
+              if (value) {
+                for (var k in value) config.headers[String(k)] = String(value[k]);
+              }
+              return chain;
+            },
+            cookie: function(value) {
+              if (value != null) config.headers.Cookie = String(value);
+              return chain;
+            },
+            cookies: function(value) {
+              if (value != null) config.headers.Cookie = String(value);
+              return chain;
+            },
             timeout: function() { return chain; },
             ignoreContentType: function() { return chain; },
-            followRedirects: function() { return chain; },
-            get: function() { return chain; },
-            post: function() { return chain; },
+            followRedirects: function(value) { config.followRedirects = value !== false; return chain; },
+            get: function() { config.method = "GET"; return chain; },
+            post: function(body) { config.method = "POST"; config.body = body == null ? "" : String(body); return chain; },
+            data: function(body) { config.body = body == null ? "" : String(body); return chain; },
+            requestBody: function(body) { config.body = body == null ? "" : String(body); return chain; },
             raw: function() { return chain; },
             request: function() { return chain; },
-            body: function() { return ""; },
+            body: function() { return java.ajax(payload()); },
+            execute: function() { return chain.body(); },
             url: function() { return u; },
             toString: function() { return u; }
           };
@@ -352,6 +433,63 @@ class LegadoJsEngine {
           return this.currentTimeMillis();
         }
       };
+
+      var AESMode = {
+        cbc: "cbc",
+        cfb64: "cfb64",
+        ctr: "ctr",
+        ecb: "ecb",
+        ofb64Gctr: "ofb64Gctr",
+        ofb64: "ofb64",
+        sic: "sic"
+      };
+
+      var esoTools = {
+        encode: function(type, body) {
+          return sendMessage("java_encode_type", JSON.stringify({type: String(type || ""), value: String(body || "")}));
+        },
+        decode: function(type, body) {
+          return sendMessage("java_decode_type", JSON.stringify({type: String(type || ""), value: String(body || "")}));
+        },
+        md5Encode: function(str) { return java.md5Encode(str); },
+        base64Encode: function(str) { return java.base64Encode(str); },
+        base64Decode: function(str) { return java.base64Decode(str); },
+        sha1Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha1", value: String(str || "")})); },
+        sha224Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha224", value: String(str || "")})); },
+        sha256Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha256", value: String(str || "")})); },
+        sha348Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha384", value: String(str || "")})); },
+        sha384Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha384", value: String(str || "")})); },
+        sha512Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha512", value: String(str || "")})); },
+        ripemd160Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "ripemd160", value: String(str || "")})); },
+        AES_Encode: function(string, inkey, opt) {
+          opt = opt || {};
+          var mode = String(opt.mode || AESMode.cbc || "cbc");
+          var raw = sendMessage("java_aes_base64_encode", JSON.stringify({
+            value: String(string || ""),
+            key: String(inkey || ""),
+            iv: String(opt.iv || ""),
+            mode: mode
+          }));
+          try { return JSON.parse(raw); } catch(e) { return {base16: "", base64: "", bytes: []}; }
+        },
+        AES_Decode: function(string, inkey, opt) {
+          opt = opt || {};
+          return java.aesBase64DecodeToString(string, inkey, opt.iv || "", String(opt.mode || AESMode.cbc || "cbc"));
+        },
+        AES_EncodeCBC: function(string, inkey, iniv) { return esoTools.AES_Encode(string, inkey, {mode: AESMode.cbc, iv: iniv}); },
+        AES_DecodeCBC: function(string, inkey, iniv) { return esoTools.AES_Decode(string, inkey, {mode: AESMode.cbc, iv: iniv}); },
+        AES_EncodeECB: function(string, inkey) { return esoTools.AES_Encode(string, inkey, {mode: AESMode.ecb}); },
+        AES_DecodeECB: function(string, inkey) { return esoTools.AES_Decode(string, inkey, {mode: AESMode.ecb}); },
+        RSA_encrypt: function() { return ""; },
+        RSA_decrypt: function() { return ""; },
+        RSA_encryptWithPrivate: function() { return ""; },
+        RSA_decryptWithPublic: function() { return ""; }
+      };
+
+      var tools = typeof tools === "undefined" ? esoTools : tools;
+      tools.md5Encode = tools.md5Encode || esoTools.md5Encode;
+      tools.base64Encode = tools.base64Encode || esoTools.base64Encode;
+      tools.base64Decode = tools.base64Decode || esoTools.base64Decode;
 
       function kv_get(key) {
         return java.get(key);
@@ -796,6 +934,161 @@ class LegadoJsEngine {
     } catch (_) {
       return '';
     }
+  }
+
+  Map<String, dynamic> _aesEncodeToMap(
+    String value,
+    String key,
+    String iv,
+    String mode,
+  ) {
+    try {
+      final keyBytes = Uint8List.fromList(utf8.encode(key));
+      if (keyBytes.length != 16 &&
+          keyBytes.length != 24 &&
+          keyBytes.length != 32) {
+        return const {'base16': '', 'base64': '', 'bytes': <int>[]};
+      }
+
+      final cipher = _aesCipher(
+        encrypting: true,
+        keyBytes: keyBytes,
+        iv: iv,
+        mode: mode,
+      );
+      final encrypted = cipher.process(Uint8List.fromList(utf8.encode(value)));
+      return {
+        'base16': _bytesToHex(encrypted),
+        'base64': base64Encode(encrypted),
+        'bytes': encrypted.toList(),
+      };
+    } catch (_) {
+      return const {'base16': '', 'base64': '', 'bytes': <int>[]};
+    }
+  }
+
+  PaddedBlockCipher _aesCipher({
+    required bool encrypting,
+    required Uint8List keyBytes,
+    required String iv,
+    required String mode,
+  }) {
+    final normalizedMode = mode.toLowerCase();
+    final blockCipher = normalizedMode == 'ecb'
+        ? ECBBlockCipher(AESEngine())
+        : CBCBlockCipher(AESEngine());
+    final cipher = PaddedBlockCipherImpl(PKCS7Padding(), blockCipher);
+    if (normalizedMode == 'ecb') {
+      cipher.init(
+        encrypting,
+        PaddedBlockCipherParameters<KeyParameter, Null>(
+          KeyParameter(keyBytes),
+          null,
+        ),
+      );
+      return cipher;
+    }
+
+    var ivBytes = Uint8List.fromList(utf8.encode(iv));
+    if (ivBytes.length != 16) {
+      ivBytes = Uint8List(16);
+    }
+    cipher.init(
+      encrypting,
+      PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>, Null>(
+        ParametersWithIV<KeyParameter>(KeyParameter(keyBytes), ivBytes),
+        null,
+      ),
+    );
+    return cipher;
+  }
+
+  String _hashHex(String type, String value) {
+    final bytes = utf8.encode(value);
+    switch (type.toLowerCase()) {
+      case 'md5':
+        return md5.convert(bytes).toString();
+      case 'sha1':
+        return sha1.convert(bytes).toString();
+      case 'sha224':
+        return sha224.convert(bytes).toString();
+      case 'sha256':
+        return sha256.convert(bytes).toString();
+      case 'sha348':
+      case 'sha384':
+        return sha384.convert(bytes).toString();
+      case 'sha512':
+        return sha512.convert(bytes).toString();
+      case 'ripemd160':
+        final digest = RIPEMD160Digest().process(Uint8List.fromList(bytes));
+        return _bytesToHex(digest);
+      default:
+        return '';
+    }
+  }
+
+  String _encodeByType(String type, String value) {
+    switch (type.toLowerCase()) {
+      case 'base64':
+        return base64Encode(utf8.encode(value));
+      case 'gbk':
+      case 'gb2312':
+      case 'gb18030':
+        return gbk
+            .encode(value)
+            .map(
+              (byte) =>
+                  '%${byte.toRadixString(16).toUpperCase().padLeft(2, '0')}',
+            )
+            .join();
+      case 'utf8':
+      case 'utf-8':
+        return Uri.encodeComponent(value);
+      case 'md5':
+        return md5.convert(utf8.encode(value)).toString();
+      default:
+        return value;
+    }
+  }
+
+  String _decodeByType(String type, String value) {
+    switch (type.toLowerCase()) {
+      case 'base64':
+        return utf8.decode(base64Decode(value), allowMalformed: true);
+      case 'gbk':
+      case 'gb2312':
+      case 'gb18030':
+        return gbk.decode(_percentBytes(value));
+      case 'utf8':
+      case 'utf-8':
+        return Uri.decodeComponent(value);
+      default:
+        return value;
+    }
+  }
+
+  Uint8List _percentBytes(String value) {
+    final bytes = <int>[];
+    for (var i = 0; i < value.length; i++) {
+      if (value.codeUnitAt(i) == 0x25 && i + 2 < value.length) {
+        final byte = int.tryParse(value.substring(i + 1, i + 3), radix: 16);
+        if (byte != null) {
+          bytes.add(byte);
+          i += 2;
+          continue;
+        }
+      }
+      bytes.add(value.codeUnitAt(i));
+    }
+    return Uint8List.fromList(bytes);
+  }
+
+  String _bytesToHex(List<int> bytes) {
+    final buffer = StringBuffer();
+    for (final byte in bytes) {
+      buffer.write(byte.toRadixString(16).padLeft(2, '0'));
+    }
+    return buffer.toString();
   }
 
   void dispose() {

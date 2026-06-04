@@ -697,15 +697,13 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
     DiagnosticIssue issue,
     SourceDiagnosticViewModel viewModel,
   ) {
-    final exp = RegExp(r'(?:\.|\#)[a-zA-Z0-9_\-\s\>\#\.\:\@\(\)]+');
-    final matches = exp.allMatches(issue.suggestion);
-    if (matches.isEmpty) return const SizedBox.shrink();
+    final selectors = _extractActionSelectors(issue.suggestion);
+    if (selectors.isEmpty) return const SizedBox.shrink();
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: matches.map((m) {
-        final selector = m.group(0)!.trim();
+      children: selectors.map((selector) {
         return CupertinoButton(
           color: const Color(0xFF007AFF).withOpacity(0.1),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -723,6 +721,74 @@ class _SourceDiagnosticPageState extends ConsumerState<SourceDiagnosticPage> {
         );
       }).toList(),
     );
+  }
+
+  List<String> _extractActionSelectors(String suggestion) {
+    final selectors = <String>[];
+    void add(String raw) {
+      var selector = raw.trim();
+      selector = selector
+          .replaceAll(RegExp(r'["“”]+'), '')
+          .replaceAll(RegExp(r'\s*\(得分[:：]?\s*\d+.*$'), '')
+          .trim();
+      while (selector.endsWith('.') ||
+          selector.endsWith('。') ||
+          selector.endsWith(',') ||
+          selector.endsWith('，') ||
+          selector.endsWith(';') ||
+          selector.endsWith('；')) {
+        selector = selector.substring(0, selector.length - 1).trim();
+      }
+      if (selector.isEmpty ||
+          selector.length > 120 ||
+          selector.contains('@js') ||
+          selector.contains('<js>') ||
+          RegExp(r'^#[0-9]+$').hasMatch(selector)) {
+        return;
+      }
+      final ok =
+          selector.startsWith('.') ||
+          selector.startsWith('#') ||
+          selector.startsWith('class.') ||
+          selector.startsWith('id.') ||
+          selector.startsWith('tag.') ||
+          selector.startsWith('@xpath:') ||
+          selector.startsWith('//');
+      if (ok && !selectors.contains(selector)) selectors.add(selector);
+    }
+
+    final withMatch = RegExp(
+      r'''\bwith\s+["“]?([^"”\n(（，,;；]+)''',
+      caseSensitive: false,
+    ).firstMatch(suggestion);
+    if (withMatch != null) add(withMatch.group(1)!);
+
+    final replaceMatch = RegExp(
+      r'''(?:替换为|新规则候选[:：]|备选规则[:：])\s*["“]?([^"”\n(（，,;；]+)''',
+    ).firstMatch(suggestion);
+    if (replaceMatch != null) add(replaceMatch.group(1)!);
+
+    final quoted = RegExp(r'''["“]([^"”]+)["”]''');
+    for (final match in quoted.allMatches(suggestion)) {
+      add(match.group(1)!);
+    }
+
+    final listPart = RegExp(
+      r'''(?:列表选择器|目录选择器|正文选择器|候补 CSS 规则|可能替代)[^:：]*[:：]\s*([^\n]+)''',
+    ).firstMatch(suggestion);
+    if (listPart != null) {
+      for (final part in listPart.group(1)!.split(RegExp(r'[，,;；]'))) {
+        add(part);
+      }
+    }
+
+    final generic = RegExp(
+      r'''(@xpath:[^\s，,;；]+|//[^\s，,;；]+|[.#][A-Za-z_][A-Za-z0-9_\-]*(?:[ >+~]+(?:[.#]?[A-Za-z_][A-Za-z0-9_\-]*|\[[^\]]+\]))*(?:\s+[a-z][A-Za-z0-9_\-]*)?|(?:class|id|tag)\.[A-Za-z0-9_\-][A-Za-z0-9_.\-\s]*(?:@[A-Za-z0-9_()\-]+)?)''',
+    );
+    for (final match in generic.allMatches(suggestion)) {
+      add(match.group(1)!);
+    }
+    return selectors;
   }
 
   Widget _buildStageTile(String title, bool success, Color textColor) {

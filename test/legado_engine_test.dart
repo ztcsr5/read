@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:fast_gbk/fast_gbk.dart';
+import 'package:read/data/models/book.dart';
+import 'package:read/data/models/diagnostic_report.dart';
 import 'package:read/data/models/book_source.dart';
 import 'package:read/data/parsers/legado/legado_js_engine.dart';
 import 'package:read/data/parsers/legado/legado_request_builder.dart';
@@ -603,6 +605,147 @@ void main() {
       expect(imported.ruleToc, result.source.ruleToc);
     });
 
+    test('auto repair fills html defaults and normalizes legacy aliases', () {
+      final source = BookSource()
+        ..bookSourceName = 'Repair Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleSearch = jsonEncode({
+          'list': '.result-item',
+          'title': 'h3@text',
+          'url': 'h3 a@href',
+        })
+        ..ruleToc = jsonEncode({'chapterListTOC': 'class.chapter-list item'});
+
+      final result = SourceAutoRepairService.repairWithReport(source);
+      final search = jsonDecode(result.source.ruleSearch!) as Map;
+      final toc = jsonDecode(result.source.ruleToc!) as Map;
+
+      expect(search['bookList'], '.result-item');
+      expect(search['name'], 'h3@text');
+      expect(search['bookUrl'], 'h3 a@href');
+      expect(toc['chapterList'], 'class.chapter-list.item');
+      expect(toc['chapterName'], '@text');
+      expect(toc['chapterUrl'], '@href');
+    });
+
+    test('auto repair applies diagnostic selector candidates', () {
+      final source = BookSource()
+        ..bookSourceName = 'Candidate Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleSearch = jsonEncode({
+          'bookList': '.old',
+          'name': 'a@text',
+          'bookUrl': 'a@href',
+        });
+      final report = DiagnosticReport(
+        searchSuccess: false,
+        bookInfoSuccess: true,
+        tocSuccess: true,
+        contentSuccess: true,
+        score: 70,
+        riskLevel: 'medium',
+        issues: [
+          DiagnosticIssue(
+            stage: 'search',
+            field: 'bookList',
+            reason: 'old selector failed',
+            suggestion: 'replace ".old" with ".book-item"',
+          ),
+        ],
+      );
+
+      final result = SourceAutoRepairService.repairWithReport(
+        source,
+        report: report,
+      );
+      final search = jsonDecode(result.source.ruleSearch!) as Map;
+
+      expect(search['bookList'], '.book-item');
+      expect(result.changes.join('\n'), contains('bookList=.book-item'));
+    });
+
+    test(
+      'auto repair applies Chinese candidate lists by stage and rule field',
+      () {
+        final source = BookSource()
+          ..bookSourceName = 'Chinese Candidate Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..ruleToc = jsonEncode({
+            'chapterList': '.old-toc a',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          });
+        final report = DiagnosticReport(
+          searchSuccess: true,
+          bookInfoSuccess: true,
+          tocSuccess: false,
+          contentSuccess: true,
+          score: 70,
+          riskLevel: 'medium',
+          issues: [
+            DiagnosticIssue(
+              stage: 'toc',
+              field: 'ruleToc',
+              reason: '目录解析失败：推荐候补 CSS 规则',
+              suggestion: '检测到可能替代的目录选择器：.chapter-list li a，#catalog a',
+            ),
+          ],
+        );
+
+        final result = SourceAutoRepairService.repairWithReport(
+          source,
+          report: report,
+        );
+        final toc = jsonDecode(result.source.ruleToc!) as Map;
+
+        expect(toc['chapterList'], '.chapter-list li a');
+        expect(
+          result.changes.join('\n'),
+          contains('chapterList=.chapter-list li a'),
+        );
+      },
+    );
+
+    test(
+      'auto repair prefers new redesign selector over old quoted selector',
+      () {
+        final source = BookSource()
+          ..bookSourceName = 'Redesign Candidate Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.old',
+            'name': 'a@text',
+            'bookUrl': 'a@href',
+          });
+        final report = DiagnosticReport(
+          searchSuccess: false,
+          bookInfoSuccess: false,
+          tocSuccess: false,
+          contentSuccess: false,
+          score: 0,
+          riskLevel: 'high',
+          issues: [
+            DiagnosticIssue(
+              stage: 'search',
+              field: 'bookList',
+              rule: '.old',
+              reason: '检测到网站结构可能改版',
+              suggestion: '检测到高权重备选规则！建议将旧选择器 ".old" 自动替换为 ".novel-item"',
+              htmlSnippet: '旧规则: .old\n新规则候选: .novel-item (得分: 89)',
+            ),
+          ],
+        );
+
+        final result = SourceAutoRepairService.repairWithReport(
+          source,
+          report: report,
+        );
+        final search = jsonDecode(result.source.ruleSearch!) as Map;
+
+        expect(search['bookList'], '.novel-item');
+      },
+    );
+
     test(
       'falls back to chapter-like html anchors when toc selector misses',
       () async {
@@ -715,6 +858,97 @@ void main() {
       expect(url, startsWith('https://api.example.com/search?keyword='));
       expect(url, isNot(contains('/@js:')));
       expect(url, contains('"X-Test":"1"'));
+    });
+
+    test('keeps embedded post config returned by raw @js searchUrl', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'Post'
+        ..bookSourceUrl = 'https://m.example.com'
+        ..searchUrl =
+            '@js:var body="q="+java.encodeURIComponent(key); source.getKey()+"/api/search,"+JSON.stringify({"method":"POST","body":body,"charset":"gbk"})';
+
+      final url = await LegadoParser.buildSearchUrl(source, '斗破苍穹');
+
+      expect(url, startsWith('https://m.example.com/api/search,'));
+      expect(url, contains('"method":"POST"'));
+      expect(url, contains('"charset":"gbk"'));
+      expect(url, isNot(contains('/@js:')));
+    });
+
+    test('applies json value javascript post processor to book URLs', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final value = LegadoRuleEvaluator.extractJsonValue({
+        'id': 155711,
+      }, r'$.id@js:"https://www.ruochu.com/book/"+result');
+
+      expect(value, 'https://www.ruochu.com/book/155711');
+    });
+
+    test(
+      'keeps response data when leading js block only defines rule vars',
+      () async {
+        if (!LegadoJsEngine().isAvailable) return;
+        final source = BookSource()
+          ..bookSourceName = 'Comment Rule'
+          ..bookSourceUrl = 'https://example.com'
+          ..customConfig = jsonEncode({
+            'bookSourceComment': 'var p = { sone: ".book" };',
+          })
+          ..ruleSearch = jsonEncode({
+            'bookList':
+                '<js>eval(String(source.bookSourceComment))</js>\np.sone',
+            'name': 'a@text',
+            'bookUrl': 'a@href',
+          });
+        final response = Response(
+          data:
+              '<html><body><div class="book"><a href="/b/1">斗破苍穹</a></div></body></html>',
+          requestOptions: RequestOptions(path: 'https://example.com/search'),
+          statusCode: 200,
+        );
+
+        final books = await LegadoParser.searchBooks(
+          source,
+          '斗破',
+          preFetchedResponse: response,
+        );
+
+        expect(books, hasLength(1));
+        expect(books.first.title, '斗破苍穹');
+        expect(books.first.filePath, 'https://example.com/b/1');
+      },
+    );
+
+    test('supports ESO style crypto helper aliases', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      expect(
+        LegadoJsEngine().evaluate('@js:esoTools.md5Encode("abc")'),
+        '900150983cd24fb0d6963f7d28e17f72',
+      );
+      expect(
+        LegadoJsEngine().evaluate(
+          '@js:esoTools.base64Decode(esoTools.base64Encode("abc"))',
+        ),
+        'abc',
+      );
+    });
+
+    test('supports legacy class selector with multiple class tokens', () {
+      final document = parse('''
+        <ul class="float-list fill-block">
+          <li><a href="/1">第一章</a></li>
+          <li><a href="/2">第二章</a></li>
+        </ul>
+      ''');
+
+      final nodes = LegadoRuleEvaluator.queryAll(
+        document,
+        'class.float-list fill-block@tag.li',
+      );
+
+      expect(nodes, hasLength(2));
+      expect(LegadoRuleEvaluator.extractHtmlValue(nodes.last, 'a@text'), '第二章');
     });
 
     test('does not throw on loose Legado attribute selectors', () {

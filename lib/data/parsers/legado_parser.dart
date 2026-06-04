@@ -1955,7 +1955,11 @@ class LegadoParser {
         ajax: (request) =>
             _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
       );
-      return (data: output, rule: block.suffix);
+      final resolvedRule = _resolvePreparedRuleSuffix(block.suffix, variables);
+      return (
+        data: output.trim().isEmpty ? data : output,
+        rule: resolvedRule.trim().isEmpty ? block.suffix : resolvedRule,
+      );
     } catch (_) {
       return (data: data, rule: block.suffix.isEmpty ? rule : block.suffix);
     }
@@ -1978,6 +1982,39 @@ class LegadoParser {
     return null;
   }
 
+  static String _resolvePreparedRuleSuffix(
+    String suffix,
+    Map<String, dynamic> variables,
+  ) {
+    final text = suffix.trim();
+    if (!_looksLikeJsRuleReference(text)) return suffix;
+    try {
+      final evaluated = LegadoJsEngine().evaluate(text, variables: variables);
+      final resolved = evaluated.trim();
+      return resolved.isEmpty ? suffix : resolved;
+    } catch (_) {
+      return suffix;
+    }
+  }
+
+  static bool _looksLikeJsRuleReference(String text) {
+    if (text.isEmpty || text.contains('\n') || text.contains('@')) {
+      return false;
+    }
+    if (text.startsWith('.') ||
+        text.startsWith('#') ||
+        text.startsWith('class.') ||
+        text.startsWith('id.') ||
+        text.startsWith('tag.') ||
+        text.startsWith('xpath:') ||
+        text.startsWith('@xpath:')) {
+      return false;
+    }
+    return RegExp(
+      r'^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$',
+    ).hasMatch(text);
+  }
+
   static Map<String, dynamic> _jsVariables(
     BookSource source, {
     String result = '',
@@ -1992,12 +2029,24 @@ class LegadoParser {
       sourceUrl.contains('://') ? sourceUrl : 'https://$sourceUrl',
     );
     final config = LegadoRequestBuilder.jsonConfig(source.customConfig);
+    final comment =
+        (config['bookSourceComment'] ??
+                config['sourceComment'] ??
+                config['comment'] ??
+                '')
+            .toString();
+    final header = config['bookSourceHeader'] ?? config['header'] ?? '';
     return {
       'result': result,
       'baseUrl': baseUrl ?? sourceUrl,
       'key': keyword ?? '',
       'keyword': keyword ?? '',
       'page': page,
+      'params': {
+        'pageIndex': page,
+        'tabIndex': 0,
+        'filters': <String, dynamic>{},
+      },
       'cookieHeader': sourceUri == null
           ? ''
           : LegadoSessionStore.cookieHeaderFor(sourceUri) ?? '',
@@ -2008,7 +2057,15 @@ class LegadoParser {
         'key': sourceUrl,
         'bookSourceUrl': sourceUrl,
         'bookSourceName': source.bookSourceName,
+        'bookSourceGroup': source.bookSourceGroup ?? '',
+        'bookSourceType': source.bookSourceType,
+        'bookSourceComment': comment,
+        'bookSourceHeader': header,
+        'enabled': source.enabled,
+        'enabledCookieJar': config['enabledCookieJar'] ?? false,
+        'enabledExplore': config['enabledExplore'] ?? true,
         'variable': config['variable'] ?? config['variableComment'] ?? '',
+        'variableComment': config['variableComment'] ?? '',
         'customConfig': config,
       },
     };
@@ -2804,7 +2861,8 @@ class LegadoParser {
           keyword: keyword,
         ),
       );
-      if (output.trim().isNotEmpty) searchUrl = output.trim();
+      searchUrl = output.trim();
+      if (searchUrl.isEmpty) return '';
     } else {
       searchUrl = LegadoRequestBuilder.replaceVariables(
         raw,
@@ -2833,7 +2891,8 @@ class LegadoParser {
             keyword: keyword,
           ),
         );
-        if (output.trim().isNotEmpty) searchUrl = output.trim();
+        searchUrl = output.trim();
+        if (searchUrl.isEmpty) return '';
       }
     }
 

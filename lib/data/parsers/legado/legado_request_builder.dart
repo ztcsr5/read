@@ -250,6 +250,7 @@ class LegadoRequestBuilder {
         .replaceAll('%0d', '')
         .trim();
     if (url.isEmpty) return '';
+    if (_isWholeJsRule(url)) return '';
     if (url.startsWith('data:') || url.startsWith('javascript:')) return url;
 
     // 1. Separate Legado config
@@ -652,6 +653,7 @@ class LegadoRequestBuilder {
             'key': keyword,
             'page': page,
             'source': {'key': baseUrl, 'bookSourceUrl': baseUrl},
+            'params': {'pageIndex': page, 'tabIndex': 0, 'filters': {}},
           },
         );
         return value.trim();
