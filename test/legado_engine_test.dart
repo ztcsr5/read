@@ -133,6 +133,20 @@ void main() {
       expect(request.charset, 'gbk');
     });
 
+    test('keeps empty signed headers from embedded config', () {
+      final source = BookSource()
+        ..bookSourceName = 'Signed'
+        ..bookSourceUrl = 'https://api.example.com';
+
+      final request = LegadoRequestBuilder.buildRequest(
+        source,
+        'https://api.example.com/search,{"headers":{"AUTHORIZATION":"","sign":"abc"}}',
+      );
+
+      expect(request.headers?['AUTHORIZATION'], '');
+      expect(request.headers?['sign'], 'abc');
+    });
+
     test('builds request headers from source header config', () {
       final source = BookSource.fromJson({
         'bookSourceName': 'Header Test',
@@ -876,13 +890,78 @@ void main() {
       expect(url, isNot(contains('/@js:')));
     });
 
+    test('wraps raw js search url scripts so the last expression returns', () {
+      final prepared = LegadoJsEngine().prepareForTesting('''
+@js:
+sign_key='secret'
+headers={'AUTHORIZATION':''}
+body='q='+java.encodeURIComponent(key)
+"/api/search?" + body + "," + java.put("headers",JSON.stringify({"headers":headers}))
+''');
+
+      expect(prepared, contains('return ("/api/search?" + body'));
+      expect(prepared, contains('java.put("headers"'));
+    });
+
+    test('wraps raw js search url scripts with nested function returns', () {
+      final prepared = LegadoJsEngine().prepareForTesting(r'''
+@js:
+sign_key='secret'
+headers={'AUTHORIZATION':''}
+params={'page':page,'wd':key}
+var urlEncode = function (param, key, encode) {
+  if(param==null) return '';
+  var paramStr = '';
+  for (var i in param) {
+    paramStr += '&' + i + '=' + encodeURIComponent(param[i]);
+  }
+  return paramStr;
+};
+body=urlEncode(params)
+"/api/v5/search/words?" + body + "," + java.put("headers",JSON.stringify({"headers":headers}))
+''');
+
+      expect(prepared, contains('return ("/api/v5/search/words?" + body'));
+      expect(prepared, contains("if(param==null) return ''"));
+    });
+
     test('applies json value javascript post processor to book URLs', () {
-      if (!LegadoJsEngine().isAvailable) return;
       final value = LegadoRuleEvaluator.extractJsonValue({
         'id': 155711,
       }, r'$.id@js:"https://www.ruochu.com/book/"+result');
 
       expect(value, 'https://www.ruochu.com/book/155711');
+    });
+
+    test('applies json value javascript post processor to cover URLs', () {
+      final value = LegadoRuleEvaluator.extractJsonValue({
+        'iconUrlSmall': '/book/155711.jpg@!bns?1',
+      }, r'$.iconUrlSmall@js:"https://b.heiyanimg.com"+result');
+
+      expect(value, 'https://b.heiyanimg.com/book/155711.jpg@!bns?1');
+    });
+
+    test(
+      'applies simple javascript replace post processors without runtime',
+      () {
+        final value = LegadoRuleEvaluator.applyPostProcessors(
+          '第1章 广告 正文 广告',
+          r'@js:result.replace(/广告/g,"")',
+        );
+
+        expect(value, '第1章  正文');
+      },
+    );
+
+    test('keeps text for t2s and s2t javascript post processors', () {
+      expect(
+        LegadoRuleEvaluator.applyPostProcessors('繁體', r'@js:java.t2s(result)'),
+        '繁體',
+      );
+      expect(
+        LegadoRuleEvaluator.applyPostProcessors('简体', r'@js:java.s2t(result)'),
+        '简体',
+      );
     });
 
     test(

@@ -1251,6 +1251,8 @@ class LegadoRuleEvaluator {
   static String _applyJsPostProcessors(String value, String rule) {
     if (!rule.contains('@js:') && !rule.contains('<js>')) return value;
     var output = value;
+    final simpleOutput = _evaluateSimpleJsPostProcessor(output, rule);
+    if (simpleOutput.isNotEmpty) output = simpleOutput;
 
     final aesMatch = RegExp(
       r'''java\.aesBase64DecodeToString\(\s*result\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']*)["']''',
@@ -1296,6 +1298,173 @@ class LegadoRuleEvaluator {
     return output;
   }
 
+  static String _evaluateSimpleJsPostProcessor(String result, String rule) {
+    final script = _extractJsPostProcessorScript(rule);
+    if (script.isEmpty) return '';
+    var expression = script.trim();
+    expression = expression.replaceFirst(RegExp(r'^return\s+'), '');
+    expression = expression.replaceAll(RegExp(r';\s*$'), '').trim();
+    if (RegExp(r'^java\.(t2s|s2t)\(\s*result\s*\)$').hasMatch(expression)) {
+      return result;
+    }
+
+    final replaced = _evaluateResultReplaceExpression(result, expression);
+    if (replaced != null) return replaced;
+
+    final startsWithMatch = RegExp(
+      r'''^result\.startsWith\(["']([^"']+)["']\)\s*\?\s*result\s*:\s*(.+)$''',
+    ).firstMatch(expression);
+    if (startsWithMatch != null) {
+      final prefix = startsWithMatch.group(1) ?? '';
+      if (result.startsWith(prefix)) return result;
+      expression = startsWithMatch.group(2)?.trim() ?? '';
+    }
+
+    final tokens = _splitJsConcatExpression(expression);
+    if (tokens.length <= 1) return '';
+    final firstLiteral = tokens
+        .map((token) => token.trim())
+        .where(_isQuotedJsString)
+        .map(_decodeJsStringLiteral)
+        .firstWhere((text) => text.isNotEmpty, orElse: () => '');
+    if (firstLiteral.isNotEmpty && result.startsWith(firstLiteral)) return '';
+    final buffer = StringBuffer();
+    var usedResult = false;
+    for (final token in tokens) {
+      final value = token.trim();
+      if (value == 'result' || value == 'String(result)') {
+        buffer.write(result);
+        usedResult = true;
+      } else if (_isQuotedJsString(value)) {
+        buffer.write(_decodeJsStringLiteral(value));
+      } else if (RegExp(r'^-?\d+(\.\d+)?$').hasMatch(value)) {
+        buffer.write(value);
+      } else {
+        return '';
+      }
+    }
+    final output = buffer.toString();
+    return usedResult ? output : '';
+  }
+
+  static String? _evaluateResultReplaceExpression(
+    String result,
+    String expression,
+  ) {
+    final literalMatch = RegExp(
+      r'''^result\.replace\(\s*(["'])(.*?)\1\s*,\s*(["'])(.*?)\3\s*\)$''',
+      dotAll: true,
+    ).firstMatch(expression);
+    if (literalMatch != null) {
+      return result.replaceFirst(
+        _decodeJsEscaped(literalMatch.group(2) ?? ''),
+        _decodeJsEscaped(literalMatch.group(4) ?? ''),
+      );
+    }
+
+    final regexMatch = RegExp(
+      r'''^result\.replace\(\s*/(.+?)/([gimsuy]*)\s*,\s*(["'])(.*?)\3\s*\)$''',
+      dotAll: true,
+    ).firstMatch(expression);
+    if (regexMatch != null) {
+      try {
+        final pattern = regexMatch.group(1) ?? '';
+        final flags = regexMatch.group(2) ?? '';
+        final replacement = _decodeJsEscaped(regexMatch.group(4) ?? '');
+        final regex = RegExp(
+          pattern,
+          caseSensitive: !flags.contains('i'),
+          multiLine: flags.contains('m'),
+          dotAll: flags.contains('s'),
+        );
+        return flags.contains('g')
+            ? result.replaceAll(regex, replacement)
+            : result.replaceFirst(regex, replacement);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  static String _extractJsPostProcessorScript(String rule) {
+    if (rule.contains('@js:')) {
+      return rule.split('@js:')[1].split('##').first.trim();
+    }
+    if (rule.contains('<js>')) {
+      return rule.split('<js>')[1].split('</js>').first.trim();
+    }
+    return '';
+  }
+
+  static List<String> _splitJsConcatExpression(String expression) {
+    final tokens = <String>[];
+    final buffer = StringBuffer();
+    var quote = 0;
+    var escaped = false;
+    var depth = 0;
+    for (var i = 0; i < expression.length; i++) {
+      final unit = expression.codeUnitAt(i);
+      if (quote != 0) {
+        buffer.writeCharCode(unit);
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        buffer.writeCharCode(unit);
+        continue;
+      }
+      if (unit == 0x28 || unit == 0x5b || unit == 0x7b) {
+        depth++;
+        buffer.writeCharCode(unit);
+        continue;
+      }
+      if (unit == 0x29 || unit == 0x5d || unit == 0x7d) {
+        if (depth > 0) depth--;
+        buffer.writeCharCode(unit);
+        continue;
+      }
+      if (unit == 0x2b && depth == 0) {
+        tokens.add(buffer.toString());
+        buffer.clear();
+        continue;
+      }
+      buffer.writeCharCode(unit);
+    }
+    tokens.add(buffer.toString());
+    return tokens;
+  }
+
+  static bool _isQuotedJsString(String value) {
+    if (value.length < 2) return false;
+    final first = value.codeUnitAt(0);
+    final last = value.codeUnitAt(value.length - 1);
+    return (first == 0x22 || first == 0x27 || first == 0x60) && first == last;
+  }
+
+  static String _decodeJsStringLiteral(String value) {
+    final body = value.substring(1, value.length - 1);
+    return _decodeJsEscaped(body);
+  }
+
+  static String _decodeJsEscaped(String body) {
+    return body
+        .replaceAll(r'\"', '"')
+        .replaceAll(r"\'", "'")
+        .replaceAll(r'\`', '`')
+        .replaceAll(r'\n', '\n')
+        .replaceAll(r'\r', '\r')
+        .replaceAll(r'\t', '\t')
+        .replaceAll(r'\\', '\\');
+  }
+
   static String _aesBase64Decode(String value, String key, String iv) {
     try {
       final keyBytes = Uint8List.fromList(utf8.encode(key));
@@ -1329,7 +1498,7 @@ class LegadoRuleEvaluator {
   }
 
   static bool _isPureJsonPath(String rule) {
-    final trimmed = rule.trim();
+    final trimmed = stripPostProcessors(rule).trim();
     return (trimmed.startsWith(r'$') ||
             trimmed.startsWith('@json:') ||
             trimmed.startsWith('json:')) &&

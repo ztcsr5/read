@@ -104,7 +104,7 @@ class LegadoRequestBuilder {
       rawHeaders.forEach((key, value) {
         final name = key.toString().trim();
         final headerValue = value.toString();
-        if (_isSafeHeaderName(name) && headerValue.isNotEmpty) {
+        if (_isSafeHeaderName(name)) {
           headers[name] = headerValue;
         }
       });
@@ -379,7 +379,7 @@ class LegadoRequestBuilder {
         json.forEach((key, value) {
           final name = key.toString().trim();
           final headerValue = value.toString();
-          if (_isSafeHeaderName(name) && headerValue.isNotEmpty) {
+          if (_isSafeHeaderName(name)) {
             headers[name] = headerValue;
           }
         });
@@ -398,7 +398,7 @@ class LegadoRequestBuilder {
       if (separator <= 0) continue;
       final key = line.substring(0, separator).trim();
       final value = line.substring(separator + 1).trim();
-      if (_isSafeHeaderName(key) && value.isNotEmpty) {
+      if (_isSafeHeaderName(key)) {
         headers[key] = value;
       }
     }
@@ -502,7 +502,7 @@ class LegadoRequestBuilder {
     for (final match in quotedPairPattern.allMatches(objectText)) {
       final key = match.group(1)?.trim() ?? '';
       final value = match.group(2)?.trim() ?? '';
-      if (_isSafeHeaderName(key) && value.isNotEmpty) {
+      if (_isSafeHeaderName(key)) {
         headers[key] = value;
       }
     }
@@ -519,7 +519,7 @@ class LegadoRequestBuilder {
         json.forEach((key, value) {
           final name = key.toString().trim();
           final headerValue = value.toString();
-          if (_isSafeHeaderName(name) && headerValue.isNotEmpty) {
+          if (_isSafeHeaderName(name)) {
             headers[name] = headerValue;
           }
         });
@@ -538,7 +538,7 @@ class LegadoRequestBuilder {
       if (separator <= 0) continue;
       final key = line.substring(0, separator).trim();
       final value = line.substring(separator + 1).trim();
-      if (_isSafeHeaderName(key) && value.isNotEmpty) {
+      if (_isSafeHeaderName(key)) {
         headers[key] = value;
       }
     }
@@ -782,7 +782,7 @@ class LegadoRequestBuilder {
     headers.forEach((key, value) {
       final name = key.trim();
       final headerValue = value.toString();
-      if (_isSafeHeaderName(name) && headerValue.isNotEmpty) {
+      if (_isSafeHeaderName(name)) {
         safe[name] = headerValue;
       }
     });

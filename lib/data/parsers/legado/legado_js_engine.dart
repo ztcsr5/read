@@ -777,9 +777,14 @@ class LegadoJsEngine {
 
     // Use JsCompatibilityTransformer to upgrade functions with java.ajax calls to async and insert await correctly
     codeToRun = JsCompatibilityTransformer.transform(codeToRun);
+    return _wrapLegadoScript(codeToRun);
+  }
 
+  String prepareForTesting(String jsCode) => _prepareCode(jsCode);
+
+  String _wrapLegadoScript(String codeToRun) {
+    codeToRun = codeToRun.trim();
     final hasAwait = codeToRun.contains('await');
-
     if (hasAwait) {
       final clean = codeToRun.trim();
       if (clean.startsWith('(function(') ||
@@ -794,18 +799,174 @@ class LegadoJsEngine {
 
       if (codeToRun.contains('return ') && !codeToRun.startsWith('(async')) {
         return '(async function() { $codeToRun })()';
-      } else if (!codeToRun.startsWith('(async') &&
-          !codeToRun.startsWith('var') &&
-          !codeToRun.startsWith('let') &&
-          !codeToRun.startsWith('const')) {
+      }
+      final withReturn = _wrapLastExpression(codeToRun, isAsync: true);
+      if (withReturn != null) return withReturn;
+      if (!codeToRun.startsWith('(async') &&
+          !_startsWithDeclaration(codeToRun)) {
         return '(async () => { return ($codeToRun); })()';
       }
     } else {
       if (codeToRun.contains('return ') && !codeToRun.contains('function')) {
         codeToRun = '(function() { $codeToRun })()';
       }
+      final withReturn = _wrapLastExpression(codeToRun, isAsync: false);
+      if (withReturn != null) return withReturn;
     }
     return codeToRun;
+  }
+
+  bool _startsWithDeclaration(String code) {
+    final clean = code.trimLeft();
+    return clean.startsWith('var ') ||
+        clean.startsWith('let ') ||
+        clean.startsWith('const ') ||
+        clean.startsWith('function ') ||
+        clean.startsWith('if ') ||
+        clean.startsWith('if(') ||
+        clean.startsWith('for ') ||
+        clean.startsWith('for(') ||
+        clean.startsWith('while ') ||
+        clean.startsWith('while(') ||
+        clean.startsWith('switch ') ||
+        clean.startsWith('try ');
+  }
+
+  String? _wrapLastExpression(String code, {required bool isAsync}) {
+    final clean = _trimTrailingSemicolons(code.trim());
+    if (clean.isEmpty ||
+        clean.startsWith('(function') ||
+        clean.startsWith('(async') ||
+        _hasTopLevelReturn(clean)) {
+      return null;
+    }
+
+    final split = _splitLastTopLevelStatement(clean);
+    if (split == null) return null;
+    final prefix = split.$1.trimRight();
+    final last = _trimTrailingSemicolons(split.$2.trim());
+    if (last.isEmpty || !_looksLikeReturnableExpression(last)) return null;
+
+    final body = prefix.isEmpty ? '' : '$prefix\n';
+    final asyncPrefix = isAsync ? 'async ' : '';
+    return '(${asyncPrefix}function() { ${body}return ($last); })()';
+  }
+
+  String _trimTrailingSemicolons(String value) {
+    var end = value.length;
+    while (end > 0 && value.codeUnitAt(end - 1) == 0x3b) {
+      end--;
+    }
+    return value.substring(0, end);
+  }
+
+  (String, String)? _splitLastTopLevelStatement(String code) {
+    var depth = 0;
+    var quote = 0;
+    var escaped = false;
+
+    for (var i = code.length - 1; i >= 0; i--) {
+      final unit = code.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x29 || unit == 0x5d || unit == 0x7d) {
+        depth++;
+        continue;
+      }
+      if (unit == 0x28 || unit == 0x5b || unit == 0x7b) {
+        if (depth > 0) depth--;
+        continue;
+      }
+      if (depth == 0 && (unit == 0x3b || unit == 0x0a || unit == 0x0d)) {
+        return (code.substring(0, i), code.substring(i + 1));
+      }
+    }
+
+    if (_looksLikeReturnableExpression(code)) return ('', code);
+    return null;
+  }
+
+  bool _looksLikeReturnableExpression(String value) {
+    final text = value.trim();
+    if (text.isEmpty || _startsWithDeclaration(text)) return false;
+    if (text.startsWith('//') || text.startsWith('/*')) return false;
+    if (RegExp(r'^[A-Za-z_$][\w$]*\s*=').hasMatch(text)) return false;
+    return text.startsWith('"') ||
+        text.startsWith("'") ||
+        text.startsWith('`') ||
+        text.startsWith('(') ||
+        text.startsWith('[') ||
+        text.startsWith('{') ||
+        text.startsWith('/') ||
+        text.startsWith('java.') ||
+        text.startsWith('source.') ||
+        text.startsWith('JSON.') ||
+        text.startsWith('String(') ||
+        text.contains('+') ||
+        text.contains('?') ||
+        RegExp(r'^[A-Za-z_$][\w$]*(\.[\w$]+|\(|\[)').hasMatch(text);
+  }
+
+  bool _hasTopLevelReturn(String code) {
+    var depth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < code.length; i++) {
+      final unit = code.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x28 || unit == 0x5b || unit == 0x7b) {
+        depth++;
+        continue;
+      }
+      if (unit == 0x29 || unit == 0x5d || unit == 0x7d) {
+        if (depth > 0) depth--;
+        continue;
+      }
+      if (depth == 0 &&
+          i + 6 <= code.length &&
+          code.substring(i, i + 6) == 'return' &&
+          _isWordBoundary(code, i - 1) &&
+          _isWordBoundary(code, i + 6)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isWordBoundary(String code, int index) {
+    if (index < 0 || index >= code.length) return true;
+    final unit = code.codeUnitAt(index);
+    return !((unit >= 0x30 && unit <= 0x39) ||
+        (unit >= 0x41 && unit <= 0x5a) ||
+        (unit >= 0x61 && unit <= 0x7a) ||
+        unit == 0x5f ||
+        unit == 0x24);
   }
 
   void _installAjaxTrap(Map<String, String> cache) {
