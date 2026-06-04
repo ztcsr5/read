@@ -961,7 +961,7 @@ class LegadoRuleEvaluator {
 
   static String _quoteLooseAttributeSelector(String selector) {
     return selector.replaceAllMapped(
-      RegExp(r'\[([A-Za-z0-9_\-:]+)([~|^$*]?=)([^\]"\']+)\]'),
+      RegExp(r"""\[([A-Za-z0-9_\-:]+)([~|^$*]?=)([^\]"']+)\]"""),
       (match) {
         final attr = match.group(1) ?? '';
         final op = match.group(2) ?? '=';

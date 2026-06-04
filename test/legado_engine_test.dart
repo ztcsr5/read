@@ -350,7 +350,7 @@ void main() {
       expect(
         LegadoRuleEvaluator.extractJsonValue(
           item,
-          '/novel/{{$.novelId}}/chapters',
+          r'/novel/{{$.novelId}}/chapters',
         ),
         '/novel/152/chapters',
       );
