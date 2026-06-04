@@ -344,6 +344,18 @@ void main() {
       );
     });
 
+    test('uses common JSON id aliases in templates', () {
+      final item = {'id': 152, 'title': '斗破苍穹'};
+
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          '/novel/{{$.novelId}}/chapters',
+        ),
+        '/novel/152/chapters',
+      );
+    });
+
     test('extracts html values with css selector and attributes', () {
       final document = parse('''
         <div class="book">
@@ -689,6 +701,38 @@ void main() {
       expect(LegadoParser.decodeBytes(bytes, 'gb18030'), text);
       expect(LegadoParser.decodeBytes(bytes, null), text);
     });
+
+    test('evaluates raw @js searchUrl before URL resolution', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'Signed'
+        ..bookSourceUrl = 'https://api.example.com'
+        ..searchUrl =
+            '@js:var u=source.getKey()+"/search?keyword="+java.encodeURIComponent(key); u+","+java.put("headers",JSON.stringify({"headers":{"X-Test":"1"}}))';
+
+      final url = await LegadoParser.buildSearchUrl(source, '斗破苍穹');
+
+      expect(url, startsWith('https://api.example.com/search?keyword='));
+      expect(url, isNot(contains('/@js:')));
+      expect(url, contains('"X-Test":"1"'));
+    });
+
+    test('does not throw on loose Legado attribute selectors', () {
+      final document = parse('''
+        <ul>
+          <li property="last_test_chapter_name">最新章节</li>
+          <li property="other">其他</li>
+        </ul>
+      ''');
+
+      expect(
+        () => LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'li[property~=las?test_chapter_name]@text',
+        ),
+        returnsNormally,
+      );
+    });
   });
 
   group('CompatibilityAnalyzer', () {
@@ -719,6 +763,24 @@ void main() {
       expect(reasons, contains('@get'));
       expect(reasons, contains('@put'));
       expect(reasons, contains('验证'));
+    });
+
+    test('does not flag URLs and CSS JSON as XPath risks', () {
+      final source = BookSource()
+        ..bookSourceName = 'Css'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl = '/api/search?keyword={{key}}'
+        ..ruleSearch = jsonEncode({
+          'bookList': 'ul.flex li',
+          'name': 'h2@text',
+          'bookUrl': 'a[href^="/"]@href',
+        });
+
+      final reasons = CompatibilityAnalyzer.analyze(
+        source,
+      ).map((issue) => issue.reason).join('\n');
+
+      expect(reasons, isNot(contains('XPath')));
     });
   });
 }

@@ -120,7 +120,9 @@ class CompatibilityAnalyzer {
       );
     }
 
-    _detectXPathRisks(text, stage, field, issues);
+    if (field != 'customConfig') {
+      _detectXPathRisks(text, stage, field, issues);
+    }
   }
 
   static void _detectXPathRisks(
@@ -129,10 +131,24 @@ class CompatibilityAnalyzer {
     String field,
     List<DiagnosticIssue> issues,
   ) {
+    final trimmed = rule.trim();
+    if (trimmed.startsWith('http://') ||
+        trimmed.startsWith('https://') ||
+        trimmed.startsWith('@js:') ||
+        trimmed.startsWith('<js>') ||
+        trimmed.startsWith('{') ||
+        trimmed.startsWith('[') ||
+        trimmed.startsWith(r'$.')) {
+      return;
+    }
     final hasXPathChars =
-        rule.contains('//') ||
-        rule.contains('/text()') ||
-        RegExp(r'/[a-zA-Z0-9_]+/@').hasMatch(rule);
+        trimmed.startsWith('//') ||
+        trimmed.startsWith('./') ||
+        (trimmed.startsWith('/') && !trimmed.contains('{{key}}')) ||
+        trimmed.contains('/text()') ||
+        trimmed.contains('/@') ||
+        RegExp(r'\b(contains|text|last|position)\s*\(').hasMatch(trimmed) ||
+        RegExp(r'@[A-Za-z_][A-Za-z0-9_\-]*\s*=').hasMatch(trimmed);
     final hasXPathPrefix = rule.contains('@xpath:') || rule.contains('xpath:');
 
     if (hasXPathChars && !hasXPathPrefix) {

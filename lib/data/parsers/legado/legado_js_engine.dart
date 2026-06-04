@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:pointycastle/export.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' show parse;
@@ -92,6 +94,20 @@ class LegadoJsEngine {
         final bytes = utf8.encode(input);
         final digest = md5.convert(bytes);
         return digest.toString().toLowerCase();
+      });
+
+      _runtime!.onMessage('java_aes_base64_decode', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _aesBase64Decode(
+            data['value']?.toString() ?? '',
+            data['key']?.toString() ?? '',
+            data['iv']?.toString() ?? '',
+          );
+        } catch (e) {
+          print('java_aes_base64_decode failed: $e');
+          return '';
+        }
       });
 
       _runtime!.onMessage('java_time', (dynamic args) {
@@ -279,6 +295,16 @@ class LegadoJsEngine {
         },
         md5Encode: function(string) {
           return sendMessage("java_md5", String(string || ""));
+        },
+        aesBase64DecodeToString: function(value, key, iv, transformation) {
+          return sendMessage("java_aes_base64_decode", JSON.stringify({
+            value: String(value || ""),
+            key: String(key || ""),
+            iv: String(iv || "")
+          }));
+        },
+        aesDecodeToString: function(value, key, iv, transformation) {
+          return java.aesBase64DecodeToString(value, key, iv, transformation);
         },
         hexDecodeToString: function(input) {
           var text = String(input || "");
@@ -567,7 +593,15 @@ class LegadoJsEngine {
         }
         if (typeof source !== 'undefined' && source !== null) {
           source.getKey = function() { return source.key || source.bookSourceUrl || ""; };
-          source.getVariable = function() { return source.variable || ""; };
+          source.getVariable = function() {
+            return source.variable || java.get("source.variable") || "";
+          };
+          source.setVariable = function(value) {
+            source.variable = value == null ? "" : String(value);
+            java.put("source.variable", source.variable);
+            return source.variable;
+          };
+          source.variable = source.getVariable();
           source.getVariableMap = function() {
             var raw = source.variable || "";
             var parsed = {};
@@ -731,6 +765,37 @@ class LegadoJsEngine {
       // Keep stringResult.
     }
     return text;
+  }
+
+  String _aesBase64Decode(String value, String key, String iv) {
+    try {
+      final keyBytes = Uint8List.fromList(utf8.encode(key));
+      if (keyBytes.length != 16 &&
+          keyBytes.length != 24 &&
+          keyBytes.length != 32) {
+        return '';
+      }
+      var ivBytes = Uint8List.fromList(utf8.encode(iv));
+      if (ivBytes.length != 16) {
+        ivBytes = Uint8List(16);
+      }
+
+      final cipher = PaddedBlockCipherImpl(
+        PKCS7Padding(),
+        CBCBlockCipher(AESEngine()),
+      );
+      cipher.init(
+        false,
+        PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>, Null>(
+          ParametersWithIV<KeyParameter>(KeyParameter(keyBytes), ivBytes),
+          null,
+        ),
+      );
+      final encrypted = base64Decode(value);
+      return utf8.decode(cipher.process(Uint8List.fromList(encrypted)));
+    } catch (_) {
+      return '';
+    }
   }
 
   void dispose() {

@@ -2782,13 +2782,8 @@ class LegadoParser {
     int page = 1,
   }) async {
     final raw = source.searchUrl ?? '';
-    var searchUrl = LegadoRequestBuilder.replaceVariables(
-      raw,
-      keyword: keyword,
-      page: page,
-      source: source,
-    );
-    if (_isWholeJsRule(searchUrl)) {
+    var searchUrl = raw;
+    if (_isWholeJsRule(raw)) {
       final variables = _jsVariables(
         source,
         keyword: keyword,
@@ -2810,6 +2805,36 @@ class LegadoParser {
         ),
       );
       if (output.trim().isNotEmpty) searchUrl = output.trim();
+    } else {
+      searchUrl = LegadoRequestBuilder.replaceVariables(
+        raw,
+        keyword: keyword,
+        page: page,
+        source: source,
+      );
+      if (_isWholeJsRule(searchUrl)) {
+        final variables = _jsVariables(
+          source,
+          keyword: keyword,
+          page: page,
+          baseUrl: source.bookSourceUrl,
+        );
+        final output = await LegadoJsEngine().evaluateWithAjax(
+          searchUrl,
+          variables: variables,
+          libraries: await _sourceLibraryCodes(
+            source,
+            baseUrl: source.bookSourceUrl,
+          ),
+          ajax: (request) => _ajaxForJs(
+            source,
+            request,
+            baseUrl: source.bookSourceUrl,
+            keyword: keyword,
+          ),
+        );
+        if (output.trim().isNotEmpty) searchUrl = output.trim();
+      }
     }
 
     final embedded = LegadoRequestBuilder.splitEmbeddedConfig(searchUrl);

@@ -28,17 +28,12 @@ class LegadoRequestBuilder {
     String keyword, {
     int page = 1,
   }) {
-    var searchUrl = replaceVariables(
-      source.searchUrl!,
-      keyword: keyword,
-      page: page,
-      source: source,
-    );
-    if (searchUrl.trimLeft().startsWith('@js:') ||
-        searchUrl.trimLeft().startsWith('<js>')) {
+    final raw = source.searchUrl!;
+    var searchUrl = raw;
+    if (_isWholeJsRule(raw)) {
       try {
         final evaluated = LegadoJsEngine().evaluate(
-          searchUrl,
+          raw,
           variables: {
             'keyword': keyword,
             'key': keyword,
@@ -53,11 +48,42 @@ class LegadoRequestBuilder {
       } catch (_) {
         return '';
       }
+    } else {
+      searchUrl = replaceVariables(
+        raw,
+        keyword: keyword,
+        page: page,
+        source: source,
+      );
+      if (_isWholeJsRule(searchUrl)) {
+        try {
+          final evaluated = LegadoJsEngine().evaluate(
+            searchUrl,
+            variables: {
+              'keyword': keyword,
+              'key': keyword,
+              'page': page,
+              'source': {
+                'key': _sourceValue(source, 'key'),
+                'bookSourceUrl': _sourceValue(source, 'key'),
+              },
+            },
+          );
+          if (evaluated.trim().isNotEmpty) searchUrl = evaluated;
+        } catch (_) {
+          return '';
+        }
+      }
     }
     final embedded = splitEmbeddedConfig(searchUrl);
     final resolved = resolveUrl(source.bookSourceUrl, embedded.url);
     if (embedded.config.isEmpty) return resolved;
     return '$resolved,${jsonEncode(embedded.config)}';
+  }
+
+  static bool _isWholeJsRule(String text) {
+    final value = text.trimLeft();
+    return value.startsWith('@js:') || value.startsWith('<js>');
   }
 
   static LegadoHttpRequest buildRequest(
@@ -127,16 +153,19 @@ class LegadoRequestBuilder {
     final fullConfigStr = [
       text,
       source?.searchUrl ?? '',
-      source?.customConfig ?? ''
+      source?.customConfig ?? '',
     ].join(' ').toLowerCase();
-    
-    bool isGbk = fullConfigStr.contains('gbk') || fullConfigStr.contains('gb2312');
-    
+
+    bool isGbk =
+        fullConfigStr.contains('gbk') || fullConfigStr.contains('gb2312');
+
     String encoded;
     if (isGbk) {
       try {
         final bytes = gbk.encode(keyword);
-        encoded = bytes.map((b) => '%${b.toRadixString(16).toUpperCase().padLeft(2, '0')}').join();
+        encoded = bytes
+            .map((b) => '%${b.toRadixString(16).toUpperCase().padLeft(2, '0')}')
+            .join();
       } catch (_) {
         encoded = Uri.encodeComponent(keyword);
       }
@@ -204,8 +233,22 @@ class LegadoRequestBuilder {
   }
 
   static String resolveUrl(String baseUrl, String url) {
-    baseUrl = baseUrl.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
-    url = url.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
+    baseUrl = baseUrl
+        .replaceAll('\n', '')
+        .replaceAll('\r', '')
+        .replaceAll('%0A', '')
+        .replaceAll('%0D', '')
+        .replaceAll('%0a', '')
+        .replaceAll('%0d', '')
+        .trim();
+    url = url
+        .replaceAll('\n', '')
+        .replaceAll('\r', '')
+        .replaceAll('%0A', '')
+        .replaceAll('%0D', '')
+        .replaceAll('%0a', '')
+        .replaceAll('%0d', '')
+        .trim();
     if (url.isEmpty) return '';
     if (url.startsWith('data:') || url.startsWith('javascript:')) return url;
 
@@ -230,7 +273,7 @@ class LegadoRequestBuilder {
     String resolvedUrl = '';
     try {
       final baseUri = Uri.parse(cleanBaseUrl(baseUrl).trim());
-      
+
       // Check if cleanUrl is already absolute
       final cleanUri = Uri.parse(cleanUrl);
       if (cleanUri.hasScheme) {
@@ -259,12 +302,16 @@ class LegadoRequestBuilder {
           }
         }
       } catch (_) {
-        final baseStr = cleanBaseUrl(baseUrl).trim().replaceAll(RegExp(r'/+$'), '');
+        final baseStr = cleanBaseUrl(
+          baseUrl,
+        ).trim().replaceAll(RegExp(r'/+$'), '');
         if (cleanUrl.startsWith('http')) {
           resolvedUrl = cleanUrl;
         } else if (cleanUrl.startsWith('//')) {
           final baseUri = Uri.tryParse(baseStr);
-          final scheme = (baseUri != null && baseUri.hasScheme) ? baseUri.scheme : 'https';
+          final scheme = (baseUri != null && baseUri.hasScheme)
+              ? baseUri.scheme
+              : 'https';
           resolvedUrl = '$scheme:$cleanUrl';
         } else if (cleanUrl.startsWith('/')) {
           final baseUri = Uri.tryParse(baseStr);
@@ -360,7 +407,14 @@ class LegadoRequestBuilder {
   static ({String url, Map<String, dynamic> config}) splitEmbeddedConfig(
     String url,
   ) {
-    url = url.replaceAll('\n', '').replaceAll('\r', '').replaceAll('%0A', '').replaceAll('%0D', '').replaceAll('%0a', '').replaceAll('%0d', '').trim();
+    url = url
+        .replaceAll('\n', '')
+        .replaceAll('\r', '')
+        .replaceAll('%0A', '')
+        .replaceAll('%0D', '')
+        .replaceAll('%0a', '')
+        .replaceAll('%0d', '')
+        .trim();
     final comma = _findEmbeddedConfigComma(url);
     if (comma <= 0 || comma >= url.length - 1) return (url: url, config: {});
     final tail = url.substring(comma + 1).trimLeft();

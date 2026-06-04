@@ -572,11 +572,82 @@ class LegadoRuleEvaluator {
       if (nodes.isNotEmpty) return nodes.first?.toString() ?? '';
       final manual = _extractNodesManually(json, rule);
       if (manual.isNotEmpty) return manual.first?.toString() ?? '';
+      final alias = _extractJsonAliasValue(json, rule);
+      if (alias.isNotEmpty) return alias;
     } catch (_) {
       final manual = _extractNodesManually(json, rule);
       if (manual.isNotEmpty) return manual.first?.toString() ?? '';
+      final alias = _extractJsonAliasValue(json, rule);
+      if (alias.isNotEmpty) return alias;
     }
     return '';
+  }
+
+  static String _extractJsonAliasValue(dynamic json, String rule) {
+    if (json is! Map) return '';
+    final cleaned = _cleanJsonRule(rule)
+        .replaceAll(RegExp(r'^\$\.?'), '')
+        .replaceAll(RegExp(r'^\.+'), '')
+        .trim();
+    if (cleaned.isEmpty || cleaned.contains('.') || cleaned.contains('[')) {
+      return '';
+    }
+    final aliases = _jsonKeyAliases(cleaned);
+    for (final alias in aliases) {
+      final value = json[alias] ?? json[alias.toLowerCase()];
+      if (value != null && value.toString().trim().isNotEmpty) {
+        return value.toString();
+      }
+    }
+    return '';
+  }
+
+  static List<String> _jsonKeyAliases(String key) {
+    const groups = [
+      [
+        'novelId',
+        'novel_id',
+        'bookId',
+        'book_id',
+        'bookID',
+        'articleid',
+        'articleId',
+        'nid',
+        'id',
+        'Id',
+      ],
+      [
+        'chapterId',
+        'chapter_id',
+        'cid',
+        'id',
+        'Id',
+        'chapterID',
+      ],
+      [
+        'chapterName',
+        'chapter_name',
+        'chapterTitle',
+        'chapter_title',
+        'name',
+        'title',
+      ],
+      [
+        'bookName',
+        'book_name',
+        'novelName',
+        'novel_name',
+        'name',
+        'title',
+      ],
+    ];
+
+    for (final group in groups) {
+      if (group.any((item) => item.toLowerCase() == key.toLowerCase())) {
+        return group;
+      }
+    }
+    return const [];
   }
 
   static String _interpolateJsonTemplate(
@@ -842,20 +913,7 @@ class LegadoRuleEvaluator {
     final selector = _normalizeCssSelector(parsed.baseSelector);
     if (selector.isEmpty || selector == 'this') return [node];
 
-    List<Element> nodes;
-    try {
-      final parent = node.parent;
-      if (parent != null) {
-        final allMatches = parent.querySelectorAll(selector);
-        nodes = allMatches
-            .where((el) => el == node || _isDescendantOf(el, node))
-            .toList();
-      } else {
-        nodes = node.querySelectorAll(selector);
-      }
-    } catch (_) {
-      nodes = node.querySelectorAll(selector);
-    }
+    final nodes = _safeQuerySelectorStep(node, selector);
     
     if (parsed.isSlice) {
       return _slice(nodes, parsed.sliceStart, parsed.sliceEnd);
@@ -875,6 +933,93 @@ class LegadoRuleEvaluator {
       return idx >= 0 && idx < nodes.length ? [nodes[idx]] : const [];
     }
     return nodes;
+  }
+
+  static List<Element> _safeQuerySelectorStep(Element node, String selector) {
+    try {
+      final parent = node.parent;
+      if (parent != null) {
+        final allMatches = parent.querySelectorAll(selector);
+        return allMatches
+            .where((el) => el == node || _isDescendantOf(el, node))
+            .toList();
+      }
+      return node.querySelectorAll(selector);
+    } catch (_) {
+      final fixedSelector = _quoteLooseAttributeSelector(selector);
+      if (fixedSelector != selector) {
+        try {
+          return node.querySelectorAll(fixedSelector);
+        } catch (_) {
+          // Fall through to manual attribute matching.
+        }
+      }
+      final manual = _manualAttributeSelector(node, selector);
+      return manual ?? const [];
+    }
+  }
+
+  static String _quoteLooseAttributeSelector(String selector) {
+    return selector.replaceAllMapped(
+      RegExp(r'\[([A-Za-z0-9_\-:]+)([~|^$*]?=)([^\]"\']+)\]'),
+      (match) {
+        final attr = match.group(1) ?? '';
+        final op = match.group(2) ?? '=';
+        final value = (match.group(3) ?? '').trim();
+        if (value.isEmpty ||
+            value.startsWith('"') ||
+            value.startsWith("'") ||
+            RegExp(r'^[A-Za-z0-9_\-]+$').hasMatch(value)) {
+          return match.group(0) ?? '';
+        }
+        final escaped = value.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+        return '[$attr$op"$escaped"]';
+      },
+    );
+  }
+
+  static List<Element>? _manualAttributeSelector(
+    Element node,
+    String selector,
+  ) {
+    final match = RegExp(
+      r'^(?:(\w+))?\[([A-Za-z0-9_\-:]+)([~|^$*]?=)([^\]]+)\]$',
+    ).firstMatch(selector.trim());
+    if (match == null) return null;
+    final tag = match.group(1)?.toLowerCase();
+    final attr = match.group(2) ?? '';
+    final op = match.group(3) ?? '=';
+    var expected = (match.group(4) ?? '').trim();
+    if ((expected.startsWith('"') && expected.endsWith('"')) ||
+        (expected.startsWith("'") && expected.endsWith("'"))) {
+      expected = expected.substring(1, expected.length - 1);
+    }
+
+    bool matches(Element element) {
+      if (tag != null && element.localName?.toLowerCase() != tag) return false;
+      final actual = element.attributes[attr];
+      if (actual == null) return false;
+      switch (op) {
+        case '~=':
+          return actual.split(RegExp(r'\s+')).contains(expected) ||
+              actual.contains(expected);
+        case '^=':
+          return actual.startsWith(expected);
+        case r'$=':
+          return actual.endsWith(expected);
+        case '*=':
+          return actual.contains(expected);
+        case '|=':
+          return actual == expected || actual.startsWith('$expected-');
+        default:
+          return actual == expected;
+      }
+    }
+
+    final result = <Element>[];
+    if (matches(node)) result.add(node);
+    result.addAll(node.querySelectorAll('*').where(matches));
+    return result;
   }
 
   static ({String baseSelector, bool isSlice, int? index, int? sliceStart, int? sliceEnd, bool isMulti, List<int>? multiIndexes})
