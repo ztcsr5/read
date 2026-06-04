@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -11,6 +12,7 @@ import '../../../widgets/ios_navigation_bar.dart';
 import '../viewmodels/book_source_viewmodel.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../../source_diagnostic/services/source_generator_service.dart';
+import '../services/local_source_web_service.dart';
 
 class SourceManagementPage extends ConsumerStatefulWidget {
   const SourceManagementPage({super.key});
@@ -42,6 +44,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
     final visibleBookSources = _filterBookSources(state.sources, keyword);
     final visibleCatalogs = _filterCatalogs(state.catalogs, keyword);
     final visibleRssSources = _filterRssSources(state.rssSources, keyword);
+    final webState = ref.watch(localSourceWebServiceProvider);
     final hasItems = _currentIds(
       visibleBookSources,
       visibleCatalogs,
@@ -94,6 +97,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
               ],
             ),
           ),
+          SliverToBoxAdapter(child: _buildWebServiceCard(webState)),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -173,6 +177,105 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
         text,
         textAlign: TextAlign.center,
         style: const TextStyle(color: CupertinoColors.systemGrey),
+      ),
+    );
+  }
+
+  Widget _buildWebServiceCard(LocalSourceWebState webState) {
+    final url = webState.url;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: CupertinoTheme.of(context).barBackgroundColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: CupertinoColors.separator.resolveFrom(context),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(CupertinoIcons.globe, size: 22),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Web 书源编辑服务',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                CupertinoSwitch(
+                  value: webState.isRunning,
+                  onChanged: (value) {
+                    final service = ref.read(
+                      localSourceWebServiceProvider.notifier,
+                    );
+                    if (value) {
+                      service.start();
+                    } else {
+                      service.stop();
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              webState.isRunning
+                  ? '电脑浏览器打开下面地址，可直接编辑 App 内书源 JSON、保存、删除和测试。'
+                  : '开启后会在局域网启动本地网页，只在本机 App 运行期间有效。',
+              style: const TextStyle(
+                fontSize: 13,
+                color: CupertinoColors.systemGrey,
+              ),
+            ),
+            if (url != null) ...[
+              const SizedBox(height: 10),
+              SelectableText(
+                url,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: CupertinoColors.activeBlue,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    minSize: 30,
+                    child: const Text('复制地址'),
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: url));
+                      if (mounted) _showAlert(context, '完成', 'Web 编辑器地址已复制');
+                    },
+                  ),
+                  const SizedBox(width: 16),
+                  Text(
+                    '访问码：${webState.accessToken}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: CupertinoColors.systemGrey,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (webState.error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                webState.error!,
+                style: const TextStyle(
+                  color: CupertinoColors.destructiveRed,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

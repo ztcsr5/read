@@ -22,6 +22,8 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在局域网内开启 Web 书源编辑服务，让电脑浏览器可以编辑 App 内书源。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- 120Hz ProMotion 支持 -->

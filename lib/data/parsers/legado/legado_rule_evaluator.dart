@@ -948,8 +948,59 @@ class LegadoRuleEvaluator {
     if (token.contains(' ') || token.startsWith('.') || token.startsWith('#')) {
       return false;
     }
+    if (_looksLikeHtmlTagToken(token)) return false;
     return _knownAttrs.contains(token) ||
         RegExp(r'^[a-zA-Z_][a-zA-Z0-9_\-:]*$').hasMatch(token);
+  }
+
+  static bool _looksLikeHtmlTagToken(String token) {
+    final value = token.toLowerCase();
+    const tags = {
+      'a',
+      'article',
+      'aside',
+      'body',
+      'button',
+      'dd',
+      'div',
+      'dl',
+      'dt',
+      'em',
+      'footer',
+      'form',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'header',
+      'i',
+      'img',
+      'input',
+      'label',
+      'li',
+      'main',
+      'nav',
+      'ol',
+      'option',
+      'p',
+      'pre',
+      'section',
+      'select',
+      'small',
+      'span',
+      'strong',
+      'table',
+      'tbody',
+      'td',
+      'textarea',
+      'th',
+      'thead',
+      'tr',
+      'ul',
+    };
+    return tags.contains(value);
   }
 
   static List<Element> _queryChain(Element root, List<String> selectors) {
@@ -1308,6 +1359,9 @@ class LegadoRuleEvaluator {
       return result;
     }
 
+    final assigned = _evaluateResultAssignmentScript(result, expression);
+    if (assigned != null) return assigned;
+
     final replaced = _evaluateResultReplaceExpression(result, expression);
     if (replaced != null) return replaced;
 
@@ -1345,6 +1399,77 @@ class LegadoRuleEvaluator {
     }
     final output = buffer.toString();
     return usedResult ? output : '';
+  }
+
+  static String? _evaluateResultAssignmentScript(
+    String result,
+    String expression,
+  ) {
+    final ifElse = RegExp(
+      r'''^if\s*\(\s*result\.match\(/((?:\\.|[^/])*)/[a-z]*\)\s*\)\s*\{\s*result\s*=\s*([\s\S]*?)\s*;?\s*\}\s*else\s*\{\s*result\s*=\s*([\s\S]*?)\s*;?\s*\}$''',
+      dotAll: true,
+    ).firstMatch(expression);
+    if (ifElse != null) {
+      final conditionPattern = _decodeJsRegexPattern(ifElse.group(1) ?? '');
+      final branch = RegExp(conditionPattern).hasMatch(result)
+          ? ifElse.group(2)
+          : ifElse.group(3);
+      return _evaluateResultMatchExpression(result, branch ?? '');
+    }
+
+    final assignment = RegExp(
+      r'''^result\s*=\s*([\s\S]+)$''',
+      dotAll: true,
+    ).firstMatch(expression);
+    if (assignment != null) {
+      return _evaluateResultMatchExpression(result, assignment.group(1) ?? '');
+    }
+    return null;
+  }
+
+  static String? _evaluateResultMatchExpression(String result, String expr) {
+    final expression = expr.trim().replaceAll(RegExp(r';\s*$'), '').trim();
+    final direct = RegExp(
+      r'''^result\.match\(/((?:\\.|[^/])*)/[a-z]*\)\[(\d+)\]$''',
+      dotAll: true,
+    ).firstMatch(expression);
+    if (direct != null) {
+      return _matchJsRegexGroup(
+        result,
+        direct.group(1) ?? '',
+        int.tryParse(direct.group(2) ?? '') ?? 0,
+      );
+    }
+
+    final prefixed = RegExp(
+      r'''^(["'`])([\s\S]*?)\1\s*\+\s*result\.match\(/((?:\\.|[^/])*)/[a-z]*\)\[(\d+)\]$''',
+      dotAll: true,
+    ).firstMatch(expression);
+    if (prefixed != null) {
+      final matched = _matchJsRegexGroup(
+        result,
+        prefixed.group(3) ?? '',
+        int.tryParse(prefixed.group(4) ?? '') ?? 0,
+      );
+      if (matched == null) return null;
+      return _decodeJsEscaped(prefixed.group(2) ?? '') + matched;
+    }
+    return null;
+  }
+
+  static String? _matchJsRegexGroup(String value, String jsPattern, int index) {
+    try {
+      final pattern = _decodeJsRegexPattern(jsPattern);
+      final match = RegExp(pattern, dotAll: true).firstMatch(value);
+      if (match == null || index > match.groupCount) return null;
+      return match.group(index) ?? '';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _decodeJsRegexPattern(String pattern) {
+    return pattern.replaceAll(r'\/', '/');
   }
 
   static String? _evaluateResultReplaceExpression(

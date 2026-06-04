@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:fast_gbk/fast_gbk.dart';
@@ -2465,6 +2466,14 @@ class LegadoParser {
               return;
             }
             if (!completer.isCompleted) {
+              if (_looksLikeBlankWebViewHtml(html)) {
+                completer.completeError(
+                  TimeoutException(
+                    'Headless WebView returned an empty document for $urlStr',
+                  ),
+                );
+                return;
+              }
               await LegadoSessionStore.persistHost(uri);
               completer.complete(html);
             }
@@ -2629,15 +2638,6 @@ class LegadoParser {
     }
 
     final hasWebView = _hasWebViewConfig(source, targetUrl);
-    if (hasWebView) {
-      print('Url config specifies webView. Routing to Headless WebView.');
-      return await _requestViaHeadlessWebView(
-        source,
-        targetUrl,
-        cancelToken: cancelToken,
-      );
-    }
-
     try {
       final request = _buildRequest(source, targetUrl, keyword: keyword);
       final headers = Map<String, dynamic>.from(request.headers ?? const {});
@@ -2709,6 +2709,16 @@ class LegadoParser {
       if (_needsManualVerification(response.statusCode, responseData)) {
         print(
           'Dio response triggers verification. Downgrading to Headless WebView.',
+        );
+        return await _requestViaHeadlessWebView(
+          source,
+          targetUrl,
+          cancelToken: cancelToken,
+        );
+      }
+      if (hasWebView && _shouldTryWebViewAfterDio(responseData)) {
+        print(
+          'Dio response is blank or incomplete while webView is enabled. Trying Headless WebView.',
         );
         return await _requestViaHeadlessWebView(
           source,
@@ -2825,6 +2835,32 @@ class LegadoParser {
     return false;
   }
 
+  static bool _shouldTryWebViewAfterDio(dynamic data) {
+    final text = data?.toString().trim() ?? '';
+    if (text.isEmpty) return true;
+    if (_looksLikeBlankWebViewHtml(text)) return true;
+    if (text.length < 120 && !_looksLikeJsonPayload(text)) return true;
+    return false;
+  }
+
+  static bool _looksLikeBlankWebViewHtml(String html) {
+    final normalized = html
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '')
+        .toLowerCase();
+    if (normalized.isEmpty) return true;
+    return normalized == '<html><head></head><body></body></html>' ||
+        normalized == '<html><head></head><body></body></html>undefined' ||
+        normalized == '<html><head></head><body></body></html>null' ||
+        normalized == '<html><head></head><body></body></html>""' ||
+        normalized == '<html><head></head><body></body></html>"';
+  }
+
+  static bool _looksLikeJsonPayload(String text) {
+    final value = text.trimLeft();
+    return value.startsWith('{') || value.startsWith('[');
+  }
+
   static bool _looksLikeHtmlPage(String text) {
     final sample = text.toLowerCase();
     return sample.contains('<!doctype html') ||
@@ -2847,21 +2883,29 @@ class LegadoParser {
         page: page,
         baseUrl: source.bookSourceUrl,
       );
-      final output = await LegadoJsEngine().evaluateWithAjax(
-        searchUrl,
-        variables: variables,
-        libraries: await _sourceLibraryCodes(
-          source,
-          baseUrl: source.bookSourceUrl,
-        ),
-        ajax: (request) => _ajaxForJs(
-          source,
-          request,
-          baseUrl: source.bookSourceUrl,
-          keyword: keyword,
-        ),
-      );
+      var output = '';
+      try {
+        output = await LegadoJsEngine().evaluateWithAjax(
+          searchUrl,
+          variables: variables,
+          libraries: await _sourceLibraryCodes(
+            source,
+            baseUrl: source.bookSourceUrl,
+          ),
+          ajax: (request) => _ajaxForJs(
+            source,
+            request,
+            baseUrl: source.bookSourceUrl,
+            keyword: keyword,
+          ),
+        );
+      } catch (_) {}
       searchUrl = output.trim();
+      if (searchUrl.isEmpty) {
+        searchUrl =
+            _evaluateCommonJsSearchUrlFallback(raw, source, keyword, page) ??
+            '';
+      }
       if (searchUrl.isEmpty) return '';
     } else {
       searchUrl = LegadoRequestBuilder.replaceVariables(
@@ -2877,21 +2921,35 @@ class LegadoParser {
           page: page,
           baseUrl: source.bookSourceUrl,
         );
-        final output = await LegadoJsEngine().evaluateWithAjax(
-          searchUrl,
-          variables: variables,
-          libraries: await _sourceLibraryCodes(
-            source,
-            baseUrl: source.bookSourceUrl,
-          ),
-          ajax: (request) => _ajaxForJs(
-            source,
-            request,
-            baseUrl: source.bookSourceUrl,
-            keyword: keyword,
-          ),
-        );
+        final jsRule = searchUrl;
+        var output = '';
+        try {
+          output = await LegadoJsEngine().evaluateWithAjax(
+            searchUrl,
+            variables: variables,
+            libraries: await _sourceLibraryCodes(
+              source,
+              baseUrl: source.bookSourceUrl,
+            ),
+            ajax: (request) => _ajaxForJs(
+              source,
+              request,
+              baseUrl: source.bookSourceUrl,
+              keyword: keyword,
+            ),
+          );
+        } catch (_) {}
         searchUrl = output.trim();
+        if (searchUrl.isEmpty) {
+          searchUrl =
+              _evaluateCommonJsSearchUrlFallback(
+                jsRule,
+                source,
+                keyword,
+                page,
+              ) ??
+              '';
+        }
         if (searchUrl.isEmpty) return '';
       }
     }
@@ -2905,6 +2963,241 @@ class LegadoParser {
   static bool _isWholeJsRule(String text) {
     final value = text.trimLeft();
     return value.startsWith('@js:') || value.startsWith('<js>');
+  }
+
+  static String? _evaluateCommonJsSearchUrlFallback(
+    String jsRule,
+    BookSource source,
+    String keyword,
+    int page,
+  ) {
+    var code = jsRule.trim();
+    if (code.startsWith('@js:')) {
+      code = code.substring(4);
+    } else if (code.startsWith('<js>') && code.endsWith('</js>')) {
+      code = code.substring(4, code.length - 5);
+    }
+    if (!code.contains('java.put') ||
+        !code.contains('params') ||
+        !code.contains('headers')) {
+      return null;
+    }
+
+    final headersObject = _extractJsAssignedObject(code, 'headers');
+    final paramsObject = _extractJsAssignedObject(code, 'params');
+    if (headersObject == null || paramsObject == null) return null;
+
+    final pathMatch = RegExp(
+      r'''(["'])([^"']*\?[^"']*)\1\s*\+\s*body''',
+      dotAll: true,
+    ).firstMatch(code);
+    final path = pathMatch?.group(2);
+    if (path == null || path.trim().isEmpty) return null;
+
+    final headers = _parseSimpleJsObject(
+      headersObject,
+      keyword: keyword,
+      page: page,
+    );
+    final params = _parseSimpleJsObject(
+      paramsObject,
+      keyword: keyword,
+      page: page,
+    );
+    if (params.isEmpty) return null;
+
+    final signKey = RegExp(
+      r'''sign_key\s*=\s*(["'])([\s\S]*?)\1''',
+      dotAll: true,
+    ).firstMatch(code)?.group(2);
+    if (signKey != null && signKey.isNotEmpty) {
+      if (code.contains("headers['sign']") ||
+          code.contains('headers["sign"]') ||
+          code.contains('headers.sign')) {
+        headers['sign'] = _signedParamString(headers, signKey);
+      }
+      if (code.contains("params['sign']") ||
+          code.contains('params["sign"]') ||
+          code.contains('params.sign')) {
+        params['sign'] = _signedParamString(params, signKey);
+      }
+    }
+
+    final body = _buildLegacyUrlEncodedBody(params);
+    final url = _resolveUrl(source.bookSourceUrl, '$path$body');
+    if (!code.contains('java.put("headers"') &&
+        !code.contains("java.put('headers'")) {
+      return url;
+    }
+    return '$url,${jsonEncode({'headers': headers})}';
+  }
+
+  static String? _extractJsAssignedObject(String code, String name) {
+    final match = RegExp('$name\\s*=\\s*\\{', multiLine: true).firstMatch(code);
+    if (match == null) return null;
+    final openIndex = code.indexOf('{', match.start);
+    if (openIndex < 0) return null;
+    var depth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = openIndex; i < code.length; i++) {
+      final unit = code.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x7b) {
+        depth++;
+      } else if (unit == 0x7d) {
+        depth--;
+        if (depth == 0) return code.substring(openIndex, i + 1);
+      }
+    }
+    return null;
+  }
+
+  static Map<String, String> _parseSimpleJsObject(
+    String objectLiteral, {
+    required String keyword,
+    required int page,
+  }) {
+    final inner = objectLiteral.trim().replaceFirst('{', '');
+    final text = inner.endsWith('}')
+        ? inner.substring(0, inner.length - 1)
+        : inner;
+    final result = <String, String>{};
+    for (final entry in _splitTopLevelCommas(text)) {
+      final colon = _firstTopLevelColon(entry);
+      if (colon <= 0) continue;
+      final key = _unquoteJsString(entry.substring(0, colon).trim());
+      final value = _evaluateSimpleJsValue(
+        entry.substring(colon + 1).trim(),
+        keyword: keyword,
+        page: page,
+      );
+      if (key.isNotEmpty) result[key] = value;
+    }
+    return result;
+  }
+
+  static List<String> _splitTopLevelCommas(String text) {
+    final parts = <String>[];
+    var start = 0;
+    var depth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x28 || unit == 0x5b || unit == 0x7b) depth++;
+      if (unit == 0x29 || unit == 0x5d || unit == 0x7d) depth--;
+      if (depth == 0 && unit == 0x2c) {
+        parts.add(text.substring(start, i).trim());
+        start = i + 1;
+      }
+    }
+    final tail = text.substring(start).trim();
+    if (tail.isNotEmpty) parts.add(tail);
+    return parts;
+  }
+
+  static int _firstTopLevelColon(String text) {
+    var depth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x28 || unit == 0x5b || unit == 0x7b) depth++;
+      if (unit == 0x29 || unit == 0x5d || unit == 0x7d) depth--;
+      if (depth == 0 && unit == 0x3a) return i;
+    }
+    return -1;
+  }
+
+  static String _evaluateSimpleJsValue(
+    String expression, {
+    required String keyword,
+    required int page,
+  }) {
+    final value = expression.trim().replaceAll(RegExp(r';+$'), '').trim();
+    if (value == 'key' || value == 'keyword') return keyword;
+    if (value == 'page' || value == 'params.pageIndex') return page.toString();
+    if (value == 'true' || value == 'false') return value;
+    if (RegExp(r'^-?\d+(\.\d+)?$').hasMatch(value)) return value;
+    return _unquoteJsString(value);
+  }
+
+  static String _unquoteJsString(String value) {
+    final text = value.trim();
+    if (text.length >= 2) {
+      final first = text.codeUnitAt(0);
+      final last = text.codeUnitAt(text.length - 1);
+      if ((first == 0x22 || first == 0x27 || first == 0x60) && first == last) {
+        return text
+            .substring(1, text.length - 1)
+            .replaceAll(r'\"', '"')
+            .replaceAll(r"\'", "'")
+            .replaceAll(r'\n', '\n')
+            .replaceAll(r'\r', '\r')
+            .replaceAll(r'\t', '\t');
+      }
+    }
+    return text;
+  }
+
+  static String _signedParamString(Map<String, String> values, String signKey) {
+    final keys = values.keys.toList()..sort();
+    final payload = keys.map((key) => '$key=${values[key] ?? ''}').join();
+    return md5.convert(utf8.encode(payload + signKey)).toString();
+  }
+
+  static String _buildLegacyUrlEncodedBody(Map<String, String> params) {
+    final buffer = StringBuffer();
+    params.forEach((key, value) {
+      buffer
+        ..write('&')
+        ..write(key)
+        ..write('=')
+        ..write(Uri.encodeComponent(value));
+    });
+    return buffer.toString();
   }
 
   static String _resolveUrl(String baseUrl, String url) {

@@ -925,6 +925,49 @@ body=urlEncode(params)
       expect(prepared, contains("if(param==null) return ''"));
     });
 
+    test('falls back for signed raw js search url templates', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Signed fallback'
+        ..bookSourceUrl = 'https://api.example.com'
+        ..searchUrl = r'''
+@js:
+sign_key='secret'
+headers={'app-version':'51110','platform':'android','AUTHORIZATION':''}
+params={'gender':'3','page':page,'wd':key}
+var urlEncode = function (param, key, encode) {
+  if(param==null) return '';
+  var paramStr = '';
+  for (var i in param) {
+    paramStr += '&' + i + '=' + encodeURIComponent(param[i]);
+  }
+  return paramStr;
+};
+headerSign=String(java.md5Encode(Object.keys(headers).sort().reduce((pre,n)=>pre+n+'='+headers[n],'')+sign_key))
+paramSign=String(java.md5Encode(Object.keys(params).sort().reduce((pre,n)=>pre+n+'='+params[n],'')+sign_key))
+headers['sign']=headerSign
+params['sign']=paramSign
+body=urlEncode(params)
+"/api/v5/search/words?" +body+","+java.put("headers",JSON.stringify({"headers":headers}))
+''';
+
+      final url = await LegadoParser.buildSearchUrl(source, '斗破苍穹');
+
+      expect(url, startsWith('https://api.example.com/api/v5/search/words?'));
+      expect(url, contains('wd=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9'));
+      expect(url, contains('"app-version":"51110"'));
+      expect(url, contains('"sign"'));
+      expect(url, isNot(contains('/@js:')));
+    });
+
+    test('wraps result mutation javascript post processors', () {
+      final prepared = LegadoJsEngine().prepareForTesting(
+        r'''@js:if(result.match(/isvip/)){result="🔒"+result.match(/>([^<]+)<\/a>/)[1];}else{result=result.match(/>([^<]+)<\/a>/)[1];}''',
+      );
+
+      expect(prepared, contains('return (typeof result === "undefined"'));
+      expect(prepared, contains('result.match(/>([^<]+)<\\/a>/)[1]'));
+    });
+
     test('applies json value javascript post processor to book URLs', () {
       final value = LegadoRuleEvaluator.extractJsonValue({
         'id': 155711,
@@ -961,6 +1004,45 @@ body=urlEncode(params)
       expect(
         LegadoRuleEvaluator.applyPostProcessors('简体', r'@js:java.s2t(result)'),
         '简体',
+      );
+    });
+
+    test('extracts chapter names from html result mutation js rules', () {
+      final node = parse(
+        '<li><a href="/book/1.html">第一章 龙潜苍穹</a></li>',
+      ).querySelector('li')!;
+
+      final title = LegadoRuleEvaluator.extractHtmlValue(
+        node,
+        r'''html@js:if(result.match(/isvip/)){result="🔒"+result.match(/>([^<]+)<\/a>/)[1];}else{result=result.match(/>([^<]+)<\/a>/)[1];}''',
+      );
+
+      expect(title, '第一章 龙潜苍穹');
+    });
+
+    test('treats html tag tokens after @ as selector steps', () {
+      final document = parse('''
+<html><body>
+  <ul class="float-list fill-block">
+    <li><a href="/book/1.html">Chapter One</a></li>
+    <li><a href="/book/2.html">Chapter Two</a></li>
+  </ul>
+</body></html>
+''');
+
+      final nodes = LegadoRuleEvaluator.queryAll(
+        document,
+        'class.float-list fill-block@li',
+      );
+
+      expect(nodes, hasLength(2));
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(nodes.first, 'a@text'),
+        'Chapter One',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(nodes.first, 'a@href'),
+        '/book/1.html',
       );
     });
 

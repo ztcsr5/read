@@ -731,11 +731,20 @@ class LegadoJsEngine {
         }
         if (typeof source !== 'undefined' && source !== null) {
           source.getKey = function() { return source.key || source.bookSourceUrl || ""; };
-          source.getVariable = function() {
+          source.getVariable = function(key) {
+            if (arguments.length > 0 && key != null && String(key) !== "") {
+              return java.get("source.variable." + String(key)) || "";
+            }
             return source.variable || java.get("source.variable") || "";
           };
-          source.setVariable = function(value) {
-            source.variable = value == null ? "" : String(value);
+          source.setVariable = function(key, value) {
+            if (arguments.length > 1) {
+              var k = String(key || "");
+              var v = value == null ? "" : String(value);
+              java.put("source.variable." + k, v);
+              return v;
+            }
+            source.variable = key == null ? "" : String(key);
             java.put("source.variable", source.variable);
             return source.variable;
           };
@@ -755,9 +764,39 @@ class LegadoJsEngine {
           };
           source.getLoginInfoMap = function() {
             return {
-              get: function() { return ""; }
+              get: function(k) {
+                return java.get("source.login." + String(k || "")) || "";
+              }
             };
           };
+          source.putLoginHeader = function(k, v) {
+            java.put("source.loginHeader." + String(k || ""), v == null ? "" : String(v));
+            return v == null ? "" : String(v);
+          };
+          source.getLoginHeader = function(k) {
+            return java.get("source.loginHeader." + String(k || "")) || "";
+          };
+          source.loginUrl = source.loginUrl || "";
+        }
+        if (typeof book === 'undefined' || book === null) {
+          var book = {};
+        }
+        book.getVariable = function(key) {
+          if (arguments.length > 0 && key != null && String(key) !== "") {
+            return java.get("book.variable." + String(key)) || "";
+          }
+          return book.variable || java.get("book.variable") || "";
+        };
+        book.setVariable = function(key, value) {
+          if (arguments.length > 1) {
+            var k = String(key || "");
+            var v = value == null ? "" : String(value);
+            java.put("book.variable." + k, v);
+            return v;
+          }
+          book.variable = key == null ? "" : String(key);
+          java.put("book.variable", book.variable);
+          return book.variable;
         }
       ''');
     } catch (e) {
@@ -802,6 +841,11 @@ class LegadoJsEngine {
       }
       final withReturn = _wrapLastExpression(codeToRun, isAsync: true);
       if (withReturn != null) return withReturn;
+      final resultMutation = _wrapResultMutationScript(
+        codeToRun,
+        isAsync: true,
+      );
+      if (resultMutation != null) return resultMutation;
       if (!codeToRun.startsWith('(async') &&
           !_startsWithDeclaration(codeToRun)) {
         return '(async () => { return ($codeToRun); })()';
@@ -812,6 +856,11 @@ class LegadoJsEngine {
       }
       final withReturn = _wrapLastExpression(codeToRun, isAsync: false);
       if (withReturn != null) return withReturn;
+      final resultMutation = _wrapResultMutationScript(
+        codeToRun,
+        isAsync: false,
+      );
+      if (resultMutation != null) return resultMutation;
     }
     return codeToRun;
   }
@@ -850,6 +899,15 @@ class LegadoJsEngine {
     final body = prefix.isEmpty ? '' : '$prefix\n';
     final asyncPrefix = isAsync ? 'async ' : '';
     return '(${asyncPrefix}function() { ${body}return ($last); })()';
+  }
+
+  String? _wrapResultMutationScript(String code, {required bool isAsync}) {
+    final clean = code.trim();
+    if (!RegExp(r'\bresult\s*=').hasMatch(clean) || _hasTopLevelReturn(clean)) {
+      return null;
+    }
+    final asyncPrefix = isAsync ? 'async ' : '';
+    return '(${asyncPrefix}function() { $clean; return (typeof result === "undefined" ? "" : result); })()';
   }
 
   String _trimTrailingSemicolons(String value) {
