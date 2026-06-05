@@ -1056,6 +1056,13 @@ class LegadoRuleEvaluator {
       );
       return _queryTextPseudo(node, base, pseudo.type, pseudo.arg);
     }
+    final has = _extractTrailingHasPseudo(rawSelector.trim());
+    if (has != null) {
+      final base = _normalizeCssSelector(
+        has.base.isEmpty ? '*' : has.base,
+      );
+      return _queryHasPseudo(node, base, has.inner);
+    }
     final parsed = _parseIndexConfig(rawSelector);
     final selector = _normalizeCssSelector(parsed.baseSelector);
     if (selector.isEmpty || selector == 'this') return [node];
@@ -1161,6 +1168,68 @@ class LegadoRuleEvaluator {
     } catch (_) {
       return text.contains(arg);
     }
+  }
+
+  /// Extracts a trailing Jsoup :has(...) pseudo-class that the Dart html
+  /// package cannot evaluate. Same safety rules as _extractTrailingTextPseudo:
+  /// the pseudo must close at the end of the token and the base must be a
+  /// simple selector; otherwise returns null so the caller keeps its existing
+  /// behavior (which already returns empty for :has), ensuring no regression.
+  static ({String base, String inner})? _extractTrailingHasPseudo(
+    String selector,
+  ) {
+    const token = ':has(';
+    final idx = selector.indexOf(token);
+    if (idx < 0) return null;
+    final start = idx + token.length;
+    var depth = 1;
+    var i = start;
+    while (i < selector.length && depth > 0) {
+      final ch = selector[i];
+      if (ch == '(') {
+        depth++;
+      } else if (ch == ')') {
+        depth--;
+        if (depth == 0) break;
+      }
+      i++;
+    }
+    if (depth != 0) return null;
+    if (i != selector.length - 1) return null;
+    final inner = selector.substring(start, i).trim();
+    final base = selector.substring(0, idx);
+    for (final c in const ['>', '+', '~', ',', ' ', '(', ')', ':']) {
+      if (base.contains(c)) return null;
+    }
+    return (base: base, inner: inner);
+  }
+
+  static List<Element> _queryHasPseudo(
+    Element node,
+    String baseSelector,
+    String inner,
+  ) {
+    List<Element> candidates;
+    try {
+      candidates = node.querySelectorAll(
+        baseSelector.isEmpty ? '*' : baseSelector,
+      );
+    } catch (_) {
+      return const [];
+    }
+    // Dart's CSS engine supports neither :has nor a leading child combinator,
+    // so approximate a direct-child argument (>foo) as a descendant match.
+    var innerSel = inner;
+    if (innerSel.startsWith('>')) innerSel = innerSel.substring(1).trim();
+    innerSel = _normalizeCssSelector(innerSel);
+    if (innerSel.isEmpty) return candidates;
+    return candidates.where((el) {
+      try {
+        return el.querySelector(innerSel) != null;
+      } catch (_) {
+        return false;
+      }
+    }).toList();
   }
 
   static List<Element> _safeQuerySelectorStep(Element node, String selector) {
