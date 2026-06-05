@@ -1049,6 +1049,13 @@ class LegadoRuleEvaluator {
   }
 
   static List<Element> _querySelectorStep(Element node, String rawSelector) {
+    final pseudo = _extractTrailingTextPseudo(rawSelector.trim());
+    if (pseudo != null) {
+      final base = _normalizeCssSelector(
+        pseudo.base.isEmpty ? '*' : pseudo.base,
+      );
+      return _queryTextPseudo(node, base, pseudo.type, pseudo.arg);
+    }
     final parsed = _parseIndexConfig(rawSelector);
     final selector = _normalizeCssSelector(parsed.baseSelector);
     if (selector.isEmpty || selector == 'this') return [node];
@@ -1073,6 +1080,87 @@ class LegadoRuleEvaluator {
       return idx >= 0 && idx < nodes.length ? [nodes[idx]] : const [];
     }
     return nodes;
+  }
+
+  /// Extracts a trailing Jsoup text pseudo-class (:matches/:matchesOwn/
+  /// :contains/:containsOwn) that the Dart html package cannot evaluate.
+  /// Only activates when the pseudo closes at the end of the token and the
+  /// base is a simple selector (no combinator/group/nested pseudo); otherwise
+  /// returns null so the caller keeps its existing behavior (no regression).
+  static ({String base, String type, String arg})? _extractTrailingTextPseudo(
+    String selector,
+  ) {
+    const types = ['matchesOwn', 'containsOwn', 'matches', 'contains'];
+    for (final type in types) {
+      final token = ':$type(';
+      final idx = selector.indexOf(token);
+      if (idx < 0) continue;
+      final start = idx + token.length;
+      var depth = 1;
+      var i = start;
+      while (i < selector.length && depth > 0) {
+        final ch = selector[i];
+        if (ch == '(') {
+          depth++;
+        } else if (ch == ')') {
+          depth--;
+          if (depth == 0) break;
+        }
+        i++;
+      }
+      if (depth != 0) return null;
+      if (i != selector.length - 1) return null;
+      final arg = selector.substring(start, i);
+      final base = selector.substring(0, idx);
+      for (final c in const ['>', '+', '~', ',', ' ', '(', ')', ':']) {
+        if (base.contains(c)) return null;
+      }
+      return (base: base, type: type, arg: arg);
+    }
+    return null;
+  }
+
+  static List<Element> _queryTextPseudo(
+    Element node,
+    String baseSelector,
+    String type,
+    String arg,
+  ) {
+    List<Element> candidates;
+    try {
+      candidates = node.querySelectorAll(
+        baseSelector.isEmpty ? '*' : baseSelector,
+      );
+    } catch (_) {
+      return const [];
+    }
+    return candidates
+        .where((el) => _matchesTextPseudo(el, type, arg))
+        .toList();
+  }
+
+  static bool _matchesTextPseudo(Element el, String type, String arg) {
+    final isOwn = type == 'matchesOwn' || type == 'containsOwn';
+    final isContains = type == 'contains' || type == 'containsOwn';
+    final text = isOwn
+        ? el.nodes.whereType<Text>().map((n) => n.text).join('')
+        : el.text;
+    if (isContains) {
+      var needle = arg.trim();
+      if (needle.length >= 2) {
+        final f = needle[0];
+        final l = needle[needle.length - 1];
+        if ((f == "'" && l == "'") || (f == '"' && l == '"')) {
+          needle = needle.substring(1, needle.length - 1);
+        }
+      }
+      return text.toLowerCase().contains(needle.toLowerCase());
+    }
+    try {
+      return _compileFlexibleRegExp(arg).hasMatch(text);
+    } catch (_) {
+      return text.contains(arg);
+    }
   }
 
   static List<Element> _safeQuerySelectorStep(Element node, String selector) {
