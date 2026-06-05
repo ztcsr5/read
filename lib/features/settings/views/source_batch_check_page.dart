@@ -5,7 +5,6 @@ import 'package:flutter/material.dart' show LinearProgressIndicator, Divider, Co
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/models/book_source.dart';
-import '../../../data/models/chapter.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../../../widgets/ios_navigation_bar.dart';
@@ -89,44 +88,28 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       String? errorMessage;
 
       try {
-        // 搜索通用字进行验证
-        final books = await LegadoParser.searchBooks(source, '天')
-            .timeout(const Duration(seconds: 15));
-        if (books.isNotEmpty) {
-          final book = books.first;
-          List<Chapter> chapters = [];
-          try {
-            // 限制获取前 1~5 个章节以提高检测性能，同时触发目录解析逻辑
-            chapters = await LegadoParser.getChapterList(source, book, limit: 5)
-                .timeout(const Duration(seconds: 15));
-          } catch (_) {
-            // 目录获取异常，视为结果为空或失败
-          }
-
-          if (chapters.isNotEmpty) {
-            final firstChapter = chapters.first;
-            final chapterUrl = firstChapter.url ?? firstChapter.content ?? '';
-            if (chapterUrl.trim().isNotEmpty) {
-              try {
-                final content = await LegadoParser.getChapterContent(source, chapterUrl)
-                    .timeout(const Duration(seconds: 15));
-                if (content.length > 50 && !content.contains('解析失败')) {
-                  success = true;
-                  booksCount = books.length;
-                } else {
-                  errorMessage = '正文过短或解析失败';
-                }
-              } catch (_) {
-                errorMessage = '正文解析异常';
-              }
-            } else {
-              errorMessage = '章节链接为空';
+        // 统一测源：复用单源测试的 testSource，确保「一键测源」与单源测试判定标准一致，
+        // 并继承其虚假成功(假绿)拦截逻辑，降低测源误差。
+        final report = await LegadoParser.testSource(source, '天')
+            .timeout(const Duration(seconds: 45));
+        success = !report.hasFailure;
+        if (success) {
+          // 从「搜索结果」步骤提取书籍数量用于展示
+          for (final step in report.steps) {
+            final match = RegExp(r'解析到 (\d+) 本').firstMatch(step.message);
+            if (match != null) {
+              booksCount = int.tryParse(match.group(1)!) ?? 0;
+              break;
             }
-          } else {
-            errorMessage = '目录解析失败';
           }
         } else {
-          errorMessage = '搜索结果为空';
+          final failStep = report.steps.firstWhere(
+            (s) => s.status == LegadoStepStatus.fail,
+            orElse: () => report.steps.isNotEmpty
+                ? report.steps.last
+                : const LegadoTestStep.fail('测试', '未知错误'),
+          );
+          errorMessage = '${failStep.title}：${failStep.message}';
         }
       } catch (e) {
         errorMessage = e.toString().replaceFirst('Exception: ', '');
