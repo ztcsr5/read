@@ -471,10 +471,10 @@ class LegadoRuleEvaluator {
           }
         }
       } else {
-        if (line.contains('{result}') || line.contains('result')) {
+        if (line.contains('{result}') || line.contains('{' '{result}' '}')) {
           output = line
               .replaceAll('{result}', output)
-              .replaceAll('result', output);
+              .replaceAll('{' '{result}' '}', output);
         } else if (line.contains('{}') || line.contains('{{}}')) {
           output = line.replaceAll('{}', output).replaceAll('{{}}', output);
         } else if (line.contains('{') && originalJson != null) {
