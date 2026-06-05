@@ -492,6 +492,62 @@ void main() {
       // li has no src directly, falls back to sub-img's src
       expect(LegadoRuleEvaluator.extractHtmlValue(node, 'src'), '/image.png');
     });
+
+    test('applies json path javascript post processors for book urls', () {
+      final item = {'id': 155711, 'iconUrlSmall': '/book/155711.jpg@!bns?1'};
+
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'$.id@js:"https://www.ruochu.com/book/"+result',
+        ),
+        'https://www.ruochu.com/book/155711',
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'$.iconUrlSmall@js:"https://b.heiyanimg.com"+result',
+        ),
+        'https://b.heiyanimg.com/book/155711.jpg@!bns?1',
+      );
+    });
+
+    test('keeps multiline js post processors intact for chapter names', () {
+      final document = parse('''
+        <li><a href="/book/1">Chapter One</a></li>
+      ''');
+      final node = document.querySelector('li')!;
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          node,
+          r'''html@js:if(result.match(/isvip/)){
+result=""+result.match(/>([^<]+)<\/a>/)[1];
+}else{result=result.match(/>([^<]+)<\/a>/)[1];}''',
+        ),
+        'Chapter One',
+      );
+    });
+
+    test('supports legado class shorthand with descendant selector', () {
+      final document = parse('''
+        <ul class="float-list fill-block">
+          <li><a href="/book/1">Chapter One</a></li>
+          <li><a href="/book/2">Chapter Two</a></li>
+        </ul>
+      ''');
+
+      final nodes = LegadoRuleEvaluator.queryAll(
+        document,
+        'class.float-list fill-block@li',
+      );
+
+      expect(nodes, hasLength(2));
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(nodes.first, 'a@href'),
+        '/book/1',
+      );
+    });
   });
 
   group('LegadoJsEngine', () {

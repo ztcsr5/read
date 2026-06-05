@@ -22,35 +22,50 @@ final localSourceWebServiceProvider =
 class LocalSourceWebState {
   final bool isRunning;
   final String? url;
+  final List<String> urls;
+  final List<String> interfaceLabels;
   final int? port;
   final String accessToken;
   final String? error;
+  final bool permissionProbeSent;
 
   const LocalSourceWebState({
     required this.isRunning,
     required this.accessToken,
+    this.urls = const [],
+    this.interfaceLabels = const [],
     this.url,
     this.port,
     this.error,
+    this.permissionProbeSent = false,
   });
 
-  factory LocalSourceWebState.initial() {
-    return LocalSourceWebState(isRunning: false, accessToken: _randomToken());
+  factory LocalSourceWebState.initial({String? accessToken}) {
+    return LocalSourceWebState(
+      isRunning: false,
+      accessToken: accessToken ?? _randomToken(),
+    );
   }
 
   LocalSourceWebState copyWith({
     bool? isRunning,
     String? url,
+    List<String>? urls,
+    List<String>? interfaceLabels,
     int? port,
     String? accessToken,
     String? error,
+    bool? permissionProbeSent,
   }) {
     return LocalSourceWebState(
       isRunning: isRunning ?? this.isRunning,
       url: url ?? this.url,
+      urls: urls ?? this.urls,
+      interfaceLabels: interfaceLabels ?? this.interfaceLabels,
       port: port ?? this.port,
       accessToken: accessToken ?? this.accessToken,
       error: error,
+      permissionProbeSent: permissionProbeSent ?? this.permissionProbeSent,
     );
   }
 }
@@ -73,7 +88,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       Object? lastError;
       for (var port = 1122; port <= 1132; port++) {
         try {
-          server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+          server = await HttpServer.bind(
+            InternetAddress.anyIPv4,
+            port,
+            shared: true,
+          );
           break;
         } catch (e) {
           lastError = e;
@@ -84,28 +103,52 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       }
 
       _server = server;
+      server.autoCompress = true;
       unawaited(_serve(server));
-      final host = await _localIpv4Address();
+      final endpoints = await _localWebEndpoints(server.port, token);
+      final urls = endpoints.map((endpoint) => endpoint.url).toList();
       state = state.copyWith(
         isRunning: true,
         port: server.port,
         accessToken: token,
-        url: 'http://$host:${server.port}/?token=$token',
+        url: urls.isEmpty
+            ? 'http://127.0.0.1:${server.port}/?token=$token'
+            : urls.first,
+        urls: urls,
+        interfaceLabels: endpoints.map((endpoint) => endpoint.label).toList(),
+        permissionProbeSent: false,
         error: null,
+      );
+      unawaited(
+        _triggerLocalNetworkPermissionProbe(server.port).then((sent) {
+          if (mounted && identical(_server, server)) {
+            state = state.copyWith(permissionProbeSent: sent, error: null);
+          }
+        }),
       );
     } catch (e) {
       state = state.copyWith(isRunning: false, error: e.toString());
     }
   }
 
-  Future<void> stop() async {
+  Future<void> restart() async {
+    final token = state.accessToken;
+    await stop(preserveToken: true);
+    state = LocalSourceWebState.initial(accessToken: token);
+    await start();
+  }
+
+  Future<void> stop({bool preserveToken = false}) async {
+    final token = state.accessToken;
     final server = _server;
     _server = null;
     if (server != null) {
       await server.close(force: true);
     }
     if (mounted) {
-      state = LocalSourceWebState.initial();
+      state = LocalSourceWebState.initial(
+        accessToken: preserveToken ? token : null,
+      );
     }
   }
 
@@ -133,6 +176,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     }
 
     final path = request.uri.path;
+    if (request.method == 'GET' && path == '/health') {
+      await _text(request, 'READ_SOURCE_WEB_OK port=${state.port ?? '-'}');
+      return;
+    }
+
     if (request.method == 'GET' && (path == '/' || path == '/index.html')) {
       await _html(request, _editorHtml(state.accessToken));
       return;
@@ -151,6 +199,9 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         'ok': true,
         'service': 'read-source-web',
         'port': state.port,
+        'urls': state.urls,
+        'interfaces': state.interfaceLabels,
+        'permissionProbeSent': state.permissionProbeSent,
       });
       return;
     }
@@ -352,6 +403,18 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     await response.close();
   }
 
+  Future<void> _text(HttpRequest request, String body) async {
+    final response = request.response;
+    response.statusCode = HttpStatus.ok;
+    response.headers.contentType = ContentType(
+      'text',
+      'plain',
+      charset: 'utf-8',
+    );
+    response.write(body);
+    await response.close();
+  }
+
   Future<void> _json(
     HttpRequest request,
     Map<String, dynamic> body, {
@@ -383,7 +446,19 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
   }
 }
 
-Future<String> _localIpv4Address() async {
+class _LocalWebEndpoint {
+  final String url;
+  final String label;
+
+  const _LocalWebEndpoint({required this.url, required this.label});
+}
+
+Future<List<_LocalWebEndpoint>> _localWebEndpoints(
+  int port,
+  String token,
+) async {
+  final endpoints = <({String address, String name, int score})>[];
+
   try {
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4,
@@ -392,15 +467,76 @@ Future<String> _localIpv4Address() async {
     for (final interface in interfaces) {
       for (final address in interface.addresses) {
         final value = address.address;
-        if (!value.startsWith('127.') && !value.startsWith('169.254.')) {
-          return value;
-        }
+        if (value.startsWith('127.') || value.startsWith('169.254.')) continue;
+        endpoints.add((
+          address: value,
+          name: interface.name,
+          score: _addressPriority(interface.name, value),
+        ));
       }
     }
   } catch (_) {
     // Fall back to loopback below.
   }
-  return '127.0.0.1';
+
+  endpoints.sort((a, b) => a.score.compareTo(b.score));
+
+  final result = <_LocalWebEndpoint>[];
+  for (final endpoint in endpoints) {
+    result.add(
+      _LocalWebEndpoint(
+        url: 'http://${endpoint.address}:$port/?token=$token',
+        label: '${endpoint.name} · ${endpoint.address}',
+      ),
+    );
+  }
+
+  result.add(
+    _LocalWebEndpoint(
+      url: 'http://127.0.0.1:$port/?token=$token',
+      label: 'loopback · 127.0.0.1',
+    ),
+  );
+  return result;
+}
+
+int _addressPriority(String interfaceName, String address) {
+  final name = interfaceName.toLowerCase();
+  if (name == 'en0' || name.contains('wi-fi') || name.contains('wlan')) {
+    return 0;
+  }
+  if (name.startsWith('eth') || name.contains('ethernet')) return 1;
+  if (_isPrivateLanAddress(address)) return 2;
+  if (name.startsWith('pdp') || name.startsWith('utun')) return 5;
+  return 3;
+}
+
+bool _isPrivateLanAddress(String address) {
+  if (address.startsWith('10.')) return true;
+  if (address.startsWith('192.168.')) return true;
+  final parts = address.split('.');
+  if (parts.length == 4 && parts.first == '172') {
+    final second = int.tryParse(parts[1]);
+    return second != null && second >= 16 && second <= 31;
+  }
+  return false;
+}
+
+Future<bool> _triggerLocalNetworkPermissionProbe(int port) async {
+  RawDatagramSocket? socket;
+  try {
+    socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+    socket.broadcastEnabled = true;
+    final payload = utf8.encode('read-source-web:$port');
+    socket.send(payload, InternetAddress('255.255.255.255'), port);
+    socket.send(payload, InternetAddress('224.0.0.251'), 5353);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    socket?.close();
+  }
 }
 
 String _randomToken() {

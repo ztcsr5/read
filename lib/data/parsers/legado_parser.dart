@@ -311,6 +311,24 @@ class LegadoParser {
       tocLogs.add('  章节链接 (url): ${firstChapter.url}');
       tocLogs.add('  章节内部指向链接 (content): ${firstChapter.content}');
 
+      final suspiciousChapter = _firstSuspiciousChapter(
+        chapters.take(8),
+        firstBook.filePath,
+      );
+      if (suspiciousChapter != null) {
+        tocLogs.add(
+          '警告：目录虽然解析出章节，但结果疑似无效：${suspiciousChapter.title} / ${suspiciousChapter.content ?? suspiciousChapter.url ?? ''}',
+        );
+        steps.add(
+          LegadoTestStep.fail(
+            '目录',
+            '目录解析结果疑似 JS 残片、空链接或详情页重复链接，请检查 ruleToc.chapterName/chapterUrl',
+            logs: tocLogs,
+          ),
+        );
+        return LegadoTestReport(steps: steps);
+      }
+
       steps.add(
         LegadoTestStep.ok(
           '目录',
@@ -775,7 +793,10 @@ class LegadoParser {
     final visitedUrls = <String>{};
 
     var currentResponse =
-        preFetchedResponse ?? await _request(source, book.filePath);
+        preFetchedResponse != null &&
+            _responseMatchesUrl(preFetchedResponse, book.filePath)
+        ? preFetchedResponse
+        : await _request(source, book.filePath);
     currentResponse = await _followTocUrl(
       source,
       book.filePath,
@@ -1747,6 +1768,30 @@ class LegadoParser {
       if (list[i] != prefix[i]) return false;
     }
     return true;
+  }
+
+  static bool _responseMatchesUrl(Response<dynamic> response, String url) {
+    try {
+      final actual = response.realUri;
+      final expected = Uri.parse(url);
+      if (actual.scheme.toLowerCase() != expected.scheme.toLowerCase()) {
+        return false;
+      }
+      if (actual.host.toLowerCase() != expected.host.toLowerCase()) {
+        return false;
+      }
+      final actualPath = _normalizedComparePath(actual);
+      final expectedPath = _normalizedComparePath(expected);
+      if (actualPath != expectedPath) return false;
+      return actual.query == expected.query;
+    } catch (_) {
+      return response.realUri.toString() == url;
+    }
+  }
+
+  static String _normalizedComparePath(Uri uri) {
+    final path = uri.path.replaceAll(RegExp(r'/+$'), '');
+    return path.isEmpty ? '/' : path;
   }
 
   static Future<Response<dynamic>> _retryShortenedDuplicatePathIfMissing(
@@ -3257,6 +3302,38 @@ class LegadoParser {
   static String _sample(dynamic data) {
     final text = data.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
     return text.length > 220 ? '${text.substring(0, 220)}...' : text;
+  }
+
+  static Chapter? _firstSuspiciousChapter(
+    Iterable<Chapter> chapters,
+    String bookUrl,
+  ) {
+    final normalizedBookUrl = bookUrl.trim();
+    for (final chapter in chapters) {
+      final title = chapter.title.trim();
+      final target = (chapter.content ?? chapter.url ?? '').trim();
+      if (title.isEmpty || target.isEmpty) return chapter;
+      if (_looksLikeJsFragment(title)) return chapter;
+      if (target == normalizedBookUrl && !target.startsWith('volume://')) {
+        return chapter;
+      }
+    }
+    return null;
+  }
+
+  static bool _looksLikeJsFragment(String text) {
+    final value = text.trim();
+    if (value.contains('result.match') ||
+        value.contains('}else{') ||
+        value.contains('@js:') ||
+        value.contains('function(') ||
+        value.contains('=>') ||
+        value.contains('java.ajax') ||
+        value.contains('java.connect')) {
+      return true;
+    }
+    return value.length > 120 &&
+        (value.contains('{') || value.contains('}') || value.contains(';'));
   }
 
   static List<Book> _parseBooksByJsonFallback(

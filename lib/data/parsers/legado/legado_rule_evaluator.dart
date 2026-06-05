@@ -379,7 +379,7 @@ class LegadoRuleEvaluator {
         .toList();
     if (lines.isEmpty) return output.trim();
 
-    if (lines.length == 1) {
+    if (lines.length == 1 || _hasMultilineInlineJsPostProcessor(rule)) {
       return _applySingleLinePostProcessors(
         output,
         rule,
@@ -484,6 +484,14 @@ class LegadoRuleEvaluator {
     }
 
     return output.trim();
+  }
+
+  static bool _hasMultilineInlineJsPostProcessor(String rule) {
+    final marker = rule.indexOf('@js:');
+    if (marker < 0) return false;
+    final tail = rule.substring(marker + 4);
+    final jsBody = tail.split('##').first;
+    return jsBody.contains('\n') || jsBody.contains('\r');
   }
 
   static String _applySingleLinePostProcessors(

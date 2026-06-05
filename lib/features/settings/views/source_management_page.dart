@@ -183,6 +183,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
 
   Widget _buildWebServiceCard(LocalSourceWebState webState) {
     final url = webState.url;
+    final urls = webState.urls.isEmpty ? [if (url != null) url] : webState.urls;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Container(
@@ -225,35 +226,100 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
             const SizedBox(height: 8),
             Text(
               webState.isRunning
-                  ? '电脑浏览器打开下面地址，可直接编辑 App 内书源 JSON、保存、删除和测试。'
-                  : '开启后会在局域网启动本地网页，只在本机 App 运行期间有效。',
+                  ? '电脑和手机连接同一个 Wi-Fi 后，在电脑浏览器打开下方地址即可直接编辑 App 内书源 JSON。'
+                  : '开启后会在局域网启动本地网页，只在 App 运行期间有效。iOS 第一次开启会请求“本地网络”权限。',
               style: const TextStyle(
                 fontSize: 13,
                 color: CupertinoColors.systemGrey,
               ),
             ),
-            if (url != null) ...[
+            if (urls.isNotEmpty) ...[
               const SizedBox(height: 10),
-              SelectableText(
-                url,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: CupertinoColors.activeBlue,
+              ...List.generate(urls.length, (index) {
+                final item = urls[index];
+                final label = index < webState.interfaceLabels.length
+                    ? webState.interfaceLabels[index]
+                    : '地址 ${index + 1}';
+                return Padding(
+                  padding: EdgeInsets.only(top: index == 0 ? 0 : 8),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.systemGrey6.resolveFrom(context),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          index == 0 ? '推荐地址 · $label' : '备用地址 · $label',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: CupertinoColors.systemGrey,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        SelectableText(
+                          item,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: CupertinoColors.activeBlue,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+              const Text(
+                '健康检查：把地址末尾替换为 /health，能看到 READ_SOURCE_WEB_OK 就说明手机服务已通。',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: CupertinoColors.systemGrey,
                 ),
               ),
               const SizedBox(height: 8),
-              Row(
+              Wrap(
+                spacing: 16,
+                runSpacing: 6,
                 children: [
                   CupertinoButton(
                     padding: EdgeInsets.zero,
                     minSize: 30,
-                    child: const Text('复制地址'),
+                    child: const Text('复制推荐地址'),
                     onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: url));
+                      await Clipboard.setData(ClipboardData(text: urls.first));
                       if (mounted) _showAlert(context, '完成', 'Web 编辑器地址已复制');
                     },
                   ),
-                  const SizedBox(width: 16),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    minSize: 30,
+                    child: const Text('复制全部'),
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: urls.join('\n')),
+                      );
+                      if (mounted) _showAlert(context, '完成', '全部可用地址已复制');
+                    },
+                  ),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    minSize: 30,
+                    child: const Text('重启服务'),
+                    onPressed: () => ref
+                        .read(localSourceWebServiceProvider.notifier)
+                        .restart(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 10,
+                runSpacing: 4,
+                children: [
                   Text(
                     '访问码：${webState.accessToken}',
                     style: const TextStyle(
@@ -261,7 +327,22 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                       color: CupertinoColors.systemGrey,
                     ),
                   ),
+                  Text(
+                    webState.permissionProbeSent ? '本地网络探测已发送' : '等待本地网络权限探测',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: CupertinoColors.systemGrey,
+                    ),
+                  ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '打不开时优先检查：手机和电脑同一 Wi-Fi、关闭 VPN/代理/隐私中继、iOS 设置里允许本 App 访问本地网络。',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: CupertinoColors.systemGrey,
+                ),
               ),
             ],
             if (webState.error != null) ...[

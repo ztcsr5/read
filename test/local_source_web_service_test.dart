@@ -20,11 +20,27 @@ void main() {
 
     final service = LocalSourceWebService(repo);
     await service.start();
-    addTearDown(service.stop);
+    addTearDown(() => service.stop());
 
     final token = service.state.accessToken;
     final base = 'http://127.0.0.1:${service.state.port}';
     final headers = {'X-Read-Token': token, 'Content-Type': 'application/json'};
+
+    expect(service.state.urls, isNotEmpty);
+    expect(service.state.urls.any((url) => url.contains('127.0.0.1')), isTrue);
+
+    final healthResponse = await http.get(Uri.parse('$base/health'));
+    expect(healthResponse.statusCode, 200);
+    expect(healthResponse.body, contains('READ_SOURCE_WEB_OK'));
+
+    final statusResponse = await http.get(
+      Uri.parse('$base/api/status'),
+      headers: headers,
+    );
+    expect(statusResponse.statusCode, 200);
+    final statusJson = jsonDecode(statusResponse.body) as Map<String, dynamic>;
+    expect(statusJson['urls'], isA<List>());
+    expect(statusJson['permissionProbeSent'], isA<bool>());
 
     final listResponse = await http.get(
       Uri.parse('$base/api/sources'),
