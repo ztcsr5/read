@@ -366,6 +366,29 @@ class LegadoRuleEvaluator {
     return value.replaceAll(RegExp(r'<[^>]+>'), '').trim();
   }
 
+  /// Compiles a regex that may carry Java/Jsoup inline flags (?i)/(?s)/(?m).
+  /// Dart RegExp rejects inline flags, so translate to constructor options
+  /// and strip them. Without this such patterns throw and callers silently
+  /// fall back to literal replacement, breaking ## cleaning and [attr~=re].
+  static RegExp _compileFlexibleRegExp(String pattern) {
+    var caseSensitive = true;
+    var dotAll = false;
+    var multiLine = false;
+    for (final m in RegExp(r'\(\?([ismxuU]+)\)').allMatches(pattern)) {
+      final flags = m.group(1) ?? '';
+      if (flags.contains('i')) caseSensitive = false;
+      if (flags.contains('s')) dotAll = true;
+      if (flags.contains('m')) multiLine = true;
+    }
+    final stripped = pattern.replaceAll(RegExp(r'\(\?[ismxuU]+\)'), '');
+    return RegExp(
+      stripped,
+      caseSensitive: caseSensitive,
+      multiLine: multiLine,
+      dotAll: dotAll,
+    );
+  }
+
   static String applyPostProcessors(
     String value,
     String rule, {
@@ -435,9 +458,9 @@ class LegadoRuleEvaluator {
               : '';
           try {
             if (onlyFirst) {
-              output = output.replaceFirst(RegExp(pattern), replacement);
+              output = output.replaceFirst(_compileFlexibleRegExp(pattern), replacement);
             } else {
-              output = output.replaceAll(RegExp(pattern), replacement);
+              output = output.replaceAll(_compileFlexibleRegExp(pattern), replacement);
             }
           } catch (_) {
             if (onlyFirst) {
@@ -448,10 +471,10 @@ class LegadoRuleEvaluator {
           }
         }
       } else {
-        if (line.contains('{result}') || line.contains('{{result}}')) {
+        if (line.contains('{result}') || line.contains('result')) {
           output = line
               .replaceAll('{result}', output)
-              .replaceAll('{{result}}', output);
+              .replaceAll('result', output);
         } else if (line.contains('{}') || line.contains('{{}}')) {
           output = line.replaceAll('{}', output).replaceAll('{{}}', output);
         } else if (line.contains('{') && originalJson != null) {
@@ -546,9 +569,9 @@ class LegadoRuleEvaluator {
             : '';
         try {
           if (onlyFirst) {
-            output = output.replaceFirst(RegExp(pattern), replacement);
+            output = output.replaceFirst(_compileFlexibleRegExp(pattern), replacement);
           } else {
-            output = output.replaceAll(RegExp(pattern), replacement);
+            output = output.replaceAll(_compileFlexibleRegExp(pattern), replacement);
           }
         } catch (_) {
           if (onlyFirst) {
@@ -1118,6 +1141,9 @@ class LegadoRuleEvaluator {
       if (actual == null) return false;
       switch (op) {
         case '~=':
+          try {
+            if (_compileFlexibleRegExp(expected).hasMatch(actual)) return true;
+          } catch (_) {}
           return actual.split(RegExp(r'\s+')).contains(expected) ||
               actual.contains(expected);
         case '^=':
@@ -1344,7 +1370,7 @@ class LegadoRuleEvaluator {
       try {
         final pattern = matchJoin.group(1) ?? '';
         final joiner = matchJoin.group(2) ?? '';
-        output = RegExp(pattern)
+        output = _compileFlexibleRegExp(pattern)
             .allMatches(output)
             .map((match) => match.group(0) ?? '')
             .where((text) => text.isNotEmpty)
