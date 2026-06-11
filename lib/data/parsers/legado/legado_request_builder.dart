@@ -613,16 +613,98 @@ class LegadoRequestBuilder {
         .replaceAll('%0a', '')
         .replaceAll('%0d', '')
         .trim();
+    final legacyHeaders = _extractLegacyHeaderDirectives(url);
+    url = legacyHeaders.url.trim();
+    final directiveConfig = <String, dynamic>{};
+    if (legacyHeaders.headers.isNotEmpty) {
+      directiveConfig['headers'] = legacyHeaders.headers;
+    }
     final comma = _findEmbeddedConfigComma(url);
-    if (comma <= 0 || comma >= url.length - 1) return (url: url, config: {});
+    if (comma <= 0 || comma >= url.length - 1) {
+      return (url: url, config: directiveConfig);
+    }
     final tail = url.substring(comma + 1).trimLeft();
     final configText = _extractLeadingJsonObject(tail);
-    if (configText == null) return (url: url, config: {});
+    if (configText == null) return (url: url, config: directiveConfig);
     final config = jsonConfig(configText);
     if (config.isEmpty && configText.trim() != '{}') {
-      return (url: url, config: {});
+      return (url: url, config: directiveConfig);
     }
+    _mergeConfigHeaders(config, legacyHeaders.headers);
     return (url: url.substring(0, comma).trimRight(), config: config);
+  }
+
+  static ({String url, Map<String, dynamic> headers})
+  _extractLegacyHeaderDirectives(String text) {
+    final headers = <String, dynamic>{};
+    final output = StringBuffer();
+    var index = 0;
+    final lower = text.toLowerCase();
+    const marker = '@header:';
+
+    while (index < text.length) {
+      final found = lower.indexOf(marker, index);
+      if (found < 0) {
+        output.write(text.substring(index));
+        break;
+      }
+      output.write(text.substring(index, found));
+      var objectStart = found + marker.length;
+      while (objectStart < text.length &&
+          text.codeUnitAt(objectStart) <= 0x20) {
+        objectStart++;
+      }
+      if (objectStart >= text.length || text.codeUnitAt(objectStart) != 0x7b) {
+        output.write(text.substring(found, objectStart));
+        index = objectStart;
+        continue;
+      }
+      final objectText = _extractBalanced(text, objectStart, 0x7b, 0x7d);
+      if (objectText == null) {
+        output.write(text.substring(found));
+        index = text.length;
+        break;
+      }
+      headers.addAll(_parseHeaderDirectiveObject(objectText));
+      index = objectStart + objectText.length;
+    }
+
+    return (url: output.toString(), headers: headers);
+  }
+
+  static Map<String, dynamic> _parseHeaderDirectiveObject(String objectText) {
+    final parsed = jsonConfig(objectText);
+    if (parsed.isNotEmpty) {
+      final directHeaders = <String, dynamic>{};
+      parsed.forEach((key, value) {
+        final name = key.toString().trim();
+        if (_isSafeHeaderName(name)) {
+          directHeaders[name] = value.toString();
+        }
+      });
+      return directHeaders;
+    }
+    return _parseLooseHeaderObject(objectText);
+  }
+
+  static void _mergeConfigHeaders(
+    Map<String, dynamic> config,
+    Map<String, dynamic> headers,
+  ) {
+    if (headers.isEmpty) return;
+    final merged = <String, dynamic>{};
+    final existing = config['headers'] ?? config['header'];
+    if (existing is Map) {
+      existing.forEach((key, value) {
+        final name = key.toString().trim();
+        if (_isSafeHeaderName(name)) merged[name] = value.toString();
+      });
+    } else if (existing is String) {
+      merged.addAll(parseHeaderString(existing));
+    }
+    merged.addAll(headers);
+    config['headers'] = merged;
+    if (config.containsKey('header')) config.remove('header');
   }
 
   static int _findEmbeddedConfigComma(String text) {
@@ -694,7 +776,38 @@ class LegadoRequestBuilder {
         headers[key] = value;
       }
     }
+    if (headers.isNotEmpty) return headers;
+
+    final inner =
+        objectText.trim().startsWith('{') && objectText.trim().endsWith('}')
+        ? objectText.trim().substring(1, objectText.trim().length - 1)
+        : objectText;
+    for (final part in inner.split(',')) {
+      final colon = part.indexOf(':');
+      final equal = part.indexOf('=');
+      final separator = colon < 0
+          ? equal
+          : (equal < 0 ? colon : (colon < equal ? colon : equal));
+      if (separator <= 0) continue;
+      final key = _stripLooseQuotes(part.substring(0, separator).trim());
+      final value = _stripLooseQuotes(part.substring(separator + 1).trim());
+      if (_isSafeHeaderName(key)) {
+        headers[key] = value;
+      }
+    }
     return headers;
+  }
+
+  static String _stripLooseQuotes(String value) {
+    final text = value.trim();
+    if (text.length >= 2) {
+      final first = text[0];
+      final last = text[text.length - 1];
+      if ((first == '"' && last == '"') || (first == "'" && last == "'")) {
+        return text.substring(1, text.length - 1);
+      }
+    }
+    return text;
   }
 
   static Map<String, dynamic> _parseEvaluatedHeaders(String text) {

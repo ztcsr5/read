@@ -77,6 +77,54 @@ void main() {
       expect(embedded.config['headers']['User-Agent'], 'MobileUA');
     });
 
+    test('splits legado header directives before and after urls', () {
+      final prefixed = LegadoRequestBuilder.splitEmbeddedConfig(
+        "@Header:{Referer:'https://m.example.com/search'}/search@kw=abc",
+      );
+      expect(prefixed.url, '/search@kw=abc');
+      expect(
+        prefixed.config['headers']['Referer'],
+        'https://m.example.com/search',
+      );
+
+      final suffixed = LegadoRequestBuilder.splitEmbeddedConfig(
+        'https://example.com/search@header:{referer:example.com,Accept-Encoding:*}',
+      );
+      expect(suffixed.url, 'https://example.com/search');
+      expect(suffixed.config['headers']['referer'], 'example.com');
+      expect(suffixed.config['headers']['Accept-Encoding'], '*');
+    });
+
+    test('merges legado header directives with comma embedded config', () {
+      final embedded = LegadoRequestBuilder.splitEmbeddedConfig(
+        '@Header:{Referer:"https://ref.example"}https://example.com/search,{"headers":{"X-Test":"1"},"method":"POST"}',
+      );
+
+      expect(embedded.url, 'https://example.com/search');
+      expect(embedded.config['method'], 'POST');
+      expect(embedded.config['headers']['X-Test'], '1');
+      expect(embedded.config['headers']['Referer'], 'https://ref.example');
+    });
+
+    test('resolves legado header directive urls into request headers', () {
+      final source = BookSource()
+        ..bookSourceName = 'Header URL'
+        ..bookSourceUrl = 'https://example.com/base/';
+
+      final resolved = LegadoRequestBuilder.resolveUrl(
+        source.bookSourceUrl,
+        '@Header:{Referer:"https://ref.example"}/api/search',
+      );
+      final request = LegadoRequestBuilder.buildRequest(source, resolved);
+
+      expect(
+        resolved,
+        'https://example.com/api/search,{"headers":{"Referer":"https://ref.example"}}',
+      );
+      expect(request.url, 'https://example.com/api/search');
+      expect(request.headers?['Referer'], 'https://ref.example');
+    });
+
     test('drops empty urls with only embedded config suffix', () {
       expect(
         LegadoRequestBuilder.resolveUrl(
