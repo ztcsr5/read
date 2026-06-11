@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -135,6 +136,19 @@ class LegadoJsEngine {
         }
       });
 
+      _runtime!.onMessage('java_bytes_to_string', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final bytes = base64Decode(data['value']?.toString() ?? '');
+          return _decodeBytesByType(
+            Uint8List.fromList(bytes),
+            data['type']?.toString() ?? 'utf-8',
+          );
+        } catch (_) {
+          return '';
+        }
+      });
+
       _runtime!.onMessage('java_aes_base64_encode', (dynamic args) {
         try {
           final data = jsonDecode(args.toString());
@@ -163,6 +177,58 @@ class LegadoJsEngine {
           );
         } catch (e) {
           print('java_aes_base64_decode failed: $e');
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_aes_base64_decode_bytes', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final decoded = _cipherBase64Decode(
+            data['value']?.toString() ?? '',
+            data['key']?.toString() ?? '',
+            data['iv']?.toString() ?? '',
+            data['transformation']?.toString() ?? 'AES/CBC/PKCS5Padding',
+          );
+          return base64Encode(decoded);
+        } catch (e) {
+          print('java_aes_base64_decode_bytes failed: $e');
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_cipher_bytes_decode', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final decoded = _cipherDecodeBytes(
+            input: Uint8List.fromList(
+              base64Decode(data['input']?.toString() ?? ''),
+            ),
+            keyBytes: Uint8List.fromList(
+              base64Decode(data['key']?.toString() ?? ''),
+            ),
+            ivBytes: Uint8List.fromList(
+              base64Decode(data['iv']?.toString() ?? ''),
+            ),
+            transformation:
+                data['transformation']?.toString() ?? 'AES/CBC/PKCS5Padding',
+          );
+          return base64Encode(decoded);
+        } catch (e) {
+          print('java_cipher_bytes_decode failed: $e');
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_inflate_bytes', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final bytes = Uint8List.fromList(
+            base64Decode(data['value']?.toString() ?? ''),
+          );
+          return _inflateBytesToString(bytes);
+        } catch (e) {
+          print('java_inflate_bytes failed: $e');
           return '';
         }
       });
@@ -409,6 +475,10 @@ class LegadoJsEngine {
         return out;
       }
 
+      function __bytesToBase64(bytes) {
+        return btoa(__bytesToBinaryString(__javaBytes(bytes)));
+      }
+
       function __base64ToBytes(str) {
         var raw = atob(String(str || ""));
         var bytes = [];
@@ -416,11 +486,33 @@ class LegadoJsEngine {
         return __arrayWithToArray(bytes);
       }
 
+      function __javaBytes(value) {
+        if (value == null) return __arrayWithToArray([]);
+        if (Array.isArray(value)) {
+          return __arrayWithToArray(value.map(function(v) { return Number(v || 0) & 0xff; }));
+        }
+        if (value.__javaBytes) return __javaBytes(value.__javaBytes);
+        if (value.getBytes && typeof value.getBytes === "function") return __javaBytes(value.getBytes());
+        if (typeof value === "string") return __bytesFromString(value, "utf-8");
+        return __bytesFromString(String(value), "utf-8");
+      }
+
+      function __bytesToString(bytes, charset) {
+        return sendMessage("java_bytes_to_string", JSON.stringify({
+          value: __bytesToBase64(bytes),
+          type: String(charset || "utf-8")
+        }));
+      }
+
       function __javaString(value) {
-        var text = Array.isArray(value) ? __bytesToBinaryString(value) : String(value == null ? "" : value);
+        var text = Array.isArray(value) || (value && value.__javaBytes)
+          ? __bytesToString(value, "utf-8")
+          : String(value == null ? "" : value);
         return {
+          __javaString: text,
           getBytes: function(charset) { return __bytesFromString(text, charset || "utf-8"); },
           toString: function() { return text; },
+          toJSON: function() { return text; },
           valueOf: function() { return text; }
         };
       }
@@ -759,7 +851,20 @@ class LegadoJsEngine {
           return java.aesBase64DecodeToString(value, key, iv, transformation);
         },
         aesBase64DecodeToByteArray: function(value, key, iv, transformation) {
-          return __bytesFromString(java.aesBase64DecodeToString(value, key, iv, transformation), "utf-8");
+          var actualIv = iv;
+          var actualTransformation = transformation;
+          var third = String(iv || "");
+          if (third.indexOf("/") >= 0 || /^(AES|DES|DESede|TripleDES)/i.test(third)) {
+            actualTransformation = iv;
+            actualIv = transformation;
+          }
+          var raw = sendMessage("java_aes_base64_decode_bytes", JSON.stringify({
+            value: String(value || ""),
+            key: String(key || ""),
+            iv: String(actualIv || ""),
+            transformation: String(actualTransformation || "AES/CBC/PKCS5Padding")
+          }));
+          return __base64ToBytes(raw);
         },
         hexDecodeToString: function(input) {
           var text = String(input || "");
@@ -940,10 +1045,174 @@ class LegadoJsEngine {
         return {};
       }
 
+      var __javaBase64 = {
+        NO_WRAP: 2,
+        DEFAULT: 0,
+        getDecoder: function() {
+          return {
+            decode: function(value) {
+              return __base64ToBytes(value);
+            }
+          };
+        },
+        getEncoder: function() {
+          return {
+            encodeToString: function(bytes) {
+              return __bytesToBase64(bytes);
+            }
+          };
+        },
+        encode: function(bytes, flags) {
+          return __bytesFromString(__bytesToBase64(bytes), "utf-8");
+        },
+        encodeToString: function(bytes, flags) {
+          return __bytesToBase64(bytes);
+        },
+        decode: function(value, flags) {
+          if (Array.isArray(value) || (value && value.__javaBytes)) {
+            value = __bytesToString(value, "utf-8");
+          }
+          return __base64ToBytes(value);
+        }
+      };
+
+      var __javaArrays = {
+        copyOfRange: function(bytes, start, end) {
+          return __arrayWithToArray(__javaBytes(bytes).slice(Number(start || 0), Number(end || 0)));
+        }
+      };
+
+      function __SecretKeySpec(bytes, algorithm) {
+        return {
+          __keyBytes: __javaBytes(bytes),
+          algorithm: String(algorithm || "")
+        };
+      }
+
+      function __IvParameterSpec(bytes) {
+        return {
+          __ivBytes: __javaBytes(bytes)
+        };
+      }
+
+      var __Cipher = {
+        DECRYPT_MODE: 2,
+        ENCRYPT_MODE: 1,
+        getInstance: function(transformation) {
+          var cipher = {
+            __transformation: String(transformation || "AES/CBC/PKCS5Padding"),
+            __mode: 2,
+            __keyBytes: [],
+            __ivBytes: [],
+            init: function(mode, keySpec, ivSpec) {
+              cipher.__mode = Number(mode || 2);
+              cipher.__keyBytes = __javaBytes(keySpec && keySpec.__keyBytes ? keySpec.__keyBytes : keySpec);
+              cipher.__ivBytes = ivSpec && ivSpec.__ivBytes ? __javaBytes(ivSpec.__ivBytes) : [];
+              return cipher;
+            },
+            doFinal: function(bytes) {
+              if (cipher.__mode !== 2) return __arrayWithToArray([]);
+              var raw = sendMessage("java_cipher_bytes_decode", JSON.stringify({
+                input: __bytesToBase64(bytes),
+                key: __bytesToBase64(cipher.__keyBytes),
+                iv: __bytesToBase64(cipher.__ivBytes),
+                transformation: cipher.__transformation
+              }));
+              return __base64ToBytes(raw);
+            }
+          };
+          return cipher;
+        }
+      };
+
+      function __ByteArrayInputStream(bytes) {
+        return {
+          __javaBytes: __javaBytes(bytes)
+        };
+      }
+
+      function __inflateBytes(bytes) {
+        var text = sendMessage("java_inflate_bytes", JSON.stringify({
+          value: __bytesToBase64(bytes)
+        }));
+        return __bytesFromString(text, "utf-8");
+      }
+
+      function __InflaterInputStream(input) {
+        var bytes = __inflateBytes(input && input.__javaBytes ? input.__javaBytes : input);
+        var index = 0;
+        return {
+          read: function() {
+            if (index >= bytes.length) return -1;
+            return Number(bytes[index++]) & 0xff;
+          },
+          close: function() {}
+        };
+      }
+
+      function __ByteArrayOutputStream(size) {
+        var bytes = [];
+        return {
+          write: function(value) {
+            bytes.push(Number(value || 0) & 0xff);
+          },
+          close: function() {},
+          toByteArray: function() {
+            return __arrayWithToArray(bytes.slice());
+          },
+          toString: function(charset) {
+            return __bytesToString(bytes, charset || "utf-8");
+          }
+        };
+      }
+
+      function __JavaImporter() {
+        return {
+          importPackage: function() {},
+          importClass: function() {},
+          String: function(value) { return __javaString(value); },
+          Base64: __javaBase64,
+          Arrays: __javaArrays,
+          Cipher: __Cipher,
+          SecretKeySpec: __SecretKeySpec,
+          IvParameterSpec: __IvParameterSpec,
+          ByteArrayInputStream: __ByteArrayInputStream,
+          ByteArrayOutputStream: __ByteArrayOutputStream,
+          InflaterInputStream: __InflaterInputStream
+        };
+      }
+
+      var JavaImporter = __JavaImporter;
+
       var Packages = {
         java: {
           lang: {
             String: function(value) { return __javaString(value); }
+          },
+          io: {
+            ByteArrayInputStream: __ByteArrayInputStream,
+            ByteArrayOutputStream: __ByteArrayOutputStream
+          },
+          util: {
+            Arrays: __javaArrays,
+            Base64: __javaBase64,
+            zip: {
+              InflaterInputStream: __InflaterInputStream
+            }
+          }
+        },
+        javax: {
+          crypto: {
+            Cipher: __Cipher,
+            spec: {
+              SecretKeySpec: __SecretKeySpec,
+              IvParameterSpec: __IvParameterSpec
+            }
+          }
+        },
+        android: {
+          util: {
+            Base64: __javaBase64
           }
         }
       };
@@ -951,17 +1220,7 @@ class LegadoJsEngine {
 
       var android = {
         util: {
-          Base64: {
-            encode: function(bytes, flags) {
-              return btoa(__bytesToBinaryString(bytes));
-            },
-            encodeToString: function(bytes, flags) {
-              return btoa(__bytesToBinaryString(bytes));
-            },
-            decode: function(value, flags) {
-              return __base64ToBytes(value);
-            }
-          }
+          Base64: __javaBase64
         }
       };
 
@@ -1652,13 +1911,31 @@ class LegadoJsEngine {
     String transformation,
   ) {
     try {
+      final encrypted = base64Decode(value);
+      return _cipherDecodeBytes(
+        input: Uint8List.fromList(encrypted),
+        keyBytes: Uint8List.fromList(utf8.encode(key)),
+        ivBytes: Uint8List.fromList(utf8.encode(iv)),
+        transformation: transformation,
+      );
+    } catch (_) {
+      return Uint8List(0);
+    }
+  }
+
+  Uint8List _cipherDecodeBytes({
+    required Uint8List input,
+    required Uint8List keyBytes,
+    required Uint8List ivBytes,
+    required String transformation,
+  }) {
+    try {
       final cipher = _decodeCipher(
         transformation: transformation,
-        key: key,
-        iv: iv,
+        keyBytes: keyBytes,
+        ivBytes: ivBytes,
       );
-      final encrypted = base64Decode(value);
-      return cipher.process(Uint8List.fromList(encrypted));
+      return cipher.process(input);
     } catch (_) {
       return Uint8List(0);
     }
@@ -1666,23 +1943,23 @@ class LegadoJsEngine {
 
   PaddedBlockCipher _decodeCipher({
     required String transformation,
-    required String key,
-    required String iv,
+    required Uint8List keyBytes,
+    required Uint8List ivBytes,
   }) {
     final upper = transformation.toUpperCase();
     final isDes = upper.contains('DES');
     final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
     final engine = isDes ? DESedeEngine() : AESEngine();
-    final keyBytes = isDes
-        ? _desCompatibleKeyBytes(key)
-        : Uint8List.fromList(utf8.encode(key));
+    final normalizedKeyBytes = isDes ? _desCompatibleKeyBytes(keyBytes) : keyBytes;
     if (!isDes &&
-        keyBytes.length != 16 &&
-        keyBytes.length != 24 &&
-        keyBytes.length != 32) {
+        normalizedKeyBytes.length != 16 &&
+        normalizedKeyBytes.length != 24 &&
+        normalizedKeyBytes.length != 32) {
       throw ArgumentError('Invalid AES key length');
     }
-    final keyParam = isDes ? DESedeParameters(keyBytes) : KeyParameter(keyBytes);
+    final keyParam = isDes
+        ? DESedeParameters(normalizedKeyBytes)
+        : KeyParameter(normalizedKeyBytes);
 
     final cipher = PaddedBlockCipherImpl(
       PKCS7Padding(),
@@ -1694,14 +1971,14 @@ class LegadoJsEngine {
         PaddedBlockCipherParameters<CipherParameters, Null>(keyParam, null),
       );
     } else {
-      var ivBytes = Uint8List.fromList(utf8.encode(iv));
-      if (ivBytes.length != engine.blockSize) {
-        ivBytes = Uint8List(engine.blockSize);
+      var normalizedIvBytes = ivBytes;
+      if (normalizedIvBytes.length != engine.blockSize) {
+        normalizedIvBytes = Uint8List(engine.blockSize);
       }
       cipher.init(
         false,
         PaddedBlockCipherParameters<ParametersWithIV<CipherParameters>, Null>(
-          ParametersWithIV<CipherParameters>(keyParam, ivBytes),
+          ParametersWithIV<CipherParameters>(keyParam, normalizedIvBytes),
           null,
         ),
       );
@@ -1709,8 +1986,7 @@ class LegadoJsEngine {
     return cipher;
   }
 
-  Uint8List _desCompatibleKeyBytes(String key) {
-    final raw = Uint8List.fromList(utf8.encode(key));
+  Uint8List _desCompatibleKeyBytes(Uint8List raw) {
     if (raw.length == 24) return raw;
     if (raw.length == 16) {
       return Uint8List.fromList([...raw, ...raw.sublist(0, 8)]);
@@ -1719,6 +1995,26 @@ class LegadoJsEngine {
       return Uint8List.fromList([...raw, ...raw, ...raw]);
     }
     throw ArgumentError('Invalid DES key length');
+  }
+
+  String _inflateBytesToString(Uint8List bytes) {
+    final decoders = <List<int> Function()>[
+      () => ZLibDecoder().convert(bytes),
+      () => ZLibDecoder(raw: true).convert(bytes),
+      () => ZLibDecoder(gzip: true).convert(bytes),
+      () => GZipCodec().decode(bytes),
+    ];
+    for (final decode in decoders) {
+      try {
+        final inflated = decode();
+        if (inflated.isNotEmpty) {
+          return utf8.decode(inflated, allowMalformed: true);
+        }
+      } catch (_) {
+        // Try the next common deflate/gzip flavor.
+      }
+    }
+    return '';
   }
 
   Map<String, dynamic> _aesEncodeToMap(
@@ -1849,6 +2145,19 @@ class LegadoJsEngine {
         return Uri.decodeComponent(value);
       default:
         return value;
+    }
+  }
+
+  String _decodeBytesByType(Uint8List bytes, String type) {
+    switch (type.toLowerCase()) {
+      case 'gbk':
+      case 'gb2312':
+      case 'gb18030':
+        return gbk.decode(bytes);
+      case 'utf8':
+      case 'utf-8':
+      default:
+        return utf8.decode(bytes, allowMalformed: true);
     }
   }
 

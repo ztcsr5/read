@@ -2445,6 +2445,50 @@ CryptoJS.DES.decrypt("0XUfPCehJ3Q=", CryptoJS.enc.Utf8.parse("6CB1E21E"), {
       expect(des, 'hello');
     });
 
+    test('supports JavaImporter AES byte decrypt and inflater shims', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final decoded = LegadoJsEngine().evaluate(
+        r'''@js:
+var javaImport = new JavaImporter();
+javaImport.importPackage(
+  Packages.java.lang,
+  Packages.javax.crypto,
+  Packages.javax.crypto.spec,
+  Packages.java.io,
+  Packages.java.util,
+  Packages.java.util.zip
+);
+with (javaImport) {
+  function decrypt(str) {
+    var bytes = java.aesBase64DecodeToByteArray(
+      str,
+      "Shuew237HSFH242s",
+      "AES/CBC/PKCS5Padding",
+      "abcdefghijklmnop"
+    );
+    var inflaterInputStream = new InflaterInputStream(new ByteArrayInputStream(bytes));
+    var byteArrayOutputStream = new ByteArrayOutputStream(512);
+    while (true) {
+      var read = inflaterInputStream.read();
+      if (read != -1) {
+        byteArrayOutputStream.write(read);
+      } else {
+        byteArrayOutputStream.close();
+        return byteArrayOutputStream.toString();
+      }
+    }
+  }
+}
+decrypt(result);
+''',
+        variables: {
+          'result': '9XGKV+gLPbg9nhpsZ/+4AvfGGarQ3vqnSbYUtZx29vU=',
+        },
+      );
+
+      expect(decoded, 'hello inflater');
+    });
+
     test('supports cookie bridge backed by session store', () {
       if (!LegadoJsEngine().isAvailable) return;
       final uri = Uri.parse('https://cookie.example/path');
