@@ -1343,30 +1343,40 @@ class LegadoParser {
       if (pendingTocUrls.isEmpty) {
         break;
       }
-      final nextUrlResolved = pendingTocUrls.removeAt(0);
 
-      try {
-        final nextResponse = await _request(source, nextUrlResolved);
-        final nextHtml = nextResponse.data?.toString() ?? '';
-        if (nextResponse.statusCode != 200 ||
-            nextHtml.contains("Bad Gateway") ||
-            nextHtml.contains("502 Error") ||
-            nextHtml.contains("502 Bad Gateway") ||
-            nextHtml.contains("503 Service Temporarily Unavailable") ||
-            nextHtml.contains("Nginx Error") ||
-            nextHtml.contains("Server Error") ||
-            (nextHtml.contains("Cloudflare") &&
-                nextHtml.contains("checking your browser"))) {
-          throw Exception(
-            "🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${nextResponse.statusCode})",
-          );
+      Response<dynamic>? nextResponse;
+      String? nextUrlResolved;
+      while (pendingTocUrls.isNotEmpty) {
+        final candidateUrl = pendingTocUrls.removeAt(0);
+        try {
+          final response = await _request(source, candidateUrl);
+          final nextHtml = response.data?.toString() ?? '';
+          if (response.statusCode != 200 ||
+              nextHtml.contains("Bad Gateway") ||
+              nextHtml.contains("502 Error") ||
+              nextHtml.contains("502 Bad Gateway") ||
+              nextHtml.contains("503 Service Temporarily Unavailable") ||
+              nextHtml.contains("Nginx Error") ||
+              nextHtml.contains("Server Error") ||
+              (nextHtml.contains("Cloudflare") &&
+                  nextHtml.contains("checking your browser"))) {
+            throw Exception(
+              "🚨 核心网络层提示：站点服务器高频反爬拦截或并发熔断 (Status: ${response.statusCode})",
+            );
+          }
+          nextUrlResolved = candidateUrl;
+          nextResponse = response;
+          break;
+        } catch (innerError) {
+          print('Error processing chapter list page: $innerError');
         }
-        currentUrlStr = nextUrlResolved;
-        data = nextResponse.data;
-      } catch (innerError) {
-        print('Error processing chapter list page: $innerError');
+      }
+
+      if (nextResponse == null || nextUrlResolved == null) {
         break;
       }
+      currentUrlStr = nextUrlResolved;
+      data = nextResponse.data;
     }
 
     final uniqueChapters = <String, Chapter>{};

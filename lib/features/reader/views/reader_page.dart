@@ -510,70 +510,74 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               ),
             ],
             // 主阅读区域 — 无限滑动
-            Listener(
-              behavior: HitTestBehavior.translucent,
-              onPointerDown: (event) {
-                _pointerDownTime = DateTime.now();
-                _pointerDownPosition = event.localPosition;
-                _isPointerDrag = false;
-                _hadSelectionOnPointerDown = _hasSelection;
-              },
-              onPointerMove: (event) {
-                if (_pointerDownPosition != null) {
-                  final distance =
-                      (event.localPosition - _pointerDownPosition!).distance;
-                  if (distance > 15) {
-                    _isPointerDrag = true;
-                  }
-                }
-              },
-              onPointerUp: (event) {
-                if (_pointerDownTime != null &&
-                    _pointerDownPosition != null &&
-                    !_isPointerDrag) {
-                  final duration = DateTime.now().difference(_pointerDownTime!);
-                  final distance =
-                      (event.localPosition - _pointerDownPosition!).distance;
-                  if (duration.inMilliseconds < 300 && distance < 15) {
-                    if (!_hadSelectionOnPointerDown) {
-                      _handleReaderTap(event.localPosition);
+            Positioned.fill(
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (event) {
+                  _pointerDownTime = DateTime.now();
+                  _pointerDownPosition = event.localPosition;
+                  _isPointerDrag = false;
+                  _hadSelectionOnPointerDown = _hasSelection;
+                },
+                onPointerMove: (event) {
+                  if (_pointerDownPosition != null) {
+                    final distance =
+                        (event.localPosition - _pointerDownPosition!).distance;
+                    if (distance > 15) {
+                      _isPointerDrag = true;
                     }
                   }
-                }
-              },
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onHorizontalDragEnd: (details) {
-                  if (details.primaryVelocity != null &&
-                      details.primaryVelocity! > 650) {
-                    _goBack();
+                },
+                onPointerUp: (event) {
+                  if (_pointerDownTime != null &&
+                      _pointerDownPosition != null &&
+                      !_isPointerDrag) {
+                    final duration = DateTime.now().difference(
+                      _pointerDownTime!,
+                    );
+                    final distance =
+                        (event.localPosition - _pointerDownPosition!).distance;
+                    if (duration.inMilliseconds < 300 && distance < 15) {
+                      if (!_hadSelectionOnPointerDown) {
+                        _handleReaderTap(event.localPosition);
+                      }
+                    }
                   }
                 },
-                child: MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    boldText: readerState.fontWeightIndex == -1
-                        ? MediaQuery.boldTextOf(context)
-                        : false,
-                  ),
-                  child: SelectionArea(
-                    onSelectionChanged: (content) {
-                      final hasSel =
-                          content != null && content.plainText.isNotEmpty;
-                      if (_hasSelection != hasSel) {
-                        setState(() {
-                          _hasSelection = hasSel;
-                        });
-                      }
-                    },
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: KeyedSubtree(
-                        key: ValueKey(
-                          readerState.isLoading && readerState.items.isEmpty
-                              ? 'skeleton'
-                              : 'content',
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragEnd: (details) {
+                    if (details.primaryVelocity != null &&
+                        details.primaryVelocity! > 650) {
+                      _goBack();
+                    }
+                  },
+                  child: MediaQuery(
+                    data: MediaQuery.of(context).copyWith(
+                      boldText: readerState.fontWeightIndex == -1
+                          ? MediaQuery.boldTextOf(context)
+                          : false,
+                    ),
+                    child: SelectionArea(
+                      onSelectionChanged: (content) {
+                        final hasSel =
+                            content != null && content.plainText.isNotEmpty;
+                        if (_hasSelection != hasSel) {
+                          setState(() {
+                            _hasSelection = hasSel;
+                          });
+                        }
+                      },
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: KeyedSubtree(
+                          key: ValueKey(
+                            readerState.isLoading && readerState.items.isEmpty
+                                ? 'skeleton'
+                                : 'content',
+                          ),
+                          child: _buildReadingContent(bgColor, textColor),
                         ),
-                        child: _buildReadingContent(bgColor, textColor),
                       ),
                     ),
                   ),

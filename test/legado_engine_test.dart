@@ -1731,10 +1731,7 @@ body=urlEncode(params)
         },
       );
 
-      expect(
-        value,
-        'https://api.example.com/BookFiles/Html/155711/index.html',
-      );
+      expect(value, 'https://api.example.com/BookFiles/Html/155711/index.html');
     });
 
     test(
@@ -1806,10 +1803,7 @@ body=urlEncode(params)
         "##,{'webView': true}###Catalog,{'webView': true}",
       );
 
-      expect(
-        value,
-        "Catalog,{'webView': true}",
-      );
+      expect(value, "Catalog,{'webView': true}");
     });
 
     test('keeps text for t2s and s2t javascript post processors', () {
@@ -2241,6 +2235,70 @@ body=urlEncode(params)
       ]);
     });
 
+    test(
+      'skips broken toc pages and continues pending nextTocUrl queue',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((request) async {
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/toc':
+              request.response.write('''
+              <div class="toc"><a href="/c1">Chapter 1</a></div>
+              <div class="pages">
+                <a href="/bad">bad</a>
+                <a href="/toc3">3</a>
+              </div>
+            ''');
+              break;
+            case '/bad':
+              request.response.statusCode = HttpStatus.internalServerError;
+              request.response.write('Server Error');
+              break;
+            case '/toc3':
+              request.response.write(
+                '<div class="toc"><a href="/c3">Chapter 3</a></div>',
+              );
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Paged Toc Source'
+          ..bookSourceUrl = base
+          ..ruleToc = jsonEncode({
+            'chapterList': '.toc a',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+            'nextTocUrl': '.pages a@href',
+          });
+        final book = Book(
+          title: 'Paged Toc',
+          author: '',
+          filePath: '$base/toc',
+          fileType: 'online',
+          isFromSource: true,
+        );
+
+        final chapters = await LegadoParser.getChapterList(source, book);
+
+        expect(chapters.map((chapter) => chapter.title), [
+          'Chapter 1',
+          'Chapter 3',
+        ]);
+        expect(chapters.map((chapter) => chapter.url), [
+          '$base/c1',
+          '$base/c3',
+        ]);
+      },
+    );
+
     test('loads toc from legacy json path without json prefix', () async {
       final source = BookSource()
         ..bookSourceName = 'Legacy Json Toc Source'
@@ -2570,53 +2628,58 @@ body=urlEncode(params)
       expect(content, 'Resolved Body');
     });
 
-    test('exposes chapter title to multiline content js postprocessor', () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-      server.listen((request) async {
-        request.response.headers.contentType = ContentType.json;
-        request.response.write(jsonEncode({
-          'data': {'content': 'Chapter 1 ACTUAL CONTENT'},
-        }));
-        await request.response.close();
-      });
+    test(
+      'exposes chapter title to multiline content js postprocessor',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((request) async {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': {'content': 'Chapter 1 ACTUAL CONTENT'},
+            }),
+          );
+          await request.response.close();
+        });
 
-      final base = 'http://${server.address.host}:${server.port}';
-      final source = BookSource()
-        ..bookSourceName = 'Chapter JS Context Source'
-        ..bookSourceUrl = base
-        ..ruleContent = jsonEncode({
-          'content': r'''$.data.content
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Chapter JS Context Source'
+          ..bookSourceUrl = base
+          ..ruleContent = jsonEncode({
+            'content': r'''$.data.content
 <js>
 a=String(chapter.title).replace(/\s/g,"");
 result.substring(0,90).includes(a)?result=result.split(a,2)[1]:result;
 result.toLowerCase()
 </js>''',
-        });
-      final book = Book(
-        title: 'Demo Book',
-        author: '',
-        filePath: '$base/book/1',
-        fileType: 'online',
-        isFromSource: true,
-      );
-      final chapter = Chapter(
-        bookId: 1,
-        title: 'Chapter 1',
-        index: 0,
-        url: '$base/c1',
-        content: '$base/c1',
-      );
+          });
+        final book = Book(
+          title: 'Demo Book',
+          author: '',
+          filePath: '$base/book/1',
+          fileType: 'online',
+          isFromSource: true,
+        );
+        final chapter = Chapter(
+          bookId: 1,
+          title: 'Chapter 1',
+          index: 0,
+          url: '$base/c1',
+          content: '$base/c1',
+        );
 
-      final content = await LegadoParser.getChapterContent(
-        source,
-        chapter.url!,
-        book: book,
-        chapter: chapter,
-      );
+        final content = await LegadoParser.getChapterContent(
+          source,
+          chapter.url!,
+          book: book,
+          chapter: chapter,
+        );
 
-      expect(content, 'actual content');
-    });
+        expect(content, 'actual content');
+      },
+    );
 
     test('keeps embedded request config from templated nextContentUrl', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
