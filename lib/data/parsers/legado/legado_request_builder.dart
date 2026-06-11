@@ -176,53 +176,108 @@ class LegadoRequestBuilder {
     final rawKey = keyword;
     final baseUrl = source == null ? '' : _sourceValue(source, 'key');
     final sourceKey = _sourceValue(source, 'key');
-    return _replaceScriptBlocks(
-          _replaceJavaHelpers(
-            _replaceEncodedPlaceholders(text),
-            keyword: keyword,
-            page: page,
-          ),
-          keyword: keyword,
-          page: page,
-          source: source,
-        )
-        .replaceAllMapped(RegExp(r'\{\{page([+-]\d+)\}\}'), (match) {
-          final offset = int.tryParse(match.group(1) ?? '') ?? 0;
-          return (page + offset).toString();
-        })
-        .replaceAllMapped(RegExp(r'\{page([+-]\d+)\}'), (match) {
-          final offset = int.tryParse(match.group(1) ?? '') ?? 0;
-          return (page + offset).toString();
-        })
-        .replaceAllMapped(RegExp(r'<([^<>]+)>'), (match) {
-          return _replacePageSequence(
-            match.group(0) ?? '',
-            match.group(1),
-            page,
-          );
-        })
-        .replaceAll('{{key}}', encoded)
-        .replaceAll('{{keyword}}', encoded)
-        .replaceAll('{{searchKey}}', encoded)
-        .replaceAll('{{keyRaw}}', rawKey)
-        .replaceAll('{{searchKeyRaw}}', keyword)
-        .replaceAll('{{page}}', page.toString())
-        .replaceAll('{{source.key}}', sourceKey)
-        .replaceAll('{{source.getKey()}}', sourceKey)
-        .replaceAll('{{source.getKey}}', sourceKey)
-        .replaceAll('{{source.bookSourceUrl}}', baseUrl)
-        .replaceAll('{{baseUrl}}', baseUrl)
-        .replaceAll('{key}', encoded)
-        .replaceAll('{keyword}', encoded)
-        .replaceAll('{searchKey}', encoded)
-        .replaceAll('{keyRaw}', rawKey)
-        .replaceAll('{page}', page.toString())
-        .replaceAll('{source.key}', sourceKey)
-        .replaceAll('{source.getKey()}', sourceKey)
-        .replaceAll('{source.getKey}', sourceKey)
-        .replaceAll('{source.bookSourceUrl}', baseUrl)
-        .replaceAll('{baseUrl}', baseUrl)
-        .replaceAll('%s', encoded);
+    final output =
+        _replaceScriptBlocks(
+              _replaceJavaHelpers(
+                _replaceEncodedPlaceholders(text),
+                keyword: keyword,
+                page: page,
+              ),
+              keyword: keyword,
+              page: page,
+              source: source,
+            )
+            .replaceAllMapped(RegExp(r'\{\{page([+-]\d+)\}\}'), (match) {
+              final offset = int.tryParse(match.group(1) ?? '') ?? 0;
+              return (page + offset).toString();
+            })
+            .replaceAllMapped(RegExp(r'\{page([+-]\d+)\}'), (match) {
+              final offset = int.tryParse(match.group(1) ?? '') ?? 0;
+              return (page + offset).toString();
+            })
+            .replaceAllMapped(RegExp(r'<([^<>]+)>'), (match) {
+              return _replacePageSequence(
+                match.group(0) ?? '',
+                match.group(1),
+                page,
+              );
+            })
+            .replaceAll('{{key}}', encoded)
+            .replaceAll('{{keyword}}', encoded)
+            .replaceAll('{{searchKey}}', encoded)
+            .replaceAll('{{keyRaw}}', rawKey)
+            .replaceAll('{{searchKeyRaw}}', keyword)
+            .replaceAll('{{page}}', page.toString())
+            .replaceAll('{{source.key}}', sourceKey)
+            .replaceAll('{{source.getKey()}}', sourceKey)
+            .replaceAll('{{source.getKey}}', sourceKey)
+            .replaceAll('{{source.bookSourceUrl}}', baseUrl)
+            .replaceAll('{{baseUrl}}', baseUrl)
+            .replaceAll('{key}', encoded)
+            .replaceAll('{keyword}', encoded)
+            .replaceAll('{searchKey}', encoded)
+            .replaceAll('{keyRaw}', rawKey)
+            .replaceAll('{page}', page.toString())
+            .replaceAll('{source.key}', sourceKey)
+            .replaceAll('{source.getKey()}', sourceKey)
+            .replaceAll('{source.getKey}', sourceKey)
+            .replaceAll('{source.bookSourceUrl}', baseUrl)
+            .replaceAll('{baseUrl}', baseUrl)
+            .replaceAll('%s', encoded);
+    if (text.contains('@js:') || text.contains('<js>')) {
+      return output;
+    }
+    return _replaceBareLegacySearchTokens(output, encoded, page);
+  }
+
+  static String _replaceBareLegacySearchTokens(
+    String text,
+    String encodedKeyword,
+    int page,
+  ) {
+    var output = text
+        .replaceAll('{{searchPage}}', page.toString())
+        .replaceAll('{searchPage}', page.toString());
+    output = output.replaceAllMapped(RegExp(r'searchPage([+-]\d+)'), (match) {
+      final offset = int.tryParse(match.group(1) ?? '') ?? 0;
+      return (page + offset).toString();
+    });
+    output = _replaceBareWord(output, 'searchPage', page.toString());
+    output = _replaceBareWord(output, 'searchKey', encodedKeyword);
+    return output;
+  }
+
+  static String _replaceBareWord(String text, String token, String value) {
+    final buffer = StringBuffer();
+    var index = 0;
+    while (index < text.length) {
+      final found = text.indexOf(token, index);
+      if (found < 0) {
+        buffer.write(text.substring(index));
+        break;
+      }
+      final before = found == 0 ? '' : text[found - 1];
+      final afterIndex = found + token.length;
+      final after = afterIndex >= text.length ? '' : text[afterIndex];
+      if (_isIdentifierChar(before) || _isIdentifierChar(after)) {
+        buffer.write(text.substring(index, afterIndex));
+      } else {
+        buffer.write(text.substring(index, found));
+        buffer.write(value);
+      }
+      index = afterIndex;
+    }
+    return buffer.toString();
+  }
+
+  static bool _isIdentifierChar(String char) {
+    if (char.isEmpty) return false;
+    final code = char.codeUnitAt(0);
+    return (code >= 0x30 && code <= 0x39) ||
+        (code >= 0x41 && code <= 0x5a) ||
+        (code >= 0x61 && code <= 0x7a) ||
+        code == 0x5f ||
+        code == 0x24;
   }
 
   static String _replacePageSequence(String original, String? body, int page) {

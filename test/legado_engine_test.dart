@@ -190,13 +190,37 @@ void main() {
         ..bookSourceUrl = 'https://example.com';
 
       final text = LegadoRequestBuilder.replaceVariables(
-        '/search/{{page+1}}/{page-1}?raw={{searchKeyRaw}}&key={{searchKey}}',
+        '/search/{{page+1}}/{page-1}?raw={{searchKeyRaw}}&key={{searchKey}}&old=searchKey&p=searchPage',
         keyword: 'abc def',
         page: 2,
         source: source,
       );
 
-      expect(text, '/search/3/1?raw=abc def&key=abc%20def');
+      expect(text, '/search/3/1?raw=abc def&key=abc%20def&old=abc%20def&p=2');
+    });
+
+    test('replaces legacy search tokens inside embedded json configs', () {
+      final source = BookSource()
+        ..bookSourceName = 'Test'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl =
+            'https://example.com/search,{"method":"POST","body":{"title":"searchKey","pageNum":{{searchPage}},"pageNext":"searchPage+1"}}';
+
+      final url = LegadoRequestBuilder.buildSearchUrl(
+        source,
+        'abc def',
+        page: 2,
+      );
+      final request = LegadoRequestBuilder.buildRequest(
+        source,
+        url,
+        keyword: 'abc def',
+        page: 2,
+      );
+
+      expect(request.body, contains('"title":"abc%20def"'));
+      expect(request.body, contains('"pageNum":2'));
+      expect(request.body, contains('"pageNext":"3"'));
     });
 
     test('replaces placeholders even when shared url encoded braces', () {
