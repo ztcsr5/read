@@ -79,6 +79,7 @@ void main() {
     expect(htmlResponse.body, contains('exportAllSources()'));
     expect(htmlResponse.body, contains('downloadCurrentJson()'));
     expect(htmlResponse.body, contains('loadImportFile(event)'));
+    expect(htmlResponse.body, contains('loadMoreSources()'));
 
     final updated = source.toJson()
       ..['id'] = sourceId

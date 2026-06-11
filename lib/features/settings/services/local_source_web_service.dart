@@ -810,6 +810,7 @@ String _editorHtml(String token) {
       <div class="searchbox"><input id="filter" placeholder="搜索名称、URL、分组" oninput="scheduleLoadSources()"></div>
       <p class="hint" id="listHint" style="margin:0 2px 10px"></p>
       <div id="list"></div>
+      <button id="loadMoreBtn" class="secondary" style="width:100%;display:none;margin-top:10px" onclick="loadMoreSources()">加载更多</button>
     </aside>
 
     <main class="workspace">
@@ -872,6 +873,8 @@ let sourceStats = {total: 0, enabledCount: 0, filteredTotal: 0, hasMore: false};
 let current = null;
 let tab = "base";
 let loadTimer = 0;
+let sourceOffset = 0;
+const sourcePageSize = 400;
 const tabs = [
   ["base","基础"],["search","搜索"],["detail","详情"],["toc","目录"],["content","正文"],["explore","发现"],["raw","完整 JSON"]
 ];
@@ -902,12 +905,20 @@ function scheduleLoadSources() {
   loadTimer = setTimeout(() => loadSources(), 180);
 }
 async function loadSources() {
+  return loadSourcePage(false);
+}
+async function loadMoreSources() {
+  return loadSourcePage(true);
+}
+async function loadSourcePage(append) {
   try {
     const q = document.getElementById("filter").value.trim();
-    const params = new URLSearchParams({summary:"1", limit:"400"});
+    const params = new URLSearchParams({summary:"1", limit:String(sourcePageSize), offset:String(append ? sourceOffset : 0)});
     if (q) params.set("q", q);
     const res = await api(`/api/sources?${params}`);
-    sources = res.data || [];
+    const page = res.data || [];
+    sources = append ? sources.concat(page) : page;
+    sourceOffset = (res.offset ?? (append ? sourceOffset : 0)) + page.length;
     sourceStats = {
       total: res.total ?? sources.length,
       enabledCount: res.enabledCount ?? sources.filter(s => s.enabled !== false).length,
@@ -923,8 +934,11 @@ function renderList() {
   const q = document.getElementById("filter").value.trim();
   const hint = document.getElementById("listHint");
   hint.textContent = q
-    ? `匹配 ${sourceStats.filteredTotal} 个，当前显示前 ${sources.length} 个${sourceStats.hasMore ? "，继续输入可缩小范围" : ""}`
-    : `当前显示前 ${sources.length} 个；搜索框支持服务端过滤，避免 8000+ 源一次性卡死`;
+    ? `匹配 ${sourceStats.filteredTotal} 个，当前显示 ${sources.length} 个${sourceStats.hasMore ? "，可继续加载或继续输入缩小范围" : ""}`
+    : `当前显示 ${sources.length} / ${sourceStats.total} 个；搜索框支持服务端过滤，避免 8000+ 源一次性卡死`;
+  const loadMoreBtn = document.getElementById("loadMoreBtn");
+  loadMoreBtn.style.display = sourceStats.hasMore ? "" : "none";
+  loadMoreBtn.textContent = sourceStats.hasMore ? `加载更多（已显示 ${sources.length} / ${sourceStats.filteredTotal}）` : "已全部加载";
   const root = document.getElementById("list");
   root.innerHTML = "";
   sources.forEach(s => {
