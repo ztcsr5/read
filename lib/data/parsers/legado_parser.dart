@@ -500,6 +500,9 @@ class LegadoParser {
     }
 
     final results = <Book>[];
+    final regexListRule = bookListRule == null
+        ? null
+        : _regexListRule(bookListRule);
     if ((bookListRule == null || bookListRule.isEmpty) &&
         _looksLikeJsonData(data, null)) {
       results.addAll(
@@ -510,6 +513,15 @@ class LegadoParser {
           baseUrl: response.realUri.toString(),
         ),
       );
+    } else if (regexListRule != null) {
+      final books = _parseBooksByRegexList(
+        data,
+        rule,
+        source,
+        baseUrl: response.realUri.toString(),
+        regexRule: regexListRule,
+      );
+      results.addAll(reverseList ? books.reversed : books);
     } else if (bookListRule != null &&
         _isJsonRule(bookListRule) &&
         _looksLikeJsonData(data, bookListRule)) {
@@ -662,6 +674,9 @@ class LegadoParser {
     }
 
     final results = <Book>[];
+    final regexListRule = bookListRule == null
+        ? null
+        : _regexListRule(bookListRule);
     if ((bookListRule == null || bookListRule.isEmpty) &&
         _looksLikeJsonData(data, null)) {
       results.addAll(
@@ -673,6 +688,15 @@ class LegadoParser {
           keyword: keyword,
         ),
       );
+    } else if (regexListRule != null) {
+      final books = _parseBooksByRegexList(
+        data,
+        rule,
+        source,
+        baseUrl: response.realUri.toString(),
+        regexRule: regexListRule,
+      );
+      results.addAll(reverseList ? books.reversed : books);
     } else if (bookListRule != null &&
         _isJsonRule(bookListRule) &&
         _looksLikeJsonData(data, bookListRule)) {
@@ -1998,10 +2022,12 @@ class LegadoParser {
 
   static int _parseChapterCount(String value) {
     for (final pattern in const [
+      r'chapter\s*(\d+)',
       r'\u7b2c\s*(\d+)\s*(?:\u7ae0|\u8282|\u5377|\u56de|\u96c6)?',
       r'(\d+)\s*(?:\u7ae0|\u8282|\u5377|\u56de|\u96c6)',
+      r'(\d+)\s*(?:chapter|chapters)',
     ]) {
-      final match = RegExp(pattern).firstMatch(value);
+      final match = RegExp(pattern, caseSensitive: false).firstMatch(value);
       if (match != null) return int.tryParse(match.group(1) ?? '') ?? 0;
     }
     return 0;
@@ -4151,6 +4177,89 @@ class LegadoParser {
     } catch (_) {
       return [];
     }
+  }
+
+  static List<Book> _parseBooksByRegexList(
+    dynamic data,
+    Map<String, dynamic> rule,
+    BookSource source, {
+    required String baseUrl,
+    required String regexRule,
+  }) {
+    final matches = _extractRegexGroupRows(data.toString(), regexRule);
+    if (matches.isEmpty) return const [];
+
+    final explicitNameRule =
+        _firstRule(rule, const ['name', 'title', 'bookName']);
+    final explicitUrlRule = _firstRule(rule, const [
+      'bookUrl',
+      'tocUrl',
+      'catalogUrl',
+      'url',
+      'link',
+    ]);
+    final authorRule = _firstRule(rule, const ['author', 'writer']);
+    final coverRule = _firstRule(rule, const ['coverUrl', 'cover']);
+    final kindRule = _firstRule(rule, const ['kind', 'category', 'tags']);
+    final wordCountRule = _firstRule(rule, const ['wordCount']);
+    final lastChapterRule = _firstRule(rule, const ['lastChapter']);
+
+    String value(List<String> groups, String? rawRule, String fallbackRule) {
+      final selected = (rawRule == null || rawRule.trim().isEmpty)
+          ? fallbackRule
+          : rawRule;
+      if (selected.trim().isEmpty) return '';
+      return _cleanRuleOutput(
+        _valueFromRegexGroups(groups, _sourceScopedRule(selected, source)),
+      );
+    }
+
+    final books = <Book>[];
+    final seen = <String>{};
+    for (final groups in matches) {
+      final name = value(groups, explicitNameRule, r'$1').trim();
+      final urlFallback = groups.length > 2 ? r'$2' : '';
+      final bookUrl = value(groups, explicitUrlRule, urlFallback).trim();
+      if (name.isEmpty && bookUrl.isEmpty) continue;
+
+      final author = value(groups, authorRule, '').trim();
+      final coverUrl = value(groups, coverRule, '').trim();
+      final kind = value(groups, kindRule, '').trim();
+      final wordCount = _parseWordCount(value(groups, wordCountRule, ''));
+      final totalChapters =
+          _parseChapterCount(value(groups, lastChapterRule, ''));
+      final resolvedBookUrl = bookUrl.isEmpty
+          ? baseUrl
+          : _resolveBookUrl(baseUrl, bookUrl);
+      final dedupeKey = '$name|$resolvedBookUrl';
+      if (!seen.add(dedupeKey)) continue;
+
+      books.add(
+        Book(
+          title: name.isEmpty ? 'Unknown' : name,
+          author: author,
+          filePath: resolvedBookUrl,
+          fileType: 'online',
+          coverPath: coverUrl.isEmpty ? null : _resolveUrl(baseUrl, coverUrl),
+          tags: _splitBookTags(kind),
+          isFromSource: true,
+          sourceUrl: source.id.toString(),
+          totalChapters: totalChapters,
+          fileSize: wordCount,
+        ),
+      );
+    }
+    return books;
+  }
+
+  static List<String> _splitBookTags(String value) {
+    if (value.trim().isEmpty) return const [];
+    final seen = <String>{};
+    return value
+        .split(RegExp(r'[,，/|;；\s]+'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty && seen.add(item))
+        .toList();
   }
 
   static List<Chapter> _parseChaptersByRegexList(

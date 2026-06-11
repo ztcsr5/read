@@ -1701,6 +1701,80 @@ body=urlEncode(params)
       expect(books.first.filePath, '$base/book/1');
     });
 
+    test('parses regex search lists with capture group field rules', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Regex Search Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl = 'https://example.com/search?key={{key}}'
+        ..ruleSearch = jsonEncode({
+          'bookList':
+              r':(?s)<li class="result">.*?<a href="([^"]+)">([^<]+)</a>.*?<span class="a">([^<]+)</span>.*?<img src="([^"]+)">.*?<span class="k">([^<]+)</span>.*?<span class="last">([^<]+)</span>',
+          'name': r'$2',
+          'bookUrl': r'$1',
+          'author': r'$3',
+          'coverUrl': r'$4',
+          'kind': r'$5',
+          'lastChapter': r'$6',
+        });
+      final response = Response<dynamic>(
+        data: '''
+          <li class="result">
+            <a href="/book/1">Alpha</a>
+            <span class="a">Tom</span>
+            <img src="/cover/1.jpg">
+            <span class="k">fantasy,done</span>
+            <span class="last">Chapter 23</span>
+          </li>
+        ''',
+        requestOptions: RequestOptions(path: 'https://example.com/search'),
+        statusCode: 200,
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        'alpha',
+        preFetchedResponse: response,
+      );
+
+      expect(books, hasLength(1));
+      expect(books.first.title, 'Alpha');
+      expect(books.first.author, 'Tom');
+      expect(books.first.filePath, 'https://example.com/book/1');
+      expect(books.first.coverPath, 'https://example.com/cover/1.jpg');
+      expect(books.first.tags, ['fantasy', 'done']);
+      expect(books.first.totalChapters, 23);
+    });
+
+    test('reverses regex search lists with minus prefix', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Reverse Regex Search Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl = 'https://example.com/search?key={{key}}'
+        ..ruleSearch = jsonEncode({
+          'bookList': r'-:<div data-url="([^"]+)">([^<]+)</div>',
+          'name': r'$2',
+          'bookUrl': r'$1',
+        });
+      final response = Response<dynamic>(
+        data:
+            '<div data-url="/book/1">First</div><div data-url="/book/2">Second</div>',
+        requestOptions: RequestOptions(path: 'https://example.com/search'),
+        statusCode: 200,
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        'alpha',
+        preFetchedResponse: response,
+      );
+
+      expect(books.map((book) => book.title), ['Second', 'First']);
+      expect(books.map((book) => book.filePath), [
+        'https://example.com/book/2',
+        'https://example.com/book/1',
+      ]);
+    });
+
     test('keeps toc rows with same fallback url but different titles', () async {
       final source = BookSource()
         ..bookSourceName = 'No Chapter Url Source'
