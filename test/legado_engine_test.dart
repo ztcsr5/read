@@ -2572,6 +2572,59 @@ body=urlEncode(params)
       },
     );
 
+    test(
+      'skips broken content pages and continues pending nextContentUrl queue',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final requestedPaths = <String>[];
+        server.listen((request) async {
+          requestedPaths.add(request.uri.path);
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/c1':
+              request.response.write('''
+              <div id="content"><p>Part 1</p></div>
+              <div class="pages">
+                <a href="/broken">2</a>
+                <a href="/c1p3">3</a>
+              </div>
+            ''');
+              break;
+            case '/broken':
+              request.response.statusCode = HttpStatus.internalServerError;
+              request.response.write('Server Error');
+              break;
+            case '/c1p3':
+              request.response.write('<div id="content"><p>Part 3</p></div>');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Broken Paged Content Source'
+          ..bookSourceUrl = base
+          ..ruleContent = jsonEncode({
+            'content': '#content@html',
+            'nextContentUrl': '.pages a@href',
+          });
+
+        final content = await LegadoParser.getChapterContent(
+          source,
+          '$base/c1',
+        );
+
+        expect(content, contains('Part 1'));
+        expect(content, contains('Part 3'));
+        expect(requestedPaths, ['/c1', '/broken', '/c1p3']);
+      },
+    );
+
     test('uses book and chapter context variables for content rules', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -2626,6 +2679,130 @@ body=urlEncode(params)
       expect(content, isNot(contains('Demo Book')));
       expect(requested, ['/c1', '/c1?page=2']);
     });
+
+    test(
+      'testSource passes book and chapter context into content rules',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((request) async {
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/search':
+              request.response.write('''
+              <div class="book">
+                <a href="/book"><span class="title">Demo Book</span></a>
+              </div>
+            ''');
+              break;
+            case '/book':
+              request.response.write('''
+              <div class="toc">
+                <a class="chapter" href="/chapter">ChapterOne</a>
+              </div>
+            ''');
+              break;
+            case '/chapter':
+              request.response.write('<div id="ChapterOne">Context Body</div>');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Context Test Source'
+          ..bookSourceUrl = base
+          ..searchUrl = '/search?q={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.book',
+            'name': '.title@text',
+            'bookUrl': 'a@href',
+          })
+          ..ruleToc = jsonEncode({
+            'chapterList': '.chapter',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          })
+          ..ruleContent = jsonEncode({'content': '#{{chapter.title}}@text'});
+
+        final report = await LegadoParser.testSource(source, 'demo');
+        final contentStep = report.steps.lastWhere(
+          (step) => step.title == '正文',
+        );
+
+        expect(contentStep.status, LegadoStepStatus.ok);
+        expect(contentStep.sample, contains('Context Body'));
+      },
+    );
+
+    test(
+      'testSource uses a keyword-matching result instead of first noise item',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final requestedPaths = <String>[];
+        server.listen((request) async {
+          requestedPaths.add(request.uri.path);
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/search':
+              request.response.write('''
+              <div class="book"><a href="/broken-book"><span class="title">广告入口</span></a></div>
+              <div class="book"><a href="/book"><span class="title">斗破苍穹</span></a></div>
+            ''');
+              break;
+            case '/broken-book':
+              request.response.write('<div class="empty">no chapters</div>');
+              break;
+            case '/book':
+              request.response.write('''
+              <div class="toc">
+                <a class="chapter" href="/chapter">第一章</a>
+              </div>
+            ''');
+              break;
+            case '/chapter':
+              request.response.write('<div id="content">正文内容</div>');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Keyword Candidate Source'
+          ..bookSourceUrl = base
+          ..searchUrl = '/search?q={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.book',
+            'name': '.title@text',
+            'bookUrl': 'a@href',
+          })
+          ..ruleToc = jsonEncode({
+            'chapterList': '.chapter',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          })
+          ..ruleContent = jsonEncode({'content': '#content@text'});
+
+        final report = await LegadoParser.testSource(source, '斗破苍穹');
+
+        expect(report.hasFailure, isFalse);
+        expect(requestedPaths, contains('/book'));
+        expect(requestedPaths, isNot(contains('/broken-book')));
+        final searchStep = report.steps.firstWhere(
+          (step) => step.title == '搜索结果',
+        );
+        expect(searchStep.sample, contains('斗破苍穹'));
+      },
+    );
 
     test('follows content url templates with chapter context', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

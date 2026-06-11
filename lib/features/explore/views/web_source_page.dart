@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../data/models/book_source.dart';
 import '../../../data/repositories/book_repository.dart';
@@ -82,6 +83,17 @@ class _WebSourcePageState extends ConsumerState<WebSourcePage> {
             _field(_tocRuleController, '目录链接规则', '.chapter-list a'),
             _field(_contentRuleController, '正文内容规则', '#content'),
             const SizedBox(height: 20),
+            CupertinoButton(
+              color: CupertinoColors.systemGrey5,
+              onPressed: () {
+                context.push('/source_json_editor', extra: _draftSource());
+              },
+              child: const Text(
+                '转完整 JSON 编辑',
+                style: TextStyle(color: CupertinoColors.activeBlue),
+              ),
+            ),
+            const SizedBox(height: 12),
             Text(
               '提示：当前写源会生成标准 Legado 风格字段，先用于项目内的搜索、目录、正文解析。复杂登录、加密、JS 渲染源后续再加高级规则。',
               style: TextStyle(
@@ -127,32 +139,52 @@ class _WebSourcePageState extends ConsumerState<WebSourcePage> {
       return;
     }
 
-    final source = BookSource()
-      ..bookSourceName = name
-      ..bookSourceUrl = baseUrl
-      ..bookSourceGroup = 'Web写源'
-      ..searchUrl = searchUrl
-      ..enabled = true
-      ..ruleSearch = jsonEncode({
-        'list': _bookListController.text.trim(),
-        'name': _nameRuleController.text.trim(),
-        'author': _authorRuleController.text.trim(),
-        'coverUrl': _coverRuleController.text.trim(),
-        'bookUrl': _bookUrlRuleController.text.trim(),
-      })
-      ..ruleToc = jsonEncode({
-        'list': _tocRuleController.text.trim(),
-        'chapterName': 'this@text',
-        'chapterUrl': 'this@href',
-      })
-      ..ruleContent = jsonEncode({
-        'content': _contentRuleController.text.trim(),
-      });
+    final source = _draftSource();
 
     await ref.read(bookRepositoryProvider).saveBookSource(source);
     if (!mounted) return;
     await _alert('已保存 Web 书源');
     if (mounted) Navigator.pop(context);
+  }
+
+  BookSource _draftSource() {
+    final name = _nameController.text.trim();
+    final baseUrl = _baseUrlController.text.trim();
+    final searchUrl = _searchUrlController.text.trim();
+    return BookSource()
+      ..bookSourceName = name.isEmpty ? '新建 Web 小说源' : name
+      ..bookSourceUrl = baseUrl.isEmpty ? 'https://example.com' : baseUrl
+      ..bookSourceType = 0
+      ..bookSourceGroup = 'Web写源'
+      ..searchUrl = searchUrl.isEmpty
+          ? '/search?keyword={{key}}&page={{page}}'
+          : searchUrl
+      ..enabled = true
+      ..ruleSearch = jsonEncode({
+        'bookList': _bookListController.text.trim(),
+        'name': _nameRuleController.text.trim(),
+        'author': _authorRuleController.text.trim(),
+        'coverUrl': _coverRuleController.text.trim(),
+        'bookUrl': _bookUrlRuleController.text.trim(),
+      })
+      ..ruleBookInfo = jsonEncode({
+        'name': 'h1@text',
+        'author': '.author@text',
+        'coverUrl': '.cover img@src',
+        'intro': '.intro@text',
+        'tocUrl': '.catalog a@href',
+      })
+      ..ruleToc = jsonEncode({
+        'chapterList': _tocRuleController.text.trim(),
+        'chapterName': '@text',
+        'chapterUrl': '@href',
+        'nextTocUrl': '',
+      })
+      ..ruleContent = jsonEncode({
+        'content': _contentRuleController.text.trim(),
+        'nextContentUrl': '',
+        'replaceRegex': '',
+      });
   }
 
   Future<void> _alert(String message) {

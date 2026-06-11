@@ -30,6 +30,7 @@ class ExploreState {
   final BookSource? verificationSource;
   final String verificationUrl;
   final String lastQuery;
+  final String resultFilter;
 
   ExploreState({
     this.isSearching = false,
@@ -41,6 +42,7 @@ class ExploreState {
     this.verificationSource,
     this.verificationUrl = '',
     this.lastQuery = '',
+    this.resultFilter = '',
   });
 
   ExploreState copyWith({
@@ -53,6 +55,7 @@ class ExploreState {
     BookSource? verificationSource,
     String? verificationUrl,
     String? lastQuery,
+    String? resultFilter,
     bool clearVerificationSource = false,
   }) {
     return ExploreState(
@@ -69,6 +72,7 @@ class ExploreState {
           ? ''
           : verificationUrl ?? this.verificationUrl,
       lastQuery: lastQuery ?? this.lastQuery,
+      resultFilter: resultFilter ?? this.resultFilter,
     );
   }
 }
@@ -104,6 +108,13 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
 
   void setSearchMatchMode(SearchMatchMode mode) {
     state = state.copyWith(searchMatchMode: mode);
+    if (state.lastQuery.isNotEmpty && !state.isSearching) {
+      unawaited(search(state.lastQuery));
+    }
+  }
+
+  void setResultFilter(String value) {
+    state = state.copyWith(resultFilter: value.trim());
   }
 
   Future<void> loadRssSources() async {
@@ -165,9 +176,17 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
               final filtered = books
                   .where((book) => _matchesSearchMode(book, query, mode))
                   .map((book) {
+                    final tags = <String>{...book.tags};
+                    if (source.bookSourceName.trim().isNotEmpty) {
+                      tags.add('source:${source.bookSourceName.trim()}');
+                    }
+                    if (source.bookSourceGroup?.trim().isNotEmpty == true) {
+                      tags.add('group:${source.bookSourceGroup!.trim()}');
+                    }
                     book
                       ..isFromSource = true
-                      ..sourceUrl = source.id.toString();
+                      ..sourceUrl = source.id.toString()
+                      ..tags = tags.toList();
                     return book;
                   })
                   .toList();
@@ -343,12 +362,30 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
   }
 
   bool _matchesSearchMode(Book book, String query, SearchMatchMode mode) {
-    if (mode == SearchMatchMode.fuzzy) return true;
     final q = _normalizeText(query);
     if (q.isEmpty) return true;
     final title = _normalizeText(book.title);
     final author = _normalizeText(book.author);
-    return title == q || title.startsWith(q) || author == q;
+    if (mode == SearchMatchMode.precise) {
+      return title == q || title.startsWith(q) || author == q;
+    }
+    return title.contains(q) ||
+        author.contains(q) ||
+        (title.length >= 2 && q.contains(title));
+  }
+
+  List<Book> filterVisibleResults(List<Book> books, String filter) {
+    final q = _normalizeText(filter);
+    if (q.isEmpty) return books;
+    return books.where((book) {
+      final values = [
+        book.title,
+        book.author,
+        book.filePath,
+        ...book.tags,
+      ].map(_normalizeText);
+      return values.any((value) => value.contains(q));
+    }).toList();
   }
 
   String _normalizeText(String value) {

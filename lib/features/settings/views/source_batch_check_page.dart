@@ -1,13 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show LinearProgressIndicator, Divider, Colors;
+import 'package:flutter/material.dart' show LinearProgressIndicator, Divider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
-import '../../../widgets/ios_navigation_bar.dart';
 import '../viewmodels/book_source_viewmodel.dart';
 
 class SourceCheckResult {
@@ -37,6 +36,8 @@ class SourceBatchCheckPage extends ConsumerStatefulWidget {
 }
 
 class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
+  static const _batchKeyword = '斗破苍穹';
+
   int _currentIndex = 0;
   int _successCount = 0;
   int _failCount = 0;
@@ -60,7 +61,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   }
 
   void _startChecking() async {
-    const maxConcurrent = 5;
+    const maxConcurrent = 2;
     final workers = <Future<void>>[];
 
     for (var i = 0; i < maxConcurrent; i++) {
@@ -90,8 +91,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       try {
         // 统一测源：复用单源测试的 testSource，确保「一键测源」与单源测试判定标准一致，
         // 并继承其虚假成功(假绿)拦截逻辑，降低测源误差。
-        final report = await LegadoParser.testSource(source, '天')
-            .timeout(const Duration(seconds: 45));
+        final report = await LegadoParser.testSource(
+          source,
+          _batchKeyword,
+        ).timeout(const Duration(seconds: 45));
         success = !report.hasFailure;
         if (success) {
           // 从「搜索结果」步骤提取书籍数量用于展示
@@ -134,7 +137,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             _failCount++;
           }
         });
-        
+
         // 自动滚动到最底部
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -201,11 +204,11 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       backgroundColor: bgColor,
       navigationBar: CupertinoNavigationBar(
         middle: const Text('一键测源'),
-        backgroundColor: CupertinoTheme.of(context).barBackgroundColor.withOpacity(0.9),
+        backgroundColor: CupertinoTheme.of(
+          context,
+        ).barBackgroundColor.withOpacity(0.9),
         border: null,
-        trailing: _isChecking
-            ? const CupertinoActivityIndicator()
-            : null,
+        trailing: _isChecking ? const CupertinoActivityIndicator() : null,
       ),
       child: SafeArea(
         child: Column(
@@ -270,6 +273,11 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             ],
           ),
           const SizedBox(height: 16),
+          const Text(
+            '检测关键词：斗破苍穹；并发：2。降低并发可减少站点频控导致的假红。',
+            style: TextStyle(fontSize: 13, color: CupertinoColors.systemGrey),
+          ),
+          const SizedBox(height: 12),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
@@ -364,9 +372,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 Text(
                   result.isSuccess
                       ? "成功搜索到 ${result.booksCount} 本书"
-                      : result.errorMessage != null && result.errorMessage!.length > 50
-                          ? "${result.errorMessage!.substring(0, 50)}..."
-                          : "${result.errorMessage}",
+                      : result.errorMessage != null &&
+                            result.errorMessage!.length > 50
+                      ? "${result.errorMessage!.substring(0, 50)}..."
+                      : "${result.errorMessage}",
                   style: TextStyle(
                     fontSize: 13,
                     color: result.isSuccess

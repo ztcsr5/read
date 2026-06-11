@@ -17,6 +17,27 @@ class BookshelfPage extends ConsumerStatefulWidget {
 
 class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   bool _handledInitialPendingImport = false;
+  late final WidgetsBindingObserver _lifecycleObserver =
+      _BookshelfLifecycleObserver(() {
+        if (!mounted) return;
+        ref.read(bookshelfViewModelProvider.notifier).loadBooks();
+      });
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(_lifecycleObserver);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(bookshelfViewModelProvider.notifier).loadBooks();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,9 +119,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                   },
                 ),
                 GestureDetector(
-                  onTap: () {
-                    // TODO: 打开个人中心
-                  },
+                  onTap: () => _showProfileActions(context),
                   child: Container(
                     margin: const EdgeInsets.only(right: 4, left: 16),
                     width: 32,
@@ -436,7 +455,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    book.author ?? '未知作者',
+                                    book.author.isEmpty ? '未知作者' : book.author,
                                     style: TextStyle(
                                       fontSize: 14,
                                       color: CupertinoColors.white.withOpacity(
@@ -587,7 +606,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  book.author ?? '未知作者',
+                  book.author.isEmpty ? '未知作者' : book.author,
                   style: TextStyle(
                     fontSize: 14,
                     color: isDark
@@ -614,5 +633,62 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         ],
       ).animate().fadeIn(delay: (index * 50).ms, duration: 400.ms),
     );
+  }
+
+  void _showProfileActions(BuildContext context) {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: const Text('快捷入口'),
+        message: const Text('常用管理功能'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(popupContext);
+              context.push('/reading_history');
+            },
+            child: const Text('阅读历史'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(popupContext);
+              context.push('/sources');
+            },
+            child: const Text('书源管理'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(popupContext);
+              context.push('/settings');
+            },
+            child: const Text('设置'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(popupContext);
+              context.push('/about');
+            },
+            child: const Text('关于'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(popupContext),
+          child: const Text('取消'),
+        ),
+      ),
+    );
+  }
+}
+
+class _BookshelfLifecycleObserver extends WidgetsBindingObserver {
+  final VoidCallback onResume;
+
+  _BookshelfLifecycleObserver(this.onResume);
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      onResume();
+    }
   }
 }

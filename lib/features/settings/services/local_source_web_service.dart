@@ -11,11 +11,16 @@ import 'package:isar/isar.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
+import '../viewmodels/book_source_viewmodel.dart';
 
 final localSourceWebServiceProvider =
     StateNotifierProvider<LocalSourceWebService, LocalSourceWebState>((ref) {
       final repo = ref.watch(bookRepositoryProvider);
-      final service = LocalSourceWebService(repo);
+      final service = LocalSourceWebService(
+        repo,
+        onSourcesChanged: () =>
+            ref.read(bookSourceViewModelProvider.notifier).loadSources(),
+      );
       ref.onDispose(service.stop);
       return service;
     });
@@ -78,10 +83,14 @@ class LocalSourceWebState {
 
 class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
   final BookRepository _repository;
+  final FutureOr<void> Function()? _onSourcesChanged;
   HttpServer? _server;
 
-  LocalSourceWebService(this._repository)
-    : super(LocalSourceWebState.initial());
+  LocalSourceWebService(
+    this._repository, {
+    FutureOr<void> Function()? onSourcesChanged,
+  }) : _onSourcesChanged = onSourcesChanged,
+       super(LocalSourceWebState.initial());
 
   Future<void> start() async {
     if (_server != null) return;
@@ -265,6 +274,7 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       final body = await _readJsonBody(request);
       final source = _sourceFromBody(body);
       final id = await _repository.saveBookSource(source);
+      _notifySourcesChanged();
       await _json(request, {'ok': true, 'id': id});
       return;
     }
@@ -277,6 +287,7 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         'count': imported.savedCount,
         'parsedCount': imported.parsedCount,
       });
+      _notifySourcesChanged();
       return;
     }
 
@@ -296,11 +307,13 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         final body = await _readJsonBody(request);
         final source = _sourceFromBody(body)..id = id;
         await _repository.saveBookSource(source);
+        _notifySourcesChanged();
         await _json(request, {'ok': true, 'id': id});
         return;
       }
       if (request.method == 'DELETE') {
         await _repository.deleteBookSource(id);
+        _notifySourcesChanged();
         await _json(request, {'ok': true});
         return;
       }
@@ -336,6 +349,12 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
 
   Future<BookSource?> _sourceById(int id) async {
     return _repository.getBookSourceById(id);
+  }
+
+  void _notifySourcesChanged() {
+    final callback = _onSourcesChanged;
+    if (callback == null) return;
+    unawaited(Future<void>.sync(callback));
   }
 
   Map<String, dynamic> _sourceJsonWithId(BookSource source) {

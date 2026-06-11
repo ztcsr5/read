@@ -230,8 +230,14 @@ class LegadoParser {
         return LegadoTestReport(steps: steps);
       }
 
-      var firstBook = books.first;
-      searchResultLogs.add('解析出首本书籍信息:');
+      final pickedBookIndex = _pickTestBookIndex(books, keyword);
+      var firstBook = books[pickedBookIndex];
+      if (pickedBookIndex > 0) {
+        searchResultLogs.add(
+          '首本与关键词不匹配，改用第 ${pickedBookIndex + 1} 本作为后续详情/目录/正文测试目标。',
+        );
+      }
+      searchResultLogs.add('解析出测试目标书籍信息:');
       searchResultLogs.add('  书名 (title): ${firstBook.title}');
       searchResultLogs.add('  作者 (author): ${firstBook.author}');
       searchResultLogs.add('  链接 (filePath): ${firstBook.filePath}');
@@ -380,7 +386,12 @@ class LegadoParser {
       }
 
       contentLogs.add('正文规则 ruleContent: ${source.ruleContent}');
-      final content = await getChapterContent(source, chapterUrl);
+      final content = await getChapterContent(
+        source,
+        chapterUrl,
+        book: firstBook,
+        chapter: firstChapter,
+      );
 
       if (content.isEmpty || content.startsWith('解析失败')) {
         contentLogs.add('错误：正文解析失败或为空！返回值: $content');
@@ -1558,9 +1569,10 @@ class LegadoParser {
 
           currentUrl = pendingContentUrls.removeAt(0);
         } catch (innerError) {
-          // 容错机制：如果某一个分页面由于网络等原因报错，捕获异常并跳出，保证之前解析成功的部分依然可以返回
+          // 某个正文分页失败时跳过该分页，继续解析已发现的其他分页，避免正文只剩前一小段。
           print('Error processing chapter content page: $innerError');
-          break;
+          if (pendingContentUrls.isEmpty) break;
+          currentUrl = pendingContentUrls.removeAt(0);
         }
       }
 
@@ -4461,6 +4473,25 @@ class LegadoParser {
   static String _sample(dynamic data) {
     final text = data.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
     return text.length > 220 ? '${text.substring(0, 220)}...' : text;
+  }
+
+  static int _pickTestBookIndex(List<Book> books, String keyword) {
+    if (books.isEmpty) return 0;
+    final q = _normalizeSearchComparable(keyword);
+    if (q.isEmpty) return 0;
+    for (var i = 0; i < books.length; i++) {
+      final title = _normalizeSearchComparable(books[i].title);
+      if (title.isEmpty) continue;
+      if (title == q || title.contains(q) || q.contains(title)) return i;
+    }
+    return 0;
+  }
+
+  static String _normalizeSearchComparable(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s\p{P}\p{S}]+', unicode: true), '')
+        .trim();
   }
 
   static Chapter? _firstSuspiciousChapter(

@@ -825,6 +825,17 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                             },
                           ),
                           const SizedBox(height: 8),
+                          CupertinoButton(
+                            child: const Text('新建 JSON 书源'),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              rootContext.push(
+                                '/source_json_editor',
+                                extra: _blankBookSource(),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 8),
                           CupertinoButton.filled(
                             child: const Text('自动识别并导入'),
                             onPressed: () {
@@ -843,6 +854,48 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
         );
       },
     );
+  }
+
+  BookSource _blankBookSource() {
+    return BookSource()
+      ..bookSourceName = '新建小说源'
+      ..bookSourceUrl = 'https://example.com'
+      ..bookSourceType = 0
+      ..bookSourceGroup = '自写源'
+      ..enabled = true
+      ..weight = 0
+      ..searchUrl = '/search?keyword={{key}}&page={{page}}'
+      ..ruleSearch = '''
+{
+  "bookList": ".book-item",
+  "name": ".book-title@text",
+  "author": ".author@text",
+  "bookUrl": "a@href",
+  "coverUrl": "img@src",
+  "intro": ".intro@text",
+  "lastChapter": ".latest@text"
+}'''
+      ..ruleBookInfo = '''
+{
+  "name": "h1@text",
+  "author": ".author@text",
+  "coverUrl": ".cover img@src",
+  "intro": ".intro@text",
+  "tocUrl": ".catalog a@href"
+}'''
+      ..ruleToc = '''
+{
+  "chapterList": ".chapter-list a",
+  "chapterName": "@text",
+  "chapterUrl": "@href",
+  "nextTocUrl": ""
+}'''
+      ..ruleContent = '''
+{
+  "content": "#content@html",
+  "nextContentUrl": "",
+  "replaceRegex": ""
+}''';
   }
 
   Future<void> _generateBookSourceFromUrl(String url, WidgetRef ref) async {

@@ -19,7 +19,13 @@ void main() {
       ..ruleSearch = jsonEncode({'bookList': '.item', 'name': 'a@text'});
     final sourceId = await repo.saveBookSource(source);
 
-    final service = LocalSourceWebService(repo);
+    var changedCount = 0;
+    final service = LocalSourceWebService(
+      repo,
+      onSourcesChanged: () {
+        changedCount++;
+      },
+    );
     await service.start();
     addTearDown(() => service.stop());
 
@@ -105,6 +111,8 @@ void main() {
       body: jsonEncode(updated),
     );
     expect(saveResponse.statusCode, 200);
+    await Future<void>.delayed(Duration.zero);
+    expect(changedCount, 1);
 
     final saved = (await repo.getAllBookSources()).single;
     expect(saved.bookSourceName, 'Edited Source');
@@ -122,6 +130,8 @@ void main() {
       ]),
     );
     expect(importResponse.statusCode, 200);
+    await Future<void>.delayed(Duration.zero);
+    expect(changedCount, 2);
     final importJson = jsonDecode(importResponse.body) as Map<String, dynamic>;
     expect(importJson['count'], 1);
     expect(importJson['parsedCount'], 1);

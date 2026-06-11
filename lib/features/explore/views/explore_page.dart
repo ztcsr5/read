@@ -51,6 +51,10 @@ class ExplorePage extends ConsumerWidget {
     ExploreState state,
     ExploreViewModel viewModel,
   ) {
+    final visibleResults = viewModel.filterVisibleResults(
+      state.searchResults,
+      state.resultFilter,
+    );
     return [
       SliverToBoxAdapter(
         child: Padding(
@@ -58,7 +62,7 @@ class ExplorePage extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-                            CupertinoSearchTextField(
+              CupertinoSearchTextField(
                 placeholder: '搜索书名或作者',
                 onSubmitted: viewModel.search,
               ),
@@ -71,15 +75,27 @@ class ExplorePage extends ConsumerWidget {
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(CupertinoIcons.globe, size: 20, color: CupertinoColors.activeBlue),
+                      Icon(
+                        CupertinoIcons.globe,
+                        size: 20,
+                        color: CupertinoColors.activeBlue,
+                      ),
                       SizedBox(width: 8),
-                      Text('智能网页小说模式', style: TextStyle(color: CupertinoColors.activeBlue, fontWeight: FontWeight.w600)),
+                      Text(
+                        '智能网页小说模式',
+                        style: TextStyle(
+                          color: CupertinoColors.activeBlue,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   ),
                   onPressed: () {
-                    Navigator.of(context).push(CupertinoPageRoute(
-                      builder: (context) => const WebBrowserPage(),
-                    ));
+                    Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (context) => const WebBrowserPage(),
+                      ),
+                    );
                   },
                 ),
               ),
@@ -110,6 +126,21 @@ class ExplorePage extends ConsumerWidget {
                 '搜索结果',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
+              if (state.searchResults.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                CupertinoSearchTextField(
+                  placeholder: '筛选结果：书名、作者、来源、地址',
+                  onChanged: viewModel.setResultFilter,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '显示 ${visibleResults.length} / ${state.searchResults.length} 条',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CupertinoColors.systemGrey,
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
             ],
           ),
@@ -184,12 +215,19 @@ class ExplorePage extends ConsumerWidget {
             child: Center(child: Text('没有搜索结果，请导入书源后尝试搜索')),
           ),
         )
+      else if (visibleResults.isEmpty)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(40),
+            child: Center(child: Text('没有符合当前筛选的结果')),
+          ),
+        )
       else
         SliverList(
           delegate: SliverChildBuilderDelegate((context, index) {
-            final book = state.searchResults[index];
+            final book = visibleResults[index];
             return _buildSearchResultItem(context, book, ref);
-          }, childCount: state.searchResults.length),
+          }, childCount: visibleResults.length),
         ),
     ];
   }
@@ -458,6 +496,18 @@ class ExplorePage extends ConsumerWidget {
                       ),
                     ),
                   ),
+                  if (_sourceLabel(book).isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _sourceLabel(book),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: CupertinoColors.activeBlue,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
                     book.filePath.isEmpty ? '暂无简介' : book.filePath,
@@ -504,5 +554,23 @@ class ExplorePage extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _sourceLabel(Book book) {
+    String? source;
+    String? group;
+    for (final tag in book.tags) {
+      if (source == null && tag.startsWith('source:')) {
+        final value = tag.substring('source:'.length).trim();
+        if (value.isNotEmpty) source = value;
+      } else if (group == null && tag.startsWith('group:')) {
+        final value = tag.substring('group:'.length).trim();
+        if (value.isNotEmpty) group = value;
+      }
+    }
+    if (source == null && group == null) return '';
+    if (source == null) return group!;
+    if (group == null) return source;
+    return '$source · $group';
   }
 }
