@@ -1171,8 +1171,8 @@ class LegadoRuleEvaluator {
     return _normalizeCssSelector(
       sanitizeCssSelector(
         rule
-            .replaceAll('@css:', '')
-            .replaceAll('@get:', '')
+            .replaceFirst(RegExp(r'^@css:', caseSensitive: false), '')
+            .replaceFirst(RegExp(r'^@get:', caseSensitive: false), '')
             .replaceAll(RegExp(r'@[a-zA-Z0-9_\-:]+$'), '')
             .trim(),
       ),
@@ -1181,15 +1181,19 @@ class LegadoRuleEvaluator {
 
   static bool isXPathRule(String rule) {
     final value = rule.trim();
-    return value.startsWith('@xpath:') ||
-        value.startsWith('xpath:') ||
+    final lowerValue = value.toLowerCase();
+    return lowerValue.startsWith('@xpath:') ||
+        lowerValue.startsWith('xpath:') ||
         value.startsWith('//') ||
         value.startsWith('./') ||
         value.startsWith('/');
   }
 
   static String xpathRule(String rule) {
-    return rule.replaceFirst('@xpath:', '').replaceFirst('xpath:', '').trim();
+    return rule
+        .replaceFirst(RegExp(r'^@xpath:', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'^xpath:', caseSensitive: false), '')
+        .trim();
   }
 
   static List<String> _extractXPathValueList(Element node, String rule) {
@@ -1848,7 +1852,10 @@ class LegadoRuleEvaluator {
   static _HtmlRule _parseHtmlRule(String rule, {bool attrAllowed = true}) {
     var cleaned = stripPostProcessors(
       rule,
-    ).replaceAll('@css:', '').replaceAll('@get:', '').trim();
+    )
+        .replaceFirst(RegExp(r'^@css:', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'^@get:', caseSensitive: false), '')
+        .trim();
     cleaned = sanitizeCssSelector(cleaned);
     if (cleaned.isEmpty || cleaned == 'this') {
       return const _HtmlRule([], 'text');

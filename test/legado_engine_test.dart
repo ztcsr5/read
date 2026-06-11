@@ -947,6 +947,31 @@ void main() {
       );
     });
 
+    test('normalizes uppercase css and xpath rule prefixes', () {
+      final document = parse('''
+        <div class="book"><a href="/book/1">Book One</a></div>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.queryAll(document, '@CSS:.book').length,
+        1,
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '@CSS:.book a@href',
+        ),
+        '/book/1',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '@XPath://div[@class="book"]/a/text()',
+        ),
+        'Book One',
+      );
+    });
+
     test('extracts chained html selectors and indexed selectors', () {
       final document = parse('''
         <div id="chaptercontent">
