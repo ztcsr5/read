@@ -531,7 +531,7 @@ class LegadoRuleEvaluator {
 
   static String stripPostProcessors(String rule) {
     var text = rule.trim();
-    final closeJs = text.lastIndexOf('</js>');
+    final closeJs = text.toLowerCase().lastIndexOf('</js>');
     if (closeJs >= 0) {
       final suffix = text.substring(closeJs + '</js>'.length).trim();
       if (suffix.isNotEmpty) text = suffix;
@@ -541,11 +541,7 @@ class LegadoRuleEvaluator {
     return text
         .split('\n')
         .first
-        .split('@js:')
-        .first
-        .split('@put:')
-        .first
-        .split('@get:')
+        .split(RegExp(r'@js:|@put:|@get:', caseSensitive: false))
         .first
         .split('##')
         .first
@@ -635,9 +631,30 @@ class LegadoRuleEvaluator {
     );
   }
 
+  static String _directiveTail(String rule, String marker) {
+    final index = rule.toLowerCase().indexOf(marker.toLowerCase());
+    if (index < 0) return '';
+    return rule.substring(index + marker.length);
+  }
+
+  static String? _jsTagBody(String rule) {
+    final lower = rule.toLowerCase();
+    final start = lower.indexOf('<js>');
+    if (start < 0) return null;
+    final bodyStart = start + '<js>'.length;
+    final end = lower.indexOf('</js>', bodyStart);
+    if (end < 0) return rule.substring(bodyStart);
+    return rule.substring(bodyStart, end);
+  }
+
   static bool _isHtmlLiteralWithGet(String original, String materialized) {
     if (!original.toLowerCase().contains('@get:')) return false;
-    final base = original.split('##').first.split('@js:').first.trim();
+    final base = original
+        .split('##')
+        .first
+        .split(RegExp(r'@js:', caseSensitive: false))
+        .first
+        .trim();
     final withoutGets = base
         .replaceAll(RegExp(r'@get:\{[^}]+\}', caseSensitive: false), '')
         .trim();
@@ -670,7 +687,7 @@ class LegadoRuleEvaluator {
 
   static String _literalBeforePostProcessors(String rule) {
     var text = rule.trim();
-    final jsIndex = text.indexOf('@js:');
+    final jsIndex = text.toLowerCase().indexOf('@js:');
     if (jsIndex >= 0) text = text.substring(0, jsIndex);
     final hashIndex = text.indexOf('##');
     if (hashIndex >= 0) text = text.substring(0, hashIndex);
@@ -898,30 +915,37 @@ class LegadoRuleEvaluator {
     for (var i = 1; i < lines.length; i++) {
       final line = lines[i];
       if (line.isEmpty) continue;
+      final lowerLine = line.toLowerCase();
 
-      if (line.contains('@get:')) {
-        final key = line.split('@get:')[1].split(RegExp(r'[@#]')).first.trim();
+      if (lowerLine.contains('@get:')) {
+        final key = _directiveTail(line, '@get:')
+            .split(RegExp(r'[@#]'))
+            .first
+            .trim();
         try {
           final cached = LegadoJsEngine().evaluate('java.get("$key")');
           if (cached.trim().isNotEmpty) output = cached;
         } catch (_) {}
       }
 
-      if (line.startsWith('<js>') ||
-          line.contains('</js>') ||
-          line.startsWith('@js:')) {
+      if (lowerLine.startsWith('<js>') ||
+          lowerLine.contains('</js>') ||
+          lowerLine.startsWith('@js:')) {
         try {
-          final jsPart = line.startsWith('@js:')
+          final jsPart = lowerLine.startsWith('@js:')
               ? line
-              : '<js>${line.split('<js>')[1].split('</js>').first}</js>';
+              : '<js>${_jsTagBody(line) ?? ''}</js>';
           final evaluated = LegadoJsEngine().evaluate(
             jsPart,
             variables: {'result': output},
           );
           if (evaluated.trim().isNotEmpty) output = evaluated;
         } catch (_) {}
-      } else if (line.contains('@put:')) {
-        final key = line.split('@put:')[1].split(RegExp(r'[@#]')).first.trim();
+      } else if (lowerLine.contains('@put:')) {
+        final key = _directiveTail(line, '@put:')
+            .split(RegExp(r'[@#]'))
+            .first
+            .trim();
         try {
           LegadoJsEngine().evaluate(
             'java.put("$key", result)',
@@ -1000,7 +1024,7 @@ class LegadoRuleEvaluator {
   }
 
   static bool _hasMultilineInlineJsPostProcessor(String rule) {
-    final marker = rule.indexOf('@js:');
+    final marker = rule.toLowerCase().indexOf('@js:');
     if (marker < 0) return false;
     final tail = rule.substring(marker + 4);
     final jsBody = tail.split('##').first;
@@ -1013,19 +1037,24 @@ class LegadoRuleEvaluator {
     dynamic originalJson,
   }) {
     var output = value;
-    if (rule.contains('@get:')) {
-      final key = rule.split('@get:')[1].split(RegExp(r'[@#]')).first.trim();
+    final lowerRule = rule.toLowerCase();
+    if (lowerRule.contains('@get:')) {
+      final key = _directiveTail(rule, '@get:')
+          .split(RegExp(r'[@#]'))
+          .first
+          .trim();
       try {
         final cached = LegadoJsEngine().evaluate('java.get("$key")');
         if (cached.trim().isNotEmpty) output = cached;
       } catch (_) {}
     }
 
-    if (rule.contains('@js:') || rule.contains('<js>')) {
+    if (lowerRule.contains('@js:') || lowerRule.contains('<js>')) {
       try {
-        final jsPart = rule.contains('@js:')
-            ? '@js:${rule.split('@js:')[1].split('##').first}'
-            : '<js>${rule.split('<js>')[1].split('</js>').first}</js>';
+        final atJs = lowerRule.indexOf('@js:');
+        final jsPart = atJs >= 0
+            ? '@js:${rule.substring(atJs + 4).split('##').first}'
+            : '<js>${_jsTagBody(rule) ?? ''}</js>';
         final evaluated = LegadoJsEngine().evaluate(
           jsPart,
           variables: {'result': output},
@@ -1034,8 +1063,11 @@ class LegadoRuleEvaluator {
       } catch (_) {}
     }
 
-    if (rule.contains('@put:')) {
-      final key = rule.split('@put:')[1].split(RegExp(r'[@#]')).first.trim();
+    if (lowerRule.contains('@put:')) {
+      final key = _directiveTail(rule, '@put:')
+          .split(RegExp(r'[@#]'))
+          .first
+          .trim();
       try {
         LegadoJsEngine().evaluate(
           'java.put("$key", result)',
@@ -1141,23 +1173,24 @@ class LegadoRuleEvaluator {
   }
 
   static bool isJsOnlyRule(String rule) {
-    final trimmed = rule.trim();
+    final trimmed = rule.trim().toLowerCase();
     return trimmed.startsWith('@js:') || trimmed.startsWith('<js>');
   }
 
   static bool containsJsRule(String? rule) {
     if (rule == null || rule.isEmpty) return false;
-    return rule.contains('@js:') ||
-        rule.contains('<js>') ||
-        rule.contains('</js>') ||
-        rule.contains('java.ajax') ||
-        rule.contains('java.connect') ||
-        rule.contains('java.get') ||
-        rule.contains('java.post') ||
-        rule.contains('esoTools.') ||
-        rule.contains('httpByte(') ||
-        rule.contains('http.get(') ||
-        rule.contains('http.post(');
+    final value = rule.toLowerCase();
+    return value.contains('@js:') ||
+        value.contains('<js>') ||
+        value.contains('</js>') ||
+        value.contains('java.ajax') ||
+        value.contains('java.connect') ||
+        value.contains('java.get') ||
+        value.contains('java.post') ||
+        value.contains('esotools.') ||
+        value.contains('httpbyte(') ||
+        value.contains('http.get(') ||
+        value.contains('http.post(');
   }
 
   static bool looksLikeJsonData(dynamic data, String? rule) {
@@ -3054,7 +3087,10 @@ class LegadoRuleEvaluator {
   }
 
   static String _applyJsPostProcessors(String value, String rule) {
-    if (!rule.contains('@js:') && !rule.contains('<js>')) return value;
+    final lowerRule = rule.toLowerCase();
+    if (!lowerRule.contains('@js:') && !lowerRule.contains('<js>')) {
+      return value;
+    }
     var output = value;
     final simpleOutput = _evaluateSimpleJsPostProcessor(output, rule);
     if (simpleOutput.isNotEmpty) output = simpleOutput;
@@ -3340,11 +3376,13 @@ class LegadoRuleEvaluator {
   }
 
   static String _extractJsPostProcessorScript(String rule) {
-    if (rule.contains('@js:')) {
-      return rule.split('@js:')[1].split('##').first.trim();
+    final lowerRule = rule.toLowerCase();
+    final atJs = lowerRule.indexOf('@js:');
+    if (atJs >= 0) {
+      return rule.substring(atJs + 4).split('##').first.trim();
     }
-    if (rule.contains('<js>')) {
-      return rule.split('<js>')[1].split('</js>').first.trim();
+    if (lowerRule.contains('<js>')) {
+      return (_jsTagBody(rule) ?? '').trim();
     }
     return '';
   }

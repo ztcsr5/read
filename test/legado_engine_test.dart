@@ -1038,6 +1038,17 @@ void main() {
         ),
         'https://example.com/book/42/7.html',
       );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(item, r'$.id@PUT:{BID:$.id}'),
+        '42',
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'https://example.com/book/@GET:{BID}/{{$.chapter}}.html',
+        ),
+        'https://example.com/book/42/7.html',
+      );
     });
 
     test('supports legado inline put and get variables in html rules', () {
@@ -1671,6 +1682,22 @@ body=urlEncode(params)
         expect(value, '第1章  正文');
       },
     );
+
+    test('normalizes uppercase javascript post processor markers', () {
+      expect(LegadoRuleEvaluator.isJsOnlyRule('@JS:result'), isTrue);
+      expect(LegadoRuleEvaluator.containsJsRule('<JS>result</JS>'), isTrue);
+      expect(
+        LegadoRuleEvaluator.applyPostProcessors('abc', r'@JS:"x"+result'),
+        'xabc',
+      );
+      expect(
+        LegadoRuleEvaluator.applyPostProcessors(
+          'ads text ads',
+          r'<JS>result.replace(/ads/g,"")</JS>',
+        ),
+        'text',
+      );
+    });
 
     test('applies String(result) replace chains and JS replacement groups', () {
       expect(
