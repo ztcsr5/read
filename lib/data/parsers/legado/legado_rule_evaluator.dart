@@ -326,6 +326,14 @@ class LegadoRuleEvaluator {
           .toList();
       return _interleaveLists(lists);
     }
+    if (_containsHtmlTemplate(rule)) {
+      final interpolated = _interpolateHtmlTemplate(node, rule);
+      final value = applyPostProcessors(
+        _literalBeforePostProcessors(interpolated),
+        interpolated,
+      );
+      return value.isEmpty ? const [] : [value];
+    }
     if (rule.contains('@@')) {
       final value = _extractSingleHtmlValue(node, rule);
       return value.isEmpty ? const [] : [value];
@@ -363,6 +371,13 @@ class LegadoRuleEvaluator {
       return _extractSingleHtmlValue(
         node,
         rule.trimLeft().substring(2).trimLeft(),
+      );
+    }
+    if (_containsHtmlTemplate(rule)) {
+      final interpolated = _interpolateHtmlTemplate(node, rule);
+      return applyPostProcessors(
+        _literalBeforePostProcessors(interpolated),
+        interpolated,
       );
     }
     if (rule.contains('@@')) {
@@ -703,6 +718,13 @@ class LegadoRuleEvaluator {
       text = text.substring(5).trimLeft();
     }
     if (text.isEmpty) return '';
+    if (_containsHtmlTemplate(text)) {
+      final interpolated = _interpolateHtmlTemplate(node, text);
+      return applyPostProcessors(
+        _literalBeforePostProcessors(interpolated),
+        interpolated,
+      );
+    }
     if (text.contains('@@')) {
       final parts = text.split('@@');
       final rawValue = _extractSingleHtmlValueNoDirectives(
@@ -1487,6 +1509,18 @@ class LegadoRuleEvaluator {
   static bool _containsJsonTemplate(String rule) {
     return rule.contains('{{') ||
         RegExp(r'\{(\$[^{}]+|[A-Za-z_][A-Za-z0-9_\.\[\]\*]*)\}').hasMatch(rule);
+  }
+
+  static bool _containsHtmlTemplate(String rule) {
+    return rule.contains('{{') && rule.contains('}}');
+  }
+
+  static String _interpolateHtmlTemplate(Element node, String rule) {
+    return rule.replaceAllMapped(RegExp(r'\{\{([\s\S]*?)\}\}'), (match) {
+      final expression = match.group(1)?.trim() ?? '';
+      if (expression.isEmpty) return '';
+      return extractHtmlValue(node, expression);
+    });
   }
 
   static List<dynamic> _extractNodesByJsonPath(dynamic json, String rule) {

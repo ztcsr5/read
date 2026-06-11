@@ -333,6 +333,10 @@ class LegadoRequestBuilder {
         .trim();
     url = _replaceStoredGetTokens(url);
     if (url.isEmpty) return '';
+    if (url.startsWith(',') &&
+        _extractLeadingJsonObject(url.substring(1).trimLeft()) != null) {
+      return '';
+    }
     if (_isWholeJsRule(url)) return '';
     if (url.startsWith('data:') || url.startsWith('javascript:')) return url;
 

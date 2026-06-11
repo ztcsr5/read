@@ -76,6 +76,16 @@ void main() {
       expect(embedded.config['headers']['User-Agent'], 'MobileUA');
     });
 
+    test('drops empty urls with only embedded config suffix', () {
+      expect(
+        LegadoRequestBuilder.resolveUrl(
+          'https://example.com/book/1.html',
+          ',{"webView":true}',
+        ),
+        isEmpty,
+      );
+    });
+
     test('keeps imported jsLib in source custom config', () {
       final source = BookSource.fromJson({
         'bookSourceName': 'JS Source',
@@ -647,6 +657,48 @@ void main() {
         contains('data-id="42"'),
       );
       expect(LegadoRuleEvaluator.extractHtmlValue(node, 'attr(data-id)'), '42');
+    });
+
+    test('interpolates html template rules with css fragments', () {
+      final document = parse('''
+        <article>
+          <meta property="og:novel:status" content="ongoing">
+          <meta property="og:novel:category" content="fantasy">
+          <a class="bt" href="/book/1">Open</a>
+          <a class="PagesLink" href="/book/1_2.html">next page</a>
+        </article>
+      ''');
+      final root = document.body!;
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          root,
+          '{{@css:meta[property="og:novel:status"] @content}}/'
+          '{{@css:meta[property="og:novel:category"] @content}}',
+        ),
+        'ongoing/fantasy',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          root,
+          'https://www.example.com{{@css:a.bt @href}}',
+        ),
+        'https://www.example.com/book/1',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          root,
+          '{{@css:a.PagesLink @href}},{"webView":true}',
+        ),
+        '/book/1_2.html,{"webView":true}',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          root,
+          '{{@@article@html@@a.bt @href}}',
+        ),
+        '/book/1',
+      );
     });
 
     test('supports legado bracket indexes on html selectors', () {
@@ -2311,6 +2363,53 @@ body=urlEncode(params)
         expect(content, contains('Part 2'));
         expect(content, contains('Part 3'));
         expect(requestedPaths, ['/c1', '/c1p2', '/c1p3']);
+      },
+    );
+
+    test(
+      'keeps embedded request config from templated nextContentUrl',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final observed = <String>[];
+        server.listen((request) async {
+          observed.add('${request.method} ${request.uri.path}');
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/c1':
+              request.response.write('''
+                <div id="content"><p>Part 1</p></div>
+                <a class="PagesLink" href="/c1p2">next</a>
+              ''');
+              break;
+            case '/c1p2':
+              request.response.write('<div id="content"><p>Part 2</p></div>');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Templated Paged Content Source'
+          ..bookSourceUrl = base
+          ..ruleContent = jsonEncode({
+            'content': '#content@html',
+            'nextContentUrl':
+                '{{@css:a.PagesLink @href}},{"method":"POST","body":"from=next"}',
+          });
+
+        final content = await LegadoParser.getChapterContent(
+          source,
+          '$base/c1',
+        );
+
+        expect(content, contains('Part 1'));
+        expect(content, contains('Part 2'));
+        expect(observed, ['GET /c1', 'POST /c1p2']);
       },
     );
 
