@@ -260,7 +260,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     if (request.method == 'POST' && path == '/api/sources/import') {
       final bodyText = await utf8.decoder.bind(request).join();
       final imported = await _importSources(bodyText);
-      await _json(request, {'ok': true, 'count': imported});
+      await _json(request, {
+        'ok': true,
+        'count': imported.savedCount,
+        'parsedCount': imported.parsedCount,
+      });
       return;
     }
 
@@ -358,7 +362,9 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     return source;
   }
 
-  Future<int> _importSources(String rawBody) async {
+  Future<({int parsedCount, int savedCount})> _importSources(
+    String rawBody,
+  ) async {
     dynamic parsed;
     try {
       parsed = jsonDecode(rawBody);
@@ -372,9 +378,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
 
     final items = _normalizeImportItems(parsed);
     final pendingByUrl = <String, BookSource>{};
-    var count = 0;
+    var parsedCount = 0;
+    var savedCount = 0;
     Future<void> flushPending() async {
       if (pendingByUrl.isEmpty) return;
+      savedCount += pendingByUrl.length;
       await _repository.saveBookSources(pendingByUrl.values.toList());
       pendingByUrl.clear();
     }
@@ -399,14 +407,14 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       if (!hasBookSource) continue;
       final source = BookSource.fromJson(map);
       if (source.bookSourceUrl.trim().isEmpty) continue;
+      parsedCount++;
       pendingByUrl[source.bookSourceUrl] = source;
-      count++;
       if (pendingByUrl.length >= 500) {
         await flushPending();
       }
     }
     await flushPending();
-    return count;
+    return (parsedCount: parsedCount, savedCount: savedCount);
   }
 
   List<dynamic> _normalizeImportItems(dynamic parsed) {
@@ -957,6 +965,11 @@ const fields = {
   explore: [["ruleExplore.bookList","bookList"],["ruleExplore.name","name"],["ruleExplore.author","author"],["ruleExplore.bookUrl","bookUrl"],["ruleExplore.coverUrl","coverUrl"],["ruleExplore.intro","intro"],["ruleExplore.kind","kind"]],
 };
 function api(path, opt={}) {
+  const timeoutMs = opt.timeoutMs || 25000;
+  delete opt.timeoutMs;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  opt.signal = opt.signal || controller.signal;
   opt.headers = Object.assign({"Content-Type":"application/json","X-Read-Token":TOKEN}, opt.headers || {});
   return fetch(path, opt).then(async r => {
     const text = await r.text();
@@ -968,6 +981,13 @@ function api(path, opt={}) {
     }
     if (!r.ok || data.ok === false) throw new Error(data.error || r.statusText);
     return data;
+  }).catch(e => {
+    if (e && e.name === "AbortError") {
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）。请确认手机未锁屏、App 仍在前台、PC 与 iPhone 在同一 Wi-Fi。`);
+    }
+    throw e;
+  }).finally(() => {
+    clearTimeout(timer);
   });
 }
 function scheduleLoadSources() {
@@ -1095,7 +1115,7 @@ async function saveSource() {
     if (tab === "raw") current = JSON.parse(document.getElementById("rawJson").value);
     const method = current.id ? "PUT" : "POST";
     const path = current.id ? `/api/sources/${current.id}` : "/api/sources";
-    const res = await api(path, {method, body: JSON.stringify(current)});
+    const res = await api(path, {method, body: JSON.stringify(current), timeoutMs: 45000});
     await loadSources();
     if (res.id) await selectSource(res.id);
     toast("保存成功");
@@ -1117,7 +1137,7 @@ async function testSource() {
   panel.style.display = "block";
   panel.innerHTML = `<div class="section-title"><h3>书源测试</h3><span>正在运行 ${escapeHtml(keyword)}</span></div><p class="hint">测试中...</p>`;
   try {
-    const res = await api(`/api/sources/${current.id}/test`, {method:"POST", body:JSON.stringify({keyword})});
+    const res = await api(`/api/sources/${current.id}/test`, {method:"POST", body:JSON.stringify({keyword}), timeoutMs: 90000});
     const steps = res.data.steps || [];
     panel.innerHTML = `<div class="section-title"><div><h3>测试结果</h3><span>${res.data.hasFailure ? "存在失败步骤" : "全部通过"}</span></div><span class="pill ${res.data.hasFailure ? "status-fail" : "status-ok"}">${res.data.hasFailure ? "FAIL" : "OK"}</span></div><div class="steps">${steps.map(stepHtml).join("")}</div>`;
   } catch(e) { panel.innerHTML = `<span class="pill status-fail">测试失败</span><p>${escapeHtml(e.message)}</p>`; }
@@ -1132,10 +1152,10 @@ async function importJson(event) {
   event.preventDefault();
   try {
     const text = document.getElementById("importText").value;
-    const res = await api("/api/sources/import", {method:"POST", body:text});
+    const res = await api("/api/sources/import", {method:"POST", body:text, timeoutMs: 120000});
     document.getElementById("importDialog").close();
     await loadSources();
-    toast(`导入成功：${res.count} 个书源`);
+    toast(`导入成功：${res.count} 个书源${res.parsedCount && res.parsedCount !== res.count ? `（解析 ${res.parsedCount} 个，已按 URL 去重）` : ""}`);
   } catch(e) { toast("导入失败：" + e.message, true); }
 }
 async function copyCurrentJson() {

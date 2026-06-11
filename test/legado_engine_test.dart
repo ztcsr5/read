@@ -479,10 +479,7 @@ void main() {
     });
 
     test('interpolates json template java expression fallbacks', () {
-      final item = {
-        'book_id': 12345,
-        'updated_at': 1700000000,
-      };
+      final item = {'book_id': 12345, 'updated_at': 1700000000};
 
       expect(
         LegadoRuleEvaluator.extractJsonValue(
@@ -695,8 +692,10 @@ void main() {
       );
     });
 
-    test('supports official legado legacy index filters and children selector', () {
-      final document = parse('''
+    test(
+      'supports official legado legacy index filters and children selector',
+      () {
+        final document = parse('''
         <div class="books m-cols">
           <article>A</article>
           <article>B</article>
@@ -710,35 +709,36 @@ void main() {
         </table>
       ''');
 
-      expect(
-        LegadoRuleEvaluator.queryAll(
-          document,
-          'class.books m-cols@children',
-        ).map((node) => node.text.trim()).toList(),
-        ['A', 'B', 'C', 'D'],
-      );
-      expect(
-        LegadoRuleEvaluator.queryAll(
-          document,
-          'class.books m-cols@children.0:2:-1',
-        ).map((node) => node.text.trim()).toList(),
-        ['A', 'C', 'D'],
-      );
-      expect(
-        LegadoRuleEvaluator.queryAll(
-          document,
-          'tag.tr!0',
-        ).map((node) => node.text.trim()).toList(),
-        ['row1', 'row2'],
-      );
-      expect(
-        LegadoRuleEvaluator.extractHtmlValue(
-          document.body!,
-          'class.books m-cols@children!0:-1@text',
-        ),
-        'B\nC',
-      );
-    });
+        expect(
+          LegadoRuleEvaluator.queryAll(
+            document,
+            'class.books m-cols@children',
+          ).map((node) => node.text.trim()).toList(),
+          ['A', 'B', 'C', 'D'],
+        );
+        expect(
+          LegadoRuleEvaluator.queryAll(
+            document,
+            'class.books m-cols@children.0:2:-1',
+          ).map((node) => node.text.trim()).toList(),
+          ['A', 'C', 'D'],
+        );
+        expect(
+          LegadoRuleEvaluator.queryAll(
+            document,
+            'tag.tr!0',
+          ).map((node) => node.text.trim()).toList(),
+          ['row1', 'row2'],
+        );
+        expect(
+          LegadoRuleEvaluator.extractHtmlValue(
+            document.body!,
+            'class.books m-cols@children!0:-1@text',
+          ),
+          'B\nC',
+        );
+      },
+    );
 
     test('supports jquery eq lt gt pseudo indexes on html selectors', () {
       final document = parse('''
@@ -952,10 +952,7 @@ void main() {
         <div class="book"><a href="/book/1">Book One</a></div>
       ''');
 
-      expect(
-        LegadoRuleEvaluator.queryAll(document, '@CSS:.book').length,
-        1,
-      );
+      expect(LegadoRuleEvaluator.queryAll(document, '@CSS:.book').length, 1);
       expect(
         LegadoRuleEvaluator.extractHtmlValue(
           document.body!,
@@ -2547,43 +2544,33 @@ doc.html();
               '<div class="novelText"><p>A</p><p style="display:none">ADS</p><p>B</p></div>',
         },
       );
-      final inserted = LegadoJsEngine().evaluate(
-        r'''@js:
+      final inserted = LegadoJsEngine().evaluate(r'''@js:
 var doc = org.jsoup.Jsoup.parse('<ul><li id="x">X</li></ul>');
 doc.select("#x").before("<li>A</li>").remove();
 doc.select("li").text();
-''',
-      );
+''');
       final hasClass = LegadoJsEngine().evaluate(
         r'''@js:org.jsoup.Jsoup.parse('<a class="vip lock">C</a>').select("a").hasClass("vip")''',
       );
-      final imported = LegadoJsEngine().evaluate(
-        r'''@js:
+      final imported = LegadoJsEngine().evaluate(r'''@js:
 importClass(org.jsoup.Jsoup);
 var doc = Jsoup.parse('<body><p class="non">卷一</p><p>A</p><p>B</p></body>');
 doc.select("p").eachText().join("|") + "::" + doc.body().text();
-''',
-      );
-      final children = LegadoJsEngine().evaluate(
-        r'''@js:
+''');
+      final children = LegadoJsEngine().evaluate(r'''@js:
 var el = org.jsoup.Jsoup.parse('<div><span>A</span><b>B</b></div>').select("div");
 el.child(1).text() + "::" + el.children().size();
-''',
-      );
-      final htmlParts = LegadoJsEngine().evaluate(
-        r'''@js:
+''');
+      final htmlParts = LegadoJsEngine().evaluate(r'''@js:
 var el = org.jsoup.Jsoup.parse('<div><span>A</span></div>').select("div");
 el.html() + "::" + String(el);
-''',
-      );
-      final list = LegadoJsEngine().evaluate(
-        r'''@js:
+''');
+      final list = LegadoJsEngine().evaluate(r'''@js:
 var list = new Packages.util.ArrayList();
 list.add("A");
 list.add("B");
 list.join(",");
-''',
-      );
+''');
 
       expect(cleaned, contains('A'));
       expect(cleaned, contains('B'));
@@ -2595,6 +2582,23 @@ list.join(",");
       expect(children, 'B::2');
       expect(htmlParts, '<span>A</span>::<div><span>A</span></div>');
       expect(list, 'A,B');
+    });
+
+    test('supports jsoup parent and index helpers in js bridge', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final value = LegadoJsEngine().evaluate(r'''@js:
+var doc = org.jsoup.Jsoup.parse('<body><div class="vol"><p class="vip">V</p><p id="c">C</p></div></body>');
+var selected = doc.select("#c");
+[
+  selected.parentNode().className(),
+  selected.parentNode().selectFirst(".vip").text(),
+  doc.select("p").eq(-1).id(),
+  doc.select("p").get(-2).className(),
+  doc.select("p").last().tagName()
+].join("|");
+''');
+
+      expect(value, 'vol|V|c|vip|p');
     });
 
     test('supports java android compatibility shims in js bridge', () async {
@@ -2611,6 +2615,23 @@ list.join(",");
       final decoded = LegadoJsEngine().evaluate(
         r'''@js:java.base64Decoder("SGVsbG8=")''',
       );
+      final aliases = LegadoJsEngine().evaluate(r'''@js:
+var javaImport = new JavaImporter(
+  Packages.java.lang.Integer,
+  Packages.java.lang.Long,
+  Packages.java.net.URLEncoder,
+  Packages.android.util.Base64
+);
+with (javaImport) {
+  [
+    Integer.parseInt("10"),
+    Long.parseLong("11"),
+    URLEncoder.encode("a b", "UTF-8"),
+    URLDecoder.decode("a%20b", "UTF-8"),
+    Base64.encodeToString(String("x").getBytes(), Base64.NO_WRAP)
+  ].join("|");
+}
+''');
       final fetched = await LegadoJsEngine().evaluateWithAjax(
         r'''@js:java.fetch("https://example.test/api", {method:"post", body:"a=1"}).body().string()''',
         ajax: (request) async {
@@ -2634,6 +2655,7 @@ list.join(",");
       expect(gbkBytes, '%D6%D0');
       expect(base64, 'YWJj');
       expect(decoded, 'Hello');
+      expect(aliases, '10|11|a%20b|a b|eA==');
       expect(fetched, '{"ok":true}');
       expect(posted, 'posted');
     });
@@ -2653,8 +2675,7 @@ list.join(",");
 
     test('supports CryptoJS AES and DES decrypt shims', () {
       if (!LegadoJsEngine().isAvailable) return;
-      final aes = LegadoJsEngine().evaluate(
-        r'''@js:
+      final aes = LegadoJsEngine().evaluate(r'''@js:
 var key = CryptoJS.enc.Utf8.parse("1234567890123456");
 var iv = CryptoJS.enc.Utf8.parse("abcdefghijklmnop");
 CryptoJS.AES.decrypt("ZM6V+N4TrIblhrpN+FfkYw==", key, {
@@ -2662,17 +2683,14 @@ CryptoJS.AES.decrypt("ZM6V+N4TrIblhrpN+FfkYw==", key, {
   mode: CryptoJS.mode.CBC,
   padding: CryptoJS.pad.Pkcs7
 }).toString(CryptoJS.enc.Utf8);
-''',
-      );
-      final des = LegadoJsEngine().evaluate(
-        r'''@js:
+''');
+      final des = LegadoJsEngine().evaluate(r'''@js:
 CryptoJS.DES.decrypt("0XUfPCehJ3Q=", CryptoJS.enc.Utf8.parse("6CB1E21E"), {
   iv: CryptoJS.enc.Utf8.parse("1F0FB845"),
   mode: CryptoJS.mode.CBC,
   padding: CryptoJS.pad.Pkcs7
 }).toString(CryptoJS.enc.Utf8);
-''',
-      );
+''');
 
       expect(aes, 'hello');
       expect(des, 'hello');
@@ -2714,9 +2732,7 @@ with (javaImport) {
 }
 decrypt(result);
 ''',
-        variables: {
-          'result': '9XGKV+gLPbg9nhpsZ/+4AvfGGarQ3vqnSbYUtZx29vU=',
-        },
+        variables: {'result': '9XGKV+gLPbg9nhpsZ/+4AvfGGarQ3vqnSbYUtZx29vU='},
       );
 
       expect(decoded, 'hello inflater');

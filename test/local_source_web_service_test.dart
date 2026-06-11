@@ -92,6 +92,7 @@ void main() {
     expect(htmlResponse.body, contains('downloadCurrentJson()'));
     expect(htmlResponse.body, contains('loadImportFile(event)'));
     expect(htmlResponse.body, contains('loadMoreSources()'));
+    expect(htmlResponse.body, contains('AbortController'));
 
     final updated = source.toJson()
       ..['id'] = sourceId
@@ -122,6 +123,7 @@ void main() {
     expect(importResponse.statusCode, 200);
     final importJson = jsonDecode(importResponse.body) as Map<String, dynamic>;
     expect(importJson['count'], 1);
+    expect(importJson['parsedCount'], 1);
     final imported = (await repo.getAllBookSources()).firstWhere(
       (source) => source.bookSourceUrl == 'https://alias-web.example.com',
     );

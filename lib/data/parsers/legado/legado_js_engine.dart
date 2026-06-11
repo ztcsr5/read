@@ -354,13 +354,24 @@ class LegadoJsEngine {
     return parts.join(' ');
   }
 
-  Map<String, dynamic> _serializeJsoupElement(Element element) => {
-        'text': element.text.trim(),
-        'ownText': _ownText(element),
-        'html': element.innerHtml,
-        'outerHtml': element.outerHtml,
-        'attr': element.attributes,
-      };
+  Map<String, dynamic> _serializeJsoupElement(
+    Element element, {
+    int parentDepth = 6,
+  }) {
+    final parent = element.parent;
+    return {
+      'text': element.text.trim(),
+      'ownText': _ownText(element),
+      'html': element.innerHtml,
+      'outerHtml': element.outerHtml,
+      'attr': element.attributes,
+      'tagName': element.localName,
+      'id': element.id,
+      'className': element.classes.join(' '),
+      if (parent != null && parentDepth > 0)
+        'parent': _serializeJsoupElement(parent, parentDepth: parentDepth - 1),
+    };
+  }
 
   String getStoredString(String key) {
     final value = _javaStorage[key];
@@ -467,14 +478,35 @@ class LegadoJsEngine {
             var cls = node.attr ? String(node.attr["class"] || "") : "";
             return cls.split(/\s+/).indexOf(String(name || "")) >= 0;
           },
+          className: function() {
+            return String(node.className || (node.attr ? node.attr["class"] || "" : ""));
+          },
+          id: function() {
+            return String(node.id || (node.attr ? node.attr.id || "" : ""));
+          },
+          tagName: function() {
+            return String(node.tagName || node.nodeName || "");
+          },
+          nodeName: function() {
+            return String(node.tagName || node.nodeName || "");
+          },
           select: function(selector) {
             return __selectFromHtml(elementOuterHtml(), selector);
+          },
+          selectFirst: function(selector) {
+            return this.select(selector).first();
           },
           children: function() {
             return __childrenFromHtml(elementHtml());
           },
           child: function(index) {
             return this.children().get(Number(index || 0));
+          },
+          parentNode: function() {
+            return __wrapJsoupElement(node.parent || {});
+          },
+          parent: function() {
+            return __wrapJsoupElement(node.parent || {});
           },
           toJSON: elementOuterHtml,
           toString: elementOuterHtml
@@ -506,6 +538,9 @@ class LegadoJsEngine {
           },
           body: function() {
             return __selectFromDoc(docId, "body").first();
+          },
+          selectFirst: function(selector) {
+            return __selectFromDoc(docId, selector).first();
           },
           toString: function() {
             return String(sendMessage("jsoup_html", String(docId || "")) || "");
@@ -563,6 +598,11 @@ class LegadoJsEngine {
         function nodeOuterHtml(node) {
           return String(node && node.outerHtml != null ? node.outerHtml : nodeHtml(node));
         }
+        function normalizeIndex(index, length) {
+          index = Number(index || 0);
+          if (index < 0) index = length + index;
+          return index;
+        }
         define("text", function() { return currentNodes().map(function(n) { return n.text || ""; }).join("\n"); });
         define("eachText", function() {
           return __arrayWithToArray(currentNodes().map(function(n) { return String(n.text || ""); }));
@@ -582,6 +622,24 @@ class LegadoJsEngine {
           if (!list.length || !list[0].attr) return false;
           return String(list[0].attr["class"] || "").split(/\s+/).indexOf(String(name || "")) >= 0;
         });
+        define("className", function() {
+          var list = currentNodes();
+          if (!list.length) return "";
+          return String(list[0].className || (list[0].attr ? list[0].attr["class"] || "" : ""));
+        });
+        define("id", function() {
+          var list = currentNodes();
+          if (!list.length) return "";
+          return String(list[0].id || (list[0].attr ? list[0].attr.id || "" : ""));
+        });
+        define("tagName", function() {
+          var list = currentNodes();
+          return list.length ? String(list[0].tagName || list[0].nodeName || "") : "";
+        });
+        define("nodeName", function() {
+          var list = currentNodes();
+          return list.length ? String(list[0].tagName || list[0].nodeName || "") : "";
+        });
         define("first", function() {
           var list = currentNodes();
           return list.length ? __wrapJsoupElement(list[0]) : __wrapJsoupElement({});
@@ -591,13 +649,13 @@ class LegadoJsEngine {
           return list.length ? __wrapJsoupElement(list[list.length - 1]) : __wrapJsoupElement({});
         });
         define("get", function(index) {
-          index = Number(index || 0);
           var list = currentNodes();
+          index = normalizeIndex(index, list.length);
           return index >= 0 && index < list.length ? __wrapJsoupElement(list[index]) : __wrapJsoupElement({});
         });
         define("eq", function(index) {
-          index = Number(index || 0);
           var list = currentNodes();
+          index = normalizeIndex(index, list.length);
           return __wrapJsoupNodes(index >= 0 && index < list.length ? [list[index]] : []);
         });
         define("children", function() {
@@ -615,6 +673,13 @@ class LegadoJsEngine {
         });
         define("child", function(index) {
           return wrapper.children().get(Number(index || 0));
+        });
+        define("parentNode", function() {
+          var list = currentNodes();
+          return list.length ? __wrapJsoupElement(list[0].parent || {}) : __wrapJsoupElement({});
+        });
+        define("parent", function() {
+          return wrapper.parentNode();
         });
         define("size", function() { return currentNodes().length; });
         define("isEmpty", function() { return currentNodes().length === 0; });
@@ -636,6 +701,9 @@ class LegadoJsEngine {
             } catch(e) {}
           }
           return __wrapJsoupNodes(merged);
+        });
+        define("selectFirst", function(selector) {
+          return wrapper.select(selector).first();
         });
         define("remove", function() {
           if (docId && selector) {
@@ -1406,6 +1474,48 @@ class LegadoJsEngine {
         return list;
       }
 
+      var __JavaInteger = {
+        parseInt: function(value, radix) {
+          var parsed = parseInt(String(value || "0"), radix == null ? 10 : Number(radix));
+          return isNaN(parsed) ? 0 : parsed;
+        },
+        valueOf: function(value, radix) {
+          return __JavaInteger.parseInt(value, radix);
+        },
+        toString: function(value) {
+          return String(value == null ? 0 : value);
+        }
+      };
+
+      var __JavaLong = {
+        parseLong: function(value, radix) {
+          var parsed = parseInt(String(value || "0"), radix == null ? 10 : Number(radix));
+          return isNaN(parsed) ? 0 : parsed;
+        },
+        valueOf: function(value, radix) {
+          return __JavaLong.parseLong(value, radix);
+        },
+        toString: function(value) {
+          return String(value == null ? 0 : value);
+        }
+      };
+
+      var __JavaURLEncoder = {
+        encode: function(value, charset) {
+          return encodeURIComponent(String(value == null ? "" : value));
+        }
+      };
+
+      var __JavaURLDecoder = {
+        decode: function(value, charset) {
+          try {
+            return decodeURIComponent(String(value == null ? "" : value).replace(/\+/g, "%20"));
+          } catch(e) {
+            return String(value == null ? "" : value);
+          }
+        }
+      };
+
       function __SecretKeySpec(bytes, algorithm) {
         return {
           __keyBytes: __javaBytes(bytes),
@@ -1506,9 +1616,13 @@ class LegadoJsEngine {
           importPackage: function() {},
           importClass: function() {},
           String: function(value) { return __javaString(value); },
+          Integer: __JavaInteger,
+          Long: __JavaLong,
           Base64: __javaBase64,
           Arrays: __javaArrays,
           ArrayList: __ArrayList,
+          URLEncoder: __JavaURLEncoder,
+          URLDecoder: __JavaURLDecoder,
           Cipher: __Cipher,
           SecretKeySpec: __SecretKeySpec,
           IvParameterSpec: __IvParameterSpec,
@@ -1523,7 +1637,13 @@ class LegadoJsEngine {
       var Packages = {
         java: {
           lang: {
-            String: function(value) { return __javaString(value); }
+            String: function(value) { return __javaString(value); },
+            Integer: __JavaInteger,
+            Long: __JavaLong
+          },
+          net: {
+            URLEncoder: __JavaURLEncoder,
+            URLDecoder: __JavaURLDecoder
           },
           io: {
             ByteArrayInputStream: __ByteArrayInputStream,
@@ -1555,6 +1675,14 @@ class LegadoJsEngine {
       };
       Packages.util = Packages.java.util;
       java.lang = Packages.java.lang;
+      java.io = Packages.java.io;
+      java.util = Packages.java.util;
+      java.net = Packages.java.net;
+      var Base64 = __javaBase64;
+      var Integer = __JavaInteger;
+      var Long = __JavaLong;
+      var URLEncoder = __JavaURLEncoder;
+      var URLDecoder = __JavaURLDecoder;
 
       var android = {
         util: {
@@ -2311,7 +2439,9 @@ class LegadoJsEngine {
     final isDes = upper.contains('DES');
     final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
     final engine = isDes ? DESedeEngine() : AESEngine();
-    final normalizedKeyBytes = isDes ? _desCompatibleKeyBytes(keyBytes) : keyBytes;
+    final normalizedKeyBytes = isDes
+        ? _desCompatibleKeyBytes(keyBytes)
+        : keyBytes;
     if (!isDes &&
         normalizedKeyBytes.length != 16 &&
         normalizedKeyBytes.length != 24 &&

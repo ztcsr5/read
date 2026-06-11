@@ -33,6 +33,87 @@ class ReaderItem {
   });
 }
 
+/// Converts HTML-like chapter content into paragraph-preserving plain text.
+String readerChapterContentToPlainText(String content) {
+  if (content.isEmpty) return content;
+  var text = content
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .replaceAll('\uFEFF', '')
+      .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '')
+      .replaceAll(
+        RegExp(
+          r'<\s*(script|style|noscript|iframe)\b[^>]*>.*?<\s*/\s*\1\s*>',
+          caseSensitive: false,
+          dotAll: true,
+        ),
+        '',
+      );
+
+  text = text
+      .replaceAll(RegExp(r'<\s*br\s*/?\s*>', caseSensitive: false), '\n')
+      .replaceAll(
+        RegExp(
+          r'<\s*/\s*(p|div|li|tr|h[1-6]|section|article|blockquote|pre|dd|dt)\s*>',
+          caseSensitive: false,
+        ),
+        '\n',
+      )
+      .replaceAll(
+        RegExp(
+          r'<\s*(p|div|li|tr|h[1-6]|section|article|blockquote|pre|dd|dt)\b[^>]*>',
+          caseSensitive: false,
+        ),
+        '\n',
+      )
+      .replaceAll(RegExp(r'<\s*/\s*(td|th)\s*>', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'<\s*hr\b[^>]*>', caseSensitive: false), '\n')
+      .replaceAll(
+        RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false),
+        '',
+      );
+
+  return _decodeReaderHtmlEntities(text);
+}
+
+String _decodeReaderHtmlEntities(String text) {
+  if (text.isEmpty || !text.contains('&')) return text;
+  var value = text
+      .replaceAll(RegExp(r'&nbsp;', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'&ensp;', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'&emsp;', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'&thinsp;', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'&lt;', caseSensitive: false), '<')
+      .replaceAll(RegExp(r'&gt;', caseSensitive: false), '>')
+      .replaceAll(RegExp(r'&amp;', caseSensitive: false), '&')
+      .replaceAll(RegExp(r'&quot;', caseSensitive: false), '"')
+      .replaceAll(RegExp(r'&apos;', caseSensitive: false), "'")
+      .replaceAll(RegExp(r'&#039;', caseSensitive: false), "'")
+      .replaceAll(RegExp(r'&ldquo;', caseSensitive: false), '\u201c')
+      .replaceAll(RegExp(r'&rdquo;', caseSensitive: false), '\u201d')
+      .replaceAll(RegExp(r'&lsquo;', caseSensitive: false), '\u2018')
+      .replaceAll(RegExp(r'&rsquo;', caseSensitive: false), '\u2019')
+      .replaceAll(RegExp(r'&hellip;', caseSensitive: false), '\u2026')
+      .replaceAll(RegExp(r'&mdash;', caseSensitive: false), '\u2014')
+      .replaceAll(RegExp(r'&ndash;', caseSensitive: false), '\u2013');
+
+  value = value.replaceAllMapped(RegExp(r'&#(\d+);'), (match) {
+    try {
+      return String.fromCharCode(int.parse(match.group(1)!));
+    } catch (_) {
+      return match.group(0)!;
+    }
+  });
+  value = value.replaceAllMapped(RegExp(r'&#[xX]([0-9a-fA-F]+);'), (match) {
+    try {
+      return String.fromCharCode(int.parse(match.group(1)!, radix: 16));
+    } catch (_) {
+      return match.group(0)!;
+    }
+  });
+  return value;
+}
+
 /// 阅读器状态
 class ReaderState {
   final Book? book;
@@ -1235,17 +1316,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
   }
 
   String _normalizeChapterContent(String content, String title) {
-    final lines = content
-        .replaceAll(
-          RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false),
-          '',
-        )
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .replaceAll('\uFEFF', '')
-        .split('\n')
-        .map((line) => line.trim())
-        .toList();
+    final lines = readerChapterContentToPlainText(
+      content,
+    ).split('\n').map((line) => line.trim()).toList();
 
     while (lines.isNotEmpty && lines.first.isEmpty) {
       lines.removeAt(0);
