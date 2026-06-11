@@ -328,7 +328,11 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                     ),
                   ),
                   Text(
-                    webState.permissionProbeSent ? '本地网络探测已发送' : '等待本地网络权限探测',
+                    webState.permissionProbeStatus == null
+                        ? (webState.permissionProbeSent
+                              ? '本地网络探测已发送'
+                              : '等待本地网络权限探测')
+                        : '网络探测：${webState.permissionProbeStatus}',
                     style: const TextStyle(
                       fontSize: 13,
                       color: CupertinoColors.systemGrey,

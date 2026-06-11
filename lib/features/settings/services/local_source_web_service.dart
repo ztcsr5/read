@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar/isar.dart';
 
@@ -28,6 +29,7 @@ class LocalSourceWebState {
   final String accessToken;
   final String? error;
   final bool permissionProbeSent;
+  final String? permissionProbeStatus;
 
   const LocalSourceWebState({
     required this.isRunning,
@@ -38,6 +40,7 @@ class LocalSourceWebState {
     this.port,
     this.error,
     this.permissionProbeSent = false,
+    this.permissionProbeStatus,
   });
 
   factory LocalSourceWebState.initial({String? accessToken}) {
@@ -56,6 +59,7 @@ class LocalSourceWebState {
     String? accessToken,
     String? error,
     bool? permissionProbeSent,
+    String? permissionProbeStatus,
   }) {
     return LocalSourceWebState(
       isRunning: isRunning ?? this.isRunning,
@@ -66,6 +70,8 @@ class LocalSourceWebState {
       accessToken: accessToken ?? this.accessToken,
       error: error,
       permissionProbeSent: permissionProbeSent ?? this.permissionProbeSent,
+      permissionProbeStatus:
+          permissionProbeStatus ?? this.permissionProbeStatus,
     );
   }
 }
@@ -117,12 +123,17 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         urls: urls,
         interfaceLabels: endpoints.map((endpoint) => endpoint.label).toList(),
         permissionProbeSent: false,
+        permissionProbeStatus: 'pending',
         error: null,
       );
       unawaited(
-        _triggerLocalNetworkPermissionProbe(server.port).then((sent) {
+        _triggerLocalNetworkPermissionProbe(server.port).then((probe) {
           if (mounted && identical(_server, server)) {
-            state = state.copyWith(permissionProbeSent: sent, error: null);
+            state = state.copyWith(
+              permissionProbeSent: probe.sent,
+              permissionProbeStatus: probe.status,
+              error: null,
+            );
           }
         }),
       );
@@ -206,6 +217,7 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         'urls': state.urls,
         'interfaces': state.interfaceLabels,
         'permissionProbeSent': state.permissionProbeSent,
+        'permissionProbeStatus': state.permissionProbeStatus,
         'sourceCount': sourceCount,
         'enabledSourceCount': enabledSourceCount,
       });
@@ -654,7 +666,21 @@ bool _isPrivateLanAddress(String address) {
   return false;
 }
 
-Future<bool> _triggerLocalNetworkPermissionProbe(int port) async {
+const _localNetworkChannel = MethodChannel('read/local_network');
+
+Future<({bool sent, String status})> _triggerLocalNetworkPermissionProbe(
+  int port,
+) async {
+  final nativeStatus = await _requestNativeLocalNetworkPermission();
+  if (nativeStatus == 'granted' ||
+      nativeStatus == 'not_required' ||
+      nativeStatus == 'timeout') {
+    return (sent: true, status: 'native:$nativeStatus');
+  }
+  if (nativeStatus == 'denied') {
+    return (sent: false, status: 'native:denied');
+  }
+
   RawDatagramSocket? socket;
   try {
     socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
@@ -663,11 +689,38 @@ Future<bool> _triggerLocalNetworkPermissionProbe(int port) async {
     socket.send(payload, InternetAddress('255.255.255.255'), port);
     socket.send(payload, InternetAddress('224.0.0.251'), 5353);
     await Future<void>.delayed(const Duration(milliseconds: 250));
-    return true;
-  } catch (_) {
-    return false;
+    return (
+      sent: true,
+      status: nativeStatus == null
+          ? 'udp:sent'
+          : 'native:$nativeStatus;udp:sent',
+    );
+  } catch (e) {
+    return (
+      sent: false,
+      status: nativeStatus == null
+          ? 'udp:failed:$e'
+          : 'native:$nativeStatus;udp:failed:$e',
+    );
   } finally {
     socket?.close();
+  }
+}
+
+Future<String?> _requestNativeLocalNetworkPermission() async {
+  if (!Platform.isIOS) return null;
+  try {
+    final status = await _localNetworkChannel.invokeMethod<String>(
+      'requestLocalNetworkAuthorization',
+      {'timeoutMs': 3000},
+    );
+    return status?.trim().isEmpty == true ? null : status?.trim();
+  } on MissingPluginException {
+    return null;
+  } on PlatformException catch (e) {
+    return 'failed:${e.code}';
+  } catch (e) {
+    return 'failed:$e';
   }
 }
 

@@ -42,6 +42,7 @@ void main() {
     final statusJson = jsonDecode(statusResponse.body) as Map<String, dynamic>;
     expect(statusJson['urls'], isA<List>());
     expect(statusJson['permissionProbeSent'], isA<bool>());
+    expect(statusJson['permissionProbeStatus'], isA<String>());
     expect(statusJson['sourceCount'], 1);
     expect(statusJson['enabledSourceCount'], 1);
     expect(

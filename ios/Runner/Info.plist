@@ -28,6 +28,7 @@
 	<array>
 		<string>_http._tcp</string>
 		<string>_read-source._tcp</string>
+		<string>_preflight_check._tcp</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
