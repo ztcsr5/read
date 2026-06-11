@@ -797,6 +797,20 @@ void main() {
       );
     });
 
+    test('supports cipher decode js post processor fallback', () {
+      final aes = LegadoRuleEvaluator.applyPostProcessors(
+        'ZM6V+N4TrIblhrpN+FfkYw==',
+        r'''@js:java.aesBase64DecodeToString(result, "1234567890123456", "AES/CBC/PKCS5Padding", "abcdefghijklmnop")''',
+      );
+      final des = LegadoRuleEvaluator.applyPostProcessors(
+        '0XUfPCehJ3Q=',
+        r'''@js:java.aesBase64DecodeToString(result, "6CB1E21E", "DES/CBC/PKCS5Padding", "1F0FB845")''',
+      );
+
+      expect(aes, 'hello');
+      expect(des, 'hello');
+    });
+
     test('supports legado text shorthand selector', () {
       final document = parse('''
         <div class="links">

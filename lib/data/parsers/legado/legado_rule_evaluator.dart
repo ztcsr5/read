@@ -2918,8 +2918,17 @@ class LegadoRuleEvaluator {
     ).firstMatch(rule);
     if (aesMatch != null) {
       final key = aesMatch.group(1) ?? '';
-      final iv = aesMatch.group(3) ?? '';
-      final decoded = _aesBase64Decode(output, key, iv);
+      final third = aesMatch.group(2) ?? '';
+      final fourth = aesMatch.group(3) ?? '';
+      final thirdIsTransformation =
+          third.contains('/') ||
+          RegExp(r'^(?:AES|DES|DESede|TripleDES)', caseSensitive: false)
+              .hasMatch(third);
+      final transformation = thirdIsTransformation
+          ? third
+          : (fourth.isEmpty ? 'AES/CBC/PKCS5Padding' : fourth);
+      final iv = thirdIsTransformation ? fourth : third;
+      final decoded = _cipherBase64Decode(output, key, iv, transformation);
       if (decoded.isNotEmpty) output = decoded;
     }
 
@@ -3198,36 +3207,69 @@ class LegadoRuleEvaluator {
         .replaceAll(r'\\', '\\');
   }
 
-  static String _aesBase64Decode(String value, String key, String iv) {
+  static String _cipherBase64Decode(
+    String value,
+    String key,
+    String iv,
+    String transformation,
+  ) {
     try {
-      final keyBytes = Uint8List.fromList(utf8.encode(key));
-      if (keyBytes.length != 16 &&
+      final upper = transformation.toUpperCase();
+      final isDes = upper.contains('DES');
+      final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
+      final engine = isDes ? DESedeEngine() : AESEngine();
+      final keyBytes = isDes
+          ? _desCompatibleKeyBytes(key)
+          : Uint8List.fromList(utf8.encode(key));
+      if (!isDes &&
+          keyBytes.length != 16 &&
           keyBytes.length != 24 &&
           keyBytes.length != 32) {
         return '';
       }
-      var ivBytes = Uint8List.fromList(utf8.encode(iv));
-      if (ivBytes.length != 16) {
-        ivBytes = Uint8List(16);
-      }
-
+      final keyParam = isDes
+          ? DESedeParameters(keyBytes)
+          : KeyParameter(keyBytes);
       final cipher = PaddedBlockCipherImpl(
         PKCS7Padding(),
-        CBCBlockCipher(AESEngine()),
+        mode == 'ecb' ? ECBBlockCipher(engine) : CBCBlockCipher(engine),
       );
-      cipher.init(
-        false,
-        PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>, Null>(
-          ParametersWithIV<KeyParameter>(KeyParameter(keyBytes), ivBytes),
-          null,
-        ),
-      );
+      if (mode == 'ecb') {
+        cipher.init(
+          false,
+          PaddedBlockCipherParameters<CipherParameters, Null>(keyParam, null),
+        );
+      } else {
+        var ivBytes = Uint8List.fromList(utf8.encode(iv));
+        if (ivBytes.length != engine.blockSize) {
+          ivBytes = Uint8List(engine.blockSize);
+        }
+        cipher.init(
+          false,
+          PaddedBlockCipherParameters<ParametersWithIV<CipherParameters>, Null>(
+            ParametersWithIV<CipherParameters>(keyParam, ivBytes),
+            null,
+          ),
+        );
+      }
       final input = base64Decode(value.trim());
       final output = cipher.process(Uint8List.fromList(input));
       return utf8.decode(output, allowMalformed: true).trim();
     } catch (_) {
       return '';
     }
+  }
+
+  static Uint8List _desCompatibleKeyBytes(String key) {
+    final raw = Uint8List.fromList(utf8.encode(key));
+    if (raw.length == 24) return raw;
+    if (raw.length == 16) {
+      return Uint8List.fromList([...raw, ...raw.sublist(0, 8)]);
+    }
+    if (raw.length == 8) {
+      return Uint8List.fromList([...raw, ...raw, ...raw]);
+    }
+    throw ArgumentError('Invalid DES key length');
   }
 
   static bool _isPureJsonPath(String rule) {
