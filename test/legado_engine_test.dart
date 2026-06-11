@@ -2418,6 +2418,33 @@ out.join(",");
       expect(des, 'hello');
     });
 
+    test('supports CryptoJS AES and DES decrypt shims', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final aes = LegadoJsEngine().evaluate(
+        r'''@js:
+var key = CryptoJS.enc.Utf8.parse("1234567890123456");
+var iv = CryptoJS.enc.Utf8.parse("abcdefghijklmnop");
+CryptoJS.AES.decrypt("ZM6V+N4TrIblhrpN+FfkYw==", key, {
+  iv: iv,
+  mode: CryptoJS.mode.CBC,
+  padding: CryptoJS.pad.Pkcs7
+}).toString(CryptoJS.enc.Utf8);
+''',
+      );
+      final des = LegadoJsEngine().evaluate(
+        r'''@js:
+CryptoJS.DES.decrypt("0XUfPCehJ3Q=", CryptoJS.enc.Utf8.parse("6CB1E21E"), {
+  iv: CryptoJS.enc.Utf8.parse("1F0FB845"),
+  mode: CryptoJS.mode.CBC,
+  padding: CryptoJS.pad.Pkcs7
+}).toString(CryptoJS.enc.Utf8);
+''',
+      );
+
+      expect(aes, 'hello');
+      expect(des, 'hello');
+    });
+
     test('supports cookie bridge backed by session store', () {
       if (!LegadoJsEngine().isAvailable) return;
       final uri = Uri.parse('https://cookie.example/path');

@@ -970,14 +970,112 @@ class LegadoJsEngine {
           return { toString: function() { return java.md5Encode(value); } };
         },
         enc: {
-          Utf8: { parse: function(value) { return String(value || ""); } },
-          Base64: {
-            stringify: function(value) { return java.base64Encode(value); },
-            parse: function(value) { return java.base64Decode(value); }
+          Utf8: {
+            parse: function(value) { return __cryptoWord(String(value || ""), "utf8"); },
+            stringify: function(value) { return __cryptoValueToString(value); }
           },
-          Hex: { parse: function(value) { return String(value || ""); } }
+          Base64: {
+            stringify: function(value) { return java.base64Encode(__cryptoValueToString(value)); },
+            parse: function(value) { return __cryptoWord(java.base64Decode(value), "base64"); }
+          },
+          Hex: {
+            parse: function(value) { return __cryptoWord(__hexToString(value), "hex"); },
+            stringify: function(value) { return __stringToHex(__cryptoValueToString(value)); }
+          },
+          Latin1: {
+            parse: function(value) { return __cryptoWord(String(value || ""), "latin1"); },
+            stringify: function(value) { return __cryptoValueToString(value); }
+          }
+        },
+        mode: {
+          CBC: "CBC",
+          ECB: "ECB"
+        },
+        pad: {
+          Pkcs7: "Pkcs7",
+          PKCS7: "Pkcs7",
+          ZeroPadding: "ZeroPadding",
+          NoPadding: "NoPadding"
         }
       };
+      CryptoJS.AES = __cryptoCipher("AES");
+      CryptoJS.DES = __cryptoCipher("DES");
+
+      function __cryptoWord(value, encoding) {
+        var text = String(value == null ? "" : value);
+        return {
+          __cryptoValue: text,
+          __cryptoEncoding: encoding || "utf8",
+          toString: function(encoder) {
+            if (encoder === CryptoJS.enc.Base64) return java.base64Encode(text);
+            if (encoder === CryptoJS.enc.Hex) return __stringToHex(text);
+            return text;
+          },
+          valueOf: function() { return text; }
+        };
+      }
+
+      function __cryptoValueToString(value) {
+        if (value == null) return "";
+        if (value.__cryptoValue != null) return String(value.__cryptoValue);
+        if (value.ciphertext != null) return __cryptoValueToString(value.ciphertext);
+        if (typeof value.toString === "function" && value.toString !== Object.prototype.toString) {
+          return String(value.toString());
+        }
+        return String(value);
+      }
+
+      function __cryptoModeName(options) {
+        if (!options || !options.mode) return "CBC";
+        var mode = String(options.mode);
+        if (mode.indexOf("ECB") >= 0 || mode.toLowerCase() === "ecb") return "ECB";
+        return "CBC";
+      }
+
+      function __cryptoPaddingName(options) {
+        if (!options || !options.padding) return "PKCS5Padding";
+        var padding = String(options.padding);
+        if (padding.toLowerCase().indexOf("zero") >= 0) return "ZeroPadding";
+        if (padding.toLowerCase().indexOf("no") >= 0) return "NoPadding";
+        return "PKCS5Padding";
+      }
+
+      function __cryptoCipher(algorithm) {
+        return {
+          decrypt: function(cipherText, key, options) {
+            options = options || {};
+            var input = __cryptoValueToString(cipherText);
+            var keyText = __cryptoValueToString(key);
+            var ivText = options.iv == null ? "" : __cryptoValueToString(options.iv);
+            var transformation = algorithm + "/" + __cryptoModeName(options) + "/" + __cryptoPaddingName(options);
+            var decoded = java.aesBase64DecodeToString(input, keyText, transformation, ivText);
+            return __cryptoWord(decoded, "utf8");
+          },
+          encrypt: function(plainText, key, options) {
+            return __cryptoWord("", "base64");
+          }
+        };
+      }
+
+      function __hexToString(value) {
+        var hex = String(value || "").replace(/\s+/g, "");
+        var out = "";
+        for (var i = 0; i + 1 < hex.length; i += 2) {
+          var byte = parseInt(hex.substr(i, 2), 16);
+          if (!isNaN(byte)) out += String.fromCharCode(byte);
+        }
+        return out;
+      }
+
+      function __stringToHex(value) {
+        var text = String(value || "");
+        var out = "";
+        for (var i = 0; i < text.length; i++) {
+          var h = (text.charCodeAt(i) & 0xff).toString(16);
+          out += h.length === 1 ? "0" + h : h;
+        }
+        return out;
+      }
 
       var org = {
         jsoup: {
