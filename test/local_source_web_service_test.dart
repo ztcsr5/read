@@ -15,7 +15,8 @@ void main() {
       ..bookSourceType = 0
       ..enabled = true
       ..weight = 1
-      ..searchUrl = '/search?q={{key}}';
+      ..searchUrl = '/search?q={{key}}'
+      ..ruleSearch = jsonEncode({'bookList': '.item', 'name': 'a@text'});
     final sourceId = await repo.saveBookSource(source);
 
     final service = LocalSourceWebService(repo);
@@ -57,7 +58,9 @@ void main() {
     expect(listJson['ok'], true);
     expect(listJson['total'], 1);
     expect(listJson['filteredTotal'], 1);
-    expect((listJson['data'] as List).single['bookSourceName'], 'Web Source');
+    final fullSource = (listJson['data'] as List).single as Map;
+    expect(fullSource['bookSourceName'], 'Web Source');
+    expect(fullSource['ruleSearch'], isA<Map>());
 
     final summaryResponse = await http.get(
       Uri.parse('$base/api/sources?summary=1&limit=1&q=web'),
@@ -70,6 +73,12 @@ void main() {
         (summaryJson['data'] as List).single as Map<String, dynamic>;
     expect(summary['bookSourceName'], 'Web Source');
     expect(summary['ruleSearch'], isNull);
+
+    final htmlResponse = await http.get(Uri.parse('$base/?token=$token'));
+    expect(htmlResponse.statusCode, 200);
+    expect(htmlResponse.body, contains('exportAllSources()'));
+    expect(htmlResponse.body, contains('downloadCurrentJson()'));
+    expect(htmlResponse.body, contains('loadImportFile(event)'));
 
     final updated = source.toJson()
       ..['id'] = sourceId

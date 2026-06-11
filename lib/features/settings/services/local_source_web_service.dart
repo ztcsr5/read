@@ -797,6 +797,7 @@ String _editorHtml(String token) {
       <button class="soft" onclick="templateSource()">标准源模板</button>
       <button onclick="newSource()">新建书源</button>
       <button class="secondary" onclick="showImport()">导入 JSON</button>
+      <button class="secondary" onclick="exportAllSources()">导出全部</button>
     </div>
   </header>
 
@@ -833,6 +834,7 @@ String _editorHtml(String token) {
             </div>
             <div class="toolbar">
               <button class="secondary" onclick="copyCurrentJson()">复制 JSON</button>
+              <button class="secondary" onclick="downloadCurrentJson()">下载当前</button>
               <button class="secondary" onclick="testSource()">测试书源</button>
               <button onclick="saveSource()">保存</button>
               <button class="danger" onclick="deleteSource()">删除</button>
@@ -853,8 +855,10 @@ String _editorHtml(String token) {
     </div>
     <div class="dialog-body">
       <textarea id="importText" class="raw" placeholder="粘贴 JSON 数组或单个书源 JSON"></textarea>
-      <p class="hint">网页端适合修源和小批量导入；超大 JSON 文件仍建议在 App 里选择本地文件导入。</p>
+      <input id="importFile" type="file" accept=".json,application/json,text/plain" style="display:none" onchange="loadImportFile(event)">
+      <p class="hint">支持粘贴 JSON，也可以从电脑选择 JSON 文件导入。导出全部可把 iOS App 内书源下载到 PC 备份或共享。</p>
       <div class="toolbar" style="justify-content:flex-end">
+        <button class="secondary" onclick="document.getElementById('importFile').click()">选择文件</button>
         <button class="secondary" onclick="document.getElementById('importDialog').close()">取消</button>
         <button onclick="importJson(event)">导入</button>
       </div>
@@ -1047,6 +1051,45 @@ async function copyCurrentJson() {
   if (tab === "raw") current = JSON.parse(document.getElementById("rawJson").value);
   await navigator.clipboard.writeText(JSON.stringify(current, null, 2));
   toast("JSON 已复制");
+}
+async function downloadCurrentJson() {
+  if (!current) return;
+  if (tab === "raw") current = JSON.parse(document.getElementById("rawJson").value);
+  downloadJson(`${safeFileName(current.bookSourceName || "book-source")}.json`, current);
+  toast("当前书源已下载");
+}
+async function exportAllSources() {
+  try {
+    toast("正在导出全部书源...");
+    const res = await api("/api/sources");
+    const date = new Date().toISOString().slice(0, 10);
+    downloadJson(`read-book-sources-${date}.json`, res.data || []);
+    toast(`已导出 ${res.total ?? (res.data || []).length} 个书源`);
+  } catch(e) { toast("导出失败：" + e.message, true); }
+}
+async function loadImportFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    document.getElementById("importText").value = text;
+    toast(`已载入文件：${file.name}`);
+  } catch(e) { toast("读取文件失败：" + e.message, true); }
+  event.target.value = "";
+}
+function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function safeFileName(name) {
+  return String(name || "book-source").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 80);
 }
 function getPath(obj, path) { return path.split(".").reduce((o,k)=>o && o[k], obj); }
 function setPath(obj, path, value) {

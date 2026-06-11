@@ -799,7 +799,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   ...page.entries.map((entry) {
                     return RepaintBoundary(
                       key: _itemKeys.putIfAbsent(
-                        entry.itemIndex,
+                        entry.keyIndex,
                         () => GlobalKey(),
                       ),
                       child: _buildReaderItemView(
@@ -942,20 +942,29 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     var usedHeight = 0.0;
 
     for (var i = 0; i < state.items.length; i++) {
-      final item = state.items[i];
-      if (item.isTitle && current.isNotEmpty) {
-        pages.add(_ReaderPageData(List.unmodifiable(current)));
-        current = <_ReaderPageEntry>[];
-        usedHeight = 0;
+      final entries = _pageEntriesForItem(
+        i,
+        state.items[i],
+        state,
+        width,
+        maxHeight,
+      );
+      for (final entry in entries) {
+        final item = entry.item;
+        if (item.isTitle && current.isNotEmpty) {
+          pages.add(_ReaderPageData(List.unmodifiable(current)));
+          current = <_ReaderPageEntry>[];
+          usedHeight = 0;
+        }
+        final itemHeight = _estimateItemHeight(item, state, width);
+        if (current.isNotEmpty && usedHeight + itemHeight > maxHeight) {
+          pages.add(_ReaderPageData(List.unmodifiable(current)));
+          current = <_ReaderPageEntry>[];
+          usedHeight = 0;
+        }
+        current.add(entry);
+        usedHeight += itemHeight;
       }
-      final itemHeight = _estimateItemHeight(item, state, width);
-      if (current.isNotEmpty && usedHeight + itemHeight > maxHeight) {
-        pages.add(_ReaderPageData(List.unmodifiable(current)));
-        current = <_ReaderPageEntry>[];
-        usedHeight = 0;
-      }
-      current.add(_ReaderPageEntry(i, item));
-      usedHeight += itemHeight;
     }
     if (current.isNotEmpty) {
       pages.add(_ReaderPageData(List.unmodifiable(current)));
@@ -964,6 +973,136 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     _pageCacheKey = key;
     _pageCache = immutable;
     return immutable;
+  }
+
+  List<_ReaderPageEntry> _pageEntriesForItem(
+    int itemIndex,
+    ReaderItem item,
+    ReaderState state,
+    double width,
+    double maxHeight,
+  ) {
+    if (item.isTitle || item.isDivider) {
+      return [_ReaderPageEntry(itemIndex, item)];
+    }
+    if (_estimateItemHeight(item, state, width) <= maxHeight) {
+      return [_ReaderPageEntry(itemIndex, item)];
+    }
+
+    final chunks = _splitReaderItemForPage(item, state, width, maxHeight);
+    if (chunks.length <= 1) {
+      return [_ReaderPageEntry(itemIndex, item)];
+    }
+
+    final baseKey = state.items.length + itemIndex * 1000 + 1;
+    return [
+      for (var i = 0; i < chunks.length; i++)
+        _ReaderPageEntry(
+          itemIndex,
+          ReaderItem(
+            chapterIndex: item.chapterIndex,
+            chapter: item.chapter,
+            paragraphIndex: item.paragraphIndex,
+            charOffset: item.charOffset + chunks[i].offset,
+            text: chunks[i].text,
+          ),
+          keyIndex: baseKey + i,
+        ),
+    ];
+  }
+
+  List<({String text, int offset})> _splitReaderItemForPage(
+    ReaderItem item,
+    ReaderState state,
+    double width,
+    double maxHeight,
+  ) {
+    final value = item.text.trim();
+    if (value.isEmpty) return [(text: item.text, offset: 0)];
+
+    final chunks = <({String text, int offset})>[];
+    var start = 0;
+    while (start < value.length) {
+      final paragraphTop = chunks.isEmpty && item.paragraphIndex == 0
+          ? 2.0
+          : 0.0;
+      final availableTextHeight =
+          (maxHeight - paragraphTop - state.paragraphSpacing - 8)
+              .clamp(state.fontSize * state.lineHeight, maxHeight)
+              .toDouble();
+
+      var low = start + 1;
+      var high = value.length;
+      var best = low;
+      while (low <= high) {
+        final mid = low + ((high - low) >> 1);
+        final candidate = value.substring(start, mid);
+        final height = _measureReaderTextHeight(candidate, state, width);
+        if (height <= availableTextHeight) {
+          best = mid;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+
+      var end = best.clamp(start + 1, value.length).toInt();
+      if (end < value.length) {
+        final minBreak = start + ((end - start) * 0.62).round();
+        for (var i = end; i > minBreak; i--) {
+          if (_isReaderPageBreak(value.codeUnitAt(i - 1))) {
+            end = i;
+            break;
+          }
+        }
+      }
+
+      final chunk = value.substring(start, end).trim();
+      if (chunk.isNotEmpty) {
+        chunks.add((text: chunk, offset: start));
+      }
+      start = end;
+      while (start < value.length &&
+          (value.codeUnitAt(start) == 0x20 ||
+              value.codeUnitAt(start) == 0x3000)) {
+        start++;
+      }
+    }
+
+    return chunks.isEmpty ? [(text: value, offset: 0)] : chunks;
+  }
+
+  double _measureReaderTextHeight(
+    String text,
+    ReaderState state,
+    double width,
+  ) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: _formatDisplayText(text, state.paragraphIndent),
+        style: _readerTextStyle(
+          state,
+          state.resolvedTextColor,
+          fontWeightIndex: state.fontWeightIndex,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: state.isJustify ? TextAlign.justify : TextAlign.left,
+    )..layout(maxWidth: width);
+    return painter.height;
+  }
+
+  bool _isReaderPageBreak(int unit) {
+    return unit == 0x3002 || // 。
+        unit == 0xff01 || // ！
+        unit == 0xff1f || // ？
+        unit == 0xff1b || // ；
+        unit == 0x003b || // ;
+        unit == 0x002e || // .
+        unit == 0x0021 || // !
+        unit == 0x003f || // ?
+        unit == 0x3000 || // full-width space
+        unit == 0x0020; // space
   }
 
   String _pageLayoutCacheKey(ReaderState state, Size size) {
@@ -2118,9 +2257,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 /// Apple 风格弹性滑动物理 — 120Hz 优化
 class _ReaderPageEntry {
   final int itemIndex;
+  final int keyIndex;
   final ReaderItem item;
 
-  const _ReaderPageEntry(this.itemIndex, this.item);
+  const _ReaderPageEntry(this.itemIndex, this.item, {int? keyIndex})
+    : keyIndex = keyIndex ?? itemIndex;
 }
 
 class _ReaderPageData {
