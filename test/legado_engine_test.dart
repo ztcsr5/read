@@ -2372,6 +2372,47 @@ body=urlEncode(params)
       expect(detail.filePath, 'https://example.com/book/1/catalog');
     });
 
+    test('follows toc url templates with book context', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requested = <String>[];
+      server.listen((request) async {
+        requested.add(request.uri.path);
+        request.response.headers.contentType = ContentType.html;
+        if (request.uri.path == '/book/1/catalog') {
+          request.response.write('<a href="/c1">Chapter One</a>');
+        } else {
+          request.response.write('<html><body>detail</body></html>');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Book Context Toc Source'
+        ..bookSourceUrl = base
+        ..ruleToc = jsonEncode({
+          'tocUrl': '{{book.bookUrl}}/catalog',
+          'chapterList': 'a',
+          'chapterName': 'text',
+          'chapterUrl': 'href',
+        });
+      final book = Book(
+        title: 'Demo Book',
+        author: '',
+        filePath: '$base/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+
+      final chapters = await LegadoParser.getChapterList(source, book);
+
+      expect(requested, ['/book/1', '/book/1/catalog']);
+      expect(chapters, hasLength(1));
+      expect(chapters.first.title, 'Chapter One');
+      expect(chapters.first.url, '$base/c1');
+    });
+
     test(
       'loads all content pages when nextContentUrl returns multiple urls',
       () async {
@@ -2478,6 +2519,55 @@ body=urlEncode(params)
       expect(content, contains('Tail'));
       expect(content, isNot(contains('Demo Book')));
       expect(requested, ['/c1', '/c1?page=2']);
+    });
+
+    test('follows content url templates with chapter context', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requested = <String>[];
+      server.listen((request) async {
+        requested.add(request.uri.path);
+        request.response.headers.contentType = ContentType.html;
+        if (request.uri.path == '/c1/real') {
+          request.response.write('<div id="content">Resolved Body</div>');
+        } else {
+          request.response.write('<html><body>stub</body></html>');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Chapter Context Content Url Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({
+          'contentUrl': '{{chapter.url}}/real',
+          'content': '#content@text',
+        });
+      final book = Book(
+        title: 'Demo Book',
+        author: '',
+        filePath: '$base/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final chapter = Chapter(
+        bookId: 1,
+        title: 'Chapter 1',
+        index: 0,
+        url: '$base/c1',
+        content: '$base/c1',
+      );
+
+      final content = await LegadoParser.getChapterContent(
+        source,
+        chapter.url!,
+        book: book,
+        chapter: chapter,
+      );
+
+      expect(requested, ['/c1', '/c1/real']);
+      expect(content, 'Resolved Body');
     });
 
     test('exposes chapter title to multiline content js postprocessor', () async {

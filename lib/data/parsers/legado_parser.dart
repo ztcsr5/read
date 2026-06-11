@@ -833,6 +833,7 @@ class LegadoParser {
             data,
             initRule,
             baseUrl: response.realUri.toString(),
+            book: book,
           );
     if (preparedInit != null) {
       data = preparedInit.data;
@@ -933,6 +934,7 @@ class LegadoParser {
       book.filePath,
       currentResponse,
       rule,
+      book: book,
     );
     currentResponse = await _retryShortenedDuplicatePathIfMissing(
       source,
@@ -980,6 +982,7 @@ class LegadoParser {
         data,
         listRule,
         baseUrl: currentUrlStr,
+        book: book,
       );
       final pageData = prepared.data;
       final pageListRule = prepared.rule;
@@ -1409,6 +1412,8 @@ class LegadoParser {
             currentUrl,
             response,
             rule,
+            book: book,
+            chapter: chapter,
           );
 
           var rawData = response.data.toString();
@@ -2579,8 +2584,9 @@ class LegadoParser {
     BookSource source,
     String baseUrl,
     Response<dynamic> response,
-    Map<String, dynamic> rule,
-  ) async {
+    Map<String, dynamic> rule, {
+    Book? book,
+  }) async {
     final tocUrlRule = _firstRule(rule, const [
       'tocUrl',
       'catalogUrl',
@@ -2590,13 +2596,27 @@ class LegadoParser {
     if (tocUrlRule == null) return response;
     final data = response.data;
     String tocUrl = '';
-    if (_looksLikeJsonData(data, tocUrlRule) && _isJsonRule(tocUrlRule)) {
+    final scopedRule = _sourceScopedRule(
+      tocUrlRule,
+      source,
+      book: book,
+      contextBaseUrl: baseUrl,
+    );
+    final variables = _jsVariables(
+      source,
+      result: data is String ? data : jsonEncode(data),
+      baseUrl: baseUrl,
+      book: book,
+    );
+    if (_looksLikeJsonData(data, scopedRule) && _isJsonRule(scopedRule)) {
       final jsonData = data is String ? jsonDecode(data) : data;
-      tocUrl = _extractJsonValue(jsonData, tocUrlRule);
+      tocUrl = _extractJsonValue(jsonData, scopedRule, variables: variables);
     } else {
       final document = parse(data.toString());
       final root = document.documentElement ?? document.body;
-      if (root != null) tocUrl = _extractHtmlValue(root, tocUrlRule);
+      if (root != null) {
+        tocUrl = _extractHtmlValue(root, scopedRule, variables: variables);
+      }
     }
     if (tocUrl.trim().isEmpty) return response;
     return _request(source, _resolveUrl(baseUrl, tocUrl));
@@ -2606,8 +2626,10 @@ class LegadoParser {
     BookSource source,
     String baseUrl,
     Response<dynamic> response,
-    Map<String, dynamic> rule,
-  ) async {
+    Map<String, dynamic> rule, {
+    Book? book,
+    Chapter? chapter,
+  }) async {
     final contentUrlRule = _firstRule(rule, const [
       'contentUrl',
       'realContentUrl',
@@ -2615,14 +2637,33 @@ class LegadoParser {
     if (contentUrlRule == null) return response;
     final data = response.data;
     String contentUrl = '';
-    if (_looksLikeJsonData(data, contentUrlRule) &&
-        _isJsonRule(contentUrlRule)) {
+    final scopedRule = _sourceScopedRule(
+      contentUrlRule,
+      source,
+      book: book,
+      chapter: chapter,
+      contextBaseUrl: baseUrl,
+    );
+    final variables = _jsVariables(
+      source,
+      result: data is String ? data : jsonEncode(data),
+      baseUrl: baseUrl,
+      book: book,
+      chapter: chapter,
+    );
+    if (_looksLikeJsonData(data, scopedRule) && _isJsonRule(scopedRule)) {
       final jsonData = data is String ? jsonDecode(data) : data;
-      contentUrl = _extractJsonValue(jsonData, contentUrlRule);
+      contentUrl = _extractJsonValue(
+        jsonData,
+        scopedRule,
+        variables: variables,
+      );
     } else {
       final document = parse(data.toString());
       final root = document.documentElement ?? document.body;
-      if (root != null) contentUrl = _extractHtmlValue(root, contentUrlRule);
+      if (root != null) {
+        contentUrl = _extractHtmlValue(root, scopedRule, variables: variables);
+      }
     }
     if (contentUrl.trim().isEmpty) return response;
     return _request(source, _resolveUrl(baseUrl, contentUrl));
