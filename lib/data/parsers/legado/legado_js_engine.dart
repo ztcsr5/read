@@ -7,7 +7,7 @@ import 'package:fast_gbk/fast_gbk.dart';
 import 'package:pointycastle/export.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
-import 'package:html/parser.dart' show parse;
+import 'package:html/parser.dart' show parse, parseFragment;
 
 import 'legado_session_store.dart';
 
@@ -73,6 +73,66 @@ class LegadoJsEngine {
           print('Jsoup select failed: $e');
         }
         return '[]';
+      });
+
+      _runtime!.onMessage('jsoup_html', (dynamic args) {
+        try {
+          final doc = _jsoupDocuments[args.toString()];
+          return doc?.documentElement?.outerHtml ?? doc?.outerHtml ?? '';
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('jsoup_text', (dynamic args) {
+        try {
+          final doc = _jsoupDocuments[args.toString()];
+          return doc?.documentElement?.text.trim() ??
+              doc?.body?.text.trim() ??
+              '';
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('jsoup_remove', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final id = data['id'].toString();
+          final selector = data['selector'].toString();
+          final doc = _jsoupDocuments[id];
+          if (doc == null || selector.isEmpty) return false;
+          for (final element in doc.querySelectorAll(selector).toList()) {
+            element.remove();
+          }
+          return true;
+        } catch (e) {
+          print('Jsoup remove failed: $e');
+          return false;
+        }
+      });
+
+      _runtime!.onMessage('jsoup_before', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final id = data['id'].toString();
+          final selector = data['selector'].toString();
+          final html = data['html']?.toString() ?? '';
+          final doc = _jsoupDocuments[id];
+          if (doc == null || selector.isEmpty || html.isEmpty) return false;
+          for (final element in doc.querySelectorAll(selector).toList()) {
+            final parent = element.parentNode;
+            if (parent == null) continue;
+            final fragment = parseFragment(html);
+            for (final node in fragment.nodes.toList()) {
+              parent.insertBefore(node, element);
+            }
+          }
+          return true;
+        } catch (e) {
+          print('Jsoup before failed: $e');
+          return false;
+        }
       });
 
       _runtime!.onMessage('java_put', (dynamic args) {
@@ -368,6 +428,10 @@ class LegadoJsEngine {
           attr: function(name) {
             return node.attr ? String(node.attr[String(name)] || "") : "";
           },
+          hasClass: function(name) {
+            var cls = node.attr ? String(node.attr["class"] || "") : "";
+            return cls.split(/\s+/).indexOf(String(name || "")) >= 0;
+          },
           select: function(selector) {
             return __selectFromHtml(String(node.html || ""), selector);
           },
@@ -376,7 +440,48 @@ class LegadoJsEngine {
         };
       }
 
-      function __wrapJsoupNodes(nodes) {
+      function __combineSelectors(parentSelector, childSelector) {
+        var parent = String(parentSelector || "").trim();
+        var child = String(childSelector || "").trim();
+        if (!parent) return child;
+        if (!child) return parent;
+        if (child.charAt(0) === ">") return parent + child;
+        return parent + " " + child;
+      }
+
+      function __wrapJsoupDocument(docId) {
+        return {
+          select: function(selector) {
+            return __selectFromDoc(docId, selector);
+          },
+          html: function() {
+            return String(sendMessage("jsoup_html", String(docId || "")) || "");
+          },
+          outerHtml: function() {
+            return String(sendMessage("jsoup_html", String(docId || "")) || "");
+          },
+          text: function() {
+            return String(sendMessage("jsoup_text", String(docId || "")) || "");
+          },
+          toString: function() {
+            return String(sendMessage("jsoup_html", String(docId || "")) || "");
+          }
+        };
+      }
+
+      function __selectFromDoc(docId, selector) {
+        var rawResult = sendMessage("jsoup_select", JSON.stringify({
+          id: String(docId || ""),
+          selector: String(selector || "")
+        }));
+        var selected = [];
+        try {
+          selected = JSON.parse(rawResult);
+        } catch(e) {}
+        return __wrapJsoupNodes(selected, docId, String(selector || ""));
+      }
+
+      function __wrapJsoupNodes(nodes, docId, selector) {
         nodes = Array.isArray(nodes) ? nodes : [];
         var wrapper = nodes.map(function(node) { return __wrapJsoupElement(node); });
         function define(name, value) {
@@ -386,28 +491,63 @@ class LegadoJsEngine {
             configurable: true
           });
         }
-        define("text", function() { return nodes.map(function(n) { return n.text || ""; }).join("\n"); });
-        define("html", function() { return nodes.map(function(n) { return n.html || ""; }).join("\n"); });
+        function currentNodes() {
+          if (docId && selector) {
+            var raw = sendMessage("jsoup_select", JSON.stringify({
+              id: String(docId || ""),
+              selector: String(selector || "")
+            }));
+            try {
+              var parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) return parsed;
+            } catch(e) {}
+          }
+          return nodes;
+        }
+        define("text", function() { return currentNodes().map(function(n) { return n.text || ""; }).join("\n"); });
+        define("html", function() { return currentNodes().map(function(n) { return n.html || ""; }).join("\n"); });
         define("outerHtml", function() { return wrapper.html(); });
         define("attr", function(name) {
-          return nodes.length > 0 && nodes[0].attr ? String(nodes[0].attr[String(name)] || "") : "";
+          var list = currentNodes();
+          return list.length > 0 && list[0].attr ? String(list[0].attr[String(name)] || "") : "";
         });
-        define("first", function() { return nodes.length ? __wrapJsoupElement(nodes[0]) : __wrapJsoupElement({}); });
+        define("hasClass", function(name) {
+          var list = currentNodes();
+          if (!list.length || !list[0].attr) return false;
+          return String(list[0].attr["class"] || "").split(/\s+/).indexOf(String(name || "")) >= 0;
+        });
+        define("first", function() {
+          var list = currentNodes();
+          return list.length ? __wrapJsoupElement(list[0]) : __wrapJsoupElement({});
+        });
+        define("last", function() {
+          var list = currentNodes();
+          return list.length ? __wrapJsoupElement(list[list.length - 1]) : __wrapJsoupElement({});
+        });
         define("get", function(index) {
           index = Number(index || 0);
-          return index >= 0 && index < nodes.length ? __wrapJsoupElement(nodes[index]) : __wrapJsoupElement({});
+          var list = currentNodes();
+          return index >= 0 && index < list.length ? __wrapJsoupElement(list[index]) : __wrapJsoupElement({});
         });
         define("eq", function(index) {
           index = Number(index || 0);
-          return __wrapJsoupNodes(index >= 0 && index < nodes.length ? [nodes[index]] : []);
+          var list = currentNodes();
+          return __wrapJsoupNodes(index >= 0 && index < list.length ? [list[index]] : []);
         });
-        define("size", function() { return nodes.length; });
-        define("isEmpty", function() { return nodes.length === 0; });
+        define("size", function() { return currentNodes().length; });
+        define("isEmpty", function() { return currentNodes().length === 0; });
         define("select", function(selector) {
+          if (docId && selector) {
+            return __selectFromDoc(
+              docId,
+              __combineSelectors(wrapper.selector || "", selector)
+            );
+          }
           var merged = [];
-          for (var i = 0; i < nodes.length; i++) {
-            var docId = sendMessage("jsoup_parse", String(nodes[i].html || ""));
-            var raw = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
+          var list = currentNodes();
+          for (var i = 0; i < list.length; i++) {
+            var childDocId = sendMessage("jsoup_parse", String(list[i].html || ""));
+            var raw = sendMessage("jsoup_select", JSON.stringify({id: childDocId, selector: String(selector || "")}));
             try {
               var parsed = JSON.parse(raw);
               if (Array.isArray(parsed)) merged = merged.concat(parsed);
@@ -415,9 +555,29 @@ class LegadoJsEngine {
           }
           return __wrapJsoupNodes(merged);
         });
-        define("toArray", function() { return wrapper.slice(); });
+        define("remove", function() {
+          if (docId && selector) {
+            sendMessage("jsoup_remove", JSON.stringify({
+              id: String(docId || ""),
+              selector: String(selector || "")
+            }));
+          }
+          return wrapper;
+        });
+        define("before", function(html) {
+          if (docId && selector) {
+            sendMessage("jsoup_before", JSON.stringify({
+              id: String(docId || ""),
+              selector: String(selector || ""),
+              html: String(html || "")
+            }));
+          }
+          return wrapper;
+        });
+        define("toArray", function() { return currentNodes().map(function(node) { return __wrapJsoupElement(node); }); });
         define("toJSON", function() { return wrapper.html(); });
         define("toString", function() { return wrapper.html(); });
+        define("selector", String(selector || ""));
         return wrapper;
       }
 
@@ -584,12 +744,13 @@ class LegadoJsEngine {
 
       function __selectFromHtml(html, selector) {
         var docId = sendMessage("jsoup_parse", String(html || ""));
-        var rawResult = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
+        var selectorText = String(selector || "");
+        var rawResult = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: selectorText}));
         var nodes = [];
         try {
           nodes = JSON.parse(rawResult);
         } catch(e) {}
-        return __wrapJsoupNodes(nodes);
+        return __wrapJsoupNodes(nodes, docId, selectorText);
       }
 
       function __looksLikeHtmlInput(value) {
@@ -1389,12 +1550,7 @@ class LegadoJsEngine {
           Jsoup: {
             parse: function(html) {
               var docId = sendMessage("jsoup_parse", String(html || ""));
-              var mockDoc = {
-                select: function(selector) {
-                  return __selectFromHtml(html, selector);
-                }
-              };
-              return mockDoc;
+              return __wrapJsoupDocument(docId);
             },
             connect: function(urlStr) {
               return __jsoupConnect(urlStr);

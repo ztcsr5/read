@@ -2534,6 +2534,37 @@ out.join(",");
       expect(forIn, '/b1,/b2');
     });
 
+    test('supports jsoup dom mutation helpers in js bridge', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final cleaned = LegadoJsEngine().evaluate(
+        r'''@js:
+var doc = org.jsoup.Jsoup.parse(result).select(".novelText");
+doc.select("[style]").remove();
+doc.html();
+''',
+        variables: {
+          'result':
+              '<div class="novelText"><p>A</p><p style="display:none">ADS</p><p>B</p></div>',
+        },
+      );
+      final inserted = LegadoJsEngine().evaluate(
+        r'''@js:
+var doc = org.jsoup.Jsoup.parse('<ul><li id="x">X</li></ul>');
+doc.select("#x").before("<li>A</li>").remove();
+doc.select("li").text();
+''',
+      );
+      final hasClass = LegadoJsEngine().evaluate(
+        r'''@js:org.jsoup.Jsoup.parse('<a class="vip lock">C</a>').select("a").hasClass("vip")''',
+      );
+
+      expect(cleaned, contains('A'));
+      expect(cleaned, contains('B'));
+      expect(cleaned, isNot(contains('ADS')));
+      expect(inserted, 'A');
+      expect(hasClass, 'true');
+    });
+
     test('supports java android compatibility shims in js bridge', () async {
       if (!LegadoJsEngine().isAvailable) return;
 
