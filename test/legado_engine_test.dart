@@ -2557,12 +2557,44 @@ doc.select("li").text();
       final hasClass = LegadoJsEngine().evaluate(
         r'''@js:org.jsoup.Jsoup.parse('<a class="vip lock">C</a>').select("a").hasClass("vip")''',
       );
+      final imported = LegadoJsEngine().evaluate(
+        r'''@js:
+importClass(org.jsoup.Jsoup);
+var doc = Jsoup.parse('<body><p class="non">卷一</p><p>A</p><p>B</p></body>');
+doc.select("p").eachText().join("|") + "::" + doc.body().text();
+''',
+      );
+      final children = LegadoJsEngine().evaluate(
+        r'''@js:
+var el = org.jsoup.Jsoup.parse('<div><span>A</span><b>B</b></div>').select("div");
+el.child(1).text() + "::" + el.children().size();
+''',
+      );
+      final htmlParts = LegadoJsEngine().evaluate(
+        r'''@js:
+var el = org.jsoup.Jsoup.parse('<div><span>A</span></div>').select("div");
+el.html() + "::" + String(el);
+''',
+      );
+      final list = LegadoJsEngine().evaluate(
+        r'''@js:
+var list = new Packages.util.ArrayList();
+list.add("A");
+list.add("B");
+list.join(",");
+''',
+      );
 
       expect(cleaned, contains('A'));
       expect(cleaned, contains('B'));
       expect(cleaned, isNot(contains('ADS')));
       expect(inserted, 'A');
       expect(hasClass, 'true');
+      expect(imported, startsWith('卷一|A|B::'));
+      expect(imported, contains('卷一'));
+      expect(children, 'B::2');
+      expect(htmlParts, '<span>A</span>::<div><span>A</span></div>');
+      expect(list, 'A,B');
     });
 
     test('supports java android compatibility shims in js bridge', () async {

@@ -58,21 +58,27 @@ class LegadoJsEngine {
           final doc = _jsoupDocuments[id];
           if (doc != null) {
             final elements = doc.querySelectorAll(selector);
-            final resultList = elements
-                .map(
-                  (el) => {
-                    'text': el.text.trim(),
-                    'html': el.outerHtml,
-                    'attr': el.attributes,
-                  },
-                )
-                .toList();
+            final resultList = elements.map(_serializeJsoupElement).toList();
             return jsonEncode(resultList);
           }
         } catch (e) {
           print('Jsoup select failed: $e');
         }
         return '[]';
+      });
+
+      _runtime!.onMessage('jsoup_children_html', (dynamic args) {
+        try {
+          final fragment = parseFragment(args?.toString() ?? '');
+          final resultList = fragment.nodes
+              .whereType<Element>()
+              .map(_serializeJsoupElement)
+              .toList();
+          return jsonEncode(resultList);
+        } catch (e) {
+          print('Jsoup children failed: $e');
+          return '[]';
+        }
       });
 
       _runtime!.onMessage('jsoup_html', (dynamic args) {
@@ -337,6 +343,25 @@ class LegadoJsEngine {
 
   bool get isAvailable => _runtime != null;
 
+  String _ownText(Element element) {
+    final parts = <String>[];
+    for (final node in element.nodes) {
+      if (node is Text) {
+        final text = node.data.trim();
+        if (text.isNotEmpty) parts.add(text);
+      }
+    }
+    return parts.join(' ');
+  }
+
+  Map<String, dynamic> _serializeJsoupElement(Element element) => {
+        'text': element.text.trim(),
+        'ownText': _ownText(element),
+        'html': element.innerHtml,
+        'outerHtml': element.outerHtml,
+        'attr': element.attributes,
+      };
+
   String getStoredString(String key) {
     final value = _javaStorage[key];
     return value == null ? '' : value.toString();
@@ -421,22 +446,38 @@ class LegadoJsEngine {
 
       function __wrapJsoupElement(node) {
         node = node || {};
+        function elementHtml() {
+          return String(node.html != null ? node.html : (node.outerHtml || ""));
+        }
+        function elementOuterHtml() {
+          return String(node.outerHtml != null ? node.outerHtml : elementHtml());
+        }
         return {
           text: function() { return String(node.text || ""); },
-          html: function() { return String(node.html || ""); },
-          outerHtml: function() { return String(node.html || ""); },
+          ownText: function() { return String(node.ownText || node.text || ""); },
+          html: elementHtml,
+          outerHtml: elementOuterHtml,
           attr: function(name) {
             return node.attr ? String(node.attr[String(name)] || "") : "";
+          },
+          hasAttr: function(name) {
+            return !!(node.attr && Object.prototype.hasOwnProperty.call(node.attr, String(name)));
           },
           hasClass: function(name) {
             var cls = node.attr ? String(node.attr["class"] || "") : "";
             return cls.split(/\s+/).indexOf(String(name || "")) >= 0;
           },
           select: function(selector) {
-            return __selectFromHtml(String(node.html || ""), selector);
+            return __selectFromHtml(elementOuterHtml(), selector);
           },
-          toJSON: function() { return String(node.html || ""); },
-          toString: function() { return String(node.html || ""); }
+          children: function() {
+            return __childrenFromHtml(elementHtml());
+          },
+          child: function(index) {
+            return this.children().get(Number(index || 0));
+          },
+          toJSON: elementOuterHtml,
+          toString: elementOuterHtml
         };
       }
 
@@ -463,6 +504,9 @@ class LegadoJsEngine {
           text: function() {
             return String(sendMessage("jsoup_text", String(docId || "")) || "");
           },
+          body: function() {
+            return __selectFromDoc(docId, "body").first();
+          },
           toString: function() {
             return String(sendMessage("jsoup_html", String(docId || "")) || "");
           }
@@ -479,6 +523,15 @@ class LegadoJsEngine {
           selected = JSON.parse(rawResult);
         } catch(e) {}
         return __wrapJsoupNodes(selected, docId, String(selector || ""));
+      }
+
+      function __childrenFromHtml(html) {
+        var rawResult = sendMessage("jsoup_children_html", String(html || ""));
+        var nodes = [];
+        try {
+          nodes = JSON.parse(rawResult);
+        } catch(e) {}
+        return __wrapJsoupNodes(nodes);
       }
 
       function __wrapJsoupNodes(nodes, docId, selector) {
@@ -504,12 +557,25 @@ class LegadoJsEngine {
           }
           return nodes;
         }
+        function nodeHtml(node) {
+          return String(node && node.html != null ? node.html : (node && node.outerHtml ? node.outerHtml : ""));
+        }
+        function nodeOuterHtml(node) {
+          return String(node && node.outerHtml != null ? node.outerHtml : nodeHtml(node));
+        }
         define("text", function() { return currentNodes().map(function(n) { return n.text || ""; }).join("\n"); });
-        define("html", function() { return currentNodes().map(function(n) { return n.html || ""; }).join("\n"); });
-        define("outerHtml", function() { return wrapper.html(); });
+        define("eachText", function() {
+          return __arrayWithToArray(currentNodes().map(function(n) { return String(n.text || ""); }));
+        });
+        define("html", function() { return currentNodes().map(nodeHtml).join("\n"); });
+        define("outerHtml", function() { return currentNodes().map(nodeOuterHtml).join("\n"); });
         define("attr", function(name) {
           var list = currentNodes();
           return list.length > 0 && list[0].attr ? String(list[0].attr[String(name)] || "") : "";
+        });
+        define("hasAttr", function(name) {
+          var list = currentNodes();
+          return !!(list.length > 0 && list[0].attr && Object.prototype.hasOwnProperty.call(list[0].attr, String(name)));
         });
         define("hasClass", function(name) {
           var list = currentNodes();
@@ -534,6 +600,22 @@ class LegadoJsEngine {
           var list = currentNodes();
           return __wrapJsoupNodes(index >= 0 && index < list.length ? [list[index]] : []);
         });
+        define("children", function() {
+          var merged = [];
+          var list = currentNodes();
+          for (var i = 0; i < list.length; i++) {
+            var raw = sendMessage("jsoup_children_html", nodeHtml(list[i]));
+            var children = [];
+            try {
+              children = JSON.parse(raw);
+            } catch(e) {}
+            merged = merged.concat(children);
+          }
+          return __wrapJsoupNodes(merged);
+        });
+        define("child", function(index) {
+          return wrapper.children().get(Number(index || 0));
+        });
         define("size", function() { return currentNodes().length; });
         define("isEmpty", function() { return currentNodes().length === 0; });
         define("select", function(selector) {
@@ -546,7 +628,7 @@ class LegadoJsEngine {
           var merged = [];
           var list = currentNodes();
           for (var i = 0; i < list.length; i++) {
-            var childDocId = sendMessage("jsoup_parse", String(list[i].html || ""));
+            var childDocId = sendMessage("jsoup_parse", nodeOuterHtml(list[i]));
             var raw = sendMessage("jsoup_select", JSON.stringify({id: childDocId, selector: String(selector || "")}));
             try {
               var parsed = JSON.parse(raw);
@@ -575,8 +657,8 @@ class LegadoJsEngine {
           return wrapper;
         });
         define("toArray", function() { return currentNodes().map(function(node) { return __wrapJsoupElement(node); }); });
-        define("toJSON", function() { return wrapper.html(); });
-        define("toString", function() { return wrapper.html(); });
+        define("toJSON", function() { return wrapper.outerHtml(); });
+        define("toString", function() { return wrapper.outerHtml(); });
         define("selector", String(selector || ""));
         return wrapper;
       }
@@ -839,7 +921,10 @@ class LegadoJsEngine {
       function __nodeValueByAttr(node, attr) {
         attr = String(attr || "text");
         if (attr === "text" || attr === "ownText") return String(node.text || "");
-        if (attr === "html" || attr === "outerHtml" || attr === "all") return String(node.html || "");
+        if (attr === "innerHtml") return String(node.html || "");
+        if (attr === "html" || attr === "outerHtml" || attr === "all") {
+          return String(node.outerHtml || node.html || "");
+        }
         if (attr === "href" || attr === "src") return node.attr ? String(node.attr[attr] || "") : "";
         if (attr.indexOf("attr.") === 0) attr = attr.substring(5);
         var attrFn = /^attr\(\s*([^)]+?)\s*\)$/.exec(attr);
@@ -1288,8 +1373,38 @@ class LegadoJsEngine {
       var __javaArrays = {
         copyOfRange: function(bytes, start, end) {
           return __arrayWithToArray(__javaBytes(bytes).slice(Number(start || 0), Number(end || 0)));
+        },
+        asList: function() {
+          return __arrayWithToArray(Array.prototype.slice.call(arguments));
         }
       };
+
+      function __ArrayList() {
+        var list = [];
+        list.add = function(value) {
+          list.push(value);
+          return true;
+        };
+        list.addAll = function(values) {
+          if (values == null) return false;
+          var arr = Array.isArray(values) ? values : Array.prototype.slice.call(values);
+          for (var i = 0; i < arr.length; i++) list.push(arr[i]);
+          return arr.length > 0;
+        };
+        list.get = function(index) {
+          return list[Number(index || 0)];
+        };
+        list.size = function() {
+          return list.length;
+        };
+        list.isEmpty = function() {
+          return list.length === 0;
+        };
+        list.toArray = function() {
+          return list.slice();
+        };
+        return list;
+      }
 
       function __SecretKeySpec(bytes, algorithm) {
         return {
@@ -1375,6 +1490,17 @@ class LegadoJsEngine {
         };
       }
 
+      function __markJavaClass(value, simpleName) {
+        try {
+          Object.defineProperty(value, "__javaSimpleName", {
+            value: simpleName,
+            enumerable: false,
+            configurable: true
+          });
+        } catch(e) {}
+        return value;
+      }
+
       function __JavaImporter() {
         return {
           importPackage: function() {},
@@ -1382,6 +1508,7 @@ class LegadoJsEngine {
           String: function(value) { return __javaString(value); },
           Base64: __javaBase64,
           Arrays: __javaArrays,
+          ArrayList: __ArrayList,
           Cipher: __Cipher,
           SecretKeySpec: __SecretKeySpec,
           IvParameterSpec: __IvParameterSpec,
@@ -1405,6 +1532,7 @@ class LegadoJsEngine {
           util: {
             Arrays: __javaArrays,
             Base64: __javaBase64,
+            ArrayList: __ArrayList,
             zip: {
               InflaterInputStream: __InflaterInputStream
             }
@@ -1425,6 +1553,7 @@ class LegadoJsEngine {
           }
         }
       };
+      Packages.util = Packages.java.util;
       java.lang = Packages.java.lang;
 
       var android = {
@@ -1558,6 +1687,31 @@ class LegadoJsEngine {
           }
         }
       };
+
+      __markJavaClass(org.jsoup.Jsoup, "Jsoup");
+      __markJavaClass(__ArrayList, "ArrayList");
+      __markJavaClass(__Cipher, "Cipher");
+      __markJavaClass(__SecretKeySpec, "SecretKeySpec");
+      __markJavaClass(__IvParameterSpec, "IvParameterSpec");
+      __markJavaClass(__ByteArrayInputStream, "ByteArrayInputStream");
+      __markJavaClass(__ByteArrayOutputStream, "ByteArrayOutputStream");
+      __markJavaClass(__InflaterInputStream, "InflaterInputStream");
+
+      function importClass(classRef) {
+        var name = classRef && classRef.__javaSimpleName ? String(classRef.__javaSimpleName) : "";
+        if (!name && classRef === org.jsoup.Jsoup) name = "Jsoup";
+        if (name) globalThis[name] = classRef;
+        return classRef;
+      }
+
+      function importPackage(packageRef) {
+        if (packageRef && typeof packageRef === "object") {
+          for (var key in packageRef) {
+            if (/^[A-Za-z_$][\w$]*$/.test(key)) globalThis[key] = packageRef[key];
+          }
+        }
+        return packageRef;
+      }
 
       java.md5 = function(string) {
         return this.md5Encode(string);
