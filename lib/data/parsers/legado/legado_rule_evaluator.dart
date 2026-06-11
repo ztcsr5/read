@@ -1114,23 +1114,14 @@ class LegadoRuleEvaluator {
       } else if (line.toLowerCase().contains('@match->')) {
         output = _applyMatchPostProcessor(output, line);
       } else if (line.startsWith('##')) {
-        final bool onlyFirst = line.endsWith('###');
-        final String processingLine = onlyFirst
-            ? line.substring(0, line.length - 1)
-            : line;
-        final parts = processingLine.split('##');
-        final processors = parts.skip(1).toList();
-        for (var idx = 0; idx < processors.length; idx += 2) {
-          final pattern = processors[idx];
+        for (final processor in _regexPostProcessors(line)) {
+          final pattern = processor.pattern;
           if (pattern.isEmpty) continue;
-          final replacement = idx + 1 < processors.length
-              ? processors[idx + 1]
-              : '';
           output = _applyRegexPostProcessor(
             output,
             pattern,
-            replacement,
-            onlyFirst: onlyFirst,
+            processor.replacement,
+            onlyFirst: processor.onlyFirst,
           );
         }
       } else {
@@ -1245,23 +1236,14 @@ class LegadoRuleEvaluator {
     }
 
     if (rule.contains('##')) {
-      final bool onlyFirst = rule.endsWith('###');
-      final String processingRule = onlyFirst
-          ? rule.substring(0, rule.length - 1)
-          : rule;
-      final parts = processingRule.split('##');
-      final processors = parts.skip(1).toList();
-      for (var index = 0; index < processors.length; index += 2) {
-        final pattern = processors[index];
+      for (final processor in _regexPostProcessors(rule)) {
+        final pattern = processor.pattern;
         if (pattern.isEmpty) continue;
-        final replacement = index + 1 < processors.length
-            ? processors[index + 1]
-            : '';
         output = _applyRegexPostProcessor(
           output,
           pattern,
-          replacement,
-          onlyFirst: onlyFirst,
+          processor.replacement,
+          onlyFirst: processor.onlyFirst,
         );
       }
     }
@@ -1277,6 +1259,56 @@ class LegadoRuleEvaluator {
     if (variables != null) output.addAll(variables);
     output['result'] = result;
     return output;
+  }
+
+  static List<({String pattern, String replacement, bool onlyFirst})>
+  _regexPostProcessors(String rule) {
+    final firstMarker = rule.indexOf('##');
+    if (firstMarker < 0) return const [];
+    var tail = rule.substring(firstMarker + 2);
+    final processors = <({String pattern, String replacement, bool onlyFirst})>[];
+
+    while (tail.isNotEmpty) {
+      final standardMarker = tail.indexOf('##');
+      final firstOnlyMarker = tail.indexOf('###');
+      if (firstOnlyMarker >= 0 &&
+          (standardMarker < 0 || firstOnlyMarker <= standardMarker)) {
+        final pattern = tail.substring(0, firstOnlyMarker);
+        tail = tail.substring(firstOnlyMarker + 3);
+        final next = tail.indexOf('##');
+        final replacement = next < 0 ? tail : tail.substring(0, next);
+        processors.add((
+          pattern: pattern,
+          replacement: replacement,
+          onlyFirst: true,
+        ));
+        tail = next < 0 ? '' : tail.substring(next + 2);
+        continue;
+      }
+
+      if (standardMarker < 0) break;
+      final pattern = tail.substring(0, standardMarker);
+      tail = tail.substring(standardMarker + 2);
+      final next = tail.indexOf('##');
+      final firstOnlyEnd = tail.indexOf('###');
+      if (firstOnlyEnd >= 0 && (next < 0 || firstOnlyEnd <= next)) {
+        processors.add((
+          pattern: pattern,
+          replacement: tail.substring(0, firstOnlyEnd),
+          onlyFirst: true,
+        ));
+        tail = tail.substring(firstOnlyEnd + 3);
+      } else {
+        processors.add((
+          pattern: pattern,
+          replacement: next < 0 ? tail : tail.substring(0, next),
+          onlyFirst: false,
+        ));
+        tail = next < 0 ? '' : tail.substring(next + 2);
+      }
+    }
+
+    return processors;
   }
 
   static String _applyMatchPostProcessor(String value, String rule) {

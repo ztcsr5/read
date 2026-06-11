@@ -1800,6 +1800,18 @@ body=urlEncode(params)
       expect(value, '{"ok":true}');
     });
 
+    test('supports legado first-match triple marker before replacement', () {
+      final value = LegadoRuleEvaluator.applyPostProcessors(
+        "https://book.example.com/info/1,{'webView': true}",
+        "##,{'webView': true}###Catalog,{'webView': true}",
+      );
+
+      expect(
+        value,
+        "Catalog,{'webView': true}",
+      );
+    });
+
     test('keeps text for t2s and s2t javascript post processors', () {
       expect(
         LegadoRuleEvaluator.applyPostProcessors('繁體', r'@js:java.t2s(result)'),
