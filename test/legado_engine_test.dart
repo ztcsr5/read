@@ -64,6 +64,18 @@ void main() {
       expect(embedded.config['headers'], isA<Map>());
     });
 
+    test('splits legado loose single quoted embedded config', () {
+      final embedded = LegadoRequestBuilder.splitEmbeddedConfig(
+        "https://example.com/search,{'webView': true, method:'POST', 'headers':{'User-Agent':'MobileUA',},}",
+      );
+
+      expect(embedded.url, 'https://example.com/search');
+      expect(embedded.config['webView'], isTrue);
+      expect(embedded.config['method'], 'POST');
+      expect(embedded.config['headers'], isA<Map>());
+      expect(embedded.config['headers']['User-Agent'], 'MobileUA');
+    });
+
     test('keeps imported jsLib in source custom config', () {
       final source = BookSource.fromJson({
         'bookSourceName': 'JS Source',

@@ -434,9 +434,119 @@ class LegadoRequestBuilder {
         return json.map((key, value) => MapEntry(key.toString(), value));
       }
     } catch (_) {
-      return {};
+      final loose = _parseLooseConfigObject(customConfig);
+      if (loose.isNotEmpty) return loose;
     }
     return {};
+  }
+
+  static Map<String, dynamic> _parseLooseConfigObject(String text) {
+    final objectText =
+        _extractLeadingJsonObject(text) ?? _extractAnyJsonObject(text);
+    if (objectText == null) return {};
+    final normalized = _normalizeLooseJsonObject(objectText);
+    if (normalized == null) return {};
+    try {
+      final decoded = jsonDecode(normalized);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) {
+        return decoded.map((key, value) => MapEntry(key.toString(), value));
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static String? _normalizeLooseJsonObject(String text) {
+    var output = text.trim();
+    if (output.isEmpty) return null;
+    output = output.replaceAllMapped(
+      RegExp(r'''([{,]\s*)([A-Za-z_][A-Za-z0-9_\-]*)\s*:'''),
+      (match) => '${match.group(1)}"${match.group(2)}":',
+    );
+    output = _replaceLooseSingleQuotedStrings(output);
+    output = output.replaceAllMapped(
+      RegExp(r',\s*([}\]])'),
+      (match) => match.group(1) ?? '',
+    );
+    return output;
+  }
+
+  static String _replaceLooseSingleQuotedStrings(String text) {
+    final buffer = StringBuffer();
+    var i = 0;
+    while (i < text.length) {
+      if (text.codeUnitAt(i) != 0x27) {
+        buffer.write(text[i]);
+        i++;
+        continue;
+      }
+
+      final raw = StringBuffer();
+      var closed = false;
+      var escaped = false;
+      i++;
+      while (i < text.length) {
+        final ch = text[i];
+        if (escaped) {
+          raw.write(r'\');
+          raw.write(ch);
+          escaped = false;
+          i++;
+          continue;
+        }
+        if (ch == r'\') {
+          escaped = true;
+          i++;
+          continue;
+        }
+        if (ch == "'") {
+          closed = true;
+          i++;
+          break;
+        }
+        raw.write(ch);
+        i++;
+      }
+      if (!closed) {
+        buffer.write("'");
+        buffer.write(raw.toString());
+        break;
+      }
+      buffer.write(jsonEncode(_decodeLooseSingleQuoted(raw.toString())));
+    }
+    return buffer.toString();
+  }
+
+  static String _decodeLooseSingleQuoted(String value) {
+    final buffer = StringBuffer();
+    var escaped = false;
+    for (var i = 0; i < value.length; i++) {
+      final ch = value[i];
+      if (!escaped) {
+        if (ch == r'\') {
+          escaped = true;
+        } else {
+          buffer.write(ch);
+        }
+        continue;
+      }
+      switch (ch) {
+        case 'n':
+          buffer.write('\n');
+          break;
+        case 'r':
+          buffer.write('\r');
+          break;
+        case 't':
+          buffer.write('\t');
+          break;
+        default:
+          buffer.write(ch);
+      }
+      escaped = false;
+    }
+    if (escaped) buffer.write(r'\');
+    return buffer.toString();
   }
 
   static Map<String, dynamic> parseHeaderString(String rawHeaders) {
