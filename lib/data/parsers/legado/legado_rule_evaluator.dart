@@ -1578,6 +1578,14 @@ class LegadoRuleEvaluator {
       final val = int.tryParse(match.group(1) ?? '') ?? 0;
       return '.$val';
     });
+    output = output.replaceAllMapped(RegExp(r':lt\((-?\d+)\)'), (match) {
+      final val = int.tryParse(match.group(1) ?? '') ?? 0;
+      return '!0:$val';
+    });
+    output = output.replaceAllMapped(RegExp(r':gt\((-?\d+)\)'), (match) {
+      final val = (int.tryParse(match.group(1) ?? '') ?? 0) + 1;
+      return '!$val:';
+    });
 
     // Convert standalone .number to *.number
     output = output.replaceAllMapped(
@@ -1633,7 +1641,7 @@ class LegadoRuleEvaluator {
   }
 
   static List<String> _splitHtmlSelectorChain(String selector) {
-    final text = selector.trim();
+    final text = _spaceHtmlCombinators(selector.trim());
     if (text.isEmpty) return const [];
 
     final legacyClass = RegExp(r'^class\.([^\[\]@>]+)$').firstMatch(text);
@@ -1655,6 +1663,48 @@ class LegadoRuleEvaluator {
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty && s != '>')
         .toList();
+  }
+
+  static String _spaceHtmlCombinators(String selector) {
+    final output = StringBuffer();
+    var bracketDepth = 0;
+    var escaped = false;
+    String? quote;
+    for (var i = 0; i < selector.length; i++) {
+      final ch = selector[i];
+      if (quote != null) {
+        output.write(ch);
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '"' || ch == "'") {
+        quote = ch;
+        output.write(ch);
+        continue;
+      }
+      if (ch == '[') {
+        bracketDepth++;
+        output.write(ch);
+        continue;
+      }
+      if (ch == ']' && bracketDepth > 0) {
+        bracketDepth--;
+        output.write(ch);
+        continue;
+      }
+      if (bracketDepth == 0 && (ch == '>' || ch == '+' || ch == '~')) {
+        output.write(' $ch ');
+      } else {
+        output.write(ch);
+      }
+    }
+    return output.toString();
   }
 
   static bool _looksLikeLegacyClassToken(String token) {

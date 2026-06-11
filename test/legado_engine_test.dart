@@ -629,6 +629,45 @@ void main() {
       );
     });
 
+    test('supports jquery eq lt gt pseudo indexes on html selectors', () {
+      final document = parse('''
+        <table>
+          <tr><td>R0C0</td><td>R0C1</td></tr>
+          <tr><td>R1C0</td><td>R1C1</td></tr>
+          <tr><td>R2C0</td><td>R2C1</td></tr>
+        </table>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'tr:eq(1)',
+        ).map((node) => node.text.trim()).toList(),
+        ['R1C0R1C1'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'tr:lt(2)',
+        ).map((node) => node.text.trim()).toList(),
+        ['R0C0R0C1', 'R1C0R1C1'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'tr:gt(0)',
+        ).map((node) => node.text.trim()).toList(),
+        ['R1C0R1C1', 'R2C0R2C1'],
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'tr:eq(1)>td:eq(0)@text',
+        ),
+        'R1C0',
+      );
+    });
+
     test('supports legado text shorthand selector', () {
       final document = parse('''
         <div class="links">
