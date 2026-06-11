@@ -40,7 +40,6 @@ import UIKit
   }
 }
 
-@available(iOS 14.0, *)
 private final class LocalNetworkPermissionHelper {
   private let serviceType = "_preflight_check._tcp"
   private let queue = DispatchQueue(label: "read.local-network-preflight")
