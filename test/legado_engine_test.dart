@@ -1656,6 +1656,34 @@ body=urlEncode(params)
       },
     );
 
+    test('extracts all matching content text nodes', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.html;
+        request.response.write('''
+          <div id="content">
+            <p>Para 1</p>
+            <p>Para 2</p>
+            <p>Para 3</p>
+          </div>
+        ''');
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Multi Paragraph Content Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({'content': '#content p@textNodes'});
+
+      final content = await LegadoParser.getChapterContent(source, '$base/c1');
+
+      expect(content, contains('Para 1'));
+      expect(content, contains('Para 2'));
+      expect(content, contains('Para 3'));
+    });
+
     test('supports ESO style crypto helper aliases', () {
       if (!LegadoJsEngine().isAvailable) return;
       expect(

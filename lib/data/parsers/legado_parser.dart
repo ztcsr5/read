@@ -1516,6 +1516,14 @@ class LegadoParser {
     }
 
     final document = parse(data.toString());
+    final root = document.documentElement ?? document.body;
+    if (root != null) {
+      final evaluated = _extractHtmlValue(root, contentRule);
+      if (evaluated.trim().isNotEmpty) {
+        return _contentHtmlToText(evaluated);
+      }
+    }
+
     final node = _queryOne(document, contentRule);
     if (node == null) return '解析失败';
 
@@ -1523,6 +1531,24 @@ class LegadoParser {
         .querySelectorAll('script, style, noscript, iframe')
         .forEach((element) => element.remove());
     var html = node.outerHtml;
+    html = html.replaceAll(
+      RegExp(r'</p>|</div>|</li>|<br\s*/?>', caseSensitive: false),
+      '\n',
+    );
+    html = html.replaceAll(
+      RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false),
+      '',
+    );
+    return _contentHtmlToText(html);
+  }
+
+  static String _contentHtmlToText(String html) {
+    final document = parse(html);
+    final root = document.body ?? document.documentElement;
+    root
+        ?.querySelectorAll('script, style, noscript, iframe')
+        .forEach((element) => element.remove());
+    html = root?.innerHtml ?? html;
     html = html.replaceAll(
       RegExp(r'</p>|</div>|</li>|<br\s*/?>', caseSensitive: false),
       '\n',
