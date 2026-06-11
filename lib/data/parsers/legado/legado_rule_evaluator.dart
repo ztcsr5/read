@@ -1602,72 +1602,86 @@ class LegadoRuleEvaluator {
     var output = selector.trim();
     if (output.isEmpty) return output;
 
-    output = output.replaceAllMapped(
-      RegExp(r':first-(?:child|of-type)\b'),
-      (_) => '.0',
-    );
-    output = output.replaceAllMapped(
-      RegExp(r':last-(?:child|of-type)\b'),
-      (_) => '.-1',
-    );
-    output = output.replaceAllMapped(
-      RegExp(r':nth-(?:child|of-type)\(\s*([^)]+?)\s*\)'),
-      (match) =>
-          _cssNthPseudoToIndex(match.group(1) ?? '', match.group(0) ?? ''),
-    );
-
     // Convert :eq(n) to .n
-    output = output.replaceAllMapped(RegExp(r':eq\((-?\d+)\)'), (match) {
-      final val = int.tryParse(match.group(1) ?? '') ?? 0;
-      return '.$val';
-    });
-    output = output.replaceAllMapped(RegExp(r':lt\((-?\d+)\)'), (match) {
-      final val = int.tryParse(match.group(1) ?? '') ?? 0;
-      return '!0:$val';
-    });
-    output = output.replaceAllMapped(RegExp(r':gt\((-?\d+)\)'), (match) {
-      final val = (int.tryParse(match.group(1) ?? '') ?? 0) + 1;
-      return '!$val:';
-    });
+    output = _replaceCssPseudoOutsideFunctions(
+      output,
+      RegExp(r':eq\((-?\d+)\)'),
+      (match) {
+        final val = int.tryParse(match.group(1) ?? '') ?? 0;
+        return '.$val';
+      },
+    );
+    output = _replaceCssPseudoOutsideFunctions(
+      output,
+      RegExp(r':lt\((-?\d+)\)'),
+      (match) {
+        final val = int.tryParse(match.group(1) ?? '') ?? 0;
+        return '!0:$val';
+      },
+    );
+    output = _replaceCssPseudoOutsideFunctions(
+      output,
+      RegExp(r':gt\((-?\d+)\)'),
+      (match) {
+        final val = (int.tryParse(match.group(1) ?? '') ?? 0) + 1;
+        return '!$val:';
+      },
+    );
 
     // Convert standalone .number to *.number
     output = output.replaceAllMapped(
       RegExp(r'(?<=^|\s)\.(\d+)\b'),
-      (match) => '*.' + match.group(1)!,
+      (match) => '*.${match.group(1)!}',
     );
 
     return output;
   }
 
-  static String _cssNthPseudoToIndex(String expression, String original) {
-    final value = expression.toLowerCase().replaceAll(RegExp(r'\s+'), '');
-    final number = int.tryParse(value);
-    if (number != null) return '.${number - 1}';
-    if (value == 'odd') return '[0::2]';
-    if (value == 'even') return '[1::2]';
+  static String _replaceCssPseudoOutsideFunctions(
+    String selector,
+    RegExp pattern,
+    String Function(Match match) replace,
+  ) {
+    return selector.replaceAllMapped(pattern, (match) {
+      if (_isInsideCssFunction(selector, match.start)) {
+        return match.group(0) ?? '';
+      }
+      return replace(match);
+    });
+  }
 
-    final fromMatch = RegExp(r'^n\+(\d+)$').firstMatch(value);
-    if (fromMatch != null) {
-      final start = (int.tryParse(fromMatch.group(1) ?? '') ?? 1) - 1;
-      return '!$start:';
+  static bool _isInsideCssFunction(String selector, int offset) {
+    var parenDepth = 0;
+    var bracketDepth = 0;
+    var escaped = false;
+    String? quote;
+    for (var i = 0; i < offset && i < selector.length; i++) {
+      final ch = selector[i];
+      if (quote != null) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '"' || ch == "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch == '[') {
+        bracketDepth++;
+      } else if (ch == ']' && bracketDepth > 0) {
+        bracketDepth--;
+      } else if (bracketDepth == 0 && ch == '(') {
+        parenDepth++;
+      } else if (bracketDepth == 0 && ch == ')' && parenDepth > 0) {
+        parenDepth--;
+      }
     }
-
-    final untilMatch = RegExp(r'^-n\+(\d+)$').firstMatch(value);
-    if (untilMatch != null) {
-      final end = int.tryParse(untilMatch.group(1) ?? '') ?? 0;
-      return '!0:$end';
-    }
-
-    final stepMatch = RegExp(r'^(\d*)n(?:\+(\d+))?$').firstMatch(value);
-    if (stepMatch != null) {
-      final stepText = stepMatch.group(1) ?? '';
-      final step = int.tryParse(stepText.isEmpty ? '1' : stepText) ?? 1;
-      final offset = int.tryParse(stepMatch.group(2) ?? '') ?? step;
-      final start = (offset - 1).clamp(0, 1 << 30).toInt();
-      return '[$start::$step]';
-    }
-
-    return original;
+    return parenDepth > 0;
   }
 
   static bool _isDescendantOf(Element child, Element parent) {
@@ -1732,16 +1746,75 @@ class LegadoRuleEvaluator {
       }
     }
 
-    return text
-        .split(RegExp(r'\s+'))
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty && s != '>')
-        .toList();
+    return _splitHtmlSelectorSteps(text);
+  }
+
+  static List<String> _splitHtmlSelectorSteps(String selector) {
+    final steps = <String>[];
+    final current = StringBuffer();
+    var bracketDepth = 0;
+    var parenDepth = 0;
+    var escaped = false;
+    String? quote;
+
+    void flush() {
+      final value = current.toString().trim();
+      if (value.isNotEmpty && value != '>') steps.add(value);
+      current.clear();
+    }
+
+    for (var i = 0; i < selector.length; i++) {
+      final ch = selector[i];
+      if (quote != null) {
+        current.write(ch);
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '"' || ch == "'") {
+        quote = ch;
+        current.write(ch);
+        continue;
+      }
+      if (ch == '[') {
+        bracketDepth++;
+        current.write(ch);
+        continue;
+      }
+      if (ch == ']' && bracketDepth > 0) {
+        bracketDepth--;
+        current.write(ch);
+        continue;
+      }
+      if (bracketDepth == 0 && ch == '(') {
+        parenDepth++;
+        current.write(ch);
+        continue;
+      }
+      if (bracketDepth == 0 && ch == ')' && parenDepth > 0) {
+        parenDepth--;
+        current.write(ch);
+        continue;
+      }
+      if (bracketDepth == 0 && parenDepth == 0 && RegExp(r'\s').hasMatch(ch)) {
+        flush();
+      } else {
+        current.write(ch);
+      }
+    }
+    flush();
+    return steps;
   }
 
   static String _spaceHtmlCombinators(String selector) {
     final output = StringBuffer();
     var bracketDepth = 0;
+    var parenDepth = 0;
     var escaped = false;
     String? quote;
     for (var i = 0; i < selector.length; i++) {
@@ -1772,7 +1845,19 @@ class LegadoRuleEvaluator {
         output.write(ch);
         continue;
       }
-      if (bracketDepth == 0 && (ch == '>' || ch == '+' || ch == '~')) {
+      if (bracketDepth == 0 && ch == '(') {
+        parenDepth++;
+        output.write(ch);
+        continue;
+      }
+      if (bracketDepth == 0 && ch == ')' && parenDepth > 0) {
+        parenDepth--;
+        output.write(ch);
+        continue;
+      }
+      if (bracketDepth == 0 &&
+          parenDepth == 0 &&
+          (ch == '>' || ch == '+' || ch == '~')) {
         output.write(' $ch ');
       } else {
         output.write(ch);
@@ -1878,17 +1963,35 @@ class LegadoRuleEvaluator {
   }
 
   static List<Element> _querySelectorStep(Element node, String rawSelector) {
-    final pseudo = _extractTrailingTextPseudo(rawSelector.trim());
+    final selectorText = rawSelector.trim();
+    final not = _extractTrailingNotPseudo(selectorText);
+    if (not != null) {
+      final base = _normalizeCssSelector(not.base.isEmpty ? '*' : not.base);
+      return _queryNotPseudo(node, base, not.inner);
+    }
+    final pseudo = _extractTrailingTextPseudo(selectorText);
     if (pseudo != null) {
       final base = _normalizeCssSelector(
         pseudo.base.isEmpty ? '*' : pseudo.base,
       );
       return _queryTextPseudo(node, base, pseudo.type, pseudo.arg);
     }
-    final has = _extractTrailingHasPseudo(rawSelector.trim());
+    final has = _extractTrailingHasPseudo(selectorText);
     if (has != null) {
       final base = _normalizeCssSelector(has.base.isEmpty ? '*' : has.base);
       return _queryHasPseudo(node, base, has.inner);
+    }
+    final structural = _extractTrailingStructuralPseudo(selectorText);
+    if (structural != null) {
+      final base = _normalizeCssSelector(
+        structural.base.isEmpty ? '*' : structural.base,
+      );
+      return _queryStructuralPseudo(
+        node,
+        base,
+        structural.type,
+        structural.arg,
+      );
     }
     final bracket = _parseBracketIndexConfig(rawSelector);
     if (bracket != null) {
@@ -2087,6 +2190,332 @@ class LegadoRuleEvaluator {
         return false;
       }
     }).toList();
+  }
+
+  static ({String base, String inner})? _extractTrailingNotPseudo(
+    String selector,
+  ) {
+    const token = ':not(';
+    var searchStart = 0;
+    while (searchStart < selector.length) {
+      final idx = selector.indexOf(token, searchStart);
+      if (idx < 0) return null;
+      searchStart = idx + token.length;
+      if (_isInsideCssFunction(selector, idx)) continue;
+      final end = _findClosingParen(selector, idx + token.length - 1);
+      if (end == null || end != selector.length - 1) return null;
+      final base = selector.substring(0, idx);
+      if (!_isSimpleSelectorBase(base)) return null;
+      return (base: base, inner: selector.substring(idx + token.length, end));
+    }
+    return null;
+  }
+
+  static List<Element> _queryNotPseudo(
+    Element node,
+    String baseSelector,
+    String inner,
+  ) {
+    final candidates = baseSelector.isEmpty || baseSelector == 'this'
+        ? [node]
+        : _safeQuerySelectorStep(node, baseSelector);
+    return candidates.where((el) => !_matchesNotInner(el, inner)).toList();
+  }
+
+  static bool _matchesNotInner(Element el, String inner) {
+    final selector = inner.trim();
+    if (selector.isEmpty) return false;
+
+    final nestedNot = _extractTrailingNotPseudo(selector);
+    if (nestedNot != null) {
+      return _matchesElementSelector(
+            el,
+            nestedNot.base.isEmpty ? '*' : nestedNot.base,
+          ) &&
+          !_matchesNotInner(el, nestedNot.inner);
+    }
+
+    final textPseudo = _extractTrailingTextPseudo(selector);
+    if (textPseudo != null) {
+      return _matchesElementSelector(
+            el,
+            textPseudo.base.isEmpty ? '*' : textPseudo.base,
+          ) &&
+          _matchesTextPseudo(el, textPseudo.type, textPseudo.arg);
+    }
+
+    final hasPseudo = _extractTrailingHasPseudo(selector);
+    if (hasPseudo != null) {
+      return _matchesElementSelector(
+            el,
+            hasPseudo.base.isEmpty ? '*' : hasPseudo.base,
+          ) &&
+          _matchesHasPseudoElement(el, hasPseudo.inner);
+    }
+
+    final structural = _extractTrailingStructuralPseudo(selector);
+    if (structural != null) {
+      return _matchesElementSelector(
+            el,
+            structural.base.isEmpty ? '*' : structural.base,
+          ) &&
+          _matchesStructuralPseudoElement(el, structural.type, structural.arg);
+    }
+
+    return _matchesElementSelector(el, selector);
+  }
+
+  static ({String base, String type, String? arg})?
+  _extractTrailingStructuralPseudo(String selector) {
+    for (final type in const [
+      'first-child',
+      'last-child',
+      'only-child',
+      'first-of-type',
+      'last-of-type',
+      'only-of-type',
+    ]) {
+      final token = ':$type';
+      if (!selector.endsWith(token)) continue;
+      final idx = selector.length - token.length;
+      if (_isInsideCssFunction(selector, idx)) continue;
+      final base = selector.substring(0, idx);
+      if (!_isSimpleSelectorBase(base)) return null;
+      return (base: base, type: type, arg: null);
+    }
+
+    for (final type in const ['nth-child', 'nth-of-type']) {
+      final token = ':$type(';
+      var searchStart = 0;
+      while (searchStart < selector.length) {
+        final idx = selector.indexOf(token, searchStart);
+        if (idx < 0) break;
+        searchStart = idx + token.length;
+        if (_isInsideCssFunction(selector, idx)) continue;
+        final end = _findClosingParen(selector, idx + token.length - 1);
+        if (end == null || end != selector.length - 1) return null;
+        final base = selector.substring(0, idx);
+        if (!_isSimpleSelectorBase(base)) return null;
+        return (
+          base: base,
+          type: type,
+          arg: selector.substring(idx + token.length, end),
+        );
+      }
+    }
+    return null;
+  }
+
+  static List<Element> _queryStructuralPseudo(
+    Element node,
+    String baseSelector,
+    String type,
+    String? arg,
+  ) {
+    final candidates = baseSelector.isEmpty || baseSelector == 'this'
+        ? [node]
+        : _safeQuerySelectorStep(node, baseSelector);
+    return candidates
+        .where((el) => _matchesStructuralPseudoElement(el, type, arg))
+        .toList();
+  }
+
+  static bool _matchesStructuralPseudoElement(
+    Element el,
+    String type,
+    String? arg,
+  ) {
+    switch (type) {
+      case 'first-child':
+        return el.previousElementSibling == null;
+      case 'last-child':
+        return el.nextElementSibling == null;
+      case 'only-child':
+        return el.previousElementSibling == null &&
+            el.nextElementSibling == null;
+      case 'first-of-type':
+        final siblings = _sameTypeSiblings(el);
+        return siblings.isNotEmpty && siblings.first == el;
+      case 'last-of-type':
+        final siblings = _sameTypeSiblings(el);
+        return siblings.isNotEmpty && siblings.last == el;
+      case 'only-of-type':
+        return _sameTypeSiblings(el).length == 1;
+      case 'nth-child':
+        return _matchesCssNthExpression(_elementSiblingIndex(el), arg ?? '');
+      case 'nth-of-type':
+        return _matchesCssNthExpression(
+          _sameTypeSiblings(el).indexOf(el) + 1,
+          arg ?? '',
+        );
+    }
+    return false;
+  }
+
+  static List<Element> _sameTypeSiblings(Element el) {
+    final parent = el.parent;
+    if (parent == null) return [el];
+    return parent.children
+        .where((sibling) => sibling.localName == el.localName)
+        .toList();
+  }
+
+  static int _elementSiblingIndex(Element el) {
+    final parent = el.parent;
+    if (parent == null) return 1;
+    return parent.children.indexOf(el) + 1;
+  }
+
+  static bool _matchesCssNthExpression(int index, String expression) {
+    if (index <= 0) return false;
+    final value = expression.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    final number = int.tryParse(value);
+    if (number != null) return index == number;
+    if (value == 'odd') return index.isOdd;
+    if (value == 'even') return index.isEven;
+
+    final match = RegExp(r'^([+-]?\d*)n([+-]\d+)?$').firstMatch(value);
+    if (match == null) return false;
+    final aText = match.group(1) ?? '';
+    final a = aText.isEmpty || aText == '+'
+        ? 1
+        : aText == '-'
+        ? -1
+        : int.tryParse(aText) ?? 0;
+    final b = int.tryParse(match.group(2) ?? '0') ?? 0;
+    if (a == 0) return index == b;
+    if (a > 0) return index >= b && (index - b) % a == 0;
+    return index <= b && (b - index) % -a == 0;
+  }
+
+  static bool _matchesHasPseudoElement(Element el, String inner) {
+    var innerSel = inner.trim();
+    if (innerSel.startsWith('>')) innerSel = innerSel.substring(1).trim();
+    innerSel = _normalizeCssSelector(sanitizeCssSelector(innerSel));
+    if (innerSel.isEmpty) return false;
+    try {
+      return el.querySelector(innerSel) != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static bool _matchesElementSelector(Element el, String selector) {
+    final normalized = _normalizeCssSelector(sanitizeCssSelector(selector));
+    if (normalized.isEmpty || normalized == '*' || normalized == 'this') {
+      return true;
+    }
+
+    final structural = _extractTrailingStructuralPseudo(normalized);
+    if (structural != null) {
+      return _matchesElementSelector(
+            el,
+            structural.base.isEmpty ? '*' : structural.base,
+          ) &&
+          _matchesStructuralPseudoElement(el, structural.type, structural.arg);
+    }
+
+    try {
+      final parent = el.parent;
+      if (parent != null) {
+        return parent.querySelectorAll(normalized).contains(el);
+      }
+      return el.querySelectorAll(normalized).contains(el);
+    } catch (_) {
+      final fixedSelector = _quoteLooseAttributeSelector(normalized);
+      if (fixedSelector != normalized) {
+        try {
+          final parent = el.parent;
+          if (parent != null) {
+            return parent.querySelectorAll(fixedSelector).contains(el);
+          }
+        } catch (_) {}
+      }
+      return false;
+    }
+  }
+
+  static int? _findClosingParen(String text, int openIndex) {
+    var depth = 0;
+    var bracketDepth = 0;
+    var escaped = false;
+    String? quote;
+    for (var i = openIndex; i < text.length; i++) {
+      final ch = text[i];
+      if (quote != null) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '"' || ch == "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch == '[') {
+        bracketDepth++;
+        continue;
+      }
+      if (ch == ']' && bracketDepth > 0) {
+        bracketDepth--;
+        continue;
+      }
+      if (bracketDepth == 0 && ch == '(') {
+        depth++;
+      } else if (bracketDepth == 0 && ch == ')') {
+        depth--;
+        if (depth == 0) return i;
+      }
+    }
+    return null;
+  }
+
+  static bool _isSimpleSelectorBase(String selector) {
+    final value = selector.trim();
+    if (value.isEmpty) return true;
+    var bracketDepth = 0;
+    var escaped = false;
+    String? quote;
+    for (var i = 0; i < value.length; i++) {
+      final ch = value[i];
+      if (quote != null) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '"' || ch == "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch == '[') {
+        bracketDepth++;
+        continue;
+      }
+      if (ch == ']' && bracketDepth > 0) {
+        bracketDepth--;
+        continue;
+      }
+      if (bracketDepth == 0 &&
+          (ch == '>' ||
+              ch == '+' ||
+              ch == '~' ||
+              ch == ',' ||
+              ch == '(' ||
+              ch == ')' ||
+              RegExp(r'\s').hasMatch(ch))) {
+        return false;
+      }
+    }
+    return bracketDepth == 0 && quote == null;
   }
 
   static List<Element> _safeQuerySelectorStep(Element node, String selector) {
@@ -2388,7 +2817,7 @@ class LegadoRuleEvaluator {
           .where((s) => s.trim().isNotEmpty)
           .toList();
       if (classes.isNotEmpty) {
-        output = '.' + classes.join('.');
+        output = '.${classes.join('.')}';
       }
     }
 

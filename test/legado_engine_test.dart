@@ -674,11 +674,69 @@ void main() {
         ['R0C0', 'R1C0', 'R2C0'],
       );
       expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'td:nth-of-type(2)',
+        ).map((node) => node.text.trim()).toList(),
+        ['R0C1', 'R1C1', 'R2C1'],
+      );
+      expect(
         LegadoRuleEvaluator.extractHtmlValue(
           document.body!,
           'tr:eq(1)>td:eq(0)@text',
         ),
         'R1C0',
+      );
+    });
+
+    test('supports not pseudo filters used by content rules', () {
+      final document = parse('''
+        <div id="content">
+          <p>first</p>
+          <p>middle</p>
+          <p>ads</p>
+        </div>
+        <div class="introduction">
+          <p>normal intro</p>
+          <p>Audio intro</p>
+        </div>
+        <table class="grid">
+          <tr><td>header</td></tr>
+          <tr align="center"><td>skip</td></tr>
+          <tr><td>keep</td></tr>
+        </table>
+        <div id="booklist">
+          <table><tr><td><li><a href="/c1">c1</a></li></td></tr></table>
+        </div>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '#content p:not(:last-child)@text',
+        ),
+        'first\nmiddle',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '.introduction p:not(:matches(Audio|Listen))@text',
+        ),
+        'normal intro',
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          '.grid tr:not([align])',
+        ).map((node) => node.text.trim()).toList(),
+        ['header', 'keep'],
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '#booklist table:not(strong:contains(Latest)) li a@href',
+        ),
+        '/c1',
       );
     });
 
