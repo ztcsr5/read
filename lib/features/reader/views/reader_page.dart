@@ -788,10 +788,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             child: Padding(
               padding: EdgeInsets.only(
                 top: padding.top + readerState.topPadding,
-                bottom:
-                    padding.bottom +
-                    readerState.bottomPadding +
-                    readerState.footerHeight,
+                bottom: padding.bottom + readerState.bottomPadding,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
