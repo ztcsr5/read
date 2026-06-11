@@ -381,10 +381,17 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       final hasBookSource =
           map.containsKey('bookSourceName') ||
           map.containsKey('bookSourceUrl') ||
+          map.containsKey('sourceName') ||
+          map.containsKey('sourceUrl') ||
           map.containsKey('searchUrl') ||
+          map.containsKey('ruleSearchUrl') ||
           map.containsKey('ruleSearch') ||
+          map.containsKey('rulesSearch') ||
           map.containsKey('ruleToc') ||
-          map.containsKey('ruleContent');
+          map.containsKey('rulesToc') ||
+          map.containsKey('ruleContent') ||
+          map.containsKey('rulesContent') ||
+          map.containsKey('ruleBookContent');
       if (!hasBookSource) continue;
       await _repository.saveBookSource(BookSource.fromJson(map));
       count++;

@@ -95,5 +95,25 @@ void main() {
     final saved = (await repo.getAllBookSources()).single;
     expect(saved.bookSourceName, 'Edited Source');
     expect(saved.ruleSearch, contains('bookList'));
+
+    final importResponse = await http.post(
+      Uri.parse('$base/api/sources/import'),
+      headers: headers,
+      body: jsonEncode([
+        {
+          'sourceName': 'Alias Web Import',
+          'sourceUrl': 'https://alias-web.example.com',
+          'rulesSearch': {'bookList': 'data.list', 'name': 'title'},
+        },
+      ]),
+    );
+    expect(importResponse.statusCode, 200);
+    final importJson = jsonDecode(importResponse.body) as Map<String, dynamic>;
+    expect(importJson['count'], 1);
+    final imported = (await repo.getAllBookSources()).firstWhere(
+      (source) => source.bookSourceUrl == 'https://alias-web.example.com',
+    );
+    expect(imported.bookSourceName, 'Alias Web Import');
+    expect(imported.ruleSearch, contains('data.list'));
   });
 }
