@@ -356,6 +356,7 @@ class LegadoJsEngine {
 
       function __looksLikeHtmlRule(ruleStr) {
         var rule = String(ruleStr || "").trim();
+        while (rule.indexOf("@@") === 0) rule = rule.substring(2).trim();
         return rule.indexOf("@") >= 0 ||
           rule.indexOf("||") >= 0 ||
           rule.indexOf("&&") >= 0 ||
@@ -366,8 +367,46 @@ class LegadoJsEngine {
           rule.indexOf("tag.") === 0;
       }
 
+      function __stripHtmlRulePrefix(ruleStr) {
+        var value = String(ruleStr || "").trim();
+        while (value.indexOf("@@") === 0) value = value.substring(2).trim();
+        if (value.indexOf("@css:") === 0) value = value.substring(5).trim();
+        return value;
+      }
+
+      function __isHtmlAttrToken(token) {
+        var value = String(token || "").trim();
+        var lower = value.toLowerCase();
+        return lower === "text" ||
+          lower === "owntext" ||
+          lower === "html" ||
+          lower === "outerhtml" ||
+          lower === "all" ||
+          lower === "href" ||
+          lower === "src" ||
+          lower.indexOf("attr.") === 0 ||
+          lower.indexOf("attr(") === 0;
+      }
+
+      function __normalizeLegadoSelectorToken(token) {
+        var value = __stripHtmlRulePrefix(token);
+        value = value.replace(/![^\\s>+~.#\\[]+$/g, "");
+        value = value.replace(/\\.\\d+$/g, "");
+        if (!value || value === "text" || value === "@text") return "body";
+        if (value.indexOf("class.") === 0) return "." + value.substring(6).replace(/\\s+/g, ".");
+        if (value.indexOf("id.") === 0) return "#" + value.substring(3).trim();
+        if (value.indexOf("tag.") === 0) return value.substring(4).trim().replace(/\\.\\d+$/g, "");
+        return value;
+      }
+
       function __normalizeLegadoSelector(selector) {
-        var value = String(selector || "").trim();
+        var value = __stripHtmlRulePrefix(selector);
+        if (value.indexOf("@") >= 0) {
+          return value.split("@")
+            .filter(function(part) { return String(part || "").trim() !== ""; })
+            .map(__normalizeLegadoSelectorToken)
+            .join(" ");
+        }
         if (!value || value === "text" || value === "@text") return "body";
         if (value.indexOf("class.") === 0) return "." + value.substring(6).replace(/\s+/g, ".");
         if (value.indexOf("id.") === 0) return "#" + value.substring(3).trim();
@@ -376,7 +415,18 @@ class LegadoJsEngine {
       }
 
       function __splitHtmlRule(ruleStr) {
-        var rule = String(ruleStr || "").trim();
+        var rule = __stripHtmlRulePrefix(ruleStr);
+        var parts = rule.split("@")
+          .filter(function(part) { return String(part || "").trim() !== ""; });
+        if (parts.length > 1) {
+          var last = String(parts[parts.length - 1] || "").trim();
+          var attr = __isHtmlAttrToken(last) ? last : "text";
+          var selectorParts = __isHtmlAttrToken(last) ? parts.slice(0, -1) : parts;
+          return {
+            selector: selectorParts.map(__normalizeLegadoSelectorToken).join(" "),
+            attr: attr || "text"
+          };
+        }
         var at = rule.lastIndexOf("@");
         var selector = at >= 0 ? rule.substring(0, at).trim() : rule;
         var attr = at >= 0 ? rule.substring(at + 1).trim() : "text";

@@ -1627,6 +1627,24 @@ body=urlEncode(params)
       expect(jsonDecode(list), ['第一段', '第二段']);
     });
 
+    test('supports @@ legacy html rules in java bridge helpers', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final html =
+          '<div class="zlb"><li><a href="/a">A</a></li><li><a href="/b">B</a></li></div>';
+
+      final text = LegadoJsEngine().evaluate(
+        '@js:java.getElements("@@class.zlb@tag.li@tag.a").text()',
+        variables: {'result': html},
+      );
+      final href = LegadoJsEngine().evaluate(
+        '@js:java.getString("@@class.zlb@tag.li@tag.a@href")',
+        variables: {'result': html},
+      );
+
+      expect(text, 'A\nB');
+      expect(href, '/a');
+    });
+
     test('supports cookie bridge backed by session store', () {
       if (!LegadoJsEngine().isAvailable) return;
       final uri = Uri.parse('https://cookie.example/path');
