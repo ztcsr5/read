@@ -50,6 +50,12 @@ class _ReaderTocPageState extends ConsumerState<ReaderTocPage> {
                 children: [
                   CupertinoButton(
                     padding: EdgeInsets.zero,
+                    onPressed: _refreshCatalog,
+                    child: const Icon(CupertinoIcons.refresh, size: 22),
+                  ),
+                  const SizedBox(width: 8),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
                     onPressed: () {
                       _showDownloadOptions(context, state);
                     },
@@ -326,6 +332,61 @@ class _ReaderTocPageState extends ConsumerState<ReaderTocPage> {
           .startDownloadChapters(limit: limit);
     } catch (e) {
       print('Download error: $e');
+    }
+  }
+
+  Future<void> _refreshCatalog() async {
+    showCupertinoDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const CupertinoAlertDialog(
+        title: Text('正在刷新目录'),
+        content: Padding(
+          padding: EdgeInsets.only(top: 14),
+          child: CupertinoActivityIndicator(),
+        ),
+      ),
+    );
+
+    try {
+      final count = await ref
+          .read(readerViewModelProvider(widget.bookId).notifier)
+          .refreshCatalog();
+      if (!mounted) return;
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: const Text('刷新完成'),
+          content: Text('已重新解析 $count 个章节。'),
+          actions: [
+            CupertinoDialogAction(
+              child: const Text('确定'),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: const Text('刷新失败'),
+          content: Text(e.toString()),
+          actions: [
+            CupertinoDialogAction(
+              child: const Text('确定'),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      );
     }
   }
 }

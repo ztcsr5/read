@@ -379,20 +379,24 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         print('Database Error reading ReadingProgress: $e. Defaulting to 0.');
       }
 
-      // 在线书籍如果还没拉取过目录，则去爬取
-      if (chapters.isEmpty && book.isFromSource && book.sourceUrl != null) {
+      // 在线书籍如果目录为空或明显少于详情页记录，按 Legado 流程先刷新详情页再拉目录。
+      if (book.isFromSource && book.sourceUrl != null) {
         final sourceId = int.tryParse(book.sourceUrl!);
         final isar = _bookRepository.isar;
         if (sourceId != null && isar != null) {
           final source = await isar.bookSources.get(sourceId);
-          if (source != null) {
+          if (source != null && _shouldRefreshOnlineCatalog(book, chapters)) {
             try {
-              chapters = await LegadoParser.getChapterList(source, book);
-              if (chapters.isNotEmpty) {
-                for (var c in chapters) {
+              final refreshed = await _fetchOnlineCatalog(source, book);
+              if (refreshed.chapters.isNotEmpty &&
+                  refreshed.chapters.length >= chapters.length) {
+                _copyBookRuntimeFields(book, refreshed.book);
+                chapters = refreshed.chapters;
+                for (final c in chapters) {
                   c.bookId = book.id;
                 }
                 try {
+                  await _bookRepository.saveBook(book);
                   await _bookRepository.deleteChaptersForBook(book.id);
                   await _bookRepository.saveChapters(chapters);
                 } catch (e) {
@@ -409,7 +413,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         }
       }
 
-      if (book.totalChapters != chapters.length) {
+      if (chapters.isNotEmpty &&
+          (book.totalChapters <= 0 || chapters.length >= book.totalChapters) &&
+          book.totalChapters != chapters.length) {
         book.totalChapters = chapters.length;
         await _bookRepository.saveBook(book);
       }
@@ -791,12 +797,8 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     if (currentBook == null) return;
     state = state.copyWith(isLoading: true, error: null);
     try {
-      var replacement = candidate;
-      try {
-        replacement = await LegadoParser.parseBookInfo(source, candidate);
-      } catch (_) {
-        replacement = candidate;
-      }
+      final fetched = await _fetchOnlineCatalog(source, candidate);
+      final replacement = fetched.book;
 
       final updatedBook = currentBook.copyWith(
         title: replacement.title.isEmpty
@@ -818,9 +820,14 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
               state.currentChapterIndex < state.chapters.length
           ? state.chapters[state.currentChapterIndex].title
           : '';
-      final chapters = await LegadoParser.getChapterList(source, updatedBook);
+      final chapters = fetched.book.filePath == updatedBook.filePath
+          ? fetched.chapters
+          : await LegadoParser.getChapterList(source, updatedBook);
       if (chapters.isEmpty) {
         throw Exception('新书源没有解析到目录');
+      }
+      for (final chapter in chapters) {
+        chapter.bookId = updatedBook.id;
       }
 
       final currentIndex = _matchChapterIndex(
@@ -894,14 +901,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
     state = state.copyWith(isLoading: true, error: null);
     try {
-      var refreshedBook = book;
-      try {
-        refreshedBook = await LegadoParser.parseBookInfo(source, book);
-      } catch (_) {
-        refreshedBook = book;
-      }
-
-      final chapters = await LegadoParser.getChapterList(source, refreshedBook);
+      final refreshed = await _fetchOnlineCatalog(source, book);
+      final refreshedBook = refreshed.book;
+      final chapters = refreshed.chapters;
       if (chapters.isEmpty) {
         throw Exception('没有解析到目录，请单源测试 ruleToc');
       }
@@ -945,6 +947,47 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       state = state.copyWith(isLoading: false, error: null);
       rethrow;
     }
+  }
+
+  bool _shouldRefreshOnlineCatalog(Book book, List<Chapter> chapters) {
+    if (!book.isFromSource) return false;
+    if (chapters.isEmpty) return true;
+    final expected = book.totalChapters;
+    if (expected <= 0) return false;
+    return expected > chapters.length && expected - chapters.length >= 3;
+  }
+
+  Future<({Book book, List<Chapter> chapters})> _fetchOnlineCatalog(
+    BookSource source,
+    Book book,
+  ) async {
+    var detailBook = book;
+    try {
+      detailBook = await LegadoParser.parseBookInfo(source, book);
+    } catch (_) {
+      detailBook = book;
+    }
+    final chapters = await LegadoParser.getChapterList(source, detailBook);
+    return (book: detailBook, chapters: chapters);
+  }
+
+  void _copyBookRuntimeFields(Book target, Book source) {
+    target
+      ..title = source.title.isEmpty || source.title == '未知'
+          ? target.title
+          : source.title
+      ..author = source.author.isEmpty ? target.author : source.author
+      ..coverPath = source.coverPath?.isEmpty ?? true
+          ? target.coverPath
+          : source.coverPath
+      ..filePath = source.filePath.isEmpty ? target.filePath : source.filePath
+      ..fileType = source.fileType.isEmpty ? target.fileType : source.fileType
+      ..totalChapters = source.totalChapters > 0
+          ? source.totalChapters
+          : target.totalChapters
+      ..fileSize = source.fileSize > 0 ? source.fileSize : target.fileSize
+      ..isFromSource = true
+      ..sourceUrl = source.sourceUrl ?? target.sourceUrl;
   }
 
   int _matchChapterIndex(List<Chapter> chapters, String title) {
