@@ -386,9 +386,11 @@ class LegadoJsEngine {
       function __nodeValueByAttr(node, attr) {
         attr = String(attr || "text");
         if (attr === "text" || attr === "ownText") return String(node.text || "");
-        if (attr === "html" || attr === "outerHtml") return String(node.html || "");
+        if (attr === "html" || attr === "outerHtml" || attr === "all") return String(node.html || "");
         if (attr === "href" || attr === "src") return node.attr ? String(node.attr[attr] || "") : "";
         if (attr.indexOf("attr.") === 0) attr = attr.substring(5);
+        var attrFn = /^attr\(\s*([^)]+?)\s*\)$/.exec(attr);
+        if (attrFn) attr = attrFn[1];
         return node.attr ? String(node.attr[attr] || "") : "";
       }
 

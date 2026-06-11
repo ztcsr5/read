@@ -13,8 +13,11 @@ class LegadoRuleEvaluator {
   static const _knownAttrs = {
     'text',
     'textNodes',
+    'ownText',
     'html',
     'outerHtml',
+    'all',
+    'attr',
     'href',
     'src',
     'data-src',
@@ -1041,8 +1044,14 @@ class LegadoRuleEvaluator {
       return false;
     }
     if (_looksLikeHtmlTagToken(token)) return false;
+    if (_isAttrFunctionToken(token)) return true;
     return _knownAttrs.contains(token) ||
         RegExp(r'^[a-zA-Z_][a-zA-Z0-9_\-:]*$').hasMatch(token);
+  }
+
+  static bool _isAttrFunctionToken(String token) {
+    return RegExp(r'^attr(?:\.[A-Za-z_][A-Za-z0-9_\-:]*)?$').hasMatch(token) ||
+        RegExp(r'^attr\(\s*[^)]+\s*\)$').hasMatch(token);
   }
 
   static bool _looksLikeHtmlTagToken(String token) {
@@ -1121,6 +1130,14 @@ class LegadoRuleEvaluator {
     if (has != null) {
       final base = _normalizeCssSelector(has.base.isEmpty ? '*' : has.base);
       return _queryHasPseudo(node, base, has.inner);
+    }
+    final bracket = _parseBracketIndexConfig(rawSelector);
+    if (bracket != null) {
+      final selector = _normalizeCssSelector(bracket.baseSelector);
+      final nodes = selector.isEmpty || selector == 'this'
+          ? node.children.whereType<Element>().toList()
+          : _safeQuerySelectorStep(node, selector);
+      return _applyBracketIndexes(nodes, bracket);
     }
     final parsed = _parseIndexConfig(rawSelector);
     final selector = _normalizeCssSelector(parsed.baseSelector);
@@ -1457,6 +1474,107 @@ class LegadoRuleEvaluator {
     return nodes.sublist(from, to);
   }
 
+  static _BracketIndexConfig? _parseBracketIndexConfig(String selector) {
+    final trimmed = selector.trim();
+    if (!trimmed.endsWith(']')) return null;
+    final open = trimmed.lastIndexOf('[');
+    if (open < 0) return null;
+    var body = trimmed.substring(open + 1, trimmed.length - 1).trim();
+    if (body.isEmpty) return null;
+    final exclude = body.startsWith('!');
+    if (exclude) body = body.substring(1).trim();
+    if (body.isEmpty) return null;
+
+    final items = <_BracketIndexItem>[];
+    for (final part in body.split(',')) {
+      final token = part.trim();
+      if (token.isEmpty) return null;
+      final pieces = token.split(':').map((s) => s.trim()).toList();
+      if (pieces.length > 3) return null;
+      if (pieces.length == 1) {
+        final index = int.tryParse(pieces.single);
+        if (index == null) return null;
+        items.add(_BracketIndexSingle(index));
+        continue;
+      }
+      int? parseOptional(String value) =>
+          value.isEmpty ? null : int.tryParse(value);
+      final start = parseOptional(pieces[0]);
+      final end = parseOptional(pieces[1]);
+      if ((pieces[0].isNotEmpty && start == null) ||
+          (pieces[1].isNotEmpty && end == null)) {
+        return null;
+      }
+      var step = 1;
+      if (pieces.length == 3) {
+        final parsedStep = int.tryParse(pieces[2]);
+        if (parsedStep == null) return null;
+        step = parsedStep;
+      }
+      items.add(_BracketIndexRange(start, end, step));
+    }
+    return _BracketIndexConfig(
+      baseSelector: trimmed.substring(0, open).trim(),
+      exclude: exclude,
+      items: items,
+    );
+  }
+
+  static List<Element> _applyBracketIndexes(
+    List<Element> nodes,
+    _BracketIndexConfig config,
+  ) {
+    if (nodes.isEmpty) return const [];
+    final indexes = <int>{};
+    for (final item in config.items) {
+      if (item is _BracketIndexSingle) {
+        final index = _normalizeIndex(item.index, nodes.length);
+        if (index >= 0 && index < nodes.length) indexes.add(index);
+      } else if (item is _BracketIndexRange) {
+        indexes.addAll(_expandBracketRange(item, nodes.length));
+      }
+    }
+    if (config.exclude) {
+      return [
+        for (var i = 0; i < nodes.length; i++)
+          if (!indexes.contains(i)) nodes[i],
+      ];
+    }
+    return [for (final index in indexes) nodes[index]];
+  }
+
+  static Iterable<int> _expandBracketRange(_BracketIndexRange range, int len) {
+    if (len <= 0) return const [];
+    var start = range.start ?? 0;
+    if (start < 0) start += len;
+    var end = range.end ?? (len - 1);
+    if (end < 0) end += len;
+
+    if ((start < 0 && end < 0) || (start >= len && end >= len)) {
+      return const [];
+    }
+    start = start.clamp(0, len - 1).toInt();
+    end = end.clamp(0, len - 1).toInt();
+    if (start == end || range.step >= len) return [start];
+
+    final step = range.step > 0
+        ? range.step
+        : (-range.step < len ? range.step + len : 1);
+    if (step <= 0) return const [];
+
+    final result = <int>[];
+    if (end > start) {
+      for (var i = start; i <= end; i += step) {
+        result.add(i);
+      }
+    } else {
+      for (var i = start; i >= end; i -= step) {
+        result.add(i);
+      }
+    }
+    return result;
+  }
+
   static List<T> _interleaveLists<T>(List<List<T>> lists) {
     if (lists.isEmpty) return const [];
     final result = <T>[];
@@ -1518,6 +1636,7 @@ class LegadoRuleEvaluator {
   }
 
   static String _htmlValue(Element target, String attrName) {
+    final normalizedAttr = _normalizeAttrName(attrName);
     switch (attrName) {
       case 'text':
         return target.text.trim();
@@ -1534,13 +1653,14 @@ class LegadoRuleEvaluator {
       case 'html':
         return target.innerHtml.trim();
       case 'outerHtml':
+      case 'all':
         return target.outerHtml.trim();
       default:
-        final direct = target.attributes[attrName];
+        final direct = target.attributes[normalizedAttr];
         if (direct != null && direct.isNotEmpty) return direct;
 
         // Fallback: search descendants
-        if (attrName == 'href') {
+        if (normalizedAttr == 'href') {
           final childHref = target.querySelector('a')?.attributes['href'];
           if (childHref != null && childHref.isNotEmpty) return childHref;
         }
@@ -1549,16 +1669,26 @@ class LegadoRuleEvaluator {
           'data-src',
           'data-original',
           'alt',
-        ].contains(attrName)) {
-          final childSrc = target.querySelector('img')?.attributes[attrName];
+        ].contains(normalizedAttr)) {
+          final childSrc = target
+              .querySelector('img')
+              ?.attributes[normalizedAttr];
           if (childSrc != null && childSrc.isNotEmpty) return childSrc;
         }
         for (final desc in target.querySelectorAll('*')) {
-          final val = desc.attributes[attrName];
+          final val = desc.attributes[normalizedAttr];
           if (val != null && val.isNotEmpty) return val;
         }
         return '';
     }
+  }
+
+  static String _normalizeAttrName(String attrName) {
+    final trimmed = attrName.trim();
+    final fn = RegExp(r'^attr\(\s*([^)]+?)\s*\)$').firstMatch(trimmed);
+    if (fn != null) return fn.group(1)?.trim() ?? trimmed;
+    if (trimmed.startsWith('attr.')) return trimmed.substring(5).trim();
+    return trimmed;
   }
 
   static String _applyJsPostProcessors(String value, String rule) {
@@ -1919,4 +2049,34 @@ class _HtmlRule {
   final String attr;
 
   const _HtmlRule(this.selectors, this.attr);
+}
+
+class _BracketIndexConfig {
+  final String baseSelector;
+  final bool exclude;
+  final List<_BracketIndexItem> items;
+
+  const _BracketIndexConfig({
+    required this.baseSelector,
+    required this.exclude,
+    required this.items,
+  });
+}
+
+abstract class _BracketIndexItem {
+  const _BracketIndexItem();
+}
+
+class _BracketIndexSingle extends _BracketIndexItem {
+  final int index;
+
+  const _BracketIndexSingle(this.index);
+}
+
+class _BracketIndexRange extends _BracketIndexItem {
+  final int? start;
+  final int? end;
+  final int step;
+
+  const _BracketIndexRange(this.start, this.end, this.step);
 }

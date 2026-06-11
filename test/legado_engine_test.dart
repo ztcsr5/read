@@ -431,6 +431,67 @@ void main() {
       ]);
     });
 
+    test('supports legado ownText all and attr function attributes', () {
+      final document = parse('''
+        <div class="card" data-id="42">
+          Own <span>Child</span>
+          <script>ignored()</script>
+        </div>
+      ''');
+      final node = document.querySelector('.card')!;
+
+      expect(LegadoRuleEvaluator.extractHtmlValue(node, 'ownText'), 'Own');
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(node, 'all'),
+        contains('data-id="42"'),
+      );
+      expect(LegadoRuleEvaluator.extractHtmlValue(node, 'attr(data-id)'), '42');
+    });
+
+    test('supports legado bracket indexes on html selectors', () {
+      final document = parse('''
+        <ul>
+          <li>A</li>
+          <li>B</li>
+          <li>C</li>
+          <li>D</li>
+        </ul>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'li[-1]',
+        ).map((node) => node.text).toList(),
+        ['D'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'li[1,3]',
+        ).map((node) => node.text).toList(),
+        ['B', 'D'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'li[-1:0]',
+        ).map((node) => node.text).toList(),
+        ['D', 'C', 'B', 'A'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'li[!1:2]',
+        ).map((node) => node.text).toList(),
+        ['A', 'D'],
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(document.body!, 'li[1,3]@text'),
+        'B\nD',
+      );
+    });
+
     test('extracts chained html selectors and indexed selectors', () {
       final document = parse('''
         <div id="chaptercontent">
@@ -1299,6 +1360,10 @@ body=urlEncode(params)
         '@js:java.getString("#content p[data-id] a@href")',
         variables: {'result': html},
       );
+      final attr = LegadoJsEngine().evaluate(
+        '@js:java.getString("#content p[data-id]@attr(data-id)")',
+        variables: {'result': html},
+      );
       final list = LegadoJsEngine().evaluate(
         '@js:JSON.stringify(java.getStringList("#content p@text"))',
         variables: {'result': html},
@@ -1306,6 +1371,7 @@ body=urlEncode(params)
 
       expect(text, '第二段');
       expect(href, '/c2');
+      expect(attr, '2');
       expect(jsonDecode(list), ['第一段', '第二段']);
     });
 
