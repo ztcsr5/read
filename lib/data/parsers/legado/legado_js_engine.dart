@@ -159,6 +159,7 @@ class LegadoJsEngine {
             data['value']?.toString() ?? '',
             data['key']?.toString() ?? '',
             data['iv']?.toString() ?? '',
+            data['transformation']?.toString() ?? 'AES/CBC/PKCS5Padding',
           );
         } catch (e) {
           print('java_aes_base64_decode failed: $e');
@@ -740,10 +741,18 @@ class LegadoJsEngine {
           return sendMessage("java_md5", String(string || ""));
         },
         aesBase64DecodeToString: function(value, key, iv, transformation) {
+          var actualIv = iv;
+          var actualTransformation = transformation;
+          var third = String(iv || "");
+          if (third.indexOf("/") >= 0 || /^(AES|DES|DESede|TripleDES)/i.test(third)) {
+            actualTransformation = iv;
+            actualIv = transformation;
+          }
           return sendMessage("java_aes_base64_decode", JSON.stringify({
             value: String(value || ""),
             key: String(key || ""),
-            iv: String(iv || "")
+            iv: String(actualIv || ""),
+            transformation: String(actualTransformation || "AES/CBC/PKCS5Padding")
           }));
         },
         aesDecodeToString: function(value, key, iv, transformation) {
@@ -1527,35 +1536,91 @@ class LegadoJsEngine {
     return text;
   }
 
-  String _aesBase64Decode(String value, String key, String iv) {
-    try {
-      final keyBytes = Uint8List.fromList(utf8.encode(key));
-      if (keyBytes.length != 16 &&
-          keyBytes.length != 24 &&
-          keyBytes.length != 32) {
-        return '';
-      }
-      var ivBytes = Uint8List.fromList(utf8.encode(iv));
-      if (ivBytes.length != 16) {
-        ivBytes = Uint8List(16);
-      }
+  String _aesBase64Decode(
+    String value,
+    String key,
+    String iv,
+    String transformation,
+  ) {
+    final decoded = _cipherBase64Decode(value, key, iv, transformation);
+    if (decoded.isEmpty) return '';
+    return utf8.decode(decoded, allowMalformed: true);
+  }
 
-      final cipher = PaddedBlockCipherImpl(
-        PKCS7Padding(),
-        CBCBlockCipher(AESEngine()),
+  Uint8List _cipherBase64Decode(
+    String value,
+    String key,
+    String iv,
+    String transformation,
+  ) {
+    try {
+      final cipher = _decodeCipher(
+        transformation: transformation,
+        key: key,
+        iv: iv,
       );
+      final encrypted = base64Decode(value);
+      return cipher.process(Uint8List.fromList(encrypted));
+    } catch (_) {
+      return Uint8List(0);
+    }
+  }
+
+  PaddedBlockCipher _decodeCipher({
+    required String transformation,
+    required String key,
+    required String iv,
+  }) {
+    final upper = transformation.toUpperCase();
+    final isDes = upper.contains('DES');
+    final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
+    final engine = isDes ? DESedeEngine() : AESEngine();
+    final keyBytes = isDes
+        ? _desCompatibleKeyBytes(key)
+        : Uint8List.fromList(utf8.encode(key));
+    if (!isDes &&
+        keyBytes.length != 16 &&
+        keyBytes.length != 24 &&
+        keyBytes.length != 32) {
+      throw ArgumentError('Invalid AES key length');
+    }
+    final keyParam = isDes ? DESedeParameters(keyBytes) : KeyParameter(keyBytes);
+
+    final cipher = PaddedBlockCipherImpl(
+      PKCS7Padding(),
+      mode == 'ecb' ? ECBBlockCipher(engine) : CBCBlockCipher(engine),
+    );
+    if (mode == 'ecb') {
       cipher.init(
         false,
-        PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>, Null>(
-          ParametersWithIV<KeyParameter>(KeyParameter(keyBytes), ivBytes),
+        PaddedBlockCipherParameters<CipherParameters, Null>(keyParam, null),
+      );
+    } else {
+      var ivBytes = Uint8List.fromList(utf8.encode(iv));
+      if (ivBytes.length != engine.blockSize) {
+        ivBytes = Uint8List(engine.blockSize);
+      }
+      cipher.init(
+        false,
+        PaddedBlockCipherParameters<ParametersWithIV<CipherParameters>, Null>(
+          ParametersWithIV<CipherParameters>(keyParam, ivBytes),
           null,
         ),
       );
-      final encrypted = base64Decode(value);
-      return utf8.decode(cipher.process(Uint8List.fromList(encrypted)));
-    } catch (_) {
-      return '';
     }
+    return cipher;
+  }
+
+  Uint8List _desCompatibleKeyBytes(String key) {
+    final raw = Uint8List.fromList(utf8.encode(key));
+    if (raw.length == 24) return raw;
+    if (raw.length == 16) {
+      return Uint8List.fromList([...raw, ...raw.sublist(0, 8)]);
+    }
+    if (raw.length == 8) {
+      return Uint8List.fromList([...raw, ...raw, ...raw]);
+    }
+    throw ArgumentError('Invalid DES key length');
   }
 
   Map<String, dynamic> _aesEncodeToMap(

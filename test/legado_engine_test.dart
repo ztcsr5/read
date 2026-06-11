@@ -2391,6 +2391,19 @@ out.join(",");
       expect(posted, 'posted');
     });
 
+    test('supports java aes and des base64 decode argument order', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final aes = LegadoJsEngine().evaluate(
+        r'''@js:java.aesBase64DecodeToString("ZM6V+N4TrIblhrpN+FfkYw==", "1234567890123456", "AES/CBC/PKCS5Padding", "abcdefghijklmnop")''',
+      );
+      final des = LegadoJsEngine().evaluate(
+        r'''@js:java.aesBase64DecodeToString("0XUfPCehJ3Q=", "6CB1E21E", "DES/CBC/PKCS5Padding", "1F0FB845")''',
+      );
+
+      expect(aes, 'hello');
+      expect(des, 'hello');
+    });
+
     test('supports cookie bridge backed by session store', () {
       if (!LegadoJsEngine().isAvailable) return;
       final uri = Uri.parse('https://cookie.example/path');
