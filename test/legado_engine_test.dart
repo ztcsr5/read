@@ -1632,6 +1632,106 @@ body=urlEncode(params)
       ]);
     });
 
+    test('loads toc from legacy json path without json prefix', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Legacy Json Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': 'data[*].directory[*]',
+          'chapterName': 'title',
+          'chapterUrl': r'/read?page={{$.page}}&books_id=123',
+        });
+      final book = Book(
+        title: 'Json Toc',
+        author: '',
+        filePath: 'https://example.com/api/toc',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: jsonEncode({
+          'data': [
+            {
+              'directory': [
+                {'title': 'C1', 'page': 1},
+                {'title': 'C2', 'page': 2},
+              ],
+            },
+            {
+              'directory': [
+                {'title': 'C3', 'page': 3},
+              ],
+            },
+          ],
+        }),
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters.map((chapter) => chapter.title), ['C1', 'C2', 'C3']);
+      expect(chapters.map((chapter) => chapter.url), [
+        'https://example.com/read?page=1&books_id=123',
+        'https://example.com/read?page=2&books_id=123',
+        'https://example.com/read?page=3&books_id=123',
+      ]);
+    });
+
+    test('flattens all nested chapter lists in json toc fallback', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Nested Json Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({});
+      final book = Book(
+        title: 'Nested Toc',
+        author: '',
+        filePath: 'https://example.com/api/toc',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: jsonEncode({
+          'data': {
+            'volumeList': [
+              {
+                'volumeName': 'V1',
+                'chapters': [
+                  {'chapterName': 'C1', 'url': '/c1'},
+                  {'chapterName': 'C2', 'url': '/c2'},
+                ],
+              },
+              {
+                'volumeName': 'V2',
+                'chapters': [
+                  {'Text': 'C3', 'Href': '/c3'},
+                ],
+              },
+            ],
+          },
+        }),
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters.map((chapter) => chapter.title), ['C1', 'C2', 'C3']);
+      expect(chapters.map((chapter) => chapter.url), [
+        'https://example.com/c1',
+        'https://example.com/c2',
+        'https://example.com/c3',
+      ]);
+    });
+
     test(
       'loads all content pages when nextContentUrl returns multiple urls',
       () async {

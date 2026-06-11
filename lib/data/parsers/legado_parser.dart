@@ -885,7 +885,8 @@ class LegadoParser {
       'chapterListToc',
       'list',
     ]);
-    if (listRule == null) return [];
+    final allowJsonTocFallback = listRule == null;
+    listRule ??= '';
 
     final chapters = <Chapter>[];
     final visitedUrls = <String>{};
@@ -933,6 +934,9 @@ class LegadoParser {
         .trim();
 
     var data = currentResponse.data;
+    if (allowJsonTocFallback && !_looksLikeJsonData(data, '')) {
+      return [];
+    }
 
     while (true) {
       if (currentUrlStr.isEmpty || visitedUrls.contains(currentUrlStr)) {
@@ -4164,45 +4168,7 @@ class LegadoParser {
   }) {
     try {
       final jsonData = data is String ? jsonDecode(data) : data;
-      final candidates = <dynamic>[
-        if (jsonData is Map) jsonData['data'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['chapters'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['chapterList'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['chapter_list'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['catalog'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['catalogList'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['volumeList'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['records'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['rows'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['items'],
-        if (jsonData is Map && jsonData['data'] is Map)
-          jsonData['data']['list'],
-        if (jsonData is Map) jsonData['chapters'],
-        if (jsonData is Map) jsonData['chapterList'],
-        if (jsonData is Map) jsonData['chapter_list'],
-        if (jsonData is Map) jsonData['catalog'],
-        if (jsonData is Map) jsonData['catalogList'],
-        if (jsonData is Map) jsonData['volumeList'],
-        if (jsonData is Map) jsonData['records'],
-        if (jsonData is Map) jsonData['rows'],
-        if (jsonData is Map) jsonData['list'],
-        if (jsonData is Map) jsonData['items'],
-        ..._findLikelyChapterLists(jsonData),
-        jsonData,
-      ];
-      final list = candidates.whereType<List>().firstWhere(
-        (items) => items.whereType<Map>().any(_looksLikeChapterMap),
-        orElse: () => const [],
-      );
+      final list = _collectLikelyChapterMaps(jsonData);
       if (list.isEmpty) return [];
 
       final isVolumeRule = _firstRule(rule, const ['isVolume']);
@@ -4210,7 +4176,7 @@ class LegadoParser {
 
       final chapters = <Chapter>[];
       var index = 0;
-      for (final raw in list.whereType<Map>()) {
+      for (final raw in list) {
         if (limit != null && chapters.length >= limit) break;
         final item = _stringKeyMap(raw);
         final title = _firstText(item, const [
@@ -4221,6 +4187,7 @@ class LegadoParser {
           'chapterTitle',
           'chapter_title',
           'chapter_title_name',
+          'text',
           'volumeName',
         ]);
         final url = _chapterUrlFromFallbackItem(
@@ -4308,11 +4275,18 @@ class LegadoParser {
       'url',
       'link',
       'path',
+      'readUrl',
+      'read_url',
+      'jumpUrl',
+      'jump_url',
+      'uri',
+      'filePath',
       'content',
       'contentUrl',
       'chapter_url',
       'chapter_url_full',
       'href',
+      'src',
     ]);
     if (direct.isNotEmpty) return direct;
 
@@ -4347,15 +4321,50 @@ class LegadoParser {
 
   static String _firstText(Map<String, dynamic> item, List<String> keys) {
     for (final key in keys) {
-      final value = item[key];
-      final text = value?.toString().trim();
-      if (text != null && text.isNotEmpty) return text;
+      final exact = item[key];
+      final exactText = exact?.toString().trim();
+      if (exactText != null && exactText.isNotEmpty) return exactText;
+
+      final keyLower = key.toLowerCase();
+      for (final entry in item.entries) {
+        if (entry.key.toLowerCase() != keyLower) continue;
+        final text = entry.value?.toString().trim();
+        if (text != null && text.isNotEmpty) return text;
+      }
     }
     return '';
   }
 
   static Map<String, dynamic> _stringKeyMap(Map<dynamic, dynamic> map) {
     return map.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  static List<Map<dynamic, dynamic>> _collectLikelyChapterMaps(dynamic value) {
+    final result = <Map<dynamic, dynamic>>[];
+    final seen = <Map<dynamic, dynamic>>{};
+
+    void visit(dynamic node, [int depth = 0]) {
+      if (depth > 8) return;
+      if (node is List) {
+        for (final child in node) {
+          visit(child, depth + 1);
+        }
+        return;
+      }
+      if (node is! Map) return;
+
+      if (_looksLikeChapterMap(node) && seen.add(node)) {
+        result.add(node);
+      }
+      for (final child in node.values) {
+        if (child is List || child is Map) {
+          visit(child, depth + 1);
+        }
+      }
+    }
+
+    visit(value);
+    return result;
   }
 
   static List<List<dynamic>> _findLikelyBookLists(dynamic value) {
@@ -4367,28 +4376,6 @@ class LegadoParser {
           result.add(node);
         }
         for (final child in node.take(8)) {
-          visit(child, depth + 1);
-        }
-      } else if (node is Map) {
-        for (final child in node.values) {
-          visit(child, depth + 1);
-        }
-      }
-    }
-
-    visit(value);
-    return result;
-  }
-
-  static List<List<dynamic>> _findLikelyChapterLists(dynamic value) {
-    final result = <List<dynamic>>[];
-    void visit(dynamic node, [int depth = 0]) {
-      if (depth > 6) return;
-      if (node is List) {
-        if (node.whereType<Map>().any(_looksLikeChapterMap)) {
-          result.add(node);
-        }
-        for (final child in node.take(12)) {
           visit(child, depth + 1);
         }
       } else if (node is Map) {
@@ -4420,23 +4407,41 @@ class LegadoParser {
   }
 
   static bool _looksLikeChapterMap(Map<dynamic, dynamic> item) {
-    return item.containsKey('chapterName') ||
-        item.containsKey('chapter_name') ||
-        item.containsKey('chapterTitle') ||
-        item.containsKey('chapter_title') ||
-        item.containsKey('chapterUrl') ||
-        item.containsKey('chapter_url') ||
-        item.containsKey('chapterId') ||
-        item.containsKey('chapter_id') ||
-        item.containsKey('cid') ||
-        item.containsKey('path') ||
-        item.containsKey('contentUrl') ||
-        (item.containsKey('name') &&
-            (item.containsKey('id') ||
-                item.containsKey('cid') ||
-                item.containsKey('chapterId'))) ||
-        (item.containsKey('title') &&
-            (item.containsKey('id') || item.containsKey('url')));
+    final lowerKeys = item.keys
+        .map((key) => key.toString().toLowerCase())
+        .toSet();
+    bool has(String key) => lowerKeys.contains(key.toLowerCase());
+
+    return has('chapterName') ||
+        has('chapter_name') ||
+        has('chapterTitle') ||
+        has('chapter_title') ||
+        has('chapterUrl') ||
+        has('chapter_url') ||
+        has('chapterId') ||
+        has('chapter_id') ||
+        has('cid') ||
+        has('path') ||
+        has('href') ||
+        has('readUrl') ||
+        has('read_url') ||
+        has('page') ||
+        has('contentUrl') ||
+        (has('name') &&
+            (has('id') ||
+                has('cid') ||
+                has('chapterId') ||
+                has('url') ||
+                has('href') ||
+                has('path') ||
+                has('page'))) ||
+        (has('title') &&
+            (has('id') ||
+                has('url') ||
+                has('href') ||
+                has('path') ||
+                has('page'))) ||
+        (has('text') && (has('url') || has('href') || has('path')));
   }
 
   static bool _isLegacyChineseCharset(String value) {
