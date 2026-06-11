@@ -1278,6 +1278,11 @@ class LegadoRuleEvaluator {
 
   static List<dynamic> _extractNodesByJsonPath(dynamic json, String rule) {
     try {
+      final cleaned = _cleanJsonRule(rule);
+      if (cleaned.contains('[?(@.')) {
+        final manual = _extractNodesManually(json, cleaned);
+        if (manual.isNotEmpty) return manual;
+      }
       final values = <dynamic>[];
       for (final match in JsonPath(jsonPathRule(rule)).read(json)) {
         final value = match.value;
@@ -1347,9 +1352,36 @@ class LegadoRuleEvaluator {
 
   static List<dynamic> _readJsonPathSegments(List<dynamic> roots, String path) {
     var current = roots;
-    for (final part in path.split('.')) {
+    for (final part in _splitJsonPathSegments(path)) {
       if (part.isEmpty) continue;
       final next = <dynamic>[];
+      final filter = _parseJsonFilterPart(part);
+      if (filter != null) {
+        for (final value in current) {
+          final children = _jsonChildrenForKey(value, filter.key);
+          for (final child in children) {
+            final candidates = child is List
+                ? child
+                : child is Map && filter.key.isEmpty
+                ? child.values
+                : [child];
+            for (final candidate in candidates) {
+              if (_jsonFilterMatches(
+                candidate,
+                filter.field,
+                filter.operator,
+                filter.expected,
+              )) {
+                next.add(candidate);
+              }
+            }
+          }
+        }
+        current = next;
+        if (current.isEmpty) return const [];
+        continue;
+      }
+
       final match = RegExp(r'^([^\[]+)?(?:\[(\*|\d+)\])?$').firstMatch(part);
       final key = (match?.group(1) ?? part).trim();
       final indexToken = match?.group(2);
@@ -1406,6 +1438,119 @@ class LegadoRuleEvaluator {
       if (current.isEmpty) return const [];
     }
     return current;
+  }
+
+  static List<String> _splitJsonPathSegments(String path) {
+    final result = <String>[];
+    var start = 0;
+    var bracketDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < path.length; i++) {
+      final unit = path.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x5b) {
+        bracketDepth++;
+      } else if (unit == 0x5d && bracketDepth > 0) {
+        bracketDepth--;
+      } else if (unit == 0x2e && bracketDepth == 0) {
+        result.add(path.substring(start, i));
+        start = i + 1;
+      }
+    }
+    result.add(path.substring(start));
+    return result
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+  }
+
+  static ({String key, String field, String? operator, String? expected})?
+  _parseJsonFilterPart(String part) {
+    final match = RegExp(
+      r'''^([^\[]*)\[\?\(@\.([A-Za-z0-9_\-]+)(?:\s*(==|!=)\s*(?:"([^"]*)"|'([^']*)'|([^)]+)))?\)\]$''',
+    ).firstMatch(part.trim());
+    if (match == null) return null;
+    return (
+      key: match.group(1)?.trim() ?? '',
+      field: match.group(2)?.trim() ?? '',
+      operator: match.group(3),
+      expected: (match.group(4) ?? match.group(5) ?? match.group(6))?.trim(),
+    );
+  }
+
+  static List<dynamic> _jsonChildrenForKey(dynamic value, String key) {
+    final children = <dynamic>[];
+    if (key == '*' || key.isEmpty) {
+      if (value is List) {
+        children.addAll(value);
+      } else if (value is Map) {
+        children.addAll(value.values);
+      }
+    } else if (value is Map) {
+      final child = value[key] ?? value[key.toString()];
+      if (child != null) children.add(child);
+    } else if (value is List) {
+      final listIndex = int.tryParse(key);
+      if (listIndex != null) {
+        if (listIndex >= 0 && listIndex < value.length) {
+          children.add(value[listIndex]);
+        }
+      } else {
+        for (final element in value) {
+          if (element is Map) {
+            final child = element[key] ?? element[key.toString()];
+            if (child != null) children.add(child);
+          }
+        }
+      }
+    }
+    return children;
+  }
+
+  static bool _jsonFilterMatches(
+    dynamic node,
+    String field,
+    String? operator,
+    String? expected,
+  ) {
+    if (node is! Map) return false;
+    final actual = node[field] ?? node[field.toString()];
+    if (operator == null) return _jsonTruthy(actual);
+    final equal = _jsonLooseEquals(actual, expected ?? '');
+    return operator == '==' ? equal : !equal;
+  }
+
+  static bool _jsonTruthy(dynamic value) {
+    if (value == null || value == false) return false;
+    if (value is num) return value != 0;
+    final text = value.toString().trim();
+    return text.isNotEmpty && text != '0' && text.toLowerCase() != 'false';
+  }
+
+  static bool _jsonLooseEquals(dynamic actual, String expected) {
+    final target = expected.trim();
+    if (actual is num) {
+      final parsed = num.tryParse(target);
+      if (parsed != null) return actual == parsed;
+    }
+    if (actual is bool) {
+      return actual.toString() == target.toLowerCase();
+    }
+    return (actual?.toString() ?? '') == target;
   }
 
   static String _cleanJsonRule(String rule) {

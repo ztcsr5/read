@@ -372,6 +372,35 @@ void main() {
       expect((nodes.last as Map)['title'], 'B');
     });
 
+    test('expands json list nodes with simple filter predicates', () {
+      final data = {
+        'data': {
+          'list': [
+            {'title': 'A', 'hasContent': 1, 'source': 'free'},
+            {'title': 'B', 'hasContent': 0, 'source': 'vip'},
+            {'title': 'C', 'hasContent': true, 'source': 'free'},
+          ],
+        },
+      };
+
+      final truthy = LegadoRuleEvaluator.extractJsonNodes(
+        data,
+        r'$.data.list[?(@.hasContent)]',
+      );
+      final equals = LegadoRuleEvaluator.extractJsonNodes(
+        data,
+        r'$.data.list[?(@.hasContent==1)]',
+      );
+      final notEquals = LegadoRuleEvaluator.extractJsonNodes(
+        data,
+        r'$.data.list[?(@.source!="vip")]',
+      );
+
+      expect(truthy.map((node) => (node as Map)['title']), ['A', 'C']);
+      expect(equals.map((node) => (node as Map)['title']), ['A']);
+      expect(notEquals.map((node) => (node as Map)['title']), ['A', 'C']);
+    });
+
     test('expands json list nodes through recursive descent', () {
       final data = {
         'payload': {
