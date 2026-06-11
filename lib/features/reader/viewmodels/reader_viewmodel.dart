@@ -1172,19 +1172,15 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
           final rawText = paragraphs[i];
           final text = rawText.trim();
           if (text.isNotEmpty) {
-            final chunks = _splitLongReaderParagraph(text);
-            for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-              final chunk = chunks[chunkIndex];
-              flattened.add(
-                ReaderItem(
-                  chapterIndex: globalChapIdx,
-                  chapter: chapter,
-                  paragraphIndex: i * 1000 + chunkIndex,
-                  charOffset: charOffset + chunk.offset,
-                  text: chunk.text,
-                ),
-              );
-            }
+            flattened.add(
+              ReaderItem(
+                chapterIndex: globalChapIdx,
+                chapter: chapter,
+                paragraphIndex: i,
+                charOffset: charOffset,
+                text: text,
+              ),
+            );
           }
           charOffset += rawText.length + 1;
         }
@@ -1249,6 +1245,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     return normalized.join('\n');
   }
 
+  // ignore: unused_element
   List<({String text, int offset})> _splitLongReaderParagraph(String text) {
     const maxChunkLength = 180;
     final value = text.trim();
