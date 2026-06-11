@@ -2287,6 +2287,28 @@ body=urlEncode(params)
       expect(indexedAttr, '2');
     });
 
+    test('supports org.jsoup.Jsoup connect ajax chain', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        r'''@js:
+var doc = org.jsoup.Jsoup.connect("https://api.example/search")
+  .requestBody("{\"key\":\"abc\"}")
+  .header("Content-Type", "application/json")
+  .ignoreContentType(true)
+  .post();
+JSON.parse(String(doc).match(/body>\s*(.*)\s*<\/bo/)[1]).data.rows[0].name;
+''',
+        ajax: (request) async {
+          expect(request, contains('https://api.example/search'));
+          expect(request, contains('"method":"POST"'));
+          expect(request, contains('"body":"{\\"key\\":\\"abc\\"}"'));
+          return '{"data":{"rows":[{"name":"Book"}]}}';
+        },
+      );
+
+      expect(output, 'Book');
+    });
+
     test('supports java.getString and getStringList for html rules', () {
       if (!LegadoJsEngine().isAvailable) return;
       final html =

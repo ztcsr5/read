@@ -534,6 +534,54 @@ class LegadoJsEngine {
         };
       }
 
+      function __jsoupResponseFromText(text) {
+        var bodyText = String(text == null ? "" : text);
+        var htmlText = /<html[\s>]/i.test(bodyText)
+          ? bodyText
+          : "<html><head></head><body>" + bodyText + "</body></html>";
+        return {
+          body: function() { return bodyText; },
+          text: function() { return bodyText; },
+          html: function() { return htmlText; },
+          select: function(selector) { return __selectFromHtml(htmlText, selector); },
+          toString: function() { return htmlText; }
+        };
+      }
+
+      function __jsoupConnect(urlStr) {
+        var u = String(urlStr || "");
+        var config = { method: "GET", headers: {} };
+        var chain = {
+          header: function(k, v) {
+            if (k != null) config.headers[String(k)] = String(v == null ? "" : v);
+            return chain;
+          },
+          headers: function(value) {
+            if (typeof value === "string") {
+              try { value = JSON.parse(value); } catch(e) { value = {}; }
+            }
+            if (value) {
+              for (var k in value) config.headers[String(k)] = String(value[k]);
+            }
+            return chain;
+          },
+          requestBody: function(body) { config.body = body == null ? "" : String(body); return chain; },
+          data: function(body) { config.body = body == null ? "" : String(body); return chain; },
+          timeout: function() { return chain; },
+          ignoreContentType: function() { return chain; },
+          followRedirects: function() { return chain; },
+          userAgent: function(value) { if (value != null) config.headers["User-Agent"] = String(value); return chain; },
+          referrer: function(value) { if (value != null) config.headers.Referer = String(value); return chain; },
+          get: function() { config.method = "GET"; return __jsoupResponseFromText(java.ajax(u + "," + JSON.stringify(config))); },
+          post: function() { config.method = "POST"; return __jsoupResponseFromText(java.ajax(u + "," + JSON.stringify(config))); },
+          execute: function() {
+            return __jsoupResponseFromText(java.ajax(u + "," + JSON.stringify(config)));
+          },
+          toString: function() { return u; }
+        };
+        return chain;
+      }
+
       function __selectFromHtml(html, selector) {
         var docId = sendMessage("jsoup_parse", String(html || ""));
         var rawResult = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
@@ -1347,6 +1395,9 @@ class LegadoJsEngine {
                 }
               };
               return mockDoc;
+            },
+            connect: function(urlStr) {
+              return __jsoupConnect(urlStr);
             }
           }
         }
