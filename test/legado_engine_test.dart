@@ -466,6 +466,28 @@ void main() {
       );
     });
 
+    test('interpolates json template java expression fallbacks', () {
+      final item = {
+        'book_id': 12345,
+        'updated_at': 1700000000,
+      };
+
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'https://book.example/details/{{parseInt(java.getString("$.book_id")/1000)}}/{{$.book_id}}.html',
+        ),
+        'https://book.example/details/12/12345.html',
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'{{java.timeFormat(java.getString("$.updated_at")*1000)}}',
+        ),
+        contains('2023'),
+      );
+    });
+
     test('uses common JSON id aliases in templates', () {
       final item = {'id': 152, 'title': '斗破苍穹'};
 

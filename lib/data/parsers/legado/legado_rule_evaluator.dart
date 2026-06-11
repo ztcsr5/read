@@ -1284,10 +1284,19 @@ class LegadoRuleEvaluator {
     Map<dynamic, dynamic> json,
     String rule,
   ) {
+    final jsonText = jsonEncode(json);
     var output = rule.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (match) {
-      final key = match.group(1)?.trim() ?? '';
-      if (key.isEmpty) return '';
-      return _extractSingleJsonValue(json, key);
+      final expression = match.group(1)?.trim() ?? '';
+      if (expression.isEmpty) return '';
+      if (_looksLikeJsonTemplateExpression(expression)) {
+        final evaluated = _evaluateJsonTemplateExpression(
+          json,
+          jsonText,
+          expression,
+        );
+        if (evaluated != null) return evaluated;
+      }
+      return _extractSingleJsonValue(json, expression);
     });
     output = output.replaceAllMapped(
       RegExp(r'\{(\$[^{}]+|[A-Za-z_][A-Za-z0-9_\.\[\]\*]*)\}'),
@@ -1298,6 +1307,147 @@ class LegadoRuleEvaluator {
       },
     );
     return output;
+  }
+
+  static bool _looksLikeJsonTemplateExpression(String expression) {
+    final value = expression.trim();
+    if (value.startsWith(r'$.') || value.startsWith(r'$..')) {
+      return value.contains('java.') ||
+          value.contains('Math.') ||
+          value.contains('parseInt') ||
+          value.contains('String(') ||
+          value.contains('&&') ||
+          value.contains('||') ||
+          value.contains('?');
+    }
+    return value.contains('java.') ||
+        value.contains('Math.') ||
+        value.contains('new Date') ||
+        value.contains('parseInt') ||
+        value.contains('String(') ||
+        value.contains('+') ||
+        value.contains('*') ||
+        value.contains('/') ||
+        value.contains('&&') ||
+        value.contains('||') ||
+        value.contains('?') ||
+        value.contains(',');
+  }
+
+  static String? _evaluateJsonTemplateExpression(
+    Map<dynamic, dynamic> json,
+    String jsonText,
+    String expression,
+  ) {
+    try {
+      final evaluated = LegadoJsEngine().evaluate(
+        '@js:($expression)',
+        variables: {'result': jsonText},
+      );
+      if (evaluated.trim().isNotEmpty) return evaluated.trim();
+    } catch (_) {
+      // Fall through to deterministic fallbacks used when QuickJS is absent.
+    }
+    return _evaluateJsonTemplateExpressionFallback(json, expression);
+  }
+
+  static String? _evaluateJsonTemplateExpressionFallback(
+    Map<dynamic, dynamic> json,
+    String expression,
+  ) {
+    var value = expression.trim();
+    final stringWrapper = RegExp(
+      r'''^String\(([\s\S]+)\)$''',
+      dotAll: true,
+    ).firstMatch(value);
+    if (stringWrapper != null) {
+      value = stringWrapper.group(1)?.trim() ?? value;
+    }
+
+    final directGet = RegExp(
+      r'''^java\.getString\(\s*(['"])(.*?)\1\s*\)$''',
+      dotAll: true,
+    ).firstMatch(value);
+    if (directGet != null) {
+      return _jsonTemplateGetString(json, directGet.group(2) ?? '');
+    }
+
+    final parseInt = RegExp(
+      r'''^parseInt\(([\s\S]+)\)$''',
+      dotAll: true,
+    ).firstMatch(value);
+    if (parseInt != null) {
+      final numeric = _evaluateJsonTemplateNumber(
+        json,
+        parseInt.group(1) ?? '',
+      );
+      if (numeric != null) return numeric.truncate().toString();
+    }
+
+    final timeFormat = RegExp(
+      r'''^java\.timeFormat\(([\s\S]+)\)$''',
+      dotAll: true,
+    ).firstMatch(value);
+    if (timeFormat != null) {
+      final millis = _evaluateJsonTemplateNumber(
+        json,
+        timeFormat.group(1) ?? '',
+      );
+      if (millis != null) return _formatJavaTime(millis.round());
+    }
+
+    return null;
+  }
+
+  static double? _evaluateJsonTemplateNumber(
+    Map<dynamic, dynamic> json,
+    String expression,
+  ) {
+    var value = expression.replaceAllMapped(
+      RegExp(r'''java\.getString\(\s*(['"])(.*?)\1\s*\)'''),
+      (match) => _jsonTemplateGetString(json, match.group(2) ?? ''),
+    );
+    value = value.replaceAll(RegExp(r'\s+'), '');
+    return _evalSimpleNumber(value);
+  }
+
+  static double? _evalSimpleNumber(String expression) {
+    if (expression.isEmpty) return null;
+    var depth = 0;
+    for (var i = expression.length - 1; i >= 0; i--) {
+      final char = expression[i];
+      if (char == ')') depth++;
+      if (char == '(') depth--;
+      if (depth == 0 && (char == '*' || char == '/')) {
+        final left = _evalSimpleNumber(expression.substring(0, i));
+        final right = _evalSimpleNumber(expression.substring(i + 1));
+        if (left == null || right == null) return null;
+        return char == '*' ? left * right : left / right;
+      }
+    }
+    final wrapped = RegExp(r'^\(([\s\S]+)\)$').firstMatch(expression);
+    if (wrapped != null) {
+      return _evalSimpleNumber(wrapped.group(1) ?? '');
+    }
+    return double.tryParse(expression);
+  }
+
+  static String _jsonTemplateGetString(
+    Map<dynamic, dynamic> json,
+    String key,
+  ) {
+    final trimmed = key.trim();
+    if (trimmed.startsWith(r'$') || trimmed.contains('.')) {
+      return _extractSingleJsonValue(json, trimmed);
+    }
+    return LegadoJsEngine().getStoredString(trimmed);
+  }
+
+  static String _formatJavaTime(int millis) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${dt.year}/${two(dt.month)}/${two(dt.day)} '
+        '${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
   }
 
   static bool _containsJsonTemplate(String rule) {
