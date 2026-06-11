@@ -41,6 +41,12 @@ void main() {
     final statusJson = jsonDecode(statusResponse.body) as Map<String, dynamic>;
     expect(statusJson['urls'], isA<List>());
     expect(statusJson['permissionProbeSent'], isA<bool>());
+    expect(statusJson['sourceCount'], 1);
+    expect(statusJson['enabledSourceCount'], 1);
+    expect(
+      statusResponse.headers['access-control-allow-private-network'],
+      'true',
+    );
 
     final listResponse = await http.get(
       Uri.parse('$base/api/sources'),
@@ -49,7 +55,21 @@ void main() {
     expect(listResponse.statusCode, 200);
     final listJson = jsonDecode(listResponse.body) as Map<String, dynamic>;
     expect(listJson['ok'], true);
+    expect(listJson['total'], 1);
+    expect(listJson['filteredTotal'], 1);
     expect((listJson['data'] as List).single['bookSourceName'], 'Web Source');
+
+    final summaryResponse = await http.get(
+      Uri.parse('$base/api/sources?summary=1&limit=1&q=web'),
+      headers: headers,
+    );
+    expect(summaryResponse.statusCode, 200);
+    final summaryJson =
+        jsonDecode(summaryResponse.body) as Map<String, dynamic>;
+    final summary =
+        (summaryJson['data'] as List).single as Map<String, dynamic>;
+    expect(summary['bookSourceName'], 'Web Source');
+    expect(summary['ruleSearch'], isNull);
 
     final updated = source.toJson()
       ..['id'] = sourceId

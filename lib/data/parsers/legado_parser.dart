@@ -102,8 +102,30 @@ class LegadoParser {
         '配置的 searchUrl: ${source.searchUrl}',
         '输入关键字: $keyword',
       ];
-      final searchUrl = await _buildSearchUrlAsync(source, keyword);
+      late final String searchUrl;
+      try {
+        searchUrl = await _buildSearchUrlAsync(source, keyword);
+      } catch (e, stackTrace) {
+        steps.add(
+          LegadoTestStep.fail(
+            '搜索 URL',
+            'searchUrl 构建异常：$e',
+            logs: [...urlLogs, '构建调用栈:\n$stackTrace'],
+          ),
+        );
+        return LegadoTestReport(steps: steps);
+      }
       urlLogs.add('构建后的搜索 URL: $searchUrl');
+      if (searchUrl.trim().isEmpty) {
+        steps.add(
+          LegadoTestStep.fail(
+            '搜索 URL',
+            'searchUrl 构建结果为空；通常是 @js/<js> 搜索 URL 执行失败、返回空字符串，或原始规则含未支持的动态占位符。',
+            logs: urlLogs,
+          ),
+        );
+        return LegadoTestReport(steps: steps);
+      }
       steps.add(LegadoTestStep.ok('搜索 URL', searchUrl, logs: urlLogs));
 
       // 2. JS 引擎状态
@@ -547,10 +569,16 @@ class LegadoParser {
     CancelToken? cancelToken,
   }) async {
     if (source.searchUrl == null || source.ruleSearch == null) return [];
+    final searchUrl = await _buildSearchUrlAsync(source, keyword, page: page);
+    if (searchUrl.trim().isEmpty) {
+      throw Exception(
+        '搜索 URL 构建结果为空：${source.bookSourceName}。请单源测试查看 searchUrl/@js 规则。',
+      );
+    }
 
     final response = await _request(
       source,
-      await _buildSearchUrlAsync(source, keyword, page: page),
+      searchUrl,
       keyword: keyword,
       cancelToken: cancelToken,
     );
@@ -1194,9 +1222,10 @@ class LegadoParser {
 
     final uniqueChapters = <String, Chapter>{};
     for (final c in chapters) {
-      final key = c.url ?? '';
-      if (key.isNotEmpty) {
-        uniqueChapters.putIfAbsent(key, () => c);
+      final urlKey = c.url ?? '';
+      final titleKey = c.title.trim();
+      if (urlKey.isNotEmpty || titleKey.isNotEmpty) {
+        uniqueChapters.putIfAbsent('$urlKey\x00$titleKey', () => c);
       } else {
         uniqueChapters['empty_url_${c.title}_${c.index}'] = c;
       }
@@ -2189,6 +2218,86 @@ class LegadoParser {
     return '$resolved,${jsonEncode(embedded.config)}';
   }
 
+  static Future<String> _applyEmbeddedUrlOptionJs(
+    BookSource source,
+    String targetUrl, {
+    String? keyword,
+  }) async {
+    final embedded = LegadoRequestBuilder.splitEmbeddedConfig(targetUrl);
+    final jsRule = embedded.config['js']?.toString().trim();
+    if (jsRule == null || jsRule.isEmpty) return targetUrl;
+
+    final resolvedInput = _resolveUrl(source.bookSourceUrl, embedded.url);
+    if (resolvedInput.isEmpty) return targetUrl;
+
+    try {
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        jsRule,
+        variables: _jsVariables(
+          source,
+          result: resolvedInput,
+          baseUrl: resolvedInput,
+          keyword: keyword,
+        ),
+        libraries: await _sourceLibraryCodes(source, baseUrl: resolvedInput),
+        ajax: (request) => _ajaxForJs(
+          source,
+          request,
+          baseUrl: resolvedInput,
+          keyword: keyword,
+        ),
+      );
+      final rewritten = output.trim();
+      if (rewritten.isEmpty) return targetUrl;
+
+      final resolvedOutput = _resolveUrl(resolvedInput, rewritten);
+      if (resolvedOutput.isEmpty) return targetUrl;
+
+      final nextConfig = Map<String, dynamic>.from(embedded.config)
+        ..remove('js');
+      if (nextConfig.isEmpty) return resolvedOutput;
+      return '$resolvedOutput,${jsonEncode(nextConfig)}';
+    } catch (e) {
+      print('URL option js execution failed: $e');
+      return targetUrl;
+    }
+  }
+
+  static Future<String> _applyResponseBodyJs(
+    BookSource source,
+    String targetUrl,
+    String body, {
+    String? keyword,
+  }) async {
+    final embedded = LegadoRequestBuilder.splitEmbeddedConfig(targetUrl);
+    final config = <String, dynamic>{};
+    config.addAll(LegadoRequestBuilder.jsonConfig(source.customConfig));
+    config.addAll(embedded.config);
+    final jsRule = (config['bodyJs'] ?? config['bodyjs'])?.toString().trim();
+    if (jsRule == null || jsRule.isEmpty) return body;
+
+    final resolvedUrl = _resolveUrl(source.bookSourceUrl, embedded.url);
+    final baseUrl = resolvedUrl.isEmpty ? source.bookSourceUrl : resolvedUrl;
+    try {
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        jsRule,
+        variables: _jsVariables(
+          source,
+          result: body,
+          baseUrl: baseUrl,
+          keyword: keyword,
+        ),
+        libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
+        ajax: (request) =>
+            _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+      );
+      return output.trim().isEmpty ? body : output;
+    } catch (e) {
+      print('bodyJs execution failed: $e');
+      return body;
+    }
+  }
+
   static String _applyFormatJsSync(
     String formatJsRule, {
     required int index,
@@ -2320,6 +2429,14 @@ class LegadoParser {
     await controller.setUserAgent(uaStr);
     LegadoSessionStore.setUserAgent(uri, uaStr);
 
+    final webViewDelay =
+        int.tryParse(
+          (config['webViewDelayTime'] ?? config['webviewDelayTime'] ?? '')
+              .toString(),
+        ) ??
+        1200;
+    final webJsRule = (config['webJs'] ?? config['webjs'])?.toString().trim();
+
     controller.setNavigationDelegate(
       NavigationDelegate(
         onPageStarted: (url) async {
@@ -2331,7 +2448,9 @@ class LegadoParser {
         },
         onPageFinished: (url) async {
           try {
-            await Future.delayed(const Duration(milliseconds: 1200));
+            await Future.delayed(
+              Duration(milliseconds: webViewDelay.clamp(0, 10000).toInt()),
+            );
             try {
               await controller.runJavaScript(
                 "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });",
@@ -2510,6 +2629,31 @@ class LegadoParser {
             if (cancelToken?.isCancelled == true) {
               return;
             }
+            if (webJsRule != null && webJsRule.isNotEmpty) {
+              try {
+                var script = webJsRule;
+                if (script.startsWith('@js:')) {
+                  script = script.substring(4);
+                } else if (script.startsWith('<js>') &&
+                    script.endsWith('</js>')) {
+                  script = script.substring(4, script.length - 5);
+                }
+                if (RegExp(r'\breturn\b').hasMatch(script) &&
+                    !script.trimLeft().startsWith('(function') &&
+                    !script.trimLeft().startsWith('(()')) {
+                  script = '(function(){ $script })()';
+                }
+                final jsResult = await controller.runJavaScriptReturningResult(
+                  script,
+                );
+                final jsText = _decodeWebViewStringResult(jsResult);
+                if (jsText.trim().isNotEmpty) {
+                  html = jsText;
+                }
+              } catch (e) {
+                print('Headless WebView webJs failed: $e');
+              }
+            }
             if (!completer.isCompleted) {
               if (_looksLikeBlankWebViewHtml(html)) {
                 completer.completeError(
@@ -2675,13 +2819,18 @@ class LegadoParser {
         .replaceAll('%0d', '')
         .trim();
 
-    // 漫画源前置降级与底层通用扩展预留
+    // 漫画源前置降级与底层通用扩展预留。java.getElements 也会被小说源用来取正文节点，
+    // 不能仅凭该 JS 桥判断为漫画源。
     if (source.bookSourceType > 0 ||
-        source.ruleContent?.contains('@css:img') == true ||
-        source.ruleContent?.contains('@js:return java.getElements') == true) {
+        source.ruleContent?.contains('@css:img') == true) {
       throw Exception('暂不支持漫画类书源解析（功能扩充预留中）');
     }
 
+    targetUrl = await _applyEmbeddedUrlOptionJs(
+      source,
+      targetUrl,
+      keyword: keyword,
+    );
     final hasWebView = _hasWebViewConfig(source, targetUrl);
     try {
       final request = _buildRequest(source, targetUrl, keyword: keyword);
@@ -2745,10 +2894,16 @@ class LegadoParser {
       final bytes = response.data is List<int>
           ? response.data as List<int>
           : utf8.encode(response.data?.toString() ?? '');
-      final responseData = decodeBytes(
+      var responseData = decodeBytes(
         bytes,
         request.charset,
         headers: response.headers.map,
+      );
+      responseData = await _applyResponseBodyJs(
+        source,
+        targetUrl,
+        responseData,
+        keyword: keyword,
       );
 
       if (_needsManualVerification(response.statusCode, responseData)) {
@@ -2886,6 +3041,22 @@ class LegadoParser {
     if (_looksLikeBlankWebViewHtml(text)) return true;
     if (text.length < 120 && !_looksLikeJsonPayload(text)) return true;
     return false;
+  }
+
+  static String _decodeWebViewStringResult(Object? result) {
+    var text = result?.toString() ?? '';
+    if (text.startsWith('"') && text.endsWith('"')) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is String) return decoded;
+      } catch (_) {
+        text = text
+            .substring(1, text.length - 1)
+            .replaceAll(r'\"', '"')
+            .replaceAll(r'\\', r'\');
+      }
+    }
+    return text;
   }
 
   static bool _looksLikeBlankWebViewHtml(String html) {

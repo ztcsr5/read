@@ -7,7 +7,6 @@ import '../../../data/models/book.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/bookmark.dart';
 import '../../../data/repositories/book_repository.dart';
-import '../../../data/models/reading_progress.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../services/tts_service.dart';
@@ -351,7 +350,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       try {
         await _bookRepository.saveBook(book);
       } catch (e) {
-        print('Database Error saving book in loadBook: $e. Retaining in memory.');
+        print(
+          'Database Error saving book in loadBook: $e. Retaining in memory.',
+        );
       }
 
       List<Chapter> chapters = [];
@@ -396,7 +397,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
                   await _bookRepository.saveChapters(chapters);
                 } catch (e) {
                   // 容错与缓存隔离：数据库存储失败，不阻塞内存数据加载
-                  print('Database Error during catalog persistence: $e. Falling back to memory-only catalog.');
+                  print(
+                    'Database Error during catalog persistence: $e. Falling back to memory-only catalog.',
+                  );
                 }
               }
             } catch (e) {
@@ -490,7 +493,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       ),
       mode:
           ReaderMode.values[(prefs.getInt('reader.mode') ?? state.mode.index)
-               .clamp(0, ReaderMode.values.length - 1)],
+              .clamp(0, ReaderMode.values.length - 1)],
       tapZoneActions: zones != null && zones.length == 9
           ? List.unmodifiable(zones)
           : null,
@@ -526,7 +529,10 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       state.tapZoneActions.map((action) => action.name).toList(),
     );
     if (state.customWallpaperPath != null) {
-      await prefs.setString('reader.customWallpaperPath', state.customWallpaperPath!);
+      await prefs.setString(
+        'reader.customWallpaperPath',
+        state.customWallpaperPath!,
+      );
     } else {
       await prefs.remove('reader.customWallpaperPath');
     }
@@ -834,17 +840,23 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       try {
         await _bookRepository.saveBook(updatedBook);
       } catch (e) {
-        print('Database Error saving book in switchBookSource: $e. Continuing.');
+        print(
+          'Database Error saving book in switchBookSource: $e. Continuing.',
+        );
       }
       try {
         await _bookRepository.deleteChaptersForBook(updatedBook.id);
       } catch (e) {
-        print('Database Error deleting chapters in switchBookSource: $e. Continuing.');
+        print(
+          'Database Error deleting chapters in switchBookSource: $e. Continuing.',
+        );
       }
       try {
         await _bookRepository.saveChapters(chapters);
       } catch (e) {
-        print('Database Error saving chapters in switchBookSource: $e. Continuing.');
+        print(
+          'Database Error saving chapters in switchBookSource: $e. Continuing.',
+        );
       }
 
       state = state.copyWith(
@@ -860,6 +872,77 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       await _loadCurrentChapter(includePrevious: false);
     } catch (e) {
       state = state.copyWith(isLoading: false, error: '换源失败: $e');
+      rethrow;
+    }
+  }
+
+  Future<int> refreshCatalog() async {
+    final book = state.book;
+    if (book == null || !book.isFromSource || book.sourceUrl == null) {
+      throw Exception('本地书籍不支持刷新在线目录');
+    }
+    final sourceId = int.tryParse(book.sourceUrl!);
+    final isar = _bookRepository.isar;
+    if (sourceId == null || isar == null) {
+      throw Exception('无法定位当前书源');
+    }
+
+    final source = await isar.bookSources.get(sourceId);
+    if (source == null) {
+      throw Exception('当前书源不存在或已被删除');
+    }
+
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      var refreshedBook = book;
+      try {
+        refreshedBook = await LegadoParser.parseBookInfo(source, book);
+      } catch (_) {
+        refreshedBook = book;
+      }
+
+      final chapters = await LegadoParser.getChapterList(source, refreshedBook);
+      if (chapters.isEmpty) {
+        throw Exception('没有解析到目录，请单源测试 ruleToc');
+      }
+      for (final chapter in chapters) {
+        chapter.bookId = refreshedBook.id;
+      }
+
+      final currentIndex = state.currentChapterIndex
+          .clamp(0, chapters.length - 1)
+          .toInt();
+      refreshedBook
+        ..totalChapters = chapters.length
+        ..currentChapter = currentIndex
+        ..readingProgress = ((currentIndex + 1) / chapters.length).clamp(
+          0.0,
+          1.0,
+        )
+        ..lastReadTime = DateTime.now();
+
+      try {
+        await _bookRepository.saveBook(refreshedBook);
+        await _bookRepository.deleteChaptersForBook(refreshedBook.id);
+        await _bookRepository.saveChapters(chapters);
+      } catch (e) {
+        print('Database Error refreshing catalog: $e. Keeping memory state.');
+      }
+
+      state = state.copyWith(
+        book: refreshedBook,
+        chapters: chapters,
+        loadedChapters: const [],
+        items: const [],
+        currentChapterIndex: currentIndex,
+        scrollPosition: 0,
+        readingProgress: refreshedBook.readingProgress,
+        isLoading: false,
+      );
+      await _loadCurrentChapter(includePrevious: true);
+      return chapters.length;
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: null);
       rethrow;
     }
   }
@@ -1016,7 +1099,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
                 await isar.chapters.put(chapter);
               });
             } catch (e) {
-              print('Database Error caching chapter content: $e. Retaining in memory.');
+              print(
+                'Database Error caching chapter content: $e. Retaining in memory.',
+              );
             }
           }
         }
@@ -1044,15 +1129,19 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
           final rawText = paragraphs[i];
           final text = rawText.trim();
           if (text.isNotEmpty) {
-            flattened.add(
-              ReaderItem(
-                chapterIndex: globalChapIdx,
-                chapter: chapter,
-                paragraphIndex: i,
-                charOffset: charOffset,
-                text: text,
-              ),
-            );
+            final chunks = _splitLongReaderParagraph(text);
+            for (var chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+              final chunk = chunks[chunkIndex];
+              flattened.add(
+                ReaderItem(
+                  chapterIndex: globalChapIdx,
+                  chapter: chapter,
+                  paragraphIndex: i * 1000 + chunkIndex,
+                  charOffset: charOffset + chunk.offset,
+                  text: chunk.text,
+                ),
+              );
+            }
           }
           charOffset += rawText.length + 1;
         }
@@ -1076,7 +1165,10 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
   String _normalizeChapterContent(String content, String title) {
     final lines = content
-        .replaceAll(RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false),
+          '',
+        )
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
         .replaceAll('\uFEFF', '')
@@ -1112,6 +1204,60 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       normalized.removeLast();
     }
     return normalized.join('\n');
+  }
+
+  List<({String text, int offset})> _splitLongReaderParagraph(String text) {
+    const maxChunkLength = 180;
+    final value = text.trim();
+    if (value.length <= maxChunkLength) {
+      return [(text: value, offset: 0)];
+    }
+
+    final chunks = <({String text, int offset})>[];
+    var start = 0;
+    while (start < value.length) {
+      var end = start + maxChunkLength;
+      if (end >= value.length) {
+        chunks.add((text: value.substring(start).trim(), offset: start));
+        break;
+      }
+
+      final minBreak = start + (maxChunkLength * 0.58).round();
+      var breakAt = -1;
+      for (var i = end; i >= minBreak; i--) {
+        final unit = value.codeUnitAt(i - 1);
+        if (_isGoodParagraphBreak(unit)) {
+          breakAt = i;
+          break;
+        }
+      }
+      if (breakAt <= start) breakAt = end;
+
+      final chunk = value.substring(start, breakAt).trim();
+      if (chunk.isNotEmpty) {
+        chunks.add((text: chunk, offset: start));
+      }
+      start = breakAt;
+      while (start < value.length &&
+          (value.codeUnitAt(start) == 0x20 ||
+              value.codeUnitAt(start) == 0x3000)) {
+        start++;
+      }
+    }
+    return chunks;
+  }
+
+  bool _isGoodParagraphBreak(int unit) {
+    return unit == 0x3002 || // 。
+        unit == 0xff01 || // ！
+        unit == 0xff1f || // ？
+        unit == 0xff1b || // ；
+        unit == 0x003b || // ;
+        unit == 0x002e || // .
+        unit == 0x0021 || // !
+        unit == 0x003f || // ?
+        unit == 0x3000 || // full-width space
+        unit == 0x0020; // space
   }
 
   bool _sameChapterTitle(String line, String title) {
@@ -1150,18 +1296,25 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
     final startIdx = state.currentChapterIndex;
     final allChapters = state.chapters;
-    
+
     final toDownload = allChapters
         .skip(startIdx)
-        .where((c) => !c.isDownloaded && c.content != null && c.content!.startsWith('http'))
+        .where(
+          (c) =>
+              !c.isDownloaded &&
+              c.content != null &&
+              c.content!.startsWith('http'),
+        )
         .toList();
 
-    final limitList = limit != null ? toDownload.take(limit).toList() : toDownload;
+    final limitList = limit != null
+        ? toDownload.take(limit).toList()
+        : toDownload;
     if (limitList.isEmpty) return;
 
     final int maxConcurrent = 3;
     var index = 0;
-    
+
     Future<void> worker() async {
       while (index < limitList.length) {
         final currentJobIndex = index++;
@@ -1169,16 +1322,19 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         final chapter = limitList[currentJobIndex];
         try {
           final contentUrl = chapter.content!;
-          final content = await LegadoParser.getChapterContent(source, contentUrl);
-          
+          final content = await LegadoParser.getChapterContent(
+            source,
+            contentUrl,
+          );
+
           chapter.content = content;
           chapter.isDownloaded = true;
           chapter.wordCount = content.length;
-          
+
           await isar.writeTxn(() async {
             await isar.chapters.put(chapter);
           });
-          
+
           if (mounted) {
             final updatedChapters = List<Chapter>.from(state.chapters);
             final idx = updatedChapters.indexWhere((c) => c.id == chapter.id);

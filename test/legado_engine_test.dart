@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1137,6 +1138,85 @@ body=urlEncode(params)
       },
     );
 
+    test('applies embedded url js and bodyJs request options', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requestedPaths = <String>[];
+      server.listen((request) async {
+        requestedPaths.add(request.uri.path);
+        request.response.headers.contentType = ContentType.json;
+        if (request.uri.path == '/search') {
+          request.response.write(
+            jsonEncode({
+              'books': [
+                {'name': 'raw title', 'url': '/book/1'},
+              ],
+            }),
+          );
+        } else {
+          request.response.statusCode = HttpStatus.notFound;
+          request.response.write('{}');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'URL Option Source'
+        ..bookSourceUrl = base
+        ..searchUrl =
+            '$base/placeholder,${jsonEncode({'js': '@js:result.replace("placeholder", "search")', 'bodyJs': '@js:result.replace("raw title", "斗破苍穹")'})}'
+        ..ruleSearch = jsonEncode({
+          'bookList': r'$.books',
+          'name': r'$.name',
+          'bookUrl': r'$.url',
+        });
+
+      final books = await LegadoParser.searchBooks(source, '斗破苍穹');
+
+      expect(requestedPaths, contains('/search'));
+      expect(requestedPaths, isNot(contains('/placeholder')));
+      expect(books, hasLength(1));
+      expect(books.first.title, '斗破苍穹');
+      expect(books.first.filePath, '$base/book/1');
+    });
+
+    test('keeps toc rows with same fallback url but different titles', () async {
+      final source = BookSource()
+        ..bookSourceName = 'No Chapter Url Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': '.toc a',
+          'chapterName': '@text',
+          'chapterUrl': '@href',
+        });
+      final book = Book(
+        title: '目录测试',
+        author: '',
+        filePath: 'https://example.com/toc',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data:
+            '<html><body><div class="toc"><a>第一章</a><a>第二章</a><a>第三章</a></div></body></html>',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters.map((chapter) => chapter.title), ['第一章', '第二章', '第三章']);
+      expect(chapters.map((chapter) => chapter.url).toSet(), {
+        'https://example.com/toc',
+      });
+    });
+
     test('supports ESO style crypto helper aliases', () {
       if (!LegadoJsEngine().isAvailable) return;
       expect(
@@ -1149,6 +1229,34 @@ body=urlEncode(params)
         ),
         'abc',
       );
+    });
+
+    test('supports java.getElements bridge for html result rules', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final html = '<div id="content"><p>第一段</p><p data-id="2">第二段</p></div>';
+
+      final text = LegadoJsEngine().evaluate(
+        '@js:java.getElements("#content p").text()',
+        variables: {'result': html},
+      );
+      final returnedHtml = LegadoJsEngine().evaluate(
+        '@js:return java.getElements("#content p")',
+        variables: {'result': html},
+      );
+      final attr = LegadoJsEngine().evaluate(
+        '@js:java.getElement("#content p[data-id]").attr("data-id")',
+        variables: {'result': html},
+      );
+      final indexedAttr = LegadoJsEngine().evaluate(
+        '@js:java.getElements("#content p")[1].attr("data-id")',
+        variables: {'result': html},
+      );
+
+      expect(text, '第一段\n第二段');
+      expect(returnedHtml, contains('<p>第一段</p>'));
+      expect(returnedHtml, contains('data-id="2"'));
+      expect(attr, '2');
+      expect(indexedAttr, '2');
     });
 
     test('supports legacy class selector with multiple class tokens', () {
@@ -1184,6 +1292,24 @@ body=urlEncode(params)
         returnsNormally,
       );
     });
+
+    test(
+      'testSource fails early when searchUrl JS builds an empty URL',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Bad JS Search'
+          ..bookSourceUrl = 'https://example.com'
+          ..searchUrl = '@js:throw new Error("boom")'
+          ..ruleSearch = jsonEncode({'bookList': '.book'});
+
+        final report = await LegadoParser.testSource(source, '斗破苍穹');
+
+        expect(report.hasFailure, isTrue);
+        expect(report.steps.first.title, '搜索 URL');
+        expect(report.steps.first.status, LegadoStepStatus.fail);
+        expect(report.steps.first.message, contains('构建结果为空'));
+      },
+    );
   });
 
   group('CompatibilityAnalyzer', () {

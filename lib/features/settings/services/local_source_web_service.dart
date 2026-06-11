@@ -195,6 +195,7 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     }
 
     if (request.method == 'GET' && path == '/api/status') {
+      final sources = await _repository.getAllBookSources();
       await _json(request, {
         'ok': true,
         'service': 'read-source-web',
@@ -202,6 +203,8 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         'urls': state.urls,
         'interfaces': state.interfaceLabels,
         'permissionProbeSent': state.permissionProbeSent,
+        'sourceCount': sources.length,
+        'enabledSourceCount': sources.where((source) => source.enabled).length,
       });
       return;
     }
@@ -209,9 +212,38 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     if (request.method == 'GET' && path == '/api/sources') {
       final sources = await _repository.getAllBookSources();
       sources.sort((a, b) => a.bookSourceName.compareTo(b.bookSourceName));
+      final q = request.uri.queryParameters['q']?.trim().toLowerCase() ?? '';
+      final summary = _queryBool(request, 'summary');
+      final offset = int.tryParse(request.uri.queryParameters['offset'] ?? '');
+      final limit = int.tryParse(request.uri.queryParameters['limit'] ?? '');
+      final filtered = q.isEmpty
+          ? sources
+          : sources.where((source) {
+              final haystack = [
+                source.bookSourceName,
+                source.bookSourceUrl,
+                source.bookSourceGroup ?? '',
+                source.searchUrl ?? '',
+              ].join('\n').toLowerCase();
+              return haystack.contains(q);
+            }).toList();
+      final start = (offset ?? 0).clamp(0, filtered.length).toInt();
+      final safeLimit = limit == null ? null : limit.clamp(1, 1000).toInt();
+      final end = safeLimit == null
+          ? filtered.length
+          : (start + safeLimit).clamp(start, filtered.length).toInt();
+      final page = filtered.sublist(start, end);
       await _json(request, {
         'ok': true,
-        'data': sources.map(_sourceJsonWithId).toList(),
+        'total': sources.length,
+        'filteredTotal': filtered.length,
+        'offset': start,
+        'limit': safeLimit,
+        'hasMore': end < filtered.length,
+        'enabledCount': sources.where((source) => source.enabled).length,
+        'data': page
+            .map(summary ? _sourceSummaryJsonWithId : _sourceJsonWithId)
+            .toList(),
       });
       return;
     }
@@ -295,6 +327,24 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
 
   Map<String, dynamic> _sourceJsonWithId(BookSource source) {
     return source.toJson()..['id'] = source.id;
+  }
+
+  Map<String, dynamic> _sourceSummaryJsonWithId(BookSource source) {
+    return {
+      'id': source.id,
+      'bookSourceName': source.bookSourceName,
+      'bookSourceUrl': source.bookSourceUrl,
+      'bookSourceGroup': source.bookSourceGroup,
+      'bookSourceType': source.bookSourceType,
+      'enabled': source.enabled,
+      'weight': source.weight,
+      'searchUrl': source.searchUrl,
+    };
+  }
+
+  bool _queryBool(HttpRequest request, String key) {
+    final value = request.uri.queryParameters[key]?.toLowerCase();
+    return value == '1' || value == 'true' || value == 'yes';
   }
 
   BookSource _sourceFromBody(Map<String, dynamic> body) {
@@ -422,7 +472,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
   }) async {
     final response = request.response;
     response.statusCode = statusCode;
-    response.headers.contentType = ContentType.json;
+    response.headers.contentType = ContentType(
+      'application',
+      'json',
+      charset: 'utf-8',
+    );
     response.write(jsonEncode(body));
     await response.close();
   }
@@ -442,6 +496,7 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         'Access-Control-Allow-Headers',
         'content-type,x-read-token,authorization',
       )
+      ..set('Access-Control-Allow-Private-Network', 'true')
       ..set('Cache-Control', 'no-store');
   }
 }
@@ -751,7 +806,8 @@ String _editorHtml(String token) {
         <div class="metric"><b id="totalCount">0</b><span>书源总数</span></div>
         <div class="metric"><b id="enabledCount">0</b><span>已启用</span></div>
       </div>
-      <div class="searchbox"><input id="filter" placeholder="搜索名称、URL、分组" oninput="renderList()"></div>
+      <div class="searchbox"><input id="filter" placeholder="搜索名称、URL、分组" oninput="scheduleLoadSources()"></div>
+      <p class="hint" id="listHint" style="margin:0 2px 10px"></p>
       <div id="list"></div>
     </aside>
 
@@ -808,8 +864,10 @@ String _editorHtml(String token) {
 <script>
 const TOKEN = "__TOKEN__";
 let sources = [];
+let sourceStats = {total: 0, enabledCount: 0, filteredTotal: 0, hasMore: false};
 let current = null;
 let tab = "base";
+let loadTimer = 0;
 const tabs = [
   ["base","基础"],["search","搜索"],["detail","详情"],["toc","目录"],["content","正文"],["explore","发现"],["raw","完整 JSON"]
 ];
@@ -825,25 +883,47 @@ function api(path, opt={}) {
   opt.headers = Object.assign({"Content-Type":"application/json","X-Read-Token":TOKEN}, opt.headers || {});
   return fetch(path, opt).then(async r => {
     const text = await r.text();
-    const data = text ? JSON.parse(text) : {};
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (e) {
+      throw new Error(`非 JSON 响应：${text.slice(0, 160)}`);
+    }
     if (!r.ok || data.ok === false) throw new Error(data.error || r.statusText);
     return data;
   });
 }
+function scheduleLoadSources() {
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => loadSources(), 180);
+}
 async function loadSources() {
   try {
-    const res = await api("/api/sources");
+    const q = document.getElementById("filter").value.trim();
+    const params = new URLSearchParams({summary:"1", limit:"400"});
+    if (q) params.set("q", q);
+    const res = await api(`/api/sources?${params}`);
     sources = res.data || [];
+    sourceStats = {
+      total: res.total ?? sources.length,
+      enabledCount: res.enabledCount ?? sources.filter(s => s.enabled !== false).length,
+      filteredTotal: res.filteredTotal ?? sources.length,
+      hasMore: !!res.hasMore,
+    };
     renderList();
   } catch(e) { toast("连接失败：" + e.message, true); }
 }
 function renderList() {
-  document.getElementById("totalCount").textContent = sources.length;
-  document.getElementById("enabledCount").textContent = sources.filter(s => s.enabled !== false).length;
-  const q = document.getElementById("filter").value.trim().toLowerCase();
+  document.getElementById("totalCount").textContent = sourceStats.total;
+  document.getElementById("enabledCount").textContent = sourceStats.enabledCount;
+  const q = document.getElementById("filter").value.trim();
+  const hint = document.getElementById("listHint");
+  hint.textContent = q
+    ? `匹配 ${sourceStats.filteredTotal} 个，当前显示前 ${sources.length} 个${sourceStats.hasMore ? "，继续输入可缩小范围" : ""}`
+    : `当前显示前 ${sources.length} 个；搜索框支持服务端过滤，避免 8000+ 源一次性卡死`;
   const root = document.getElementById("list");
   root.innerHTML = "";
-  sources.filter(s => !q || JSON.stringify(s).toLowerCase().includes(q)).forEach(s => {
+  sources.forEach(s => {
     const div = document.createElement("div");
     div.className = "source-card" + (current && current.id === s.id ? " active" : "");
     div.onclick = () => selectSource(s.id);

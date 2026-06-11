@@ -142,6 +142,8 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       BookSource? verificationSource;
       String verificationUrl = '';
       var tried = 0;
+      var sourcesWithParsedResults = 0;
+      final failureSamples = <String>[];
       final mode = state.searchMatchMode;
       final maxResults = mode == SearchMatchMode.precise ? 240 : 500;
 
@@ -159,7 +161,8 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                 cancelToken: currentCancelToken,
               ).timeout(const Duration(seconds: 16));
               if (currentCancelToken.isCancelled) return <Book>[];
-              return books
+              if (books.isNotEmpty) sourcesWithParsedResults++;
+              final filtered = books
                   .where((book) => _matchesSearchMode(book, query, mode))
                   .map((book) {
                     book
@@ -168,6 +171,14 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                     return book;
                   })
                   .toList();
+              if (books.isNotEmpty && filtered.isEmpty) {
+                _appendFailureSample(
+                  failureSamples,
+                  source,
+                  '解析到 ${books.length} 条，但被当前匹配模式过滤；可切换“模糊”重试。',
+                );
+              }
+              return filtered;
             } catch (e) {
               if (e is DioException && e.type == DioExceptionType.cancel) {
                 return <Book>[];
@@ -178,6 +189,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                     ? e.url
                     : _sourceDefaultUrl(source);
               }
+              _appendFailureSample(failureSamples, source, _compactError(e));
               print('Search Error from ${source.bookSourceName}: $e');
               return <Book>[];
             }
@@ -230,7 +242,13 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
         verificationSource: allResults.isEmpty ? verificationSource : null,
         verificationUrl: allResults.isEmpty ? verificationUrl : '',
         clearVerificationSource: allResults.isNotEmpty,
-        error: allResults.isEmpty ? '已搜索 $tried 个启用书源，暂时没有搜到书籍' : '',
+        error: allResults.isEmpty
+            ? _emptySearchMessage(
+                tried: tried,
+                sourcesWithParsedResults: sourcesWithParsedResults,
+                failures: failureSamples,
+              )
+            : '',
       );
     } catch (e) {
       state = state.copyWith(isSearching: false, error: '搜索失败: $e');
@@ -338,5 +356,42 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       RegExp(r'[\s\p{P}\p{S}]+', unicode: true),
       '',
     );
+  }
+
+  void _appendFailureSample(
+    List<String> samples,
+    BookSource source,
+    String message,
+  ) {
+    if (samples.length >= 8) return;
+    final name = source.bookSourceName.trim().isEmpty
+        ? source.bookSourceUrl
+        : source.bookSourceName;
+    samples.add('$name：$message');
+  }
+
+  String _compactError(Object error) {
+    var text = error.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    const dioPrefix = 'DioException [unknown]: ';
+    if (text.startsWith(dioPrefix)) text = text.substring(dioPrefix.length);
+    if (text.length > 180) text = '${text.substring(0, 180)}...';
+    return text;
+  }
+
+  String _emptySearchMessage({
+    required int tried,
+    required int sourcesWithParsedResults,
+    required List<String> failures,
+  }) {
+    final buffer = StringBuffer('已搜索 $tried 个启用书源，暂时没有搜到书籍');
+    if (sourcesWithParsedResults > 0) {
+      buffer.write('；其中 $sourcesWithParsedResults 个源解析到结果但被当前匹配模式过滤');
+    }
+    if (failures.isNotEmpty) {
+      buffer
+        ..write('\n失败样例：')
+        ..write(failures.map((item) => '\n• $item').join());
+    }
+    return buffer.toString();
   }
 }

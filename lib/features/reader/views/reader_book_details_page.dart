@@ -1,10 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../data/models/book.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../viewmodels/reader_viewmodel.dart';
 import '../models/reader_navigation_target.dart';
@@ -182,6 +180,61 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
     }
   }
 
+  Future<void> _refreshCatalog() async {
+    showCupertinoDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const CupertinoAlertDialog(
+        title: Text('正在刷新目录'),
+        content: Padding(
+          padding: EdgeInsets.only(top: 14),
+          child: CupertinoActivityIndicator(),
+        ),
+      ),
+    );
+
+    try {
+      final count = await ref
+          .read(readerViewModelProvider(widget.bookId).notifier)
+          .refreshCatalog();
+      if (!mounted) return;
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (ctx) => CupertinoAlertDialog(
+          title: const Text('刷新完成'),
+          content: Text('已重新解析并缓存 $count 个章节。'),
+          actions: [
+            CupertinoDialogAction(
+              child: const Text('确定'),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (ctx) => CupertinoAlertDialog(
+          title: const Text('刷新失败'),
+          content: Text(e.toString()),
+          actions: [
+            CupertinoDialogAction(
+              child: const Text('确定'),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   Future<void> _openFullToc() async {
     final target = await Navigator.of(context).push<ReaderNavigationTarget>(
       CupertinoPageRoute(
@@ -201,9 +254,7 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
 
     if (state.error != null) {
       return CupertinoPageScaffold(
-        navigationBar: const CupertinoNavigationBar(
-          middle: Text('详情'),
-        ),
+        navigationBar: const CupertinoNavigationBar(middle: Text('详情')),
         child: SafeArea(
           child: Center(
             child: Padding(
@@ -246,7 +297,8 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
     }
 
     final lastReadChapter = book.currentChapter;
-    final lastReadTitle = state.chapters.isNotEmpty && lastReadChapter < state.chapters.length
+    final lastReadTitle =
+        state.chapters.isNotEmpty && lastReadChapter < state.chapters.length
         ? state.chapters[lastReadChapter].title
         : '';
     final lastReadText = lastReadTitle.isNotEmpty
@@ -277,7 +329,10 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
               mainAxisSize: MainAxisSize.min,
               children: const [
                 Icon(CupertinoIcons.left_chevron, color: Colors.blue, size: 20),
-                Text('Back', style: TextStyle(color: Colors.blue, fontSize: 16)),
+                Text(
+                  'Back',
+                  style: TextStyle(color: Colors.blue, fontSize: 16),
+                ),
               ],
             ),
             onPressed: () async {
@@ -292,7 +347,10 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               onPressed: _markAsRead,
-              child: const Text('已读', style: TextStyle(color: Colors.blue, fontSize: 16)),
+              child: const Text(
+                '已读',
+                style: TextStyle(color: Colors.blue, fontSize: 16),
+              ),
             ),
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -301,13 +359,27 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
                   _isAscending = !_isAscending;
                 });
               },
-              child: Text(_isAscending ? '倒序' : '正序', style: const TextStyle(color: Colors.blue, fontSize: 16)),
+              child: Text(
+                _isAscending ? '倒序' : '正序',
+                style: const TextStyle(color: Colors.blue, fontSize: 16),
+              ),
+            ),
+            CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              onPressed: _refreshCatalog,
+              child: const Icon(
+                CupertinoIcons.refresh,
+                color: Colors.blue,
+                size: 22,
+              ),
             ),
             CupertinoButton(
               padding: const EdgeInsets.only(left: 8, right: 16),
               onPressed: _toggleBookmark,
               child: Icon(
-                _isInBookshelf == true ? CupertinoIcons.bookmark_fill : CupertinoIcons.bookmark,
+                _isInBookshelf == true
+                    ? CupertinoIcons.bookmark_fill
+                    : CupertinoIcons.bookmark,
                 color: Colors.blue,
                 size: 24,
               ),
@@ -449,7 +521,9 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
                 child: Text(
                   '本书简介：${book.filePath.isEmpty ? "暂无简介" : book.filePath}',
                   maxLines: _isIntroExpanded ? null : 3,
-                  overflow: _isIntroExpanded ? TextOverflow.clip : TextOverflow.ellipsis,
+                  overflow: _isIntroExpanded
+                      ? TextOverflow.clip
+                      : TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 14,
                     height: 1.5,
@@ -504,7 +578,10 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
                       ),
                     ),
                     child: CupertinoListTile(
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 4,
+                      ),
                       title: Text(
                         chapter.title,
                         style: const TextStyle(
@@ -532,7 +609,10 @@ class _ReaderBookDetailsPageState extends ConsumerState<ReaderBookDetailsPage> {
                 const SizedBox(height: 16),
                 Center(
                   child: CupertinoButton(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 24,
+                    ),
                     color: Colors.blue.withOpacity(0.06),
                     borderRadius: BorderRadius.circular(22),
                     onPressed: _openFullToc,
