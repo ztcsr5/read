@@ -212,6 +212,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       return;
     }
 
+    if (request.method == 'GET' && path == '/api/sources/export') {
+      await _exportSources(request);
+      return;
+    }
+
     if (request.method == 'GET' && path == '/api/sources') {
       final q = request.uri.queryParameters['q']?.trim().toLowerCase() ?? '';
       final summary = _queryBool(request, 'summary');
@@ -423,6 +428,38 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       return decoded.map((key, value) => MapEntry(key.toString(), value));
     }
     throw const FormatException('JSON body must be an object');
+  }
+
+  Future<void> _exportSources(HttpRequest request) async {
+    final response = request.response;
+    response.statusCode = HttpStatus.ok;
+    response.headers
+      ..contentType = ContentType('application', 'json', charset: 'utf-8')
+      ..set(
+        'Content-Disposition',
+        'attachment; filename="read-book-sources.json"',
+      );
+
+    const pageSize = 500;
+    var offset = 0;
+    var first = true;
+    response.write('[');
+    while (true) {
+      final page = await _repository.getBookSourcesPage(
+        offset: offset,
+        limit: pageSize,
+      );
+      if (page.isEmpty) break;
+      for (final source in page) {
+        if (!first) response.write(',');
+        response.write(jsonEncode(_sourceJsonWithId(source)));
+        first = false;
+      }
+      offset += page.length;
+      if (page.length < pageSize) break;
+    }
+    response.write(']');
+    await response.close();
   }
 
   Map<String, dynamic> _testReportJson(LegadoTestReport report) {
@@ -1093,11 +1130,15 @@ async function downloadCurrentJson() {
 }
 async function exportAllSources() {
   try {
-    toast("正在导出全部书源...");
-    const res = await api("/api/sources");
+    toast("正在准备导出，浏览器会直接下载 JSON...");
     const date = new Date().toISOString().slice(0, 10);
-    downloadJson(`read-book-sources-${date}.json`, res.data || []);
-    toast(`已导出 ${res.total ?? (res.data || []).length} 个书源`);
+    const a = document.createElement("a");
+    a.href = `/api/sources/export?token=${encodeURIComponent(TOKEN)}&t=${Date.now()}`;
+    a.download = `read-book-sources-${date}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast("已开始导出全部书源");
   } catch(e) { toast("导出失败：" + e.message, true); }
 }
 async function loadImportFile(event) {

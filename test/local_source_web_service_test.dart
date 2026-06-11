@@ -62,6 +62,18 @@ void main() {
     expect(fullSource['bookSourceName'], 'Web Source');
     expect(fullSource['ruleSearch'], isA<Map>());
 
+    final exportResponse = await http.get(
+      Uri.parse('$base/api/sources/export?token=$token'),
+    );
+    expect(exportResponse.statusCode, 200);
+    expect(
+      exportResponse.headers['content-disposition'],
+      contains('read-book-sources.json'),
+    );
+    final exported = jsonDecode(exportResponse.body) as List;
+    expect(exported, hasLength(1));
+    expect((exported.single as Map)['bookSourceName'], 'Web Source');
+
     final summaryResponse = await http.get(
       Uri.parse('$base/api/sources?summary=1&limit=1&q=web'),
       headers: headers,
