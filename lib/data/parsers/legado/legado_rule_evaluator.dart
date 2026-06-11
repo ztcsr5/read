@@ -3115,6 +3115,9 @@ class LegadoRuleEvaluator {
       return result;
     }
 
+    final stringChain = _evaluateResultStringChain(result, expression);
+    if (stringChain != null) return stringChain;
+
     final assigned = _evaluateResultAssignmentScript(result, expression);
     if (assigned != null) return assigned;
 
@@ -3244,12 +3247,12 @@ class LegadoRuleEvaluator {
     }
 
     final regexMatch = RegExp(
-      r'''^result\.replace\(\s*/(.+?)/([gimsuy]*)\s*,\s*(["'])(.*?)\3\s*\)$''',
+      r'''^result\.replace\(\s*/((?:\\.|[^/])*)/([gimsuy]*)\s*,\s*(["'])(.*?)\3\s*\)$''',
       dotAll: true,
     ).firstMatch(expression);
     if (regexMatch != null) {
       try {
-        final pattern = regexMatch.group(1) ?? '';
+        final pattern = _decodeJsRegexPattern(regexMatch.group(1) ?? '');
         final flags = regexMatch.group(2) ?? '';
         final replacement = _decodeJsEscaped(regexMatch.group(4) ?? '');
         final regex = RegExp(
@@ -3259,13 +3262,74 @@ class LegadoRuleEvaluator {
           dotAll: flags.contains('s'),
         );
         return flags.contains('g')
-            ? result.replaceAll(regex, replacement)
-            : result.replaceFirst(regex, replacement);
+            ? result.replaceAllMapped(
+                regex,
+                (match) => _expandJsReplacement(replacement, match),
+              )
+            : result.replaceFirstMapped(
+                regex,
+                (match) => _expandJsReplacement(replacement, match),
+              );
       } catch (_) {
         return null;
       }
     }
     return null;
+  }
+
+  static String? _evaluateResultStringChain(String result, String expression) {
+    var output = result;
+    var rest = expression.trim();
+    if (rest.startsWith('String(result)')) {
+      rest = rest.substring('String(result)'.length).trimLeft();
+    } else if (rest.startsWith('result')) {
+      rest = rest.substring('result'.length).trimLeft();
+    } else {
+      return null;
+    }
+
+    if (rest.isEmpty) return output;
+    while (rest.isNotEmpty) {
+      if (rest.startsWith('.trim()')) {
+        output = output.trim();
+        rest = rest.substring('.trim()'.length).trimLeft();
+        continue;
+      }
+      if (rest.startsWith('.toLowerCase()')) {
+        output = output.toLowerCase();
+        rest = rest.substring('.toLowerCase()'.length).trimLeft();
+        continue;
+      }
+      if (rest.startsWith('.toUpperCase()')) {
+        output = output.toUpperCase();
+        rest = rest.substring('.toUpperCase()'.length).trimLeft();
+        continue;
+      }
+      if (rest.startsWith('.replace(')) {
+        final close = _findClosingParen(rest, '.replace'.length);
+        if (close == null || close < 0) return null;
+        final call = 'result${rest.substring(0, close + 1)}';
+        final replaced = _evaluateResultReplaceExpression(output, call);
+        if (replaced == null) return null;
+        output = replaced;
+        rest = rest.substring(close + 1).trimLeft();
+        continue;
+      }
+      if (rest == ';') return output;
+      return null;
+    }
+    return output;
+  }
+
+  static String _expandJsReplacement(String replacement, Match match) {
+    return replacement.replaceAllMapped(RegExp(r'\$(\$|&|\d{1,2})'), (token) {
+      final value = token.group(1) ?? '';
+      if (value == r'$') return r'$';
+      if (value == '&') return match.group(0) ?? '';
+      final index = int.tryParse(value);
+      if (index == null || index > match.groupCount) return token.group(0) ?? '';
+      return match.group(index) ?? '';
+    });
   }
 
   static String _extractJsPostProcessorScript(String rule) {

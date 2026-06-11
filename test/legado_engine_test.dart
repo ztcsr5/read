@@ -1647,6 +1647,23 @@ body=urlEncode(params)
       },
     );
 
+    test('applies String(result) replace chains and JS replacement groups', () {
+      expect(
+        LegadoRuleEvaluator.applyPostProcessors(
+          'https://m.example.com/book/12/34.html',
+          r'''<js>String(result).replace(/.*\/(\d+)\/(\d+).*/, "https://m.example.com/wapbook/$1_$2.html").trim()</js>''',
+        ),
+        'https://m.example.com/wapbook/12_34.html',
+      );
+      expect(
+        LegadoRuleEvaluator.applyPostProcessors(
+          'A ads B ads',
+          r'''@js:String(result).replace(/ads/g, "").replace(/\s+/g, " ").trim().toLowerCase()''',
+        ),
+        'a b',
+      );
+    });
+
     test('expands capture groups in replaceRegex post processors', () {
       final value = LegadoRuleEvaluator.applyPostProcessors(
         'cover http://img.example.com/a.webp done',
