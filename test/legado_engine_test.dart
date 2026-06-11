@@ -1722,6 +1722,21 @@ body=urlEncode(params)
       expect(value, 'https://b.heiyanimg.com/book/155711.jpg@!bns?1');
     });
 
+    test('exposes book origin to javascript post processors', () {
+      final value = LegadoRuleEvaluator.extractJsonValue(
+        {'Id': '155711'},
+        r'$.Id@js:book.origin+"/BookFiles/Html/"+result+"/index.html"',
+        variables: {
+          'book': {'origin': 'https://api.example.com'},
+        },
+      );
+
+      expect(
+        value,
+        'https://api.example.com/BookFiles/Html/155711/index.html',
+      );
+    });
+
     test(
       'applies simple javascript replace post processors without runtime',
       () {
@@ -2451,6 +2466,54 @@ body=urlEncode(params)
       expect(content, contains('Tail'));
       expect(content, isNot(contains('Demo Book')));
       expect(requested, ['/c1', '/c1?page=2']);
+    });
+
+    test('exposes chapter title to multiline content js postprocessor', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode({
+          'data': {'content': 'Chapter 1 ACTUAL CONTENT'},
+        }));
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Chapter JS Context Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({
+          'content': r'''$.data.content
+<js>
+a=String(chapter.title).replace(/\s/g,"");
+result.substring(0,90).includes(a)?result=result.split(a,2)[1]:result;
+result.toLowerCase()
+</js>''',
+        });
+      final book = Book(
+        title: 'Demo Book',
+        author: '',
+        filePath: '$base/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final chapter = Chapter(
+        bookId: 1,
+        title: 'Chapter 1',
+        index: 0,
+        url: '$base/c1',
+        content: '$base/c1',
+      );
+
+      final content = await LegadoParser.getChapterContent(
+        source,
+        chapter.url!,
+        book: book,
+        chapter: chapter,
+      );
+
+      expect(content, 'actual content');
     });
 
     test('keeps embedded request config from templated nextContentUrl', () async {

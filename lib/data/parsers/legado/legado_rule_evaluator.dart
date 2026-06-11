@@ -104,14 +104,19 @@ class LegadoRuleEvaluator {
     return parts.where((part) => part.isNotEmpty).toList();
   }
 
-  static String extractJsonValue(dynamic json, String rule) {
-    return _extractJsonValueInternal(json, rule);
+  static String extractJsonValue(
+    dynamic json,
+    String rule, {
+    Map<String, dynamic>? variables,
+  }) {
+    return _extractJsonValueInternal(json, rule, variables: variables);
   }
 
   static String _extractJsonValueInternal(
     dynamic json,
     String rule, {
     bool applyPut = true,
+    Map<String, dynamic>? variables,
   }) {
     if (rule.isEmpty) return '';
     if (applyPut) {
@@ -123,7 +128,7 @@ class LegadoRuleEvaluator {
         final jsonStr = json is String ? json : jsonEncode(json);
         final value = LegadoJsEngine().evaluate(
           rule,
-          variables: {'result': jsonStr},
+          variables: _postProcessorVariables(jsonStr, variables),
         );
         if (value.trim().isNotEmpty) return value.trim();
       } catch (_) {
@@ -135,7 +140,11 @@ class LegadoRuleEvaluator {
     final fallbackParts = _splitTopLevelOperator(rule, '||');
     if (fallbackParts != null) {
       for (final part in fallbackParts) {
-        final val = _extractJsonValueInternal(json, part.trim());
+        final val = _extractJsonValueInternal(
+          json,
+          part.trim(),
+          variables: variables,
+        );
         if (val.isNotEmpty) return val;
       }
       return '';
@@ -146,7 +155,11 @@ class LegadoRuleEvaluator {
     if (spliceParts != null) {
       final results = <String>[];
       for (final part in spliceParts) {
-        final val = _extractJsonValueInternal(json, part.trim());
+        final val = _extractJsonValueInternal(
+          json,
+          part.trim(),
+          variables: variables,
+        );
         if (val.isNotEmpty) results.add(val);
       }
       return results.join('\n');
@@ -157,7 +170,11 @@ class LegadoRuleEvaluator {
     if (mergeParts != null) {
       final results = <String>[];
       for (final part in mergeParts) {
-        final val = _extractJsonValueInternal(json, part.trim());
+        final val = _extractJsonValueInternal(
+          json,
+          part.trim(),
+          variables: variables,
+        );
         if (val.isNotEmpty) results.add(val);
       }
       return results.join('\n');
@@ -171,6 +188,7 @@ class LegadoRuleEvaluator {
           _interpolateJsonTemplate(json, templateRule),
           ruleText,
           originalJson: json,
+          variables: variables,
         );
       }
       if (_containsNonBracketJsonPath(ruleText)) {
@@ -184,9 +202,15 @@ class LegadoRuleEvaluator {
       _extractSingleJsonValue(json, cleaned),
       ruleText,
       originalJson: json,
+      variables: variables,
     );
     if (value.isEmpty && !cleaned.contains(r'$')) {
-      value = applyPostProcessors(cleaned, ruleText, originalJson: json);
+      value = applyPostProcessors(
+        cleaned,
+        ruleText,
+        originalJson: json,
+        variables: variables,
+      );
     }
     return value;
   }
@@ -248,14 +272,18 @@ class LegadoRuleEvaluator {
     return nodes;
   }
 
-  static String extractHtmlValue(Element node, String rule) {
+  static String extractHtmlValue(
+    Element node,
+    String rule, {
+    Map<String, dynamic>? variables,
+  }) {
     if (rule.isEmpty) return '';
     rule = _applyHtmlPutDirectives(node, rule);
     final materializedRule = _replaceGetDirectives(rule);
     if (_isHtmlLiteralWithGet(rule, materializedRule) ||
         _isHtmlLiteralRule(materializedRule)) {
       final base = _literalBeforePostProcessors(materializedRule);
-      return applyPostProcessors(base, materializedRule);
+      return applyPostProcessors(base, materializedRule, variables: variables);
     }
     rule = materializedRule;
 
@@ -263,7 +291,11 @@ class LegadoRuleEvaluator {
     final fallbackParts = _splitTopLevelOperator(rule, '||');
     if (fallbackParts != null) {
       for (final part in fallbackParts) {
-        final val = extractHtmlValue(node, part.trim());
+        final val = extractHtmlValue(
+          node,
+          part.trim(),
+          variables: variables,
+        );
         if (val.isNotEmpty) return val;
       }
       return '';
@@ -274,7 +306,11 @@ class LegadoRuleEvaluator {
     if (spliceParts != null) {
       final results = <String>[];
       for (final part in spliceParts) {
-        final val = extractHtmlValue(node, part.trim());
+        final val = extractHtmlValue(
+          node,
+          part.trim(),
+          variables: variables,
+        );
         if (val.isNotEmpty) results.add(val);
       }
       return results.join('\n');
@@ -284,16 +320,26 @@ class LegadoRuleEvaluator {
     final mergeParts = _splitTopLevelOperator(rule, '%%');
     if (mergeParts != null) {
       final lists = mergeParts
-          .map((part) => _extractHtmlValueList(node, part.trim()))
+          .map(
+            (part) => _extractHtmlValueList(
+              node,
+              part.trim(),
+              variables: variables,
+            ),
+          )
           .where((list) => list.isNotEmpty)
           .toList();
       return _interleaveLists(lists).join('\n');
     }
 
-    return _extractSingleHtmlValue(node, rule);
+    return _extractSingleHtmlValue(node, rule, variables: variables);
   }
 
-  static List<String> _extractHtmlValueList(Element node, String rule) {
+  static List<String> _extractHtmlValueList(
+    Element node,
+    String rule, {
+    Map<String, dynamic>? variables,
+  }) {
     if (rule.isEmpty) return const [];
     rule = _applyHtmlPutDirectives(node, rule);
     final materializedRule = _replaceGetDirectives(rule);
@@ -302,6 +348,7 @@ class LegadoRuleEvaluator {
       final value = applyPostProcessors(
         _literalBeforePostProcessors(materializedRule),
         materializedRule,
+        variables: variables,
       );
       return value.trim().isEmpty ? const [] : [value];
     }
@@ -309,7 +356,11 @@ class LegadoRuleEvaluator {
     final fallbackParts = _splitTopLevelOperator(rule, '||');
     if (fallbackParts != null) {
       for (final part in fallbackParts) {
-        final values = _extractHtmlValueList(node, part.trim());
+        final values = _extractHtmlValueList(
+          node,
+          part.trim(),
+          variables: variables,
+        );
         if (values.isNotEmpty) return values;
       }
       return const [];
@@ -317,13 +368,25 @@ class LegadoRuleEvaluator {
     final spliceParts = _splitTopLevelOperator(rule, '&&');
     if (spliceParts != null) {
       return spliceParts
-          .expand((part) => _extractHtmlValueList(node, part.trim()))
+          .expand(
+            (part) => _extractHtmlValueList(
+              node,
+              part.trim(),
+              variables: variables,
+            ),
+          )
           .toList();
     }
     final mergeParts = _splitTopLevelOperator(rule, '%%');
     if (mergeParts != null) {
       final lists = mergeParts
-          .map((part) => _extractHtmlValueList(node, part.trim()))
+          .map(
+            (part) => _extractHtmlValueList(
+              node,
+              part.trim(),
+              variables: variables,
+            ),
+          )
           .where((list) => list.isNotEmpty)
           .toList();
       return _interleaveLists(lists);
@@ -333,16 +396,27 @@ class LegadoRuleEvaluator {
       final value = applyPostProcessors(
         _literalBeforePostProcessors(interpolated),
         interpolated,
+        variables: variables,
       );
       return value.isEmpty ? const [] : [value];
     }
     if (rule.contains('@@')) {
-      final value = _extractSingleHtmlValue(node, rule);
+      final value = _extractSingleHtmlValue(
+        node,
+        rule,
+        variables: variables,
+      );
       return value.isEmpty ? const [] : [value];
     }
     if (isXPathRule(rule)) {
       return _extractXPathValueList(node, rule)
-          .map((value) => applyPostProcessors(value, rule))
+          .map(
+            (value) => applyPostProcessors(
+              value,
+              rule,
+              variables: variables,
+            ),
+          )
           .where((value) => value.trim().isNotEmpty)
           .toList();
     }
@@ -353,13 +427,21 @@ class LegadoRuleEvaluator {
     return targets
         .map(
           (target) =>
-              applyPostProcessors(_htmlValue(target, parsed.attr), rule),
+              applyPostProcessors(
+                _htmlValue(target, parsed.attr),
+                rule,
+                variables: variables,
+              ),
         )
         .where((value) => value.trim().isNotEmpty)
         .toList();
   }
 
-  static String _extractSingleHtmlValue(Element node, String rule) {
+  static String _extractSingleHtmlValue(
+    Element node,
+    String rule, {
+    Map<String, dynamic>? variables,
+  }) {
     rule = _applyHtmlPutDirectives(node, rule);
     final materializedRule = _replaceGetDirectives(rule);
     if (_isHtmlLiteralWithGet(rule, materializedRule) ||
@@ -367,6 +449,7 @@ class LegadoRuleEvaluator {
       return applyPostProcessors(
         _literalBeforePostProcessors(materializedRule),
         materializedRule,
+        variables: variables,
       );
     }
     rule = materializedRule;
@@ -374,6 +457,7 @@ class LegadoRuleEvaluator {
       return _extractSingleHtmlValue(
         node,
         rule.trimLeft().substring(2).trimLeft(),
+        variables: variables,
       );
     }
     if (_containsHtmlTemplate(rule)) {
@@ -381,23 +465,32 @@ class LegadoRuleEvaluator {
       return applyPostProcessors(
         _literalBeforePostProcessors(interpolated),
         interpolated,
+        variables: variables,
       );
     }
     if (rule.contains('@@')) {
       final parts = rule.split('@@');
-      final rawValue = _extractSingleHtmlValue(node, parts[0].trim());
+      final rawValue = _extractSingleHtmlValue(
+        node,
+        parts[0].trim(),
+        variables: variables,
+      );
       if (rawValue.isEmpty) return '';
       final doc = Document.html(rawValue);
       final root = doc.body ?? doc.documentElement;
       if (root == null) return '';
       final remainingRule = parts.skip(1).join('@@');
-      return _extractSingleHtmlValue(root, remainingRule);
+      return _extractSingleHtmlValue(root, remainingRule, variables: variables);
     }
 
     if (isXPathRule(rule)) {
       try {
         final values = _extractXPathValueList(node, rule);
-        return applyPostProcessors(values.join('\n'), rule);
+        return applyPostProcessors(
+          values.join('\n'),
+          rule,
+          variables: variables,
+        );
       } catch (_) {
         return '';
       }
@@ -411,7 +504,7 @@ class LegadoRuleEvaluator {
         .where((value) => value.trim().isNotEmpty)
         .toList();
     final value = values.join('\n');
-    return applyPostProcessors(value, rule);
+    return applyPostProcessors(value, rule, variables: variables);
   }
 
   static List<Element> queryAll(Document document, String rule) {
@@ -958,6 +1051,7 @@ class LegadoRuleEvaluator {
     String value,
     String rule, {
     dynamic originalJson,
+    Map<String, dynamic>? variables,
   }) {
     var output = value;
     rule = _replaceGetDirectives(rule);
@@ -973,6 +1067,7 @@ class LegadoRuleEvaluator {
         output,
         rule,
         originalJson: originalJson,
+        variables: variables,
       );
     }
 
@@ -1001,7 +1096,7 @@ class LegadoRuleEvaluator {
               : '<js>${_jsTagBody(line) ?? ''}</js>';
           final evaluated = LegadoJsEngine().evaluate(
             jsPart,
-            variables: {'result': output},
+            variables: _postProcessorVariables(output, variables),
           );
           if (evaluated.trim().isNotEmpty) output = evaluated;
         } catch (_) {}
@@ -1013,7 +1108,7 @@ class LegadoRuleEvaluator {
         try {
           LegadoJsEngine().evaluate(
             'java.put("$key", result)',
-            variables: {'result': output},
+            variables: _postProcessorVariables(output, variables),
           );
         } catch (_) {}
       } else if (line.toLowerCase().contains('@match->')) {
@@ -1081,7 +1176,7 @@ class LegadoRuleEvaluator {
         }
       }
 
-      output = _applyJsPostProcessors(output, line);
+      output = _applyJsPostProcessors(output, line, variables: variables);
     }
 
     return output.trim();
@@ -1089,16 +1184,21 @@ class LegadoRuleEvaluator {
 
   static bool _hasMultilineInlineJsPostProcessor(String rule) {
     final marker = rule.toLowerCase().indexOf('@js:');
-    if (marker < 0) return false;
-    final tail = rule.substring(marker + 4);
-    final jsBody = tail.split('##').first;
-    return jsBody.contains('\n') || jsBody.contains('\r');
+    if (marker >= 0) {
+      final tail = rule.substring(marker + 4);
+      final jsBody = tail.split('##').first;
+      return jsBody.contains('\n') || jsBody.contains('\r');
+    }
+    final jsTagBody = _jsTagBody(rule);
+    return jsTagBody != null &&
+        (jsTagBody.contains('\n') || jsTagBody.contains('\r'));
   }
 
   static String _applySingleLinePostProcessors(
     String value,
     String rule, {
     dynamic originalJson,
+    Map<String, dynamic>? variables,
   }) {
     var output = value;
     final lowerRule = rule.toLowerCase();
@@ -1121,7 +1221,7 @@ class LegadoRuleEvaluator {
             : '<js>${_jsTagBody(rule) ?? ''}</js>';
         final evaluated = LegadoJsEngine().evaluate(
           jsPart,
-          variables: {'result': output},
+          variables: _postProcessorVariables(output, variables),
         );
         if (evaluated.trim().isNotEmpty) output = evaluated;
       } catch (_) {}
@@ -1135,7 +1235,7 @@ class LegadoRuleEvaluator {
       try {
         LegadoJsEngine().evaluate(
           'java.put("$key", result)',
-          variables: {'result': output},
+          variables: _postProcessorVariables(output, variables),
         );
       } catch (_) {}
     }
@@ -1165,8 +1265,18 @@ class LegadoRuleEvaluator {
         );
       }
     }
-    output = _applyJsPostProcessors(output, rule);
+    output = _applyJsPostProcessors(output, rule, variables: variables);
     return output.trim();
+  }
+
+  static Map<String, dynamic> _postProcessorVariables(
+    String result,
+    Map<String, dynamic>? variables,
+  ) {
+    final output = <String, dynamic>{};
+    if (variables != null) output.addAll(variables);
+    output['result'] = result;
+    return output;
   }
 
   static String _applyMatchPostProcessor(String value, String rule) {
@@ -3161,13 +3271,21 @@ class LegadoRuleEvaluator {
         .trim();
   }
 
-  static String _applyJsPostProcessors(String value, String rule) {
+  static String _applyJsPostProcessors(
+    String value,
+    String rule, {
+    Map<String, dynamic>? variables,
+  }) {
     final lowerRule = rule.toLowerCase();
     if (!lowerRule.contains('@js:') && !lowerRule.contains('<js>')) {
       return value;
     }
     var output = value;
-    final simpleOutput = _evaluateSimpleJsPostProcessor(output, rule);
+    final simpleOutput = _evaluateSimpleJsPostProcessor(
+      output,
+      rule,
+      variables: variables,
+    );
     if (simpleOutput.isNotEmpty) output = simpleOutput;
 
     final aesMatch = RegExp(
@@ -3225,7 +3343,11 @@ class LegadoRuleEvaluator {
     return output;
   }
 
-  static String _evaluateSimpleJsPostProcessor(String result, String rule) {
+  static String _evaluateSimpleJsPostProcessor(
+    String result,
+    String rule, {
+    Map<String, dynamic>? variables,
+  }) {
     final script = _extractJsPostProcessorScript(rule);
     if (script.isEmpty) return '';
     var expression = script.trim();
@@ -3240,6 +3362,13 @@ class LegadoRuleEvaluator {
 
     final assigned = _evaluateResultAssignmentScript(result, expression);
     if (assigned != null) return assigned;
+
+    final chapterCleaned = _evaluateChapterTitleCleanup(
+      result,
+      expression,
+      variables,
+    );
+    if (chapterCleaned != null) return chapterCleaned;
 
     final replaced = _evaluateResultReplaceExpression(result, expression);
     if (replaced != null) return replaced;
@@ -3268,16 +3397,72 @@ class LegadoRuleEvaluator {
       if (value == 'result' || value == 'String(result)') {
         buffer.write(result);
         usedResult = true;
-      } else if (_isQuotedJsString(value)) {
-        buffer.write(_decodeJsStringLiteral(value));
-      } else if (RegExp(r'^-?\d+(\.\d+)?$').hasMatch(value)) {
-        buffer.write(value);
       } else {
-        return '';
+        final variableValue = _evaluateVariableToken(value, variables);
+        if (variableValue != null) {
+          buffer.write(variableValue);
+        } else if (_isQuotedJsString(value)) {
+          buffer.write(_decodeJsStringLiteral(value));
+        } else if (RegExp(r'^-?\d+(\.\d+)?$').hasMatch(value)) {
+          buffer.write(value);
+        } else {
+          return '';
+        }
       }
     }
     final output = buffer.toString();
     return usedResult ? output : '';
+  }
+
+  static String? _evaluateVariableToken(
+    String token,
+    Map<String, dynamic>? variables,
+  ) {
+    if (variables == null || !RegExp(r'^[A-Za-z_$][\w$]*(?:\.[\w$]+)+$')
+        .hasMatch(token)) {
+      return null;
+    }
+    dynamic current = variables;
+    for (final part in token.split('.')) {
+      if (current is Map) {
+        current = current[part];
+      } else {
+        return null;
+      }
+    }
+    return current?.toString();
+  }
+
+  static String? _evaluateChapterTitleCleanup(
+    String result,
+    String expression,
+    Map<String, dynamic>? variables,
+  ) {
+    if (!expression.contains('chapter.title')) return null;
+    final title = _evaluateVariableToken('chapter.title', variables) ?? '';
+    if (title.isEmpty) return null;
+
+    var titleToken = title;
+    if (RegExp(r'''String\(\s*chapter\.title\s*\)\.replace\(/\s/g''')
+        .hasMatch(expression)) {
+      titleToken = titleToken.replaceAll(RegExp(r'\s+'), '');
+    }
+
+    var output = result;
+    if (titleToken.isNotEmpty &&
+        expression.contains('result.substring(0,90).includes') &&
+        expression.contains('result.split') &&
+        output.substring(0, output.length < 90 ? output.length : 90)
+            .contains(titleToken)) {
+      final index = output.indexOf(titleToken);
+      if (index >= 0) output = output.substring(index + titleToken.length);
+    }
+
+    if (RegExp(r'\bresult\.toLowerCase\(\)').hasMatch(expression) ||
+        RegExp(r'\boutput\.toLowerCase\(\)').hasMatch(expression)) {
+      output = output.toLowerCase();
+    }
+    return output;
   }
 
   static String? _evaluateResultAssignmentScript(
