@@ -311,41 +311,46 @@ class LegadoJsEngine {
 
       function __wrapJsoupNodes(nodes) {
         nodes = Array.isArray(nodes) ? nodes : [];
-        var wrapper = {
-          length: nodes.length,
-          text: function() { return nodes.map(function(n) { return n.text || ""; }).join("\n"); },
-          html: function() { return nodes.map(function(n) { return n.html || ""; }).join("\n"); },
-          outerHtml: function() { return wrapper.html(); },
-          attr: function(name) {
-            return nodes.length > 0 && nodes[0].attr ? String(nodes[0].attr[String(name)] || "") : "";
-          },
-          first: function() { return __wrapJsoupNodes(nodes.length ? [nodes[0]] : []); },
-          get: function(index) {
-            index = Number(index || 0);
-            return __wrapJsoupNodes(index >= 0 && index < nodes.length ? [nodes[index]] : []);
-          },
-          eq: function(index) { return wrapper.get(index); },
-          size: function() { return nodes.length; },
-          isEmpty: function() { return nodes.length === 0; },
-          select: function(selector) {
-            var merged = [];
-            for (var i = 0; i < nodes.length; i++) {
-              var docId = sendMessage("jsoup_parse", String(nodes[i].html || ""));
-              var raw = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
-              try {
-                var parsed = JSON.parse(raw);
-                if (Array.isArray(parsed)) merged = merged.concat(parsed);
-              } catch(e) {}
-            }
-            return __wrapJsoupNodes(merged);
-          },
-          map: function(fn) { return nodes.map(fn); },
-          forEach: function(fn) { return nodes.forEach(fn); },
-          toArray: function() { return nodes.slice(); },
-          toJSON: function() { return wrapper.html(); },
-          toString: function() { return wrapper.html(); }
-        };
-        for (var i = 0; i < nodes.length; i++) wrapper[i] = __wrapJsoupElement(nodes[i]);
+        var wrapper = nodes.map(function(node) { return __wrapJsoupElement(node); });
+        function define(name, value) {
+          Object.defineProperty(wrapper, name, {
+            value: value,
+            enumerable: false,
+            configurable: true
+          });
+        }
+        define("text", function() { return nodes.map(function(n) { return n.text || ""; }).join("\n"); });
+        define("html", function() { return nodes.map(function(n) { return n.html || ""; }).join("\n"); });
+        define("outerHtml", function() { return wrapper.html(); });
+        define("attr", function(name) {
+          return nodes.length > 0 && nodes[0].attr ? String(nodes[0].attr[String(name)] || "") : "";
+        });
+        define("first", function() { return nodes.length ? __wrapJsoupElement(nodes[0]) : __wrapJsoupElement({}); });
+        define("get", function(index) {
+          index = Number(index || 0);
+          return index >= 0 && index < nodes.length ? __wrapJsoupElement(nodes[index]) : __wrapJsoupElement({});
+        });
+        define("eq", function(index) {
+          index = Number(index || 0);
+          return __wrapJsoupNodes(index >= 0 && index < nodes.length ? [nodes[index]] : []);
+        });
+        define("size", function() { return nodes.length; });
+        define("isEmpty", function() { return nodes.length === 0; });
+        define("select", function(selector) {
+          var merged = [];
+          for (var i = 0; i < nodes.length; i++) {
+            var docId = sendMessage("jsoup_parse", String(nodes[i].html || ""));
+            var raw = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
+            try {
+              var parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) merged = merged.concat(parsed);
+            } catch(e) {}
+          }
+          return __wrapJsoupNodes(merged);
+        });
+        define("toArray", function() { return wrapper.slice(); });
+        define("toJSON", function() { return wrapper.html(); });
+        define("toString", function() { return wrapper.html(); });
         return wrapper;
       }
 
@@ -1423,6 +1428,7 @@ class LegadoJsEngine {
         unit == 0x24);
   }
 
+  // ignore: unused_element
   void _installAjaxTrap(Map<String, String> cache) {
     if (_runtime == null) return;
     _runtime!.evaluate('''
@@ -1487,6 +1493,7 @@ class LegadoJsEngine {
     ''');
   }
 
+  // ignore: unused_element
   String? _extractAjaxRequest(String error) {
     final marker = error.indexOf('__LEGADO_AJAX__');
     if (marker < 0) return null;

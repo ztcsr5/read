@@ -2319,6 +2319,37 @@ out.join("|");
       expect(value, 'V1:/1,/2|V2:/3');
     });
 
+    test('exposes jsoup arrays as element wrappers in js bridge', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final html = '''
+<div class="book"><a href="/b1">Book One</a></div>
+<div class="book"><a href="/b2">Book Two</a></div>
+''';
+
+      final mapped = LegadoJsEngine().evaluate(
+        r'''@js:
+java.getElements(".book").toArray().map(function(el) {
+  return el.select("a").attr("href") + ":" + el.text();
+}).join("|");
+''',
+        variables: {'result': html},
+      );
+      final forIn = LegadoJsEngine().evaluate(
+        r'''@js:
+var nodes = java.getElements(".book");
+var out = [];
+for (var i in nodes) {
+  out.push(nodes[i].select("a").attr("href"));
+}
+out.join(",");
+''',
+        variables: {'result': html},
+      );
+
+      expect(mapped, '/b1:Book One|/b2:Book Two');
+      expect(forIn, '/b1,/b2');
+    });
+
     test('supports java android compatibility shims in js bridge', () async {
       if (!LegadoJsEngine().isAvailable) return;
 
