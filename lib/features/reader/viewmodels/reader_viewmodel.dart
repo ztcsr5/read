@@ -952,9 +952,41 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
   bool _shouldRefreshOnlineCatalog(Book book, List<Chapter> chapters) {
     if (!book.isFromSource) return false;
     if (chapters.isEmpty) return true;
+    if (_hasSuspiciousCachedCatalog(chapters)) return true;
     final expected = book.totalChapters;
-    if (expected <= 0) return false;
+    if (expected <= 0) return chapters.length <= 3;
     return expected > chapters.length && expected - chapters.length >= 3;
+  }
+
+  bool _hasSuspiciousCachedCatalog(List<Chapter> chapters) {
+    if (chapters.length <= 1) return true;
+
+    final emptyTitles = chapters
+        .where((chapter) => chapter.title.trim().isEmpty)
+        .length;
+    if (emptyTitles >= (chapters.length / 2).ceil()) return true;
+
+    final urls = chapters
+        .map((chapter) => (chapter.content ?? chapter.url ?? '').trim())
+        .where((url) => url.isNotEmpty && !url.startsWith('volume://'))
+        .toList();
+    if (urls.isEmpty) return true;
+
+    final invalidUrls = urls.where((url) {
+      final lower = url.toLowerCase();
+      return lower.startsWith('@js:') ||
+          lower.startsWith('javascript:') ||
+          lower.contains('{') ||
+          lower.contains('}');
+    }).length;
+    if (invalidUrls >= (urls.length / 2).ceil()) return true;
+
+    final uniqueUrls = urls.toSet().length;
+    if (urls.length >= 3 && uniqueUrls <= (urls.length / 3).ceil()) {
+      return true;
+    }
+
+    return false;
   }
 
   Future<({Book book, List<Chapter> chapters})> _fetchOnlineCatalog(
