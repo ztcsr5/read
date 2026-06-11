@@ -366,6 +366,76 @@ class LegadoJsEngine {
         return list;
       }
 
+      function __encodedTextToBytes(encoded) {
+        var text = String(encoded || "");
+        var bytes = [];
+        for (var i = 0; i < text.length; i++) {
+          if (text.charAt(i) === "%" && i + 2 < text.length) {
+            var hex = text.substring(i + 1, i + 3);
+            if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+              bytes.push(parseInt(hex, 16));
+              i += 2;
+              continue;
+            }
+          }
+          bytes.push(text.charCodeAt(i) & 0xff);
+        }
+        return __arrayWithToArray(bytes);
+      }
+
+      function __bytesFromString(value, charset) {
+        var type = String(charset || "utf-8");
+        var encoded = sendMessage("java_encode_type", JSON.stringify({
+          type: type,
+          value: String(value == null ? "" : value)
+        }));
+        return __encodedTextToBytes(encoded);
+      }
+
+      function __bytesToBinaryString(bytes) {
+        if (bytes == null) return "";
+        if (typeof bytes === "string") return bytes;
+        var list = Array.isArray(bytes) ? bytes : [];
+        var out = "";
+        for (var i = 0; i < list.length; i++) {
+          out += String.fromCharCode(Number(list[i] || 0) & 0xff);
+        }
+        return out;
+      }
+
+      function __base64ToBytes(str) {
+        var raw = atob(String(str || ""));
+        var bytes = [];
+        for (var i = 0; i < raw.length; i++) bytes.push(raw.charCodeAt(i) & 0xff);
+        return __arrayWithToArray(bytes);
+      }
+
+      function __javaString(value) {
+        var text = Array.isArray(value) ? __bytesToBinaryString(value) : String(value == null ? "" : value);
+        return {
+          getBytes: function(charset) { return __bytesFromString(text, charset || "utf-8"); },
+          toString: function() { return text; },
+          valueOf: function() { return text; }
+        };
+      }
+
+      function __responseFromText(text) {
+        var bodyText = String(text == null ? "" : text);
+        var body = {
+          string: function() { return bodyText; },
+          text: function() { return bodyText; },
+          bytes: function() { return __bytesFromString(bodyText, "utf-8"); },
+          toString: function() { return bodyText; }
+        };
+        return {
+          body: function() { return body; },
+          string: function() { return bodyText; },
+          text: function() { return bodyText; },
+          json: function() { return JSON.parse(bodyText); },
+          toString: function() { return bodyText; }
+        };
+      }
+
       function __selectFromHtml(html, selector) {
         var docId = sendMessage("jsoup_parse", String(html || ""));
         var rawResult = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
@@ -577,6 +647,17 @@ class LegadoJsEngine {
         post: function(urlStr, body) {
           return java.ajax(String(urlStr || "") + "," + JSON.stringify({ method: "POST", body: body || "" }));
         },
+        postForm: function(urlStr, body) {
+          return java.ajax(String(urlStr || "") + "," + JSON.stringify({
+            method: "POST",
+            body: body || "",
+            headers: {"Content-Type": "application/x-www-form-urlencoded"}
+          }));
+        },
+        fetch: function(urlStr, options) {
+          var config = options || {};
+          return __responseFromText(java.ajax(String(urlStr || "") + "," + JSON.stringify(config)));
+        },
         connect: function(urlStr) {
           var u = String(urlStr || "");
           var config = { method: "GET", headers: {}, body: "" };
@@ -629,8 +710,14 @@ class LegadoJsEngine {
         base64Decode: function(str) {
           return __base64ToUtf8(str);
         },
+        base64Decoder: function(str) {
+          return java.base64Decode(str);
+        },
         base64DecodeToString: function(str) {
           return __base64ToUtf8(str);
+        },
+        base64DecodeToByteArray: function(str) {
+          return __base64ToBytes(str);
         },
         encodeURI: function(str) {
           return encodeURI(String(str || ""));
@@ -656,6 +743,9 @@ class LegadoJsEngine {
         },
         aesDecodeToString: function(value, key, iv, transformation) {
           return java.aesBase64DecodeToString(value, key, iv, transformation);
+        },
+        aesBase64DecodeToByteArray: function(value, key, iv, transformation) {
+          return __bytesFromString(java.aesBase64DecodeToString(value, key, iv, transformation), "utf-8");
         },
         hexDecodeToString: function(input) {
           var text = String(input || "");
@@ -835,6 +925,31 @@ class LegadoJsEngine {
         if (typeof key === "string") return java.get(key);
         return {};
       }
+
+      var Packages = {
+        java: {
+          lang: {
+            String: function(value) { return __javaString(value); }
+          }
+        }
+      };
+      java.lang = Packages.java.lang;
+
+      var android = {
+        util: {
+          Base64: {
+            encode: function(bytes, flags) {
+              return btoa(__bytesToBinaryString(bytes));
+            },
+            encodeToString: function(bytes, flags) {
+              return btoa(__bytesToBinaryString(bytes));
+            },
+            decode: function(value, flags) {
+              return __base64ToBytes(value);
+            }
+          }
+        }
+      };
 
       var CryptoJS = {
         MD5: function(value) {

@@ -2086,6 +2086,47 @@ out.join("|");
       expect(value, 'V1:/1,/2|V2:/3');
     });
 
+    test('supports java android compatibility shims in js bridge', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+
+      final gbkBytes = LegadoJsEngine().evaluate(
+        r'''@js:Packages.java.lang.String("\u4e2d").getBytes("gb2312").map(function(x) {
+  return "%" + (x & 0xff).toString(16).toUpperCase();
+}).join("")''',
+      );
+      final base64 = LegadoJsEngine().evaluate(
+        r'''@js:String(Packages.java.lang.String(android.util.Base64.encode(Packages.java.lang.String("abc").getBytes(), 2)))''',
+      );
+      final decoded = LegadoJsEngine().evaluate(
+        r'''@js:java.base64Decoder("SGVsbG8=")''',
+      );
+      final fetched = await LegadoJsEngine().evaluateWithAjax(
+        r'''@js:java.fetch("https://example.test/api", {method:"post", body:"a=1"}).body().string()''',
+        ajax: (request) async {
+          expect(request, contains('https://example.test/api'));
+          expect(request, contains('"body":"a=1"'));
+          return '{"ok":true}';
+        },
+      );
+      final posted = await LegadoJsEngine().evaluateWithAjax(
+        r'''@js:java.postForm("https://example.test/form", "q=1")''',
+        ajax: (request) async {
+          expect(request, contains('https://example.test/form'));
+          expect(
+            request,
+            contains('"Content-Type":"application/x-www-form-urlencoded"'),
+          );
+          return 'posted';
+        },
+      );
+
+      expect(gbkBytes, '%D6%D0');
+      expect(base64, 'YWJj');
+      expect(decoded, 'Hello');
+      expect(fetched, '{"ok":true}');
+      expect(posted, 'posted');
+    });
+
     test('supports cookie bridge backed by session store', () {
       if (!LegadoJsEngine().isAvailable) return;
       final uri = Uri.parse('https://cookie.example/path');
