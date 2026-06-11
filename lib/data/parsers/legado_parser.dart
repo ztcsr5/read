@@ -819,6 +819,7 @@ class LegadoParser {
 
     final chapters = <Chapter>[];
     final visitedUrls = <String>{};
+    final pendingTocUrls = <String>[];
 
     var currentResponse =
         preFetchedResponse != null &&
@@ -1160,41 +1161,23 @@ class LegadoParser {
         'nextPageUrl',
         'nextUrl',
       ]);
-      if (nextRule == null || nextRule.isEmpty) {
-        break;
-      }
-
-      String nextPage = '';
-      if (_looksLikeJsonData(pageData, nextRule) && _isJsonRule(nextRule)) {
-        try {
-          final jsonData = pageData is String ? jsonDecode(pageData) : pageData;
-          nextPage = _extractJsonValue(jsonData, nextRule);
-        } catch (_) {
-          nextPage = '';
+      if (nextRule != null && nextRule.isNotEmpty) {
+        for (final nextUrl in _extractUrlListFromRule(
+          currentUrlStr,
+          pageData,
+          nextRule,
+        )) {
+          if (nextUrl != currentUrlStr &&
+              !visitedUrls.contains(nextUrl) &&
+              !pendingTocUrls.contains(nextUrl)) {
+            pendingTocUrls.add(nextUrl);
+          }
         }
-      } else {
-        final document = parse(pageData.toString());
-        final root = document.documentElement ?? document.body;
-        if (root != null) nextPage = _extractHtmlValue(root, nextRule);
       }
-
-      nextPage = nextPage
-          .replaceAll('\n', '')
-          .replaceAll('\r', '')
-          .replaceAll('%0A', '')
-          .replaceAll('%0D', '')
-          .replaceAll('%0a', '')
-          .replaceAll('%0d', '')
-          .trim();
-      if (nextPage.isEmpty) {
+      if (pendingTocUrls.isEmpty) {
         break;
       }
-
-      final nextUrlResolved = _resolveUrl(currentUrlStr, nextPage);
-      if (nextUrlResolved == currentUrlStr ||
-          visitedUrls.contains(nextUrlResolved)) {
-        break;
-      }
+      final nextUrlResolved = pendingTocUrls.removeAt(0);
 
       try {
         final nextResponse = await _request(source, nextUrlResolved);
@@ -1256,6 +1239,7 @@ class LegadoParser {
       final parts = <String>[];
       var currentUrl = chapterUrl;
       final visitedUrls = <String>{};
+      final pendingContentUrls = <String>[];
 
       while (true) {
         try {
@@ -1348,33 +1332,23 @@ class LegadoParser {
           );
           parts.add(contentText);
 
-          final nextUrl = _extractNextContentUrl(
+          final nextUrls = _extractNextContentUrls(
             response.realUri.toString(),
             rawData,
             rule,
           );
-          if (nextUrl == null) break;
-
-          final cleanedNextUrl = nextUrl
-              .replaceAll('\n', '')
-              .replaceAll('\r', '')
-              .replaceAll('%0A', '')
-              .replaceAll('%0D', '')
-              .replaceAll('%0a', '')
-              .replaceAll('%0d', '')
-              .trim();
-          if (cleanedNextUrl.isEmpty ||
-              cleanedNextUrl == currentUrl ||
-              visitedUrls.contains(cleanedNextUrl)) {
+          for (final nextUrl in nextUrls) {
+            if (nextUrl != currentUrl &&
+                !visitedUrls.contains(nextUrl) &&
+                !pendingContentUrls.contains(nextUrl)) {
+              pendingContentUrls.add(nextUrl);
+            }
+          }
+          if (pendingContentUrls.isEmpty) {
             break;
           }
 
-          final resolvedNextUrl = _resolveUrl(currentUrl, cleanedNextUrl);
-          if (resolvedNextUrl == currentUrl ||
-              visitedUrls.contains(resolvedNextUrl))
-            break;
-
-          currentUrl = resolvedNextUrl;
+          currentUrl = pendingContentUrls.removeAt(0);
         } catch (innerError) {
           // 容错机制：如果某一个分页面由于网络等原因报错，捕获异常并跳出，保证之前解析成功的部分依然可以返回
           print('Error processing chapter content page: $innerError');
@@ -1977,7 +1951,7 @@ class LegadoParser {
     return _request(source, _resolveUrl(baseUrl, contentUrl));
   }
 
-  static String? _extractNextContentUrl(
+  static List<String> _extractNextContentUrls(
     String baseUrl,
     dynamic data,
     Map<String, dynamic> rule,
@@ -1987,22 +1961,64 @@ class LegadoParser {
       'nextUrl',
       'nextPageUrl',
     ]);
-    if (nextRule == null) return null;
-    String nextUrl = '';
-    if (_looksLikeJsonData(data, nextRule) && _isJsonRule(nextRule)) {
+    if (nextRule == null) return const [];
+    return _extractUrlListFromRule(baseUrl, data, nextRule);
+  }
+
+  static List<String> _extractUrlListFromRule(
+    String baseUrl,
+    dynamic data,
+    String rule,
+  ) {
+    final rawValues = <String>[];
+    if (_looksLikeJsonData(data, rule) && _isJsonRule(rule)) {
       try {
         final jsonData = data is String ? jsonDecode(data) : data;
-        nextUrl = _extractJsonValue(jsonData, nextRule);
+        rawValues.addAll(
+          _extractJsonNodes(jsonData, rule)
+              .map((value) => value?.toString() ?? '')
+              .where((value) => value.trim().isNotEmpty),
+        );
+        if (rawValues.isEmpty) {
+          rawValues.add(_extractJsonValue(jsonData, rule));
+        }
       } catch (_) {
-        nextUrl = '';
+        // Fall through to an empty list.
       }
     } else {
       final document = parse(data.toString());
       final root = document.documentElement ?? document.body;
-      if (root != null) nextUrl = _extractHtmlValue(root, nextRule);
+      if (root != null) rawValues.add(_extractHtmlValue(root, rule));
     }
-    if (nextUrl.trim().isEmpty) return null;
-    return _resolveUrl(baseUrl, nextUrl);
+
+    final urls = <String>[];
+    final seen = <String>{};
+    for (final raw in rawValues.expand(_splitExtractedUrlValues)) {
+      final cleaned = _cleanInlineUrl(raw);
+      if (cleaned.isEmpty) continue;
+      final resolved = _resolveUrl(baseUrl, cleaned);
+      if (resolved.isEmpty || !seen.add(resolved)) continue;
+      urls.add(resolved);
+    }
+    return urls;
+  }
+
+  static Iterable<String> _splitExtractedUrlValues(String value) {
+    return value
+        .split(RegExp(r'[\r\n]+'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty);
+  }
+
+  static String _cleanInlineUrl(String value) {
+    return value
+        .replaceAll('\n', '')
+        .replaceAll('\r', '')
+        .replaceAll('%0A', '')
+        .replaceAll('%0D', '')
+        .replaceAll('%0a', '')
+        .replaceAll('%0d', '')
+        .trim();
   }
 
   static Future<({dynamic data, String rule})> _prepareDataForRule(

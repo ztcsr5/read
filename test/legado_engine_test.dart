@@ -1398,6 +1398,123 @@ body=urlEncode(params)
       });
     });
 
+    test('loads all toc pages when nextTocUrl returns multiple urls', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.html;
+        switch (request.uri.path) {
+          case '/toc':
+            request.response.write('''
+              <div class="toc"><a href="/c1">Chapter 1</a></div>
+              <div class="pages">
+                <a href="/toc2">2</a>
+                <a href="/toc3">3</a>
+              </div>
+            ''');
+            break;
+          case '/toc2':
+            request.response.write(
+              '<div class="toc"><a href="/c2">Chapter 2</a></div>',
+            );
+            break;
+          case '/toc3':
+            request.response.write(
+              '<div class="toc"><a href="/c3">Chapter 3</a></div>',
+            );
+            break;
+          default:
+            request.response.statusCode = HttpStatus.notFound;
+            request.response.write('');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Paged Toc Source'
+        ..bookSourceUrl = base
+        ..ruleToc = jsonEncode({
+          'chapterList': '.toc a',
+          'chapterName': '@text',
+          'chapterUrl': '@href',
+          'nextTocUrl': '.pages a@href',
+        });
+      final book = Book(
+        title: 'Paged Toc',
+        author: '',
+        filePath: '$base/toc',
+        fileType: 'online',
+        isFromSource: true,
+      );
+
+      final chapters = await LegadoParser.getChapterList(source, book);
+
+      expect(chapters.map((chapter) => chapter.title), [
+        'Chapter 1',
+        'Chapter 2',
+        'Chapter 3',
+      ]);
+      expect(chapters.map((chapter) => chapter.url), [
+        '$base/c1',
+        '$base/c2',
+        '$base/c3',
+      ]);
+    });
+
+    test(
+      'loads all content pages when nextContentUrl returns multiple urls',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final requestedPaths = <String>[];
+        server.listen((request) async {
+          requestedPaths.add(request.uri.path);
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/c1':
+              request.response.write('''
+              <div id="content"><p>Part 1</p></div>
+              <div class="pages">
+                <a href="/c1p2">2</a>
+                <a href="/c1p3">3</a>
+              </div>
+            ''');
+              break;
+            case '/c1p2':
+              request.response.write('<div id="content"><p>Part 2</p></div>');
+              break;
+            case '/c1p3':
+              request.response.write('<div id="content"><p>Part 3</p></div>');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Paged Content Source'
+          ..bookSourceUrl = base
+          ..ruleContent = jsonEncode({
+            'content': '#content@html',
+            'nextContentUrl': '.pages a@href',
+          });
+
+        final content = await LegadoParser.getChapterContent(
+          source,
+          '$base/c1',
+        );
+
+        expect(content, contains('Part 1'));
+        expect(content, contains('Part 2'));
+        expect(content, contains('Part 3'));
+        expect(requestedPaths, ['/c1', '/c1p2', '/c1p3']);
+      },
+    );
+
     test('supports ESO style crypto helper aliases', () {
       if (!LegadoJsEngine().isAvailable) return;
       expect(
