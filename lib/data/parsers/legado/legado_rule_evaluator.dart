@@ -1766,7 +1766,8 @@ class LegadoRuleEvaluator {
       RegExp(r':lt\((-?\d+)\)'),
       (match) {
         final val = int.tryParse(match.group(1) ?? '') ?? 0;
-        return '!0:$val';
+        if (val <= 0) return '[-999999:-999998]';
+        return '[0:${val - 1}]';
       },
     );
     output = _replaceCssPseudoOutsideFunctions(
@@ -1774,13 +1775,14 @@ class LegadoRuleEvaluator {
       RegExp(r':gt\((-?\d+)\)'),
       (match) {
         final val = (int.tryParse(match.group(1) ?? '') ?? 0) + 1;
-        return '!$val:';
+        return '[$val:]';
       },
     );
 
-    // Convert standalone .number to *.number
+    // Keep a whole-token ".0" as Legado's current-root child index, but make
+    // descendant " .0" tokens queryable by Dart's CSS selector engine.
     output = output.replaceAllMapped(
-      RegExp(r'(?<=^|\s)\.(\d+)\b'),
+      RegExp(r'(?<=\s)\.(\d+)\b'),
       (match) => '*.${match.group(1)!}',
     );
 
@@ -2037,6 +2039,7 @@ class LegadoRuleEvaluator {
     if (token.contains(' ') || token.startsWith('.') || token.startsWith('#')) {
       return false;
     }
+    if (_isChildrenSelector(token)) return false;
     if (_looksLikeHtmlTagToken(token)) return false;
     if (_isAttrFunctionToken(token)) return true;
     return _knownAttrs.contains(token) ||
@@ -2149,6 +2152,8 @@ class LegadoRuleEvaluator {
       final selector = _normalizeCssSelector(baseSelector);
       final nodes = _isLegacyTextSelector(baseSelector)
           ? _queryLegacyTextStep(node, baseSelector.substring(5))
+          : _isChildrenSelector(baseSelector)
+          ? node.children.whereType<Element>().toList()
           : selector.isEmpty || selector == 'this'
           ? node.children.whereType<Element>().toList()
           : _safeQuerySelectorStep(node, selector);
@@ -2157,28 +2162,23 @@ class LegadoRuleEvaluator {
     final parsed = _parseIndexConfig(rawSelector);
     final baseSelector = parsed.baseSelector.trim();
     final selector = _normalizeCssSelector(baseSelector);
-    if (selector.isEmpty || selector == 'this') return [node];
 
     final nodes = _isLegacyTextSelector(baseSelector)
         ? _queryLegacyTextStep(node, baseSelector.substring(5))
+        : _isChildrenSelector(baseSelector)
+        ? node.children.whereType<Element>().toList()
+        : (selector.isEmpty || selector == 'this') && parsed.hasIndexFilter
+        ? node.children.whereType<Element>().toList()
+        : selector.isEmpty || selector == 'this'
+        ? [node]
         : _safeQuerySelectorStep(node, selector);
 
-    if (parsed.isSlice) {
-      return _slice(nodes, parsed.sliceStart, parsed.sliceEnd);
-    }
-    if (parsed.isMulti && parsed.multiIndexes != null) {
-      final result = <Element>[];
-      for (final idx in parsed.multiIndexes!) {
-        final nIdx = _normalizeIndex(idx, nodes.length);
-        if (nIdx >= 0 && nIdx < nodes.length) {
-          result.add(nodes[nIdx]);
-        }
-      }
-      return result;
-    }
-    if (parsed.index != null) {
-      final idx = _normalizeIndex(parsed.index!, nodes.length);
-      return idx >= 0 && idx < nodes.length ? [nodes[idx]] : const [];
+    if (parsed.hasIndexFilter && parsed.indexes != null) {
+      return _applyLegacyIndexFilter(
+        nodes,
+        parsed.indexes!,
+        exclude: parsed.exclude,
+      );
     }
     return nodes;
   }
@@ -2240,6 +2240,11 @@ class LegadoRuleEvaluator {
 
   static bool _isLegacyTextSelector(String selector) {
     return selector.trim().startsWith('text.') && selector.trim().length > 5;
+  }
+
+  static bool _isChildrenSelector(String selector) {
+    final value = selector.trim().toLowerCase();
+    return value == 'children' || value == 'childnodes';
   }
 
   static List<Element> _queryLegacyTextStep(Element node, String needle) {
@@ -2760,80 +2765,64 @@ class LegadoRuleEvaluator {
 
   static ({
     String baseSelector,
-    bool isSlice,
-    int? index,
-    int? sliceStart,
-    int? sliceEnd,
-    bool isMulti,
-    List<int>? multiIndexes,
+    bool hasIndexFilter,
+    bool exclude,
+    List<int>? indexes,
   })
   _parseIndexConfig(String selector) {
-    // Slice: base!start:end
-    final slice = RegExp(r'^(.+)!(-?\d*)?(?::(-?\d*)?)?$').firstMatch(selector);
-    if (slice != null) {
-      return (
-        baseSelector: slice.group(1)?.trim() ?? selector,
-        isSlice: true,
-        index: null,
-        sliceStart: int.tryParse(slice.group(2) ?? ''),
-        sliceEnd: int.tryParse(slice.group(3) ?? ''),
-        isMulti: false,
-        multiIndexes: null,
-      );
-    }
-
-    // Multi: base.i1,i2,i3
-    final multi = RegExp(r'^(.+)\.((?:\d+)(?:,\d+)*)$').firstMatch(selector);
-    if (multi != null) {
-      return (
-        baseSelector: multi.group(1)?.trim() ?? selector,
-        isSlice: false,
-        index: null,
-        sliceStart: null,
-        sliceEnd: null,
-        isMulti: true,
-        multiIndexes: multi.group(2)!.split(',').map(int.parse).toList(),
-      );
-    }
-
-    // Index: base.i
-    final index = RegExp(r'^(.+)\.(-?\d+)$').firstMatch(selector);
-    if (index != null) {
-      final base = index.group(1)?.trim() ?? selector;
-      final number = int.tryParse(index.group(2) ?? '');
-      if (number != null) {
+    // Legacy Legado indexes:
+    //   base.0       selects index 0
+    //   base.0:2:-1  selects listed indexes
+    //   base!0:-1    excludes listed indexes
+    //
+    // Official Legado treats ':' here as an index-list separator, not a
+    // range. Ranges belong to bracket syntax, e.g. base[1:-2].
+    final legacy = RegExp(
+      r'^(.*?)([.!])\s*((?:-?\d+)(?:(?::|,)\s*-?\d+)*)\s*$',
+    ).firstMatch(selector);
+    if (legacy != null) {
+      final rawIndexes = legacy.group(3) ?? '';
+      final indexes = rawIndexes
+          .split(RegExp(r'[:,]'))
+          .map((part) => int.tryParse(part.trim()))
+          .whereType<int>()
+          .toList();
+      if (indexes.isNotEmpty) {
         return (
-          baseSelector: base,
-          isSlice: false,
-          index: number,
-          sliceStart: null,
-          sliceEnd: null,
-          isMulti: false,
-          multiIndexes: null,
+          baseSelector: legacy.group(1)?.trim() ?? '',
+          hasIndexFilter: true,
+          exclude: legacy.group(2) == '!',
+          indexes: indexes,
         );
       }
     }
+
     return (
       baseSelector: selector,
-      isSlice: false,
-      index: null,
-      sliceStart: null,
-      sliceEnd: null,
-      isMulti: false,
-      multiIndexes: null,
+      hasIndexFilter: false,
+      exclude: false,
+      indexes: null,
     );
   }
 
-  static List<Element> _slice(List<Element> nodes, int? start, int? end) {
+  static List<Element> _applyLegacyIndexFilter(
+    List<Element> nodes,
+    List<int> indexes, {
+    required bool exclude,
+  }) {
     if (nodes.isEmpty) return const [];
-    final from = _normalizeIndex(
-      start ?? 0,
-      nodes.length,
-    ).clamp(0, nodes.length);
-    var to = end == null ? nodes.length : _normalizeIndex(end, nodes.length);
-    to = to.clamp(0, nodes.length);
-    if (to < from) return const [];
-    return nodes.sublist(from, to);
+    final normalized = <int>{};
+    for (final index in indexes) {
+      final idx = _normalizeIndex(index, nodes.length);
+      if (idx >= 0 && idx < nodes.length) normalized.add(idx);
+    }
+    if (exclude) {
+      return [
+        for (var i = 0; i < nodes.length; i++)
+          if (!normalized.contains(i)) nodes[i],
+      ];
+    }
+    return [for (final index in normalized) nodes[index]];
   }
 
   static _BracketIndexConfig? _parseBracketIndexConfig(String selector) {

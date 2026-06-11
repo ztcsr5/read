@@ -683,6 +683,51 @@ void main() {
       );
     });
 
+    test('supports official legado legacy index filters and children selector', () {
+      final document = parse('''
+        <div class="books m-cols">
+          <article>A</article>
+          <article>B</article>
+          <article>C</article>
+          <article>D</article>
+        </div>
+        <table>
+          <tr><td>header</td></tr>
+          <tr><td>row1</td></tr>
+          <tr><td>row2</td></tr>
+        </table>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'class.books m-cols@children',
+        ).map((node) => node.text.trim()).toList(),
+        ['A', 'B', 'C', 'D'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'class.books m-cols@children.0:2:-1',
+        ).map((node) => node.text.trim()).toList(),
+        ['A', 'C', 'D'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'tag.tr!0',
+        ).map((node) => node.text.trim()).toList(),
+        ['row1', 'row2'],
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'class.books m-cols@children!0:-1@text',
+        ),
+        'B\nC',
+      );
+    });
+
     test('supports jquery eq lt gt pseudo indexes on html selectors', () {
       final document = parse('''
         <table>
@@ -904,7 +949,7 @@ void main() {
       expect(
         LegadoRuleEvaluator.extractHtmlValue(
           document.body!,
-          'id.chaptercontent@p!1:-1@text',
+          'id.chaptercontent@p[1:-2]@text',
         ),
         '正文一\n正文二',
       );
