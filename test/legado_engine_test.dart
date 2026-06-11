@@ -492,6 +492,34 @@ void main() {
       );
     });
 
+    test('joins multiple xpath values and interleaves xpath lists', () {
+      final document = parse('''
+        <div id="content">
+          <p>Line A</p>
+          <p>Line B</p>
+        </div>
+        <div class="toc">
+          <a href="/1">Chapter 1</a>
+          <a href="/2">Chapter 2</a>
+        </div>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '//div[@id="content"]/p/text()',
+        ),
+        'Line A\nLine B',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '//div[@class="toc"]/a/@href%%//div[@class="toc"]/a/text()',
+        ),
+        '/1\nChapter 1\n/2\nChapter 2',
+      );
+    });
+
     test('extracts chained html selectors and indexed selectors', () {
       final document = parse('''
         <div id="chaptercontent">

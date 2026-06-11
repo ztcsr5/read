@@ -217,9 +217,15 @@ class LegadoRuleEvaluator {
           .toList();
       return _interleaveLists(lists);
     }
-    if (rule.contains('@@') || isXPathRule(rule)) {
+    if (rule.contains('@@')) {
       final value = _extractSingleHtmlValue(node, rule);
       return value.isEmpty ? const [] : [value];
+    }
+    if (isXPathRule(rule)) {
+      return _extractXPathValueList(node, rule)
+          .map((value) => applyPostProcessors(value, rule))
+          .where((value) => value.trim().isNotEmpty)
+          .toList();
     }
 
     final parsed = _parseHtmlRule(rule);
@@ -248,10 +254,8 @@ class LegadoRuleEvaluator {
 
     if (isXPathRule(rule)) {
       try {
-        final result = HtmlXPath.node(node).query(xpathRule(rule));
-        final attr = result.attr;
-        if (attr != null) return applyPostProcessors(attr.trim(), rule);
-        return applyPostProcessors(result.node?.text?.trim() ?? '', rule);
+        final values = _extractXPathValueList(node, rule);
+        return applyPostProcessors(values.join('\n'), rule);
       } catch (_) {
         return '';
       }
@@ -700,6 +704,25 @@ class LegadoRuleEvaluator {
 
   static String xpathRule(String rule) {
     return rule.replaceFirst('@xpath:', '').replaceFirst('xpath:', '').trim();
+  }
+
+  static List<String> _extractXPathValueList(Element node, String rule) {
+    try {
+      final cleaned = stripPostProcessors(rule);
+      final result = HtmlXPath.node(node).query(xpathRule(cleaned));
+      final attrValues = result.attrs
+          .whereType<String>()
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
+      if (attrValues.isNotEmpty) return attrValues;
+      return result.nodes
+          .map((node) => node.text?.trim() ?? '')
+          .where((value) => value.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   static String _extractSingleJsonValue(dynamic json, String rule) {
