@@ -1398,9 +1398,11 @@ class LegadoParser {
             contentRule,
             baseUrl: currentUrl,
           );
-          final contentText = _extractContentFromResponse(
+          final contentText = await _extractContentFromResponseAsync(
+            source,
             prepared.data,
             prepared.rule,
+            baseUrl: currentUrl,
           );
           parts.add(contentText);
 
@@ -1447,9 +1449,11 @@ class LegadoParser {
             contentRule,
             baseUrl: chapterUrl,
           );
-          final fallbackText = _extractContentFromResponse(
+          final fallbackText = await _extractContentFromResponseAsync(
+            source,
             prepared.data,
             prepared.rule,
+            baseUrl: chapterUrl,
           );
           finalContent = _applyContentReplaceRegex(fallbackText, rule).trim();
         } catch (_) {}
@@ -1506,6 +1510,40 @@ class LegadoParser {
     });
 
     return content.trim();
+  }
+
+  static Future<String> _extractContentFromResponseAsync(
+    BookSource source,
+    dynamic data,
+    String contentRule, {
+    required String baseUrl,
+  }) async {
+    if (!contentRule.contains('java.ajax')) {
+      return _extractContentFromResponse(data, contentRule);
+    }
+    final block = _inlineJsPostProcessor(contentRule);
+    if (block == null || block.prefix.trim().isEmpty) {
+      return _extractContentFromResponse(data, contentRule);
+    }
+
+    final input = _extractContentFromResponse(data, block.prefix);
+    if (input.trim().isEmpty || input.startsWith('解析失败')) {
+      return _extractContentFromResponse(data, contentRule);
+    }
+
+    try {
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        block.script,
+        variables: _jsVariables(source, result: input, baseUrl: baseUrl),
+        libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
+        ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
+      );
+      final suffix = block.suffix.trim();
+      if (suffix.isEmpty) return _contentHtmlToText(output);
+      return _extractContentFromResponse(output, suffix);
+    } catch (_) {
+      return _extractContentFromResponse(data, contentRule);
+    }
   }
 
   static String _extractContentFromResponse(dynamic data, String contentRule) {

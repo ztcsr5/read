@@ -1713,6 +1713,33 @@ body=urlEncode(params)
       expect(content, contains('Para 3'));
     });
 
+    test('applies ajax javascript post processor for content', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.html;
+        if (request.uri.path == '/ajax') {
+          request.response.write('<p>Ajax Body</p>');
+        } else {
+          request.response.write('<div id="seed">/ajax</div>');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Ajax Content Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({
+          'content': '#seed@text<js>java.ajax(result)</js>',
+        });
+
+      final content = await LegadoParser.getChapterContent(source, '$base/c1');
+
+      expect(content, contains('Ajax Body'));
+    });
+
     test('supports ESO style crypto helper aliases', () {
       if (!LegadoJsEngine().isAvailable) return;
       expect(
