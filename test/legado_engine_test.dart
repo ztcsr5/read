@@ -670,6 +670,41 @@ void main() {
       );
     });
 
+    test('supports legado inline put and get variables in json rules', () {
+      final item = {'name': '斗破苍穹', 'id': 42, 'chapter': 7};
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(item, r'$.name@put:{bid:$.id}'),
+        '斗破苍穹',
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'https://example.com/book/@get:{bid}/{{$.chapter}}.html',
+        ),
+        'https://example.com/book/42/7.html',
+      );
+    });
+
+    test('supports legado inline put and get variables in html rules', () {
+      final document = parse('''
+        <html><head>
+          <meta property="book_name" content="斗破苍穹">
+        </head><body>
+          <a href="/toc">章节目录</a>
+        </body></html>
+      ''');
+      final root = document.documentElement!;
+      expect(
+        LegadoRuleEvaluator.queryOne(
+          document,
+          r'@put:{n:"meta[property~=book_name]@content",u:"@@text.章节目录@href"}',
+        ),
+        isNotNull,
+      );
+      expect(LegadoRuleEvaluator.extractHtmlValue(root, r'@get:{n}'), '斗破苍穹');
+      expect(LegadoRuleEvaluator.extractHtmlValue(root, r'@get:{u}'), '/toc');
+    });
+
     test('sanitizes non-standard Legado CSS selectors', () {
       expect(
         LegadoRuleEvaluator.sanitizeCssSelector('.info li.0 a'),

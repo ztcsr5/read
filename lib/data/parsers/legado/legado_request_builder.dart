@@ -176,7 +176,7 @@ class LegadoRequestBuilder {
     final rawKey = keyword;
     final baseUrl = source == null ? '' : _sourceValue(source, 'key');
     final sourceKey = _sourceValue(source, 'key');
-    final output =
+    var output =
         _replaceScriptBlocks(
               _replaceJavaHelpers(
                 _replaceEncodedPlaceholders(text),
@@ -224,6 +224,7 @@ class LegadoRequestBuilder {
             .replaceAll('{source.bookSourceUrl}', baseUrl)
             .replaceAll('{baseUrl}', baseUrl)
             .replaceAll('%s', encoded);
+    output = _replaceStoredGetTokens(output);
     if (text.contains('@js:') || text.contains('<js>')) {
       return output;
     }
@@ -245,6 +246,13 @@ class LegadoRequestBuilder {
     output = _replaceBareWord(output, 'searchPage', page.toString());
     output = _replaceBareWord(output, 'searchKey', encodedKeyword);
     return output;
+  }
+
+  static String _replaceStoredGetTokens(String text) {
+    return text.replaceAllMapped(
+      RegExp(r'@get:\{([^}]+)\}', caseSensitive: false),
+      (match) => LegadoJsEngine().getStoredString(match.group(1)?.trim() ?? ''),
+    );
   }
 
   static String _replaceBareWord(String text, String token, String value) {
@@ -323,6 +331,7 @@ class LegadoRequestBuilder {
         .replaceAll('%0a', '')
         .replaceAll('%0d', '')
         .trim();
+    url = _replaceStoredGetTokens(url);
     if (url.isEmpty) return '';
     if (_isWholeJsRule(url)) return '';
     if (url.startsWith('data:') || url.startsWith('javascript:')) return url;

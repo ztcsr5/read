@@ -907,6 +907,7 @@ class LegadoParser {
             final item = node.map(
               (key, value) => MapEntry(key.toString(), value),
             );
+            _primeJsonRuleSideEffects(item, rule, source);
 
             var titleRule =
                 _firstRule(rule, const [
@@ -1045,6 +1046,7 @@ class LegadoParser {
         for (final node in nodes) {
           if (limit != null && (chapters.length + pageChapters.length) >= limit)
             break;
+          _primeHtmlRuleSideEffects(node, rule, source);
 
           var titleRule =
               _firstRule(rule, const [
@@ -1471,6 +1473,7 @@ class LegadoParser {
     String? baseUrl,
     bool isBookInfo = false,
   }) {
+    _primeJsonRuleSideEffects(item, rule, source);
     final name = _cleanRuleOutput(
       _extractJsonValue(
         item,
@@ -1653,6 +1656,7 @@ class LegadoParser {
     String? baseUrl,
     bool isBookInfo = false,
   }) {
+    _primeHtmlRuleSideEffects(node, rule, source);
     final name = _extractHtmlValue(
       node,
       _firstRule(rule, const ['name']) ?? '',
@@ -1861,6 +1865,38 @@ class LegadoParser {
     return '';
   }
 
+  static void _primeJsonRuleSideEffects(
+    Map<String, dynamic> item,
+    Map<String, dynamic> rule,
+    BookSource source,
+  ) {
+    for (final value in rule.values) {
+      final text = value?.toString() ?? '';
+      if (!text.toLowerCase().contains('@put:')) continue;
+      try {
+        _extractJsonValue(item, _sourceScopedRule(text, source));
+      } catch (_) {
+        // @put side effects are best-effort; the field parser will still run.
+      }
+    }
+  }
+
+  static void _primeHtmlRuleSideEffects(
+    Element node,
+    Map<String, dynamic> rule,
+    BookSource source,
+  ) {
+    for (final value in rule.values) {
+      final text = value?.toString() ?? '';
+      if (!text.toLowerCase().contains('@put:')) continue;
+      try {
+        _extractHtmlValue(node, _sourceScopedRule(text, source));
+      } catch (_) {
+        // @put side effects are best-effort; the field parser will still run.
+      }
+    }
+  }
+
   static String _sourceScopedRule(String rule, BookSource source) {
     if (rule.isEmpty) return '';
     final baseUrl = LegadoRequestBuilder.cleanBaseUrl(
@@ -1971,7 +2007,30 @@ class LegadoParser {
     String rule,
   ) {
     final rawValues = <String>[];
-    if (_looksLikeJsonData(data, rule) && _isJsonRule(rule)) {
+    if (_isJsOnlyRule(rule)) {
+      try {
+        final output = LegadoJsEngine().evaluate(
+          rule,
+          variables: {
+            'result': data is String ? data : jsonEncode(data),
+            'baseUrl': baseUrl,
+            'url': baseUrl,
+          },
+        );
+        try {
+          final decoded = jsonDecode(output);
+          if (decoded is List) {
+            rawValues.addAll(decoded.map((value) => value?.toString() ?? ''));
+          } else {
+            rawValues.add(decoded?.toString() ?? '');
+          }
+        } catch (_) {
+          rawValues.add(output);
+        }
+      } catch (_) {
+        // Fall through to normal rule handling.
+      }
+    } else if (_looksLikeJsonData(data, rule) && _isJsonRule(rule)) {
       try {
         final jsonData = data is String ? jsonDecode(data) : data;
         rawValues.addAll(

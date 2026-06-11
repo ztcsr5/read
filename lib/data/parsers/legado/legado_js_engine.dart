@@ -210,6 +210,15 @@ class LegadoJsEngine {
 
   bool get isAvailable => _runtime != null;
 
+  String getStoredString(String key) {
+    final value = _javaStorage[key];
+    return value == null ? '' : value.toString();
+  }
+
+  void putStoredValue(String key, dynamic value) {
+    _javaStorage[key] = value;
+  }
+
   void _initJavaObject() {
     final jsCode = r'''
       var __cache_store = {};
@@ -1081,6 +1090,10 @@ class LegadoJsEngine {
     }
 
     codeToRun = codeToRun.trim();
+    codeToRun = codeToRun.replaceAllMapped(
+      RegExp(r'@get:\{([^}]+)\}', caseSensitive: false),
+      (match) => getStoredString(match.group(1)?.trim() ?? ''),
+    );
 
     // Use JsCompatibilityTransformer to upgrade functions with java.ajax calls to async and insert await correctly
     codeToRun = JsCompatibilityTransformer.transform(codeToRun);

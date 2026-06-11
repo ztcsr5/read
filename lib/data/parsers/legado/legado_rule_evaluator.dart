@@ -105,7 +105,19 @@ class LegadoRuleEvaluator {
   }
 
   static String extractJsonValue(dynamic json, String rule) {
+    return _extractJsonValueInternal(json, rule);
+  }
+
+  static String _extractJsonValueInternal(
+    dynamic json,
+    String rule, {
+    bool applyPut = true,
+  }) {
     if (rule.isEmpty) return '';
+    if (applyPut) {
+      rule = _applyJsonPutDirectives(json, rule);
+    }
+    rule = _replaceGetDirectives(rule);
     if (isJsOnlyRule(rule)) {
       try {
         final jsonStr = json is String ? json : jsonEncode(json);
@@ -123,7 +135,7 @@ class LegadoRuleEvaluator {
     final fallbackParts = _splitTopLevelOperator(rule, '||');
     if (fallbackParts != null) {
       for (final part in fallbackParts) {
-        final val = extractJsonValue(json, part.trim());
+        final val = _extractJsonValueInternal(json, part.trim());
         if (val.isNotEmpty) return val;
       }
       return '';
@@ -134,7 +146,7 @@ class LegadoRuleEvaluator {
     if (spliceParts != null) {
       final results = <String>[];
       for (final part in spliceParts) {
-        final val = extractJsonValue(json, part.trim());
+        final val = _extractJsonValueInternal(json, part.trim());
         if (val.isNotEmpty) results.add(val);
       }
       return results.join('\n');
@@ -145,7 +157,7 @@ class LegadoRuleEvaluator {
     if (mergeParts != null) {
       final results = <String>[];
       for (final part in mergeParts) {
-        final val = extractJsonValue(json, part.trim());
+        final val = _extractJsonValueInternal(json, part.trim());
         if (val.isNotEmpty) results.add(val);
       }
       return results.join('\n');
@@ -180,6 +192,8 @@ class LegadoRuleEvaluator {
 
   static List<dynamic> extractJsonNodes(dynamic json, String rule) {
     if (rule.isEmpty) return const [];
+    rule = _applyJsonPutDirectives(json, rule);
+    rule = _replaceGetDirectives(rule);
     if (isJsOnlyRule(rule)) {
       try {
         final jsonStr = json is String ? json : jsonEncode(json);
@@ -235,6 +249,13 @@ class LegadoRuleEvaluator {
 
   static String extractHtmlValue(Element node, String rule) {
     if (rule.isEmpty) return '';
+    rule = _applyHtmlPutDirectives(node, rule);
+    final materializedRule = _replaceGetDirectives(rule);
+    if (_isHtmlLiteralWithGet(rule, materializedRule)) {
+      final base = _literalBeforePostProcessors(materializedRule);
+      return applyPostProcessors(base, materializedRule);
+    }
+    rule = materializedRule;
 
     // Handle || (fallback)
     final fallbackParts = _splitTopLevelOperator(rule, '||');
@@ -272,6 +293,16 @@ class LegadoRuleEvaluator {
 
   static List<String> _extractHtmlValueList(Element node, String rule) {
     if (rule.isEmpty) return const [];
+    rule = _applyHtmlPutDirectives(node, rule);
+    final materializedRule = _replaceGetDirectives(rule);
+    if (_isHtmlLiteralWithGet(rule, materializedRule)) {
+      final value = applyPostProcessors(
+        _literalBeforePostProcessors(materializedRule),
+        materializedRule,
+      );
+      return value.trim().isEmpty ? const [] : [value];
+    }
+    rule = materializedRule;
     final fallbackParts = _splitTopLevelOperator(rule, '||');
     if (fallbackParts != null) {
       for (final part in fallbackParts) {
@@ -318,6 +349,21 @@ class LegadoRuleEvaluator {
   }
 
   static String _extractSingleHtmlValue(Element node, String rule) {
+    rule = _applyHtmlPutDirectives(node, rule);
+    final materializedRule = _replaceGetDirectives(rule);
+    if (_isHtmlLiteralWithGet(rule, materializedRule)) {
+      return applyPostProcessors(
+        _literalBeforePostProcessors(materializedRule),
+        materializedRule,
+      );
+    }
+    rule = materializedRule;
+    if (rule.trimLeft().startsWith('@@')) {
+      return _extractSingleHtmlValue(
+        node,
+        rule.trimLeft().substring(2).trimLeft(),
+      );
+    }
     if (rule.contains('@@')) {
       final parts = rule.split('@@');
       final rawValue = _extractSingleHtmlValue(node, parts[0].trim());
@@ -351,6 +397,14 @@ class LegadoRuleEvaluator {
 
   static List<Element> queryAll(Document document, String rule) {
     if (rule.isEmpty) return [];
+    final rootForSideEffects = document.documentElement ?? document.body;
+    if (rootForSideEffects != null) {
+      rule = _applyHtmlPutDirectives(rootForSideEffects, rule);
+    }
+    rule = _replaceGetDirectives(rule);
+    if (rule.trimLeft().startsWith('@@')) {
+      return queryAll(document, rule.trimLeft().substring(2).trimLeft());
+    }
 
     // Handle || (fallback)
     final fallbackParts = _splitTopLevelOperator(rule, '||');
@@ -409,6 +463,16 @@ class LegadoRuleEvaluator {
 
   static Element? queryOne(dynamic node, String rule) {
     if (rule.isEmpty) return null;
+    final sideEffectRoot = node is Document
+        ? node.documentElement ?? node.body
+        : node as Element?;
+    if (sideEffectRoot != null) {
+      rule = _applyHtmlPutDirectives(sideEffectRoot, rule);
+    }
+    rule = _replaceGetDirectives(rule);
+    if (rule.trimLeft().startsWith('@@')) {
+      return queryOne(node, rule.trimLeft().substring(2).trimLeft());
+    }
 
     // Handle || (fallback)
     final fallbackParts = _splitTopLevelOperator(rule, '||');
@@ -485,6 +549,300 @@ class LegadoRuleEvaluator {
         .trim();
   }
 
+  static String _applyJsonPutDirectives(dynamic json, String rule) {
+    final parsed = _splitPutDirectives(rule);
+    if (parsed.puts.isEmpty) return rule;
+    parsed.puts.forEach((key, valueRule) {
+      if (key.isEmpty) return;
+      final value = _extractJsonValueInternal(
+        json,
+        _replaceGetDirectives(valueRule),
+        applyPut: false,
+      );
+      LegadoJsEngine().putStoredValue(key, value);
+    });
+    return parsed.rule.trim();
+  }
+
+  static String _applyHtmlPutDirectives(Element node, String rule) {
+    final parsed = _splitPutDirectives(rule);
+    if (parsed.puts.isEmpty) return rule;
+    parsed.puts.forEach((key, valueRule) {
+      if (key.isEmpty) return;
+      final value = _extractSingleHtmlValueNoDirectives(
+        node,
+        _replaceGetDirectives(valueRule),
+      );
+      LegadoJsEngine().putStoredValue(key, value);
+    });
+    return parsed.rule.trim();
+  }
+
+  static ({String rule, Map<String, String> puts}) _splitPutDirectives(
+    String rule,
+  ) {
+    final puts = <String, String>{};
+    final output = StringBuffer();
+    var index = 0;
+    while (index < rule.length) {
+      final marker = rule.toLowerCase().indexOf('@put:', index);
+      if (marker < 0) {
+        output.write(rule.substring(index));
+        break;
+      }
+      output.write(rule.substring(index, marker));
+      var open = marker + 5;
+      while (open < rule.length && rule.codeUnitAt(open) <= 0x20) {
+        open++;
+      }
+      if (open >= rule.length || rule[open] != '{') {
+        output.write(rule.substring(marker, marker + 5));
+        index = marker + 5;
+        continue;
+      }
+      final close = _findBalanced(rule, open, 0x7b, 0x7d);
+      if (close < 0) {
+        output.write(rule.substring(marker));
+        index = rule.length;
+        break;
+      }
+      final body = rule.substring(open + 1, close);
+      puts.addAll(_parsePutBody(body));
+      index = close + 1;
+    }
+    return (rule: output.toString(), puts: puts);
+  }
+
+  static Map<String, String> _parsePutBody(String body) {
+    final result = <String, String>{};
+    for (final entry in _splitTopLevel(body, 0x2c)) {
+      final colon = _findTopLevel(entry, 0x3a);
+      if (colon <= 0) continue;
+      final key = _unquoteLoose(entry.substring(0, colon).trim());
+      final value = _unquoteLoose(entry.substring(colon + 1).trim());
+      if (key.isNotEmpty) result[key] = value;
+    }
+    return result;
+  }
+
+  static String _replaceGetDirectives(String rule) {
+    return rule.replaceAllMapped(
+      RegExp(r'@get:\{([^}]+)\}', caseSensitive: false),
+      (match) => LegadoJsEngine().getStoredString(match.group(1)?.trim() ?? ''),
+    );
+  }
+
+  static bool _isHtmlLiteralWithGet(String original, String materialized) {
+    if (!original.toLowerCase().contains('@get:')) return false;
+    final base = original.split('##').first.split('@js:').first.trim();
+    final withoutGets = base
+        .replaceAll(RegExp(r'@get:\{[^}]+\}', caseSensitive: false), '')
+        .trim();
+    if (withoutGets.isEmpty) return true;
+    final lower = withoutGets.toLowerCase();
+    if (lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('/') ||
+        lower.contains('://') ||
+        withoutGets.contains('<') ||
+        withoutGets.contains('>') ||
+        withoutGets.contains('?') ||
+        withoutGets.contains('&')) {
+      return true;
+    }
+    if (withoutGets.contains('@') ||
+        withoutGets.startsWith('.') ||
+        withoutGets.startsWith('#') ||
+        lower.startsWith('class.') ||
+        lower.startsWith('id.') ||
+        lower.startsWith('tag.') ||
+        lower.startsWith('@css:') ||
+        lower.startsWith('@xpath:') ||
+        lower.startsWith('xpath:') ||
+        _looksLikeHtmlTagToken(withoutGets)) {
+      return false;
+    }
+    return materialized.trim().isNotEmpty;
+  }
+
+  static String _literalBeforePostProcessors(String rule) {
+    var text = rule.trim();
+    final jsIndex = text.indexOf('@js:');
+    if (jsIndex >= 0) text = text.substring(0, jsIndex);
+    final hashIndex = text.indexOf('##');
+    if (hashIndex >= 0) text = text.substring(0, hashIndex);
+    return text.trim();
+  }
+
+  static String _extractSingleHtmlValueNoDirectives(Element node, String rule) {
+    var text = rule.trim();
+    while (text.startsWith('@@')) {
+      text = text.substring(2).trimLeft();
+    }
+    if (text.toLowerCase().startsWith('@css:')) {
+      text = text.substring(5).trimLeft();
+    }
+    if (text.isEmpty) return '';
+    if (text.contains('@@')) {
+      final parts = text.split('@@');
+      final rawValue = _extractSingleHtmlValueNoDirectives(
+        node,
+        parts[0].trim(),
+      );
+      if (rawValue.isEmpty) return '';
+      final doc = Document.html(rawValue);
+      final root = doc.body ?? doc.documentElement;
+      if (root == null) return '';
+      return _extractSingleHtmlValueNoDirectives(
+        root,
+        parts.skip(1).join('@@'),
+      );
+    }
+    if (isXPathRule(text)) {
+      final values = _extractXPathValueList(node, text);
+      return applyPostProcessors(values.join('\n'), text);
+    }
+    final parsed = _parseHtmlRule(text);
+    final targets = _queryChain(node, parsed.selectors);
+    if (targets.isEmpty) return '';
+    final values = targets
+        .map((target) => _htmlValue(target, parsed.attr))
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
+    return applyPostProcessors(values.join('\n'), text);
+  }
+
+  static int _findBalanced(String text, int start, int open, int close) {
+    var depth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = start; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == open) {
+        depth++;
+      } else if (unit == close) {
+        depth--;
+        if (depth == 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  static List<String> _splitTopLevel(String text, int separator) {
+    final parts = <String>[];
+    var start = 0;
+    var parenDepth = 0;
+    var bracketDepth = 0;
+    var braceDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x28) parenDepth++;
+      if (unit == 0x29 && parenDepth > 0) parenDepth--;
+      if (unit == 0x5b) bracketDepth++;
+      if (unit == 0x5d && bracketDepth > 0) bracketDepth--;
+      if (unit == 0x7b) braceDepth++;
+      if (unit == 0x7d && braceDepth > 0) braceDepth--;
+      if (unit == separator &&
+          parenDepth == 0 &&
+          bracketDepth == 0 &&
+          braceDepth == 0) {
+        parts.add(text.substring(start, i).trim());
+        start = i + 1;
+      }
+    }
+    final tail = text.substring(start).trim();
+    if (tail.isNotEmpty) parts.add(tail);
+    return parts;
+  }
+
+  static int _findTopLevel(String text, int target) {
+    var parenDepth = 0;
+    var bracketDepth = 0;
+    var braceDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if (quote != 0) {
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
+        quote = unit;
+        continue;
+      }
+      if (unit == 0x28) parenDepth++;
+      if (unit == 0x29 && parenDepth > 0) parenDepth--;
+      if (unit == 0x5b) bracketDepth++;
+      if (unit == 0x5d && bracketDepth > 0) bracketDepth--;
+      if (unit == 0x7b) braceDepth++;
+      if (unit == 0x7d && braceDepth > 0) braceDepth--;
+      if (unit == target &&
+          parenDepth == 0 &&
+          bracketDepth == 0 &&
+          braceDepth == 0) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  static String _unquoteLoose(String value) {
+    final text = value.trim();
+    if (text.length >= 2) {
+      final first = text.codeUnitAt(0);
+      final last = text.codeUnitAt(text.length - 1);
+      if ((first == 0x22 || first == 0x27 || first == 0x60) && first == last) {
+        return text
+            .substring(1, text.length - 1)
+            .replaceAll(r'\"', '"')
+            .replaceAll(r"\'", "'")
+            .replaceAll(r'\`', '`')
+            .replaceAll(r'\n', '\n')
+            .replaceAll(r'\r', '\r')
+            .replaceAll(r'\t', '\t')
+            .replaceAll(r'\\', '\\');
+      }
+    }
+    return text;
+  }
+
   static String cleanRuleOutput(String value) {
     return value.replaceAll(RegExp(r'<[^>]+>'), '').trim();
   }
@@ -518,6 +876,7 @@ class LegadoRuleEvaluator {
     dynamic originalJson,
   }) {
     var output = value;
+    rule = _replaceGetDirectives(rule);
     final lines = rule
         .split(RegExp(r'[\r\n]+'))
         .map((l) => l.trim())
