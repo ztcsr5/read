@@ -417,6 +417,46 @@ void main() {
       );
     });
 
+    test('interpolates @json literal URL templates', () {
+      final item = {
+        'id': 7,
+        'photoPath': '/cover.jpg',
+        'chapter_nid': 'n1',
+        'chapter_vid': 'v2',
+      };
+
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'@json:https://api.example.com/book?id={$.id}',
+        ),
+        'https://api.example.com/book?id=7',
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'@JSon:https://cdn.example.com/book{$.photoPath}',
+        ),
+        'https://cdn.example.com/book/cover.jpg',
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(
+          item,
+          r'@json:https://api.example.com/read?nid={{$.chapter_nid}}&vid={{$.chapter_vid}}',
+        ),
+        'https://api.example.com/read?nid=n1&vid=v2',
+      );
+    });
+
+    test('keeps @json json path extraction case-insensitive', () {
+      final item = {'name': 'Book A'};
+
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(item, r'@JSon:$.name'),
+        'Book A',
+      );
+    });
+
     test('extracts html values with css selector and attributes', () {
       final document = parse('''
         <div class="book">

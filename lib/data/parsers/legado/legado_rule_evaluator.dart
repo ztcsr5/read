@@ -166,8 +166,9 @@ class LegadoRuleEvaluator {
     var ruleText = rule;
     if (json is Map || json is List) {
       if (_containsJsonTemplate(ruleText)) {
+        final templateRule = _stripJsonRulePrefix(ruleText);
         return applyPostProcessors(
-          _interpolateJsonTemplate(json, ruleText),
+          _interpolateJsonTemplate(json, templateRule),
           ruleText,
           originalJson: json,
         );
@@ -512,7 +513,7 @@ class LegadoRuleEvaluator {
 
   static bool isJsonRule(String rule) {
     final cleaned = stripPostProcessors(rule);
-    if (cleaned.startsWith('@json:') || cleaned.startsWith('json:')) {
+    if (_hasJsonRulePrefix(cleaned)) {
       return true;
     }
     if (cleaned.startsWith(r'$.') || cleaned.startsWith(r'$[')) return true;
@@ -1408,9 +1409,19 @@ class LegadoRuleEvaluator {
   }
 
   static String _cleanJsonRule(String rule) {
-    return stripPostProcessors(
-      rule,
-    ).replaceFirst('@json:', '').replaceFirst('json:', '').trim();
+    return _stripJsonRulePrefix(stripPostProcessors(rule)).trim();
+  }
+
+  static bool _hasJsonRulePrefix(String rule) {
+    return RegExp(r'^@?json:', caseSensitive: false).hasMatch(rule.trimLeft());
+  }
+
+  static String _stripJsonRulePrefix(String rule) {
+    final leading = rule.length - rule.trimLeft().length;
+    final prefix = rule.substring(0, leading);
+    final body = rule.substring(leading);
+    return prefix +
+        body.replaceFirst(RegExp(r'^@?json:', caseSensitive: false), '');
   }
 
   static String sanitizeCssSelector(String selector) {
@@ -2523,13 +2534,14 @@ class LegadoRuleEvaluator {
 
   static bool _isPureJsonPath(String rule) {
     final trimmed = stripPostProcessors(rule).trim();
-    return (trimmed.startsWith(r'$') ||
-            trimmed.startsWith('@json:') ||
-            trimmed.startsWith('json:')) &&
-        !trimmed.contains(' ') &&
-        !trimmed.contains('/') &&
-        !trimmed.contains('{') &&
-        !trimmed.contains('}');
+    final normalized = _stripJsonRulePrefix(trimmed).trim();
+    return (trimmed.startsWith(r'$') || _hasJsonRulePrefix(trimmed)) &&
+        normalized.isNotEmpty &&
+        !normalized.contains(' ') &&
+        !normalized.contains('/') &&
+        !normalized.contains(':') &&
+        !normalized.contains('{') &&
+        !normalized.contains('}');
   }
 
   static bool _containsNonBracketJsonPath(String rule) {
