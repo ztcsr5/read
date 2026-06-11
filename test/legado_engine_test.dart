@@ -1259,6 +1259,29 @@ body=urlEncode(params)
       expect(indexedAttr, '2');
     });
 
+    test('supports java.getString and getStringList for html rules', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final html =
+          '<div id="content"><p>第一段</p><p data-id="2"><a href="/c2">第二段</a></p></div>';
+
+      final text = LegadoJsEngine().evaluate(
+        '@js:java.getString("#content p[data-id]@text")',
+        variables: {'result': html},
+      );
+      final href = LegadoJsEngine().evaluate(
+        '@js:java.getString("#content p[data-id] a@href")',
+        variables: {'result': html},
+      );
+      final list = LegadoJsEngine().evaluate(
+        '@js:JSON.stringify(java.getStringList("#content p@text"))',
+        variables: {'result': html},
+      );
+
+      expect(text, '第二段');
+      expect(href, '/c2');
+      expect(jsonDecode(list), ['第一段', '第二段']);
+    });
+
     test('supports legacy class selector with multiple class tokens', () {
       final document = parse('''
         <ul class="float-list fill-block">

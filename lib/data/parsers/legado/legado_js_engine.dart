@@ -314,6 +314,64 @@ class LegadoJsEngine {
         return __wrapJsoupNodes(nodes);
       }
 
+      function __looksLikeHtmlInput(value) {
+        return /<[a-zA-Z][\s\S]*>/.test(String(value || ""));
+      }
+
+      function __looksLikeHtmlRule(ruleStr) {
+        var rule = String(ruleStr || "").trim();
+        return rule.indexOf("@") >= 0 ||
+          rule.indexOf("||") >= 0 ||
+          rule.indexOf("&&") >= 0 ||
+          rule.indexOf("#") === 0 ||
+          rule.indexOf(".") === 0 ||
+          rule.indexOf("class.") === 0 ||
+          rule.indexOf("id.") === 0 ||
+          rule.indexOf("tag.") === 0;
+      }
+
+      function __normalizeLegadoSelector(selector) {
+        var value = String(selector || "").trim();
+        if (!value || value === "text" || value === "@text") return "body";
+        if (value.indexOf("class.") === 0) return "." + value.substring(6).replace(/\s+/g, ".");
+        if (value.indexOf("id.") === 0) return "#" + value.substring(3).trim();
+        if (value.indexOf("tag.") === 0) return value.substring(4).trim();
+        return value;
+      }
+
+      function __splitHtmlRule(ruleStr) {
+        var rule = String(ruleStr || "").trim();
+        var at = rule.lastIndexOf("@");
+        var selector = at >= 0 ? rule.substring(0, at).trim() : rule;
+        var attr = at >= 0 ? rule.substring(at + 1).trim() : "text";
+        return { selector: __normalizeLegadoSelector(selector), attr: attr || "text" };
+      }
+
+      function __nodeValueByAttr(node, attr) {
+        attr = String(attr || "text");
+        if (attr === "text" || attr === "ownText") return String(node.text || "");
+        if (attr === "html" || attr === "outerHtml") return String(node.html || "");
+        if (attr === "href" || attr === "src") return node.attr ? String(node.attr[attr] || "") : "";
+        if (attr.indexOf("attr.") === 0) attr = attr.substring(5);
+        return node.attr ? String(node.attr[attr] || "") : "";
+      }
+
+      function __extractHtmlRuleString(html, ruleStr) {
+        var parts = __splitHtmlRule(ruleStr);
+        var nodes = __selectFromHtml(html, parts.selector).toArray();
+        if (!nodes.length) return "";
+        if (parts.attr === "text" || parts.attr === "ownText") {
+          return nodes.map(function(n) { return __nodeValueByAttr(n, parts.attr); }).join("\n");
+        }
+        return __nodeValueByAttr(nodes[0], parts.attr);
+      }
+
+      function __extractHtmlRuleList(html, ruleStr) {
+        var parts = __splitHtmlRule(ruleStr);
+        var nodes = __selectFromHtml(html, parts.selector).toArray();
+        return nodes.map(function(n) { return __nodeValueByAttr(n, parts.attr); });
+      }
+
       var java = {
         put: function(key, value) {
           if (typeof key === "string" && (key.indexOf("http://") === 0 || key.indexOf("https://") === 0)) {
@@ -333,6 +391,10 @@ class LegadoJsEngine {
           var text = String(key || "");
           var stored = this.get(text);
           if (stored !== "") return String(stored);
+          if (typeof result !== "undefined" && __looksLikeHtmlInput(result) && __looksLikeHtmlRule(text)) {
+            var htmlValue = __extractHtmlRuleString(result, text);
+            if (htmlValue !== "") return htmlValue;
+          }
           if (typeof result !== "undefined" && (
               text.indexOf("$") === 0 ||
               text.indexOf(".") === 0 ||
@@ -354,6 +416,10 @@ class LegadoJsEngine {
           return isNaN(value) ? Number(def || 0) : value;
         },
         getStringList: function(key) {
+          var text = String(key || "");
+          if (typeof result !== "undefined" && __looksLikeHtmlInput(result) && __looksLikeHtmlRule(text)) {
+            return __extractHtmlRuleList(result, text);
+          }
           var value = java.getString(key, "[]");
           try {
             var parsed = JSON.parse(value);
