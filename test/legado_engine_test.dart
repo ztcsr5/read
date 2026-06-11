@@ -1669,6 +1669,28 @@ body=urlEncode(params)
       expect(href, '/a');
     });
 
+    test('supports getStringList toArray and setContent in js bridge', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final html = '''
+<div class="volume"><h2>V1</h2><a href="/1">C1</a><a href="/2">C2</a></div>
+<div class="volume"><h2>V2</h2><a href="/3">C3</a></div>
+''';
+
+      final value = LegadoJsEngine().evaluate(
+        r'''@js:
+var out = [];
+java.getElements(".volume").toArray().forEach(function(vol) {
+  java.setContent(vol);
+  out.push(java.getString("h2@text") + ":" + java.getStringList("a@href").toArray().join(","));
+});
+out.join("|");
+''',
+        variables: {'result': html},
+      );
+
+      expect(value, 'V1:/1,/2|V2:/3');
+    });
+
     test('supports cookie bridge backed by session store', () {
       if (!LegadoJsEngine().isAvailable) return;
       final uri = Uri.parse('https://cookie.example/path');

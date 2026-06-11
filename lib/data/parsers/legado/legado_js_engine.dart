@@ -340,6 +340,23 @@ class LegadoJsEngine {
         return wrapper;
       }
 
+      function __arrayWithToArray(values) {
+        var list = Array.isArray(values) ? values : [];
+        if (typeof list.toArray !== "function") {
+          list.toArray = function() { return list.slice(); };
+        }
+        if (typeof list.size !== "function") {
+          list.size = function() { return list.length; };
+        }
+        if (typeof list.isEmpty !== "function") {
+          list.isEmpty = function() { return list.length === 0; };
+        }
+        if (typeof list.get !== "function") {
+          list.get = function(index) { return list[Number(index || 0)]; };
+        }
+        return list;
+      }
+
       function __selectFromHtml(html, selector) {
         var docId = sendMessage("jsoup_parse", String(html || ""));
         var rawResult = sendMessage("jsoup_select", JSON.stringify({id: docId, selector: String(selector || "")}));
@@ -457,7 +474,7 @@ class LegadoJsEngine {
       function __extractHtmlRuleList(html, ruleStr) {
         var parts = __splitHtmlRule(ruleStr);
         var nodes = __selectFromHtml(html, parts.selector).toArray();
-        return nodes.map(function(n) { return __nodeValueByAttr(n, parts.attr); });
+        return __arrayWithToArray(nodes.map(function(n) { return __nodeValueByAttr(n, parts.attr); }));
       }
 
       var java = {
@@ -511,9 +528,9 @@ class LegadoJsEngine {
           var value = java.getString(key, "[]");
           try {
             var parsed = JSON.parse(value);
-            return Array.isArray(parsed) ? parsed : [];
+            return __arrayWithToArray(Array.isArray(parsed) ? parsed : []);
           } catch(e) {
-            return value ? String(value).split(",") : [];
+            return __arrayWithToArray(value ? String(value).split(",") : []);
           }
         },
         getElements: function(ruleStr) {
@@ -522,6 +539,22 @@ class LegadoJsEngine {
         },
         getElement: function(ruleStr) {
           return java.getElements(ruleStr).first();
+        },
+        setContent: function(content) {
+          if (content && typeof content === "object") {
+            if (typeof content.html === "function") {
+              result = content.html();
+            } else if (content.html != null) {
+              result = String(content.html);
+            } else if (content.outerHtml != null) {
+              result = String(content.outerHtml);
+            } else {
+              result = String(content);
+            }
+          } else {
+            result = content == null ? "" : String(content);
+          }
+          return result;
         },
         ajax: function(urlStr) {
           return sendMessage("java_ajax", String(urlStr || ""));
