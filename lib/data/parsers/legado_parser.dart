@@ -502,7 +502,14 @@ class LegadoParser {
     final results = <Book>[];
     if ((bookListRule == null || bookListRule.isEmpty) &&
         _looksLikeJsonData(data, null)) {
-      results.addAll(_parseBooksByJsonFallback(data, rule, source));
+      results.addAll(
+        await _parseBooksByJsonFallback(
+          data,
+          rule,
+          source,
+          baseUrl: response.realUri.toString(),
+        ),
+      );
     } else if (bookListRule != null &&
         _isJsonRule(bookListRule) &&
         _looksLikeJsonData(data, bookListRule)) {
@@ -515,7 +522,7 @@ class LegadoParser {
         for (final node in nodes) {
           if (node is Map<String, dynamic>) {
             results.add(
-              _parseBookFromJson(
+              await _parseBookFromJsonAsync(
                 node,
                 rule,
                 source,
@@ -524,7 +531,7 @@ class LegadoParser {
             );
           } else if (node is Map) {
             results.add(
-              _parseBookFromJson(
+              await _parseBookFromJsonAsync(
                 node.map((key, value) => MapEntry(key.toString(), value)),
                 rule,
                 source,
@@ -534,13 +541,34 @@ class LegadoParser {
           }
         }
         if (results.isEmpty) {
-          results.addAll(_parseBooksByJsonFallback(data, rule, source));
+          results.addAll(
+            await _parseBooksByJsonFallback(
+              data,
+              rule,
+              source,
+              baseUrl: response.realUri.toString(),
+            ),
+          );
         }
       } catch (_) {
-        results.addAll(_parseBooksByJsonFallback(data, rule, source));
+        results.addAll(
+          await _parseBooksByJsonFallback(
+            data,
+            rule,
+            source,
+            baseUrl: response.realUri.toString(),
+          ),
+        );
       }
     } else if (bookListRule == null || _looksLikeJsonData(data, bookListRule)) {
-      results.addAll(_parseBooksByJsonFallback(data, rule, source));
+      results.addAll(
+        await _parseBooksByJsonFallback(
+          data,
+          rule,
+          source,
+          baseUrl: response.realUri.toString(),
+        ),
+      );
     } else {
       final document = parse(data.toString());
       var nodes = _queryAll(document, bookListRule);
@@ -636,7 +664,15 @@ class LegadoParser {
     final results = <Book>[];
     if ((bookListRule == null || bookListRule.isEmpty) &&
         _looksLikeJsonData(data, null)) {
-      results.addAll(_parseBooksByJsonFallback(data, rule, source));
+      results.addAll(
+        await _parseBooksByJsonFallback(
+          data,
+          rule,
+          source,
+          baseUrl: response.realUri.toString(),
+          keyword: keyword,
+        ),
+      );
     } else if (bookListRule != null &&
         _isJsonRule(bookListRule) &&
         _looksLikeJsonData(data, bookListRule)) {
@@ -648,25 +684,59 @@ class LegadoParser {
         }
         for (final node in nodes) {
           if (node is Map<String, dynamic>) {
-            results.add(_parseBookFromJson(node, rule, source));
+            results.add(
+              await _parseBookFromJsonAsync(
+                node,
+                rule,
+                source,
+                baseUrl: response.realUri.toString(),
+                keyword: keyword,
+              ),
+            );
           } else if (node is Map) {
             results.add(
-              _parseBookFromJson(
+              await _parseBookFromJsonAsync(
                 node.map((key, value) => MapEntry(key.toString(), value)),
                 rule,
                 source,
+                baseUrl: response.realUri.toString(),
+                keyword: keyword,
               ),
             );
           }
         }
         if (results.isEmpty) {
-          results.addAll(_parseBooksByJsonFallback(data, rule, source));
+          results.addAll(
+            await _parseBooksByJsonFallback(
+              data,
+              rule,
+              source,
+              baseUrl: response.realUri.toString(),
+              keyword: keyword,
+            ),
+          );
         }
       } catch (_) {
-        results.addAll(_parseBooksByJsonFallback(data, rule, source));
+        results.addAll(
+          await _parseBooksByJsonFallback(
+            data,
+            rule,
+            source,
+            baseUrl: response.realUri.toString(),
+            keyword: keyword,
+          ),
+        );
       }
     } else if (bookListRule == null || _looksLikeJsonData(data, bookListRule)) {
-      results.addAll(_parseBooksByJsonFallback(data, rule, source));
+      results.addAll(
+        await _parseBooksByJsonFallback(
+          data,
+          rule,
+          source,
+          baseUrl: response.realUri.toString(),
+          keyword: keyword,
+        ),
+      );
     } else {
       final document = parse(data.toString());
       var nodes = _queryAll(document, bookListRule);
@@ -755,7 +825,7 @@ class LegadoParser {
       if (root is Map<String, dynamic>) {
         return _mergeBookInfo(
           book,
-          _parseBookFromJson(
+          await _parseBookFromJsonAsync(
             root,
             rule,
             source,
@@ -766,7 +836,7 @@ class LegadoParser {
       } else if (root is Map) {
         return _mergeBookInfo(
           book,
-          _parseBookFromJson(
+          await _parseBookFromJsonAsync(
             _stringKeyMap(root),
             rule,
             source,
@@ -1647,6 +1717,216 @@ class LegadoParser {
       totalChapters: totalChapters,
       fileSize: wordCount,
     );
+  }
+
+  static Future<Book> _parseBookFromJsonAsync(
+    Map<String, dynamic> item,
+    Map<String, dynamic> rule,
+    BookSource source, {
+    String? baseUrl,
+    bool isBookInfo = false,
+    String? keyword,
+  }) async {
+    final baseBook = _parseBookFromJson(
+      item,
+      rule,
+      source,
+      baseUrl: baseUrl,
+      isBookInfo: isBookInfo,
+    );
+    final base = baseUrl ?? source.bookSourceUrl;
+
+    try {
+      final coverUrl = await _resolveJsonAjaxFieldValue(
+        source,
+        item,
+        _ruleOrKey(rule['coverUrl'], item, const [
+          'coverUrl',
+          'CoverUrl',
+          'cover',
+          'Cover',
+          'cover_url',
+          'picUrl',
+          'pic',
+          'imgUrl',
+          'imageUrl',
+          'thumb',
+          'image',
+          'coverPath',
+        ]),
+        baseUrl: base,
+        keyword: keyword,
+      );
+      final bookUrlRule = isBookInfo
+          ? (rule['tocUrl'] ?? rule['catalogUrl'] ?? rule['bookUrl'])
+          : (rule['bookUrl'] ?? rule['tocUrl'] ?? rule['catalogUrl']);
+      final bookUrl = await _resolveJsonAjaxFieldValue(
+        source,
+        item,
+        _ruleOrKey(bookUrlRule, item, const [
+          'bookUrl',
+          'BookUrl',
+          'url',
+          'Url',
+          'detailUrl',
+          'detail_url',
+          'book_url',
+          'tocUrl',
+          'catalogUrl',
+          'bookId',
+          'BookId',
+          'book_id',
+          'book_id',
+          'bookID',
+          'book_id',
+          'articleid',
+          'articleId',
+          'novelId',
+          'novel_id',
+          'nid',
+          'id',
+          'Id',
+        ]),
+        baseUrl: base,
+        keyword: keyword,
+      );
+      final wordCountStr = await _resolveJsonAjaxFieldValue(
+        source,
+        item,
+        _ruleOrKey(rule['wordCount'], item, const [
+          'wordCount',
+          'WordCount',
+          'word_count',
+          'words',
+          'Words',
+          'size',
+          'Size',
+        ]),
+        baseUrl: base,
+        keyword: keyword,
+      );
+      final lastChapter = await _resolveJsonAjaxFieldValue(
+        source,
+        item,
+        _ruleOrKey(rule['lastChapter'], item, const [
+          'lastChapter',
+          'LastChapter',
+          'last_chapter',
+          'lastChapterName',
+          'latestChapter',
+        ]),
+        baseUrl: base,
+        keyword: keyword,
+      );
+
+      final asyncWordCount = _parseWordCount(wordCountStr ?? '');
+      final asyncTotalChapters = _parseChapterCount(lastChapter ?? '');
+      return baseBook.copyWith(
+        coverPath: coverUrl == null || coverUrl.isEmpty
+            ? null
+            : _resolveUrl(base, coverUrl),
+        filePath: bookUrl == null || bookUrl.isEmpty
+            ? null
+            : _resolveBookUrl(base, bookUrl),
+        fileSize: asyncWordCount > 0 ? asyncWordCount : null,
+        totalChapters: asyncTotalChapters > 0 ? asyncTotalChapters : null,
+      );
+    } catch (_) {
+      return baseBook;
+    }
+  }
+
+  static Future<String?> _resolveJsonAjaxFieldValue(
+    BookSource source,
+    Map<String, dynamic> item,
+    String rawRule, {
+    required String baseUrl,
+    String? keyword,
+  }) async {
+    final rule = _sourceScopedRule(rawRule, source).trim();
+    if (!rule.contains('java.ajax')) return null;
+    final block = _inlineJsPostProcessor(rule);
+    if (block == null || block.prefix.trim().isEmpty) return null;
+
+    final input = _cleanRuleOutput(_extractJsonValue(item, block.prefix));
+    if (input.trim().isEmpty) return null;
+
+    final output = await LegadoJsEngine().evaluateWithAjax(
+      block.script,
+      variables: _jsVariables(
+        source,
+        result: input,
+        baseUrl: baseUrl,
+        keyword: keyword,
+      ),
+      libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
+      ajax: (request) =>
+          _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+    );
+    final value = _applyAjaxFieldSuffix(output, block.suffix);
+    return value.trim().isEmpty ? null : value;
+  }
+
+  static ({String prefix, String script, String suffix})?
+  _inlineJsPostProcessor(String rule) {
+    final tagStart = rule.indexOf('<js>');
+    final atStart = rule.indexOf('@js:');
+    final useTag = tagStart >= 0 && (atStart < 0 || tagStart < atStart);
+    if (useTag) {
+      final close = rule.indexOf('</js>', tagStart);
+      if (close < 0) return null;
+      final end = close + '</js>'.length;
+      return (
+        prefix: rule.substring(0, tagStart),
+        script: rule.substring(tagStart, end),
+        suffix: rule.substring(end),
+      );
+    }
+    if (atStart >= 0) {
+      final regexStart = rule.indexOf('##', atStart + 4);
+      final end = regexStart < 0 ? rule.length : regexStart;
+      return (
+        prefix: rule.substring(0, atStart),
+        script: rule.substring(atStart, end),
+        suffix: regexStart < 0 ? '' : rule.substring(regexStart),
+      );
+    }
+    return null;
+  }
+
+  static String _applyAjaxFieldSuffix(String output, String suffix) {
+    final text = output.trim();
+    final rule = suffix.trim();
+    if (text.isEmpty || rule.isEmpty) return text;
+    try {
+      if (_isJsonRule(rule) && _looksLikeJsonData(text, rule)) {
+        final jsonData = jsonDecode(text);
+        return _cleanRuleOutput(_extractJsonValue(jsonData, rule));
+      }
+    } catch (_) {}
+    return _cleanRuleOutput(
+      LegadoRuleEvaluator.applyPostProcessors(text, rule),
+    );
+  }
+
+  static int _parseChapterCount(String value) {
+    for (final pattern in const [
+      r'\u7b2c\s*(\d+)\s*(?:\u7ae0|\u8282|\u5377|\u56de|\u96c6)?',
+      r'(\d+)\s*(?:\u7ae0|\u8282|\u5377|\u56de|\u96c6)',
+    ]) {
+      final match = RegExp(pattern).firstMatch(value);
+      if (match != null) return int.tryParse(match.group(1) ?? '') ?? 0;
+    }
+    return 0;
+  }
+
+  static int _parseWordCount(String value) {
+    if (value.isEmpty) return 0;
+    if (value.contains('\u4e07')) {
+      final numPart = double.tryParse(value.split('\u4e07').first.trim()) ?? 0;
+      return (numPart * 10000).toInt();
+    }
+    return int.tryParse(value.replaceAll(RegExp(r'\D'), '')) ?? 0;
   }
 
   static Book _parseBookFromHtmlNode(
@@ -3626,11 +3906,13 @@ class LegadoParser {
         (value.contains('{') || value.contains('}') || value.contains(';'));
   }
 
-  static List<Book> _parseBooksByJsonFallback(
+  static Future<List<Book>> _parseBooksByJsonFallback(
     dynamic data,
     Map<String, dynamic> rule,
-    BookSource source,
-  ) {
+    BookSource source, {
+    String? baseUrl,
+    String? keyword,
+  }) async {
     try {
       final jsonData = data is String ? jsonDecode(data) : data;
       final candidates = <dynamic>[
@@ -3673,10 +3955,19 @@ class LegadoParser {
         orElse: () => const [],
       );
       if (list.isEmpty) return [];
-      return list
-          .whereType<Map>()
-          .map((item) => _parseBookFromJson(_stringKeyMap(item), rule, source))
-          .toList();
+      final books = <Book>[];
+      for (final item in list.whereType<Map>()) {
+        books.add(
+          await _parseBookFromJsonAsync(
+            _stringKeyMap(item),
+            rule,
+            source,
+            baseUrl: baseUrl,
+            keyword: keyword,
+          ),
+        );
+      }
+      return books;
     } catch (_) {
       return [];
     }
