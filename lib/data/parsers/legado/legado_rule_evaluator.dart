@@ -1156,17 +1156,23 @@ class LegadoRuleEvaluator {
     }
     final bracket = _parseBracketIndexConfig(rawSelector);
     if (bracket != null) {
-      final selector = _normalizeCssSelector(bracket.baseSelector);
-      final nodes = selector.isEmpty || selector == 'this'
+      final baseSelector = bracket.baseSelector.trim();
+      final selector = _normalizeCssSelector(baseSelector);
+      final nodes = _isLegacyTextSelector(baseSelector)
+          ? _queryLegacyTextStep(node, baseSelector.substring(5))
+          : selector.isEmpty || selector == 'this'
           ? node.children.whereType<Element>().toList()
           : _safeQuerySelectorStep(node, selector);
       return _applyBracketIndexes(nodes, bracket);
     }
     final parsed = _parseIndexConfig(rawSelector);
-    final selector = _normalizeCssSelector(parsed.baseSelector);
+    final baseSelector = parsed.baseSelector.trim();
+    final selector = _normalizeCssSelector(baseSelector);
     if (selector.isEmpty || selector == 'this') return [node];
 
-    final nodes = _safeQuerySelectorStep(node, selector);
+    final nodes = _isLegacyTextSelector(baseSelector)
+        ? _queryLegacyTextStep(node, baseSelector.substring(5))
+        : _safeQuerySelectorStep(node, selector);
 
     if (parsed.isSlice) {
       return _slice(nodes, parsed.sliceStart, parsed.sliceEnd);
@@ -1241,6 +1247,24 @@ class LegadoRuleEvaluator {
       return const [];
     }
     return candidates.where((el) => _matchesTextPseudo(el, type, arg)).toList();
+  }
+
+  static bool _isLegacyTextSelector(String selector) {
+    return selector.trim().startsWith('text.') && selector.trim().length > 5;
+  }
+
+  static List<Element> _queryLegacyTextStep(Element node, String needle) {
+    final target = needle.trim();
+    if (target.isEmpty) return const [];
+    final lowerTarget = target.toLowerCase();
+    final result = <Element>[];
+    if (_ownText(node).toLowerCase().contains(lowerTarget)) result.add(node);
+    result.addAll(
+      node
+          .querySelectorAll('*')
+          .where((el) => _ownText(el).toLowerCase().contains(lowerTarget)),
+    );
+    return result;
   }
 
   static bool _matchesTextPseudo(Element el, String type, String arg) {
@@ -1668,11 +1692,7 @@ class LegadoRuleEvaluator {
         _collectTextNodes(target, list);
         return list.join('\n');
       case 'ownText':
-        return target.nodes
-            .whereType<Text>()
-            .map((node) => node.text)
-            .join('')
-            .trim();
+        return _ownText(target);
       case 'html':
         return target.innerHtml.trim();
       case 'outerHtml':
@@ -1712,6 +1732,14 @@ class LegadoRuleEvaluator {
     if (fn != null) return fn.group(1)?.trim() ?? trimmed;
     if (trimmed.startsWith('attr.')) return trimmed.substring(5).trim();
     return trimmed;
+  }
+
+  static String _ownText(Element target) {
+    return target.nodes
+        .whereType<Text>()
+        .map((node) => node.text)
+        .join('')
+        .trim();
   }
 
   static String _applyJsPostProcessors(String value, String rule) {

@@ -512,6 +512,35 @@ void main() {
       );
     });
 
+    test('supports legado text shorthand selector', () {
+      final document = parse('''
+        <div class="links">
+          <a href="/catalog">查看目录</a>
+          <a href="/upper">CATALOG</a>
+          <a href="/about">关于</a>
+        </div>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(document.body!, 'text.目录@href'),
+        '/catalog',
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'text.目录',
+        ).map((node) => node.attributes['href']).toList(),
+        ['/catalog'],
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'text.catalog@href',
+        ),
+        '/upper',
+      );
+    });
+
     test('joins multiple xpath values and interleaves xpath lists', () {
       final document = parse('''
         <div id="content">
