@@ -28,6 +28,82 @@ class LegadoRuleEvaluator {
     'alt',
   };
 
+  static List<String>? _splitTopLevelOperator(String rule, String operator) {
+    final parts = <String>[];
+    var start = 0;
+    var parenDepth = 0;
+    var bracketDepth = 0;
+    var braceDepth = 0;
+    var inJsBlock = false;
+    var inPostProcessor = false;
+    String? quote;
+
+    for (var i = 0; i < rule.length; i++) {
+      if (inJsBlock) {
+        if (rule.startsWith('</js>', i)) {
+          inJsBlock = false;
+          i += 4;
+        }
+        continue;
+      }
+      if (rule.startsWith('<js>', i)) {
+        inJsBlock = true;
+        i += 3;
+        continue;
+      }
+      if (inPostProcessor) continue;
+      if (quote != null) {
+        if (rule[i] == '\\') {
+          i++;
+        } else if (rule[i] == quote) {
+          quote = null;
+        }
+        continue;
+      }
+      final ch = rule[i];
+      if (ch == '"' || ch == "'" || ch == '`') {
+        quote = ch;
+        continue;
+      }
+      if (rule.startsWith('@js:', i) || rule.startsWith('##', i)) {
+        inPostProcessor = true;
+        continue;
+      }
+      switch (ch) {
+        case '(':
+          parenDepth++;
+          break;
+        case ')':
+          if (parenDepth > 0) parenDepth--;
+          break;
+        case '[':
+          bracketDepth++;
+          break;
+        case ']':
+          if (bracketDepth > 0) bracketDepth--;
+          break;
+        case '{':
+          braceDepth++;
+          break;
+        case '}':
+          if (braceDepth > 0) braceDepth--;
+          break;
+      }
+      if (parenDepth == 0 &&
+          bracketDepth == 0 &&
+          braceDepth == 0 &&
+          rule.startsWith(operator, i)) {
+        parts.add(rule.substring(start, i).trim());
+        i += operator.length - 1;
+        start = i + 1;
+      }
+    }
+
+    if (parts.isEmpty) return null;
+    parts.add(rule.substring(start).trim());
+    return parts.where((part) => part.isNotEmpty).toList();
+  }
+
   static String extractJsonValue(dynamic json, String rule) {
     if (rule.isEmpty) return '';
     if (isJsOnlyRule(rule)) {
@@ -44,9 +120,9 @@ class LegadoRuleEvaluator {
     }
 
     // Handle || (fallback)
-    if (rule.contains('||')) {
-      final parts = rule.split('||');
-      for (final part in parts) {
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
         final val = extractJsonValue(json, part.trim());
         if (val.isNotEmpty) return val;
       }
@@ -54,10 +130,10 @@ class LegadoRuleEvaluator {
     }
 
     // Handle && (splicing)
-    if (rule.contains('&&')) {
-      final parts = rule.split('&&');
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
       final results = <String>[];
-      for (final part in parts) {
+      for (final part in spliceParts) {
         final val = extractJsonValue(json, part.trim());
         if (val.isNotEmpty) results.add(val);
       }
@@ -65,10 +141,10 @@ class LegadoRuleEvaluator {
     }
 
     // Handle %% (cross merge)
-    if (rule.contains('%%')) {
-      final parts = rule.split('%%');
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
       final results = <String>[];
-      for (final part in parts) {
+      for (final part in mergeParts) {
         final val = extractJsonValue(json, part.trim());
         if (val.isNotEmpty) results.add(val);
       }
@@ -120,9 +196,9 @@ class LegadoRuleEvaluator {
     }
 
     // Handle || (fallback)
-    if (rule.contains('||')) {
-      final parts = rule.split('||');
-      for (final part in parts) {
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
         final val = extractJsonNodes(json, part.trim());
         if (val.isNotEmpty) return val;
       }
@@ -130,20 +206,20 @@ class LegadoRuleEvaluator {
     }
 
     // Handle && (splicing)
-    if (rule.contains('&&')) {
-      final parts = rule.split('&&');
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
       final results = <dynamic>[];
-      for (final part in parts) {
+      for (final part in spliceParts) {
         results.addAll(extractJsonNodes(json, part.trim()));
       }
       return results;
     }
 
     // Handle %% (cross merge)
-    if (rule.contains('%%')) {
-      final parts = rule.split('%%');
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
       final results = <dynamic>[];
-      for (final part in parts) {
+      for (final part in mergeParts) {
         results.addAll(extractJsonNodes(json, part.trim()));
       }
       return results;
@@ -161,9 +237,9 @@ class LegadoRuleEvaluator {
     if (rule.isEmpty) return '';
 
     // Handle || (fallback)
-    if (rule.contains('||')) {
-      final parts = rule.split('||');
-      for (final part in parts) {
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
         final val = extractHtmlValue(node, part.trim());
         if (val.isNotEmpty) return val;
       }
@@ -171,10 +247,10 @@ class LegadoRuleEvaluator {
     }
 
     // Handle && (splicing)
-    if (rule.contains('&&')) {
-      final parts = rule.split('&&');
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
       final results = <String>[];
-      for (final part in parts) {
+      for (final part in spliceParts) {
         final val = extractHtmlValue(node, part.trim());
         if (val.isNotEmpty) results.add(val);
       }
@@ -182,9 +258,9 @@ class LegadoRuleEvaluator {
     }
 
     // Handle %% (cross merge)
-    if (rule.contains('%%')) {
-      final parts = rule.split('%%');
-      final lists = parts
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
+      final lists = mergeParts
           .map((part) => _extractHtmlValueList(node, part.trim()))
           .where((list) => list.isNotEmpty)
           .toList();
@@ -196,22 +272,23 @@ class LegadoRuleEvaluator {
 
   static List<String> _extractHtmlValueList(Element node, String rule) {
     if (rule.isEmpty) return const [];
-    if (rule.contains('||')) {
-      for (final part in rule.split('||')) {
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
         final values = _extractHtmlValueList(node, part.trim());
         if (values.isNotEmpty) return values;
       }
       return const [];
     }
-    if (rule.contains('&&')) {
-      return rule
-          .split('&&')
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
+      return spliceParts
           .expand((part) => _extractHtmlValueList(node, part.trim()))
           .toList();
     }
-    if (rule.contains('%%')) {
-      final lists = rule
-          .split('%%')
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
+      final lists = mergeParts
           .map((part) => _extractHtmlValueList(node, part.trim()))
           .where((list) => list.isNotEmpty)
           .toList();
@@ -276,9 +353,9 @@ class LegadoRuleEvaluator {
     if (rule.isEmpty) return [];
 
     // Handle || (fallback)
-    if (rule.contains('||')) {
-      final parts = rule.split('||');
-      for (final part in parts) {
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
         final val = queryAll(document, part.trim());
         if (val.isNotEmpty) return val;
       }
@@ -286,19 +363,19 @@ class LegadoRuleEvaluator {
     }
 
     // Handle && (splicing)
-    if (rule.contains('&&')) {
-      final parts = rule.split('&&');
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
       final results = <Element>[];
-      for (final part in parts) {
+      for (final part in spliceParts) {
         results.addAll(queryAll(document, part.trim()));
       }
       return results;
     }
 
     // Handle %% (cross merge)
-    if (rule.contains('%%')) {
-      final parts = rule.split('%%');
-      final lists = parts
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
+      final lists = mergeParts
           .map((part) => queryAll(document, part.trim()))
           .where((list) => list.isNotEmpty)
           .toList();
@@ -334,9 +411,9 @@ class LegadoRuleEvaluator {
     if (rule.isEmpty) return null;
 
     // Handle || (fallback)
-    if (rule.contains('||')) {
-      final parts = rule.split('||');
-      for (final part in parts) {
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
         final val = queryOne(node, part.trim());
         if (val != null) return val;
       }

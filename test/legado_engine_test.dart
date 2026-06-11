@@ -424,6 +424,30 @@ void main() {
       );
     });
 
+    test('does not split fallback operators inside selector arguments', () {
+      final document = parse('''
+        <div class="book">
+          <p>A||B</p>
+          <span>Fallback</span>
+        </div>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'p:containsOwn(A||B)@text||span@text',
+        ),
+        'A||B',
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'p:containsOwn(A||B)||span',
+        ).map((node) => node.localName).toList(),
+        ['p'],
+      );
+    });
+
     test('interleaves html values and nodes for %% rules', () {
       final document = parse('''
         <div class="toc">

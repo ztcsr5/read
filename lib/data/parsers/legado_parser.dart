@@ -2352,26 +2352,12 @@ class LegadoParser {
 
   static List<Element> _queryAll(Document document, String rule) {
     if (rule.trim().isEmpty) return [];
-    final alternatives = rule.split(RegExp(r'\|\|'));
-    for (final alt in alternatives) {
-      final trimmed = alt.trim();
-      if (trimmed.isEmpty) continue;
-      final nodes = LegadoRuleEvaluator.queryAll(document, trimmed);
-      if (nodes.isNotEmpty) return nodes;
-    }
-    return [];
+    return LegadoRuleEvaluator.queryAll(document, rule);
   }
 
   static Element? _queryOne(dynamic node, String rule) {
     if (rule.trim().isEmpty) return null;
-    final alternatives = rule.split(RegExp(r'\|\|'));
-    for (final alt in alternatives) {
-      final trimmed = alt.trim();
-      if (trimmed.isEmpty) continue;
-      final match = LegadoRuleEvaluator.queryOne(node, trimmed);
-      if (match != null) return match;
-    }
-    return null;
+    return LegadoRuleEvaluator.queryOne(node, rule);
   }
 
   static bool _hasWebViewConfig(BookSource source, String url) {
