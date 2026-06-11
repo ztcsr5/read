@@ -527,7 +527,17 @@ class LegadoParser {
         _looksLikeJsonData(data, bookListRule)) {
       try {
         final jsonData = data is String ? jsonDecode(data) : data;
-        var nodes = _extractJsonNodes(jsonData, bookListRule);
+        final variables = _jsVariables(
+          source,
+          result: data is String ? data : jsonEncode(data),
+          baseUrl: response.realUri.toString(),
+          page: page,
+        );
+        var nodes = _extractJsonNodes(
+          jsonData,
+          bookListRule,
+          variables: variables,
+        );
         if (reverseList) {
           nodes = nodes.reversed.toList();
         }
@@ -702,7 +712,18 @@ class LegadoParser {
         _looksLikeJsonData(data, bookListRule)) {
       try {
         final jsonData = data is String ? jsonDecode(data) : data;
-        var nodes = _extractJsonNodes(jsonData, bookListRule);
+        final variables = _jsVariables(
+          source,
+          result: data is String ? data : jsonEncode(data),
+          baseUrl: response.realUri.toString(),
+          keyword: keyword,
+          page: page,
+        );
+        var nodes = _extractJsonNodes(
+          jsonData,
+          bookListRule,
+          variables: variables,
+        );
         if (reverseList) {
           nodes = nodes.reversed.toList();
         }
@@ -844,9 +865,20 @@ class LegadoParser {
 
     if (_isJsonRule(sampleRule) && _looksLikeJsonData(data, sampleRule)) {
       final jsonData = data is String ? jsonDecode(data) : data;
+      final variables = _jsVariables(
+        source,
+        result: data is String ? data : jsonEncode(data),
+        baseUrl: response.realUri.toString(),
+        book: book,
+      );
       final root = initRule == null || sampleRule.isEmpty
           ? jsonData
-          : _extractJsonNodes(jsonData, sampleRule).firstOrNull ?? jsonData;
+          : _extractJsonNodes(
+                  jsonData,
+                  sampleRule,
+                  variables: variables,
+                ).firstOrNull ??
+                jsonData;
       if (root is Map<String, dynamic>) {
         return _mergeBookInfo(
           book,
@@ -1019,8 +1051,18 @@ class LegadoParser {
           _looksLikeJsonData(pageData, pageListRule)) {
         try {
           final jsonData = pageData is String ? jsonDecode(pageData) : pageData;
+          final variables = _jsVariables(
+            source,
+            result: pageData is String ? pageData : jsonEncode(pageData),
+            baseUrl: currentUrlStr,
+            book: book,
+          );
           var index = chapters.length;
-          for (final node in _extractJsonNodes(jsonData, pageListRule)) {
+          for (final node in _extractJsonNodes(
+            jsonData,
+            pageListRule,
+            variables: variables,
+          )) {
             if (limit != null &&
                 (chapters.length + pageChapters.length) >= limit)
               break;
@@ -2744,8 +2786,23 @@ class LegadoParser {
     } else if (_looksLikeJsonData(data, rule) && _isJsonRule(rule)) {
       try {
         final jsonData = data is String ? jsonDecode(data) : data;
+        final variables = source == null
+            ? <String, dynamic>{
+                'result': data is String ? data : jsonEncode(data),
+                'baseUrl': baseUrl,
+                'url': baseUrl,
+                'book': _bookJsObject(book),
+                'chapter': _chapterJsObject(chapter, fallbackUrl: baseUrl),
+              }
+            : _jsVariables(
+                source,
+                result: data is String ? data : jsonEncode(data),
+                baseUrl: baseUrl,
+                book: book,
+                chapter: chapter,
+              );
         rawValues.addAll(
-          _extractJsonNodes(jsonData, rule)
+          _extractJsonNodes(jsonData, rule, variables: variables)
               .map((value) => value?.toString() ?? '')
               .where((value) => value.trim().isNotEmpty),
         );
@@ -3169,8 +3226,16 @@ class LegadoParser {
     );
   }
 
-  static List<dynamic> _extractJsonNodes(dynamic json, String jsonPath) {
-    return LegadoRuleEvaluator.extractJsonNodes(json, jsonPath);
+  static List<dynamic> _extractJsonNodes(
+    dynamic json,
+    String jsonPath, {
+    Map<String, dynamic>? variables,
+  }) {
+    return LegadoRuleEvaluator.extractJsonNodes(
+      json,
+      jsonPath,
+      variables: variables,
+    );
   }
 
   static String _extractHtmlValue(
