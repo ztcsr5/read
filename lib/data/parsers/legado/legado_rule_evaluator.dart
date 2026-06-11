@@ -252,7 +252,8 @@ class LegadoRuleEvaluator {
     if (rule.isEmpty) return '';
     rule = _applyHtmlPutDirectives(node, rule);
     final materializedRule = _replaceGetDirectives(rule);
-    if (_isHtmlLiteralWithGet(rule, materializedRule)) {
+    if (_isHtmlLiteralWithGet(rule, materializedRule) ||
+        _isHtmlLiteralRule(materializedRule)) {
       final base = _literalBeforePostProcessors(materializedRule);
       return applyPostProcessors(base, materializedRule);
     }
@@ -296,7 +297,8 @@ class LegadoRuleEvaluator {
     if (rule.isEmpty) return const [];
     rule = _applyHtmlPutDirectives(node, rule);
     final materializedRule = _replaceGetDirectives(rule);
-    if (_isHtmlLiteralWithGet(rule, materializedRule)) {
+    if (_isHtmlLiteralWithGet(rule, materializedRule) ||
+        _isHtmlLiteralRule(materializedRule)) {
       final value = applyPostProcessors(
         _literalBeforePostProcessors(materializedRule),
         materializedRule,
@@ -360,7 +362,8 @@ class LegadoRuleEvaluator {
   static String _extractSingleHtmlValue(Element node, String rule) {
     rule = _applyHtmlPutDirectives(node, rule);
     final materializedRule = _replaceGetDirectives(rule);
-    if (_isHtmlLiteralWithGet(rule, materializedRule)) {
+    if (_isHtmlLiteralWithGet(rule, materializedRule) ||
+        _isHtmlLiteralRule(materializedRule)) {
       return applyPostProcessors(
         _literalBeforePostProcessors(materializedRule),
         materializedRule,
@@ -700,6 +703,42 @@ class LegadoRuleEvaluator {
     return materialized.trim().isNotEmpty;
   }
 
+  static bool _isHtmlLiteralRule(String rule) {
+    final text = _literalBeforePostProcessors(rule).trim();
+    if (text.isEmpty || text.contains('{{') || text.contains('}}')) {
+      return false;
+    }
+    final lower = text.toLowerCase();
+    if (lower.startsWith('@xpath:') ||
+        lower.startsWith('xpath:') ||
+        (text.startsWith('//') &&
+            !RegExp(r'^//[A-Za-z0-9.-]+(?:[:/]|$)').hasMatch(text)) ||
+        text.startsWith('./') ||
+        text.contains('@') ||
+        text.startsWith('.') ||
+        text.startsWith('#') ||
+        lower.startsWith('class.') ||
+        lower.startsWith('id.') ||
+        lower.startsWith('tag.') ||
+        lower.startsWith('text.') ||
+        lower.startsWith('@css:') ||
+        _looksLikeHtmlTagToken(text)) {
+      return false;
+    }
+    if (lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        RegExp(r'^//[A-Za-z0-9.-]+(?:[:/]|$)').hasMatch(text) ||
+        text.startsWith('/') ||
+        lower.contains('://') ||
+        text.contains('?') ||
+        text.contains('&') ||
+        text.contains('<') ||
+        text.contains('>')) {
+      return true;
+    }
+    return false;
+  }
+
   static String _literalBeforePostProcessors(String rule) {
     var text = rule.trim();
     final jsIndex = text.toLowerCase().indexOf('@js:');
@@ -724,6 +763,9 @@ class LegadoRuleEvaluator {
         _literalBeforePostProcessors(interpolated),
         interpolated,
       );
+    }
+    if (_isHtmlLiteralRule(text)) {
+      return applyPostProcessors(_literalBeforePostProcessors(text), text);
     }
     if (text.contains('@@')) {
       final parts = text.split('@@');

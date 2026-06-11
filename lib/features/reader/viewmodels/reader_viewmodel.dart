@@ -1247,6 +1247,8 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
             textContent = await LegadoParser.getChapterContent(
               source,
               textContent,
+              book: book,
+              chapter: chapter,
             );
             // 存回本地以免重复请求
             chapter.content = textContent;
@@ -1470,6 +1472,8 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
           final content = await LegadoParser.getChapterContent(
             source,
             contentUrl,
+            book: book,
+            chapter: chapter,
           );
 
           chapter.content = content;

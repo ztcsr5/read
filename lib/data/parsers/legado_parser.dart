@@ -855,6 +855,7 @@ class LegadoParser {
             source,
             baseUrl: book.filePath,
             isBookInfo: true,
+            contextBook: book,
           ),
         );
       } else if (root is Map) {
@@ -866,6 +867,7 @@ class LegadoParser {
             source,
             baseUrl: book.filePath,
             isBookInfo: true,
+            contextBook: book,
           ),
         );
       }
@@ -888,6 +890,7 @@ class LegadoParser {
         source,
         baseUrl: book.filePath,
         isBookInfo: true,
+        contextBook: book,
       ),
     );
   }
@@ -1282,6 +1285,8 @@ class LegadoParser {
           currentUrlStr,
           pageData,
           nextRule,
+          source: source,
+          book: book,
         )) {
           if (nextUrl != currentUrlStr &&
               !visitedUrls.contains(nextUrl) &&
@@ -1341,8 +1346,10 @@ class LegadoParser {
 
   static Future<String> getChapterContent(
     BookSource source,
-    String chapterUrl,
-  ) async {
+    String chapterUrl, {
+    Book? book,
+    Chapter? chapter,
+  }) async {
     if (chapterUrl.trim().isEmpty) return '解析失败：章节链接为空';
 
     final ruleContentStr = source.ruleContent;
@@ -1374,6 +1381,13 @@ class LegadoParser {
             break;
           }
           visitedUrls.add(currentUrl);
+          final pageContentRule = _sourceScopedRule(
+            contentRule,
+            source,
+            book: book,
+            chapter: chapter,
+            contextBaseUrl: currentUrl,
+          );
 
           var response = await _request(source, currentUrl);
           final html = response.data?.toString() ?? '';
@@ -1402,9 +1416,16 @@ class LegadoParser {
           // 1. sourceRegex
           final sourceRegexRule = _firstRule(rule, const ['sourceRegex']);
           if (sourceRegexRule != null && sourceRegexRule.isNotEmpty) {
-            final ruleText = sourceRegexRule.startsWith('##')
-                ? sourceRegexRule
-                : '##$sourceRegexRule';
+            final scopedSourceRegexRule = _sourceScopedRule(
+              sourceRegexRule,
+              source,
+              book: book,
+              chapter: chapter,
+              contextBaseUrl: currentUrl,
+            );
+            final ruleText = scopedSourceRegexRule.startsWith('##')
+                ? scopedSourceRegexRule
+                : '##$scopedSourceRegexRule';
             rawData = LegadoRuleEvaluator.applyPostProcessors(
               rawData,
               ruleText,
@@ -1419,6 +1440,8 @@ class LegadoParser {
                 source,
                 result: rawData,
                 baseUrl: currentUrl,
+                book: book,
+                chapter: chapter,
               );
               final output = await LegadoJsEngine().evaluateWithAjax(
                 webJsRule,
@@ -1442,21 +1465,28 @@ class LegadoParser {
           final prepared = await _prepareDataForRule(
             source,
             rawData,
-            contentRule,
+            pageContentRule,
             baseUrl: currentUrl,
+            book: book,
+            chapter: chapter,
           );
           final contentText = await _extractContentFromResponseAsync(
             source,
             prepared.data,
             prepared.rule,
             baseUrl: currentUrl,
+            book: book,
+            chapter: chapter,
           );
           parts.add(contentText);
 
           final nextUrls = _extractNextContentUrls(
+            source,
             response.realUri.toString(),
             rawData,
             rule,
+            book: book,
+            chapter: chapter,
           );
           for (final nextUrl in nextUrls) {
             if (nextUrl != currentUrl &&
@@ -1478,7 +1508,15 @@ class LegadoParser {
       }
 
       final content = parts
-          .map((part) => _applyContentReplaceRegex(part, rule))
+          .map(
+            (part) => _applyContentReplaceRegex(
+              part,
+              rule,
+              source: source,
+              book: book,
+              chapter: chapter,
+            ),
+          )
           .where((part) => part.trim().isNotEmpty)
           .join('\n');
 
@@ -1493,16 +1531,32 @@ class LegadoParser {
           final prepared = await _prepareDataForRule(
             source,
             fallbackHtml,
-            contentRule,
+            _sourceScopedRule(
+              contentRule,
+              source,
+              book: book,
+              chapter: chapter,
+              contextBaseUrl: chapterUrl,
+            ),
             baseUrl: chapterUrl,
+            book: book,
+            chapter: chapter,
           );
           final fallbackText = await _extractContentFromResponseAsync(
             source,
             prepared.data,
             prepared.rule,
             baseUrl: chapterUrl,
+            book: book,
+            chapter: chapter,
           );
-          finalContent = _applyContentReplaceRegex(fallbackText, rule).trim();
+          finalContent = _applyContentReplaceRegex(
+            fallbackText,
+            rule,
+            source: source,
+            book: book,
+            chapter: chapter,
+          ).trim();
         } catch (_) {}
       }
 
@@ -1564,6 +1618,8 @@ class LegadoParser {
     dynamic data,
     String contentRule, {
     required String baseUrl,
+    Book? book,
+    Chapter? chapter,
   }) async {
     if (!contentRule.contains('java.ajax')) {
       return _extractContentFromResponse(data, contentRule);
@@ -1581,7 +1637,13 @@ class LegadoParser {
     try {
       final output = await LegadoJsEngine().evaluateWithAjax(
         block.script,
-        variables: _jsVariables(source, result: input, baseUrl: baseUrl),
+        variables: _jsVariables(
+          source,
+          result: input,
+          baseUrl: baseUrl,
+          book: book,
+          chapter: chapter,
+        ),
         libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
         ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
       );
@@ -1653,6 +1715,7 @@ class LegadoParser {
     BookSource source, {
     String? baseUrl,
     bool isBookInfo = false,
+    Book? contextBook,
   }) {
     _primeJsonRuleSideEffects(item, rule, source);
     final name = _cleanRuleOutput(
@@ -1676,6 +1739,7 @@ class LegadoParser {
             'bName',
           ]),
           source,
+          book: contextBook,
         ),
       ),
     );
@@ -1696,6 +1760,7 @@ class LegadoParser {
             'penName',
           ]),
           source,
+          book: contextBook,
         ),
       ),
     );
@@ -1718,6 +1783,7 @@ class LegadoParser {
             'coverPath',
           ]),
           source,
+          book: contextBook,
         ),
       ),
     );
@@ -1753,6 +1819,7 @@ class LegadoParser {
             'Id',
           ]),
           source,
+          book: contextBook,
         ),
       ),
     );
@@ -1773,6 +1840,7 @@ class LegadoParser {
             'Size',
           ]),
           source,
+          book: contextBook,
         ),
       ),
     );
@@ -1790,6 +1858,7 @@ class LegadoParser {
             'latestChapter',
           ]),
           source,
+          book: contextBook,
         ),
       ),
     );
@@ -1837,6 +1906,7 @@ class LegadoParser {
     String? baseUrl,
     bool isBookInfo = false,
     String? keyword,
+    Book? contextBook,
   }) async {
     final baseBook = _parseBookFromJson(
       item,
@@ -1844,6 +1914,7 @@ class LegadoParser {
       source,
       baseUrl: baseUrl,
       isBookInfo: isBookInfo,
+      contextBook: contextBook,
     );
     final base = baseUrl ?? source.bookSourceUrl;
 
@@ -1851,20 +1922,24 @@ class LegadoParser {
       final coverUrl = await _resolveJsonAjaxFieldValue(
         source,
         item,
-        _ruleOrKey(rule['coverUrl'], item, const [
-          'coverUrl',
-          'CoverUrl',
-          'cover',
-          'Cover',
-          'cover_url',
-          'picUrl',
-          'pic',
-          'imgUrl',
-          'imageUrl',
-          'thumb',
-          'image',
-          'coverPath',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(rule['coverUrl'], item, const [
+            'coverUrl',
+            'CoverUrl',
+            'cover',
+            'Cover',
+            'cover_url',
+            'picUrl',
+            'pic',
+            'imgUrl',
+            'imageUrl',
+            'thumb',
+            'image',
+            'coverPath',
+          ]),
+          source,
+          book: contextBook,
+        ),
         baseUrl: base,
         keyword: keyword,
       );
@@ -1874,58 +1949,70 @@ class LegadoParser {
       final bookUrl = await _resolveJsonAjaxFieldValue(
         source,
         item,
-        _ruleOrKey(bookUrlRule, item, const [
-          'bookUrl',
-          'BookUrl',
-          'url',
-          'Url',
-          'detailUrl',
-          'detail_url',
-          'book_url',
-          'tocUrl',
-          'catalogUrl',
-          'bookId',
-          'BookId',
-          'book_id',
-          'book_id',
-          'bookID',
-          'book_id',
-          'articleid',
-          'articleId',
-          'novelId',
-          'novel_id',
-          'nid',
-          'id',
-          'Id',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(bookUrlRule, item, const [
+            'bookUrl',
+            'BookUrl',
+            'url',
+            'Url',
+            'detailUrl',
+            'detail_url',
+            'book_url',
+            'tocUrl',
+            'catalogUrl',
+            'bookId',
+            'BookId',
+            'book_id',
+            'book_id',
+            'bookID',
+            'book_id',
+            'articleid',
+            'articleId',
+            'novelId',
+            'novel_id',
+            'nid',
+            'id',
+            'Id',
+          ]),
+          source,
+          book: contextBook,
+        ),
         baseUrl: base,
         keyword: keyword,
       );
       final wordCountStr = await _resolveJsonAjaxFieldValue(
         source,
         item,
-        _ruleOrKey(rule['wordCount'], item, const [
-          'wordCount',
-          'WordCount',
-          'word_count',
-          'words',
-          'Words',
-          'size',
-          'Size',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(rule['wordCount'], item, const [
+            'wordCount',
+            'WordCount',
+            'word_count',
+            'words',
+            'Words',
+            'size',
+            'Size',
+          ]),
+          source,
+          book: contextBook,
+        ),
         baseUrl: base,
         keyword: keyword,
       );
       final lastChapter = await _resolveJsonAjaxFieldValue(
         source,
         item,
-        _ruleOrKey(rule['lastChapter'], item, const [
-          'lastChapter',
-          'LastChapter',
-          'last_chapter',
-          'lastChapterName',
-          'latestChapter',
-        ]),
+        _sourceScopedRule(
+          _ruleOrKey(rule['lastChapter'], item, const [
+            'lastChapter',
+            'LastChapter',
+            'last_chapter',
+            'lastChapterName',
+            'latestChapter',
+          ]),
+          source,
+          book: contextBook,
+        ),
         baseUrl: base,
         keyword: keyword,
       );
@@ -2048,36 +2135,61 @@ class LegadoParser {
     BookSource source, {
     String? baseUrl,
     bool isBookInfo = false,
+    Book? contextBook,
   }) {
     _primeHtmlRuleSideEffects(node, rule, source);
     final name = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['name']) ?? '',
+      _sourceScopedRule(
+        _firstRule(rule, const ['name']) ?? '',
+        source,
+        book: contextBook,
+      ),
     );
     final author = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['author']) ?? '',
+      _sourceScopedRule(
+        _firstRule(rule, const ['author']) ?? '',
+        source,
+        book: contextBook,
+      ),
     );
     final coverUrl = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['coverUrl', 'cover']) ?? '',
+      _sourceScopedRule(
+        _firstRule(rule, const ['coverUrl', 'cover']) ?? '',
+        source,
+        book: contextBook,
+      ),
     );
     final bookUrlKeys = isBookInfo
         ? const ['tocUrl', 'catalogUrl']
         : const ['bookUrl', 'tocUrl', 'catalogUrl', 'url'];
     final bookUrl = _extractHtmlValue(
       node,
-      _firstRule(rule, bookUrlKeys) ?? '',
+      _sourceScopedRule(
+        _firstRule(rule, bookUrlKeys) ?? '',
+        source,
+        book: contextBook,
+      ),
     );
     final base = baseUrl ?? source.bookSourceUrl;
 
     final wordCountStr = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['wordCount']) ?? '',
+      _sourceScopedRule(
+        _firstRule(rule, const ['wordCount']) ?? '',
+        source,
+        book: contextBook,
+      ),
     );
     final lastChapter = _extractHtmlValue(
       node,
-      _firstRule(rule, const ['lastChapter']) ?? '',
+      _sourceScopedRule(
+        _firstRule(rule, const ['lastChapter']) ?? '',
+        source,
+        book: contextBook,
+      ),
     );
 
     int totalChapters = 0;
@@ -2290,12 +2402,18 @@ class LegadoParser {
     }
   }
 
-  static String _sourceScopedRule(String rule, BookSource source) {
+  static String _sourceScopedRule(
+    String rule,
+    BookSource source, {
+    Book? book,
+    Chapter? chapter,
+    String? contextBaseUrl,
+  }) {
     if (rule.isEmpty) return '';
     final baseUrl = LegadoRequestBuilder.cleanBaseUrl(
-      source.bookSourceUrl,
+      contextBaseUrl ?? source.bookSourceUrl,
     ).replaceAll(RegExp(r'/+$'), '');
-    return rule
+    var output = rule
         .replaceAll('{{source.bookSourceUrl}}', baseUrl)
         .replaceAll('{source.bookSourceUrl}', baseUrl)
         .replaceAll('{{source.key}}', baseUrl)
@@ -2304,6 +2422,29 @@ class LegadoParser {
         .replaceAll('{source.getKey()}', baseUrl)
         .replaceAll('{{baseUrl}}', baseUrl)
         .replaceAll('{baseUrl}', baseUrl);
+    String replaceToken(String text, String name, String value) {
+      return text.replaceAll('{{$name}}', value).replaceAll('{$name}', value);
+    }
+
+    if (book != null) {
+      output = replaceToken(output, 'book.name', book.title);
+      output = replaceToken(output, 'book.title', book.title);
+      output = replaceToken(output, 'book.author', book.author);
+      output = replaceToken(output, 'book.bookUrl', book.filePath);
+      output = replaceToken(output, 'book.url', book.filePath);
+      output = replaceToken(output, 'book.origin', book.filePath);
+      output = replaceToken(output, 'book.tocUrl', book.filePath);
+      output = replaceToken(output, 'book.coverUrl', book.coverPath ?? '');
+      output = replaceToken(output, 'book.coverPath', book.coverPath ?? '');
+    }
+    if (chapter != null) {
+      final chapterUrl = chapter.url ?? chapter.content ?? '';
+      output = replaceToken(output, 'chapter.title', chapter.title);
+      output = replaceToken(output, 'chapter.name', chapter.title);
+      output = replaceToken(output, 'chapter.url', chapterUrl);
+      output = replaceToken(output, 'chapter.index', chapter.index.toString());
+    }
+    return output;
   }
 
   static Map<String, dynamic> _ruleMap(String? ruleJson) {
@@ -2381,24 +2522,46 @@ class LegadoParser {
   }
 
   static List<String> _extractNextContentUrls(
+    BookSource source,
     String baseUrl,
     dynamic data,
-    Map<String, dynamic> rule,
-  ) {
+    Map<String, dynamic> rule, {
+    Book? book,
+    Chapter? chapter,
+  }) {
     final nextRule = _firstRule(rule, const [
       'nextContentUrl',
       'nextUrl',
       'nextPageUrl',
     ]);
     if (nextRule == null) return const [];
-    return _extractUrlListFromRule(baseUrl, data, nextRule);
+    return _extractUrlListFromRule(
+      baseUrl,
+      data,
+      nextRule,
+      source: source,
+      book: book,
+      chapter: chapter,
+    );
   }
 
   static List<String> _extractUrlListFromRule(
     String baseUrl,
     dynamic data,
-    String rule,
-  ) {
+    String rule, {
+    BookSource? source,
+    Book? book,
+    Chapter? chapter,
+  }) {
+    if (source != null) {
+      rule = _sourceScopedRule(
+        rule,
+        source,
+        book: book,
+        chapter: chapter,
+        contextBaseUrl: baseUrl,
+      );
+    }
     final rawValues = <String>[];
     if (_isJsOnlyRule(rule)) {
       try {
@@ -2408,6 +2571,8 @@ class LegadoParser {
             'result': data is String ? data : jsonEncode(data),
             'baseUrl': baseUrl,
             'url': baseUrl,
+            'book': _bookJsObject(book),
+            'chapter': _chapterJsObject(chapter, fallbackUrl: baseUrl),
           },
         );
         try {
@@ -2479,6 +2644,8 @@ class LegadoParser {
     String rule, {
     String? baseUrl,
     String? keyword,
+    Book? book,
+    Chapter? chapter,
   }) async {
     final block = _leadingJsBlock(rule);
     if (block == null) return (data: data, rule: rule);
@@ -2489,6 +2656,8 @@ class LegadoParser {
       result: resultText,
       baseUrl: baseUrl,
       keyword: keyword,
+      book: book,
+      chapter: chapter,
     );
     try {
       final output = await LegadoJsEngine().evaluateWithAjax(
@@ -2564,6 +2733,8 @@ class LegadoParser {
     String? baseUrl,
     String? keyword,
     int page = 1,
+    Book? book,
+    Chapter? chapter,
   }) {
     final sourceUrl = LegadoRequestBuilder.cleanBaseUrl(
       source.bookSourceUrl,
@@ -2611,6 +2782,39 @@ class LegadoParser {
         'variableComment': config['variableComment'] ?? '',
         'customConfig': config,
       },
+      'book': _bookJsObject(book),
+      'chapter': _chapterJsObject(chapter, fallbackUrl: baseUrl),
+    };
+  }
+
+  static Map<String, dynamic> _bookJsObject(Book? book) {
+    if (book == null) return <String, dynamic>{};
+    return <String, dynamic>{
+      'name': book.title,
+      'title': book.title,
+      'author': book.author,
+      'bookUrl': book.filePath,
+      'url': book.filePath,
+      'origin': book.filePath,
+      'coverUrl': book.coverPath ?? '',
+      'coverPath': book.coverPath ?? '',
+      'tocUrl': book.filePath,
+      'index': book.currentChapter,
+      'variable': '',
+    };
+  }
+
+  static Map<String, dynamic> _chapterJsObject(
+    Chapter? chapter, {
+    String? fallbackUrl,
+  }) {
+    return <String, dynamic>{
+      'title': chapter?.title ?? '',
+      'name': chapter?.title ?? '',
+      'url': chapter?.url ?? chapter?.content ?? fallbackUrl ?? '',
+      'index': chapter?.index ?? 0,
+      'content': chapter?.content ?? '',
+      'variable': '',
     };
   }
 
@@ -3958,15 +4162,23 @@ class LegadoParser {
 
   static String _applyContentReplaceRegex(
     String value,
-    Map<String, dynamic> rule,
-  ) {
+    Map<String, dynamic> rule, {
+    BookSource? source,
+    Book? book,
+    Chapter? chapter,
+  }) {
     final replaceRule = _firstRule(rule, const ['replaceRegex', 'replace']);
     if (replaceRule == null || replaceRule.isEmpty) {
       return _cleanRuleOutput(value);
     }
+    final scopedReplaceRule = source == null
+        ? replaceRule
+        : _sourceScopedRule(replaceRule, source, book: book, chapter: chapter);
     return LegadoRuleEvaluator.applyPostProcessors(
       value,
-      replaceRule.startsWith('##') ? replaceRule : '##$replaceRule',
+      scopedReplaceRule.startsWith('##')
+          ? scopedReplaceRule
+          : '##$scopedReplaceRule',
     );
   }
 
@@ -3986,8 +4198,10 @@ class LegadoParser {
     if (value == null) return false;
     final text = value.trim();
     if (text.isEmpty || text == 'null') return false;
-    return !RegExp(r'^(?:false|no|not|0|0\.0)$', caseSensitive: false)
-        .hasMatch(text);
+    return !RegExp(
+      r'^(?:false|no|not|0|0\.0)$',
+      caseSensitive: false,
+    ).hasMatch(text);
   }
 
   static String _sample(dynamic data) {
@@ -4189,8 +4403,11 @@ class LegadoParser {
     final matches = _extractRegexGroupRows(data.toString(), regexRule);
     if (matches.isEmpty) return const [];
 
-    final explicitNameRule =
-        _firstRule(rule, const ['name', 'title', 'bookName']);
+    final explicitNameRule = _firstRule(rule, const [
+      'name',
+      'title',
+      'bookName',
+    ]);
     final explicitUrlRule = _firstRule(rule, const [
       'bookUrl',
       'tocUrl',
@@ -4226,8 +4443,9 @@ class LegadoParser {
       final coverUrl = value(groups, coverRule, '').trim();
       final kind = value(groups, kindRule, '').trim();
       final wordCount = _parseWordCount(value(groups, wordCountRule, ''));
-      final totalChapters =
-          _parseChapterCount(value(groups, lastChapterRule, ''));
+      final totalChapters = _parseChapterCount(
+        value(groups, lastChapterRule, ''),
+      );
       final resolvedBookUrl = bookUrl.isEmpty
           ? baseUrl
           : _resolveBookUrl(baseUrl, bookUrl);
@@ -4385,9 +4603,7 @@ class LegadoParser {
   }
 
   static List<String> _regexGroups(RegExpMatch match) {
-    return [
-      for (var i = 0; i <= match.groupCount; i++) match.group(i) ?? '',
-    ];
+    return [for (var i = 0; i <= match.groupCount; i++) match.group(i) ?? ''];
   }
 
   static RegExp _compileLegadoRegex(String pattern) {
@@ -4427,7 +4643,10 @@ class LegadoParser {
     return LegadoRuleEvaluator.applyPostProcessors(base, processors);
   }
 
-  static String _expandRegexGroupTemplate(String template, List<String> groups) {
+  static String _expandRegexGroupTemplate(
+    String template,
+    List<String> groups,
+  ) {
     return template.replaceAllMapped(RegExp(r'\\([\\$])|\$(\d+)'), (match) {
       final escaped = match.group(1);
       if (escaped != null) return escaped;

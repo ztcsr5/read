@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:read/data/models/book.dart';
+import 'package:read/data/models/chapter.dart';
 import 'package:read/data/models/diagnostic_report.dart';
 import 'package:read/data/models/book_source.dart';
 import 'package:read/data/parsers/legado/legado_js_engine.dart';
@@ -2313,6 +2314,37 @@ body=urlEncode(params)
       ]);
     });
 
+    test('uses book context variables for detail toc url templates', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Book Context Detail Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleBookInfo = jsonEncode({
+          'name': 'h1@text',
+          'tocUrl': '{{book.bookUrl}}/catalog',
+        });
+      final book = Book(
+        title: 'Original Name',
+        author: 'Author',
+        filePath: 'https://example.com/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '<h1>Resolved Name</h1>',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final detail = await LegadoParser.parseBookInfo(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(detail.title, 'Resolved Name');
+      expect(detail.filePath, 'https://example.com/book/1/catalog');
+    });
+
     test(
       'loads all content pages when nextContentUrl returns multiple urls',
       () async {
@@ -2366,52 +2398,101 @@ body=urlEncode(params)
       },
     );
 
-    test(
-      'keeps embedded request config from templated nextContentUrl',
-      () async {
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        addTearDown(() => server.close(force: true));
-        final observed = <String>[];
-        server.listen((request) async {
-          observed.add('${request.method} ${request.uri.path}');
-          request.response.headers.contentType = ContentType.html;
-          switch (request.uri.path) {
-            case '/c1':
-              request.response.write('''
+    test('uses book and chapter context variables for content rules', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requested = <String>[];
+      server.listen((request) async {
+        requested.add(request.uri.toString());
+        request.response.headers.contentType = ContentType.html;
+        if (request.uri.queryParameters['page'] == '2') {
+          request.response.write('<div id="content"><p>Demo Tail</p></div>');
+        } else {
+          request.response.write(
+            '<div id="content"><p>Demo Book Intro</p><p>Demo Body</p></div>',
+          );
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Context Content Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({
+          'content': '#content@text',
+          'nextContentUrl': '{{chapter.url}}?page=2',
+          'replaceRegex': '##{{book.name}}\\s*##',
+        });
+      final book = Book(
+        title: 'Demo Book',
+        author: '',
+        filePath: '$base/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final chapter = Chapter(
+        bookId: 1,
+        title: 'Chapter 1',
+        index: 0,
+        url: '$base/c1',
+        content: '$base/c1',
+      );
+
+      final content = await LegadoParser.getChapterContent(
+        source,
+        chapter.url!,
+        book: book,
+        chapter: chapter,
+      );
+
+      expect(content, contains('Intro'));
+      expect(content, contains('Body'));
+      expect(content, contains('Tail'));
+      expect(content, isNot(contains('Demo Book')));
+      expect(requested, ['/c1', '/c1?page=2']);
+    });
+
+    test('keeps embedded request config from templated nextContentUrl', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final observed = <String>[];
+      server.listen((request) async {
+        observed.add('${request.method} ${request.uri.path}');
+        request.response.headers.contentType = ContentType.html;
+        switch (request.uri.path) {
+          case '/c1':
+            request.response.write('''
                 <div id="content"><p>Part 1</p></div>
                 <a class="PagesLink" href="/c1p2">next</a>
               ''');
-              break;
-            case '/c1p2':
-              request.response.write('<div id="content"><p>Part 2</p></div>');
-              break;
-            default:
-              request.response.statusCode = HttpStatus.notFound;
-              request.response.write('');
-          }
-          await request.response.close();
+            break;
+          case '/c1p2':
+            request.response.write('<div id="content"><p>Part 2</p></div>');
+            break;
+          default:
+            request.response.statusCode = HttpStatus.notFound;
+            request.response.write('');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Templated Paged Content Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({
+          'content': '#content@html',
+          'nextContentUrl':
+              '{{@css:a.PagesLink @href}},{"method":"POST","body":"from=next"}',
         });
 
-        final base = 'http://${server.address.host}:${server.port}';
-        final source = BookSource()
-          ..bookSourceName = 'Templated Paged Content Source'
-          ..bookSourceUrl = base
-          ..ruleContent = jsonEncode({
-            'content': '#content@html',
-            'nextContentUrl':
-                '{{@css:a.PagesLink @href}},{"method":"POST","body":"from=next"}',
-          });
+      final content = await LegadoParser.getChapterContent(source, '$base/c1');
 
-        final content = await LegadoParser.getChapterContent(
-          source,
-          '$base/c1',
-        );
-
-        expect(content, contains('Part 1'));
-        expect(content, contains('Part 2'));
-        expect(observed, ['GET /c1', 'POST /c1p2']);
-      },
-    );
+      expect(content, contains('Part 1'));
+      expect(content, contains('Part 2'));
+      expect(observed, ['GET /c1', 'POST /c1p2']);
+    });
 
     test('extracts all matching content text nodes', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
