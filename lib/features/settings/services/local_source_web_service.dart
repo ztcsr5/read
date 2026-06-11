@@ -371,7 +371,14 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     }
 
     final items = _normalizeImportItems(parsed);
+    final pendingByUrl = <String, BookSource>{};
     var count = 0;
+    Future<void> flushPending() async {
+      if (pendingByUrl.isEmpty) return;
+      await _repository.saveBookSources(pendingByUrl.values.toList());
+      pendingByUrl.clear();
+    }
+
     for (final item in items) {
       if (item is! Map) continue;
       final map = item.map((key, value) => MapEntry(key.toString(), value));
@@ -390,9 +397,15 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
           map.containsKey('rulesContent') ||
           map.containsKey('ruleBookContent');
       if (!hasBookSource) continue;
-      await _repository.saveBookSource(BookSource.fromJson(map));
+      final source = BookSource.fromJson(map);
+      if (source.bookSourceUrl.trim().isEmpty) continue;
+      pendingByUrl[source.bookSourceUrl] = source;
       count++;
+      if (pendingByUrl.length >= 500) {
+        await flushPending();
+      }
     }
+    await flushPending();
     return count;
   }
 

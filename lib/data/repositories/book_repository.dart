@@ -384,6 +384,20 @@ class BookRepository {
     });
   }
 
+  Future<int> saveBookSources(List<BookSource> sources) async {
+    if (sources.isEmpty) return 0;
+    if (isar == null) {
+      for (final source in sources) {
+        await saveBookSource(source);
+      }
+      return sources.length;
+    }
+    await isar!.writeTxn(() async {
+      await isar!.collection<BookSource>().putAllByBookSourceUrl(sources);
+    });
+    return sources.length;
+  }
+
   Future<void> deleteBookSource(int sourceId) async {
     if (isar == null) {
       _mockBookSources.removeWhere((s) => s.id == sourceId);
