@@ -536,6 +536,8 @@ class LegadoRuleEvaluator {
       final suffix = text.substring(closeJs + '</js>'.length).trim();
       if (suffix.isNotEmpty) text = suffix;
     }
+    final matchMarker = text.toLowerCase().indexOf('@match->');
+    if (matchMarker >= 0) text = text.substring(0, matchMarker);
     return text
         .split('\n')
         .first
@@ -926,6 +928,8 @@ class LegadoRuleEvaluator {
             variables: {'result': output},
           );
         } catch (_) {}
+      } else if (line.toLowerCase().contains('@match->')) {
+        output = _applyMatchPostProcessor(output, line);
       } else if (line.startsWith('##')) {
         final bool onlyFirst = line.endsWith('###');
         final String processingLine = onlyFirst
@@ -1040,6 +1044,10 @@ class LegadoRuleEvaluator {
       } catch (_) {}
     }
 
+    if (rule.toLowerCase().contains('@match->')) {
+      output = _applyMatchPostProcessor(output, rule);
+    }
+
     if (rule.contains('##')) {
       final bool onlyFirst = rule.endsWith('###');
       final String processingRule = onlyFirst
@@ -1063,6 +1071,27 @@ class LegadoRuleEvaluator {
     }
     output = _applyJsPostProcessors(output, rule);
     return output.trim();
+  }
+
+  static String _applyMatchPostProcessor(String value, String rule) {
+    final lower = rule.toLowerCase();
+    final marker = lower.indexOf('@match->');
+    if (marker < 0) return value;
+    final tail = rule.substring(marker + '@match->'.length).trim();
+    if (tail.isEmpty) return value;
+    final pattern = tail
+        .split(RegExp(r'@js:|<js>|##|@put:|@get:', caseSensitive: false))
+        .first
+        .trim();
+    if (pattern.isEmpty) return value;
+    try {
+      final match = _compileFlexibleRegExp(pattern).firstMatch(value);
+      if (match == null) return '';
+      if (match.groupCount > 0) return match.group(1)?.trim() ?? '';
+      return match.group(0)?.trim() ?? '';
+    } catch (_) {
+      return value;
+    }
   }
 
   static String _applyRegexPostProcessor(
@@ -1573,6 +1602,20 @@ class LegadoRuleEvaluator {
     var output = selector.trim();
     if (output.isEmpty) return output;
 
+    output = output.replaceAllMapped(
+      RegExp(r':first-(?:child|of-type)\b'),
+      (_) => '.0',
+    );
+    output = output.replaceAllMapped(
+      RegExp(r':last-(?:child|of-type)\b'),
+      (_) => '.-1',
+    );
+    output = output.replaceAllMapped(
+      RegExp(r':nth-(?:child|of-type)\(\s*([^)]+?)\s*\)'),
+      (match) =>
+          _cssNthPseudoToIndex(match.group(1) ?? '', match.group(0) ?? ''),
+    );
+
     // Convert :eq(n) to .n
     output = output.replaceAllMapped(RegExp(r':eq\((-?\d+)\)'), (match) {
       final val = int.tryParse(match.group(1) ?? '') ?? 0;
@@ -1594,6 +1637,37 @@ class LegadoRuleEvaluator {
     );
 
     return output;
+  }
+
+  static String _cssNthPseudoToIndex(String expression, String original) {
+    final value = expression.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    final number = int.tryParse(value);
+    if (number != null) return '.${number - 1}';
+    if (value == 'odd') return '[0::2]';
+    if (value == 'even') return '[1::2]';
+
+    final fromMatch = RegExp(r'^n\+(\d+)$').firstMatch(value);
+    if (fromMatch != null) {
+      final start = (int.tryParse(fromMatch.group(1) ?? '') ?? 1) - 1;
+      return '!$start:';
+    }
+
+    final untilMatch = RegExp(r'^-n\+(\d+)$').firstMatch(value);
+    if (untilMatch != null) {
+      final end = int.tryParse(untilMatch.group(1) ?? '') ?? 0;
+      return '!0:$end';
+    }
+
+    final stepMatch = RegExp(r'^(\d*)n(?:\+(\d+))?$').firstMatch(value);
+    if (stepMatch != null) {
+      final stepText = stepMatch.group(1) ?? '';
+      final step = int.tryParse(stepText.isEmpty ? '1' : stepText) ?? 1;
+      final offset = int.tryParse(stepMatch.group(2) ?? '') ?? step;
+      final start = (offset - 1).clamp(0, 1 << 30).toInt();
+      return '[$start::$step]';
+    }
+
+    return original;
   }
 
   static bool _isDescendantOf(Element child, Element parent) {

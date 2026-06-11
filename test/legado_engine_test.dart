@@ -660,11 +660,50 @@ void main() {
         ['R1C0R1C1', 'R2C0R2C1'],
       );
       expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'tr:nth-child(n+2)',
+        ).map((node) => node.text.trim()).toList(),
+        ['R1C0R1C1', 'R2C0R2C1'],
+      );
+      expect(
+        LegadoRuleEvaluator.queryAll(
+          document,
+          'td:nth-child(2n+1)',
+        ).map((node) => node.text.trim()).toList(),
+        ['R0C0', 'R1C0', 'R2C0'],
+      );
+      expect(
         LegadoRuleEvaluator.extractHtmlValue(
           document.body!,
           'tr:eq(1)>td:eq(0)@text',
         ),
         'R1C0',
+      );
+    });
+
+    test('supports match arrow regex post processors', () {
+      final document = parse('''
+        <div class="author">作者：Alice</div>
+        <ul class="info">
+          <li>状态：连载</li>
+          <li>最后更新时间：2026-01-02</li>
+        </ul>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'div.author@match->(?<=作者：)(.+)',
+        ),
+        'Alice',
+      );
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          'ul.info > li:nth-child(2)@match->(?<=最后更新时间：)(.+)',
+        ),
+        '2026-01-02',
       );
     });
 
