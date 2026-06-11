@@ -92,6 +92,38 @@ void main() {
       );
     });
 
+    test('replaces gbk java encode helpers in search urls', () {
+      final source = BookSource()
+        ..bookSourceName = 'GBK'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl =
+            '/search.php?kw={{java.encodeURI(key, "gbk")}}&p={{page}}';
+
+      final url = LegadoRequestBuilder.buildSearchUrl(
+        source,
+        '\u4e2d',
+        page: 2,
+      );
+
+      expect(url, 'https://example.com/search.php?kw=%D6%D0&p=2');
+    });
+
+    test('replaces Packages getBytes hex templates without js runtime', () {
+      final source = BookSource()
+        ..bookSourceName = 'Bytes'
+        ..bookSourceUrl = 'http://www.shubao96.com'
+        ..searchUrl =
+            'http://www.shubao96.com/search/_{{Packages.java.lang.String("key").getBytes("gbk").map(x => (x&0xff).toString(16)).join("_")}}/{{page}}';
+
+      final url = LegadoRequestBuilder.buildSearchUrl(
+        source,
+        '\u4e2d',
+        page: 3,
+      );
+
+      expect(url, 'http://www.shubao96.com/search/_d6_d0/3');
+    });
+
     test('replaces legado angle-bracket page sequences', () {
       final source = BookSource()
         ..bookSourceName = 'Test'

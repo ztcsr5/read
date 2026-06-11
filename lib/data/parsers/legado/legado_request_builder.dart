@@ -505,8 +505,9 @@ class LegadoRequestBuilder {
     final configText = _extractLeadingJsonObject(tail);
     if (configText == null) return (url: url, config: {});
     final config = jsonConfig(configText);
-    if (config.isEmpty && configText.trim() != '{}')
+    if (config.isEmpty && configText.trim() != '{}') {
       return (url: url, config: {});
+    }
     return (url: url.substring(0, comma).trimRight(), config: config);
   }
 
@@ -535,16 +536,6 @@ class LegadoRequestBuilder {
       }
     }
     return -1;
-  }
-
-  static bool _looksLikeScript(String tail) {
-    return tail.contains('=>') ||
-        tail.contains('function') ||
-        tail.contains('if ') ||
-        tail.contains('return') ||
-        tail.contains('java.') ||
-        tail.contains('JSON.') ||
-        tail.contains('String');
   }
 
   static bool _looksLikeJsHeader(String text) {
@@ -680,18 +671,23 @@ class LegadoRequestBuilder {
     required String keyword,
     required int page,
   }) {
-    return text.replaceAllMapped(
+    final output = text.replaceAllMapped(
       RegExp(
-        r'\{\{java\.(base64Encode|base64Decode|base64DecodeToString|hexDecodeToString|md5Encode|encodeURI|encodeURIComponent|decodeURI|decodeURIComponent)\((.*?)\)\}\}',
+        r'\{\{java\.(base64Encode|base64Decode|base64DecodeToString|base64Decoder|hexDecodeToString|md5Encode|encodeURI|encodeURIComponent|decodeURI|decodeURIComponent)\(([\s\S]*?)\)\}\}',
       ),
       (match) {
         final helper = match.group(1) ?? '';
         final expression = match.group(2) ?? '';
+        if (_shouldEvaluateAsInlineScript(expression)) {
+          return match.group(0) ?? '';
+        }
+        final args = _splitTopLevelArguments(expression);
         final value = _evaluateSimpleStringExpression(
-          expression,
+          args.isEmpty ? expression : args.first,
           keyword: keyword,
           page: page,
         );
+        final charset = args.length > 1 ? _stripStringLiteral(args[1]) : '';
         switch (helper) {
           case 'md5Encode':
             return md5.convert(utf8.encode(value)).toString();
@@ -699,12 +695,15 @@ class LegadoRequestBuilder {
             return base64Encode(utf8.encode(value));
           case 'base64Decode':
           case 'base64DecodeToString':
+          case 'base64Decoder':
             return utf8.decode(base64Decode(value), allowMalformed: true);
           case 'hexDecodeToString':
             return _hexDecodeToString(value);
           case 'encodeURI':
+            if (_isGbkCharset(charset)) return _encodeGbkPercent(value);
             return Uri.encodeFull(value);
           case 'encodeURIComponent':
+            if (_isGbkCharset(charset)) return _encodeGbkPercent(value);
             return Uri.encodeComponent(value);
           case 'decodeURI':
             return Uri.decodeFull(value);
@@ -713,6 +712,11 @@ class LegadoRequestBuilder {
         }
         return value;
       },
+    );
+    return _replacePackagesStringByteTemplates(
+      output,
+      keyword: keyword,
+      page: page,
     );
   }
 
@@ -741,9 +745,162 @@ class LegadoRequestBuilder {
         );
         return value.trim();
       } catch (_) {
-        return '';
+        return _evaluateInlineScriptFallback(
+              script,
+              keyword: keyword,
+              page: page,
+            ) ??
+            '';
       }
     });
+  }
+
+  static bool _shouldEvaluateAsInlineScript(String expression) {
+    return expression.contains('java.') ||
+        expression.contains('Packages.') ||
+        expression.contains('android.') ||
+        expression.contains('Math.') ||
+        expression.contains('new Date') ||
+        expression.contains(';') ||
+        expression.contains('=>') ||
+        expression.contains('function');
+  }
+
+  static List<String> _splitTopLevelArguments(String expression) {
+    final args = <String>[];
+    final current = StringBuffer();
+    var depth = 0;
+    var quote = 0;
+    var escaping = false;
+    for (var i = 0; i < expression.length; i++) {
+      final code = expression.codeUnitAt(i);
+      if (quote != 0) {
+        current.writeCharCode(code);
+        if (escaping) {
+          escaping = false;
+        } else if (code == 0x5c) {
+          escaping = true;
+        } else if (code == quote) {
+          quote = 0;
+        }
+        continue;
+      }
+      if (code == 0x22 || code == 0x27) {
+        quote = code;
+        current.writeCharCode(code);
+      } else if (code == 0x28 || code == 0x5b || code == 0x7b) {
+        depth++;
+        current.writeCharCode(code);
+      } else if (code == 0x29 || code == 0x5d || code == 0x7d) {
+        if (depth > 0) depth--;
+        current.writeCharCode(code);
+      } else if (code == 0x2c && depth == 0) {
+        args.add(current.toString().trim());
+        current.clear();
+      } else {
+        current.writeCharCode(code);
+      }
+    }
+    final tail = current.toString().trim();
+    if (tail.isNotEmpty) args.add(tail);
+    return args;
+  }
+
+  static String _stripStringLiteral(String value) {
+    final text = value.trim();
+    if (text.length >= 2) {
+      final first = text[0];
+      final last = text[text.length - 1];
+      if ((first == '"' && last == '"') || (first == "'" && last == "'")) {
+        return text.substring(1, text.length - 1);
+      }
+    }
+    return text;
+  }
+
+  static bool _isGbkCharset(String charset) {
+    final value = charset.toLowerCase().replaceAll('-', '');
+    return value == 'gbk' || value == 'gb2312' || value == 'gb18030';
+  }
+
+  static String _encodeGbkPercent(String value) {
+    try {
+      return gbk
+          .encode(value)
+          .map(
+            (byte) =>
+                '%${byte.toRadixString(16).toUpperCase().padLeft(2, '0')}',
+          )
+          .join();
+    } catch (_) {
+      return Uri.encodeComponent(value);
+    }
+  }
+
+  static String _replacePackagesStringByteTemplates(
+    String text, {
+    required String keyword,
+    required int page,
+  }) {
+    return text.replaceAllMapped(RegExp(r'\{\{([\s\S]*?)\}\}'), (match) {
+      final script = match.group(1) ?? '';
+      return _evaluatePackagesStringBytes(
+            script,
+            keyword: keyword,
+            page: page,
+          ) ??
+          (match.group(0) ?? '');
+    });
+  }
+
+  static String? _evaluateInlineScriptFallback(
+    String script, {
+    required String keyword,
+    required int page,
+  }) {
+    return _evaluatePackagesStringBytes(script, keyword: keyword, page: page);
+  }
+
+  static String? _evaluatePackagesStringBytes(
+    String script, {
+    required String keyword,
+    required int page,
+  }) {
+    if (!script.contains('Packages.java.lang.String') ||
+        !script.contains('.getBytes') ||
+        !script.contains('toString(16)')) {
+      return null;
+    }
+    final valueMatch = RegExp(
+      r'''Packages\.java\.lang\.String\(\s*(['"]?)(.*?)\1\s*\)''',
+    ).firstMatch(script);
+    if (valueMatch == null) return null;
+    final rawValue = valueMatch.group(2)?.trim() ?? '';
+    final value = rawValue == 'key'
+        ? keyword
+        : rawValue == 'page'
+        ? page.toString()
+        : _stripStringLiteral(rawValue);
+
+    final charsetMatch = RegExp(
+      r'''\.getBytes\(\s*(['"])(.*?)\1\s*\)''',
+    ).firstMatch(script);
+    final charset = charsetMatch?.group(2) ?? 'utf-8';
+    final bytes = _isGbkCharset(charset)
+        ? gbk.encode(value)
+        : utf8.encode(value);
+    final joinMatch = RegExp(
+      r'''\.join\(\s*(['"])(.*?)\1\s*\)''',
+    ).firstMatch(script);
+    final separator = joinMatch?.group(2) ?? '';
+    final prefix = script.contains("'%'") || script.contains('"%') ? '%' : '';
+    final upper = script.contains('toUpperCase()');
+    return bytes
+        .map((byte) {
+          final hex = byte.toRadixString(16);
+          return '$prefix${upper ? hex.toUpperCase() : hex}';
+        })
+        .join(separator);
   }
 
   static bool _looksLikeInlineScript(String script) {
