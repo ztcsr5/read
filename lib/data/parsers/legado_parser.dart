@@ -887,6 +887,10 @@ class LegadoParser {
     ]);
     final allowJsonTocFallback = listRule == null;
     listRule ??= '';
+    final reverseTocFromRule = listRule.startsWith('-');
+    if (listRule.startsWith('-') || listRule.startsWith('+')) {
+      listRule = listRule.substring(1);
+    }
 
     final chapters = <Chapter>[];
     final visitedUrls = <String>{};
@@ -957,7 +961,20 @@ class LegadoParser {
       final isVolumeRule = _firstRule(rule, const ['isVolume']);
       final formatJsRule = _firstRule(rule, const ['formatJs']);
 
-      if (pageListRule.isEmpty && _looksLikeJsonData(pageData, null)) {
+      final regexListRule = _regexListRule(pageListRule);
+      if (regexListRule != null) {
+        pageChapters.addAll(
+          _parseChaptersByRegexList(
+            pageData,
+            rule,
+            book,
+            currentUrlStr,
+            regexListRule,
+            startIndex: chapters.length,
+            limit: limit,
+          ),
+        );
+      } else if (pageListRule.isEmpty && _looksLikeJsonData(pageData, null)) {
         pageChapters.addAll(
           _parseChaptersByJsonFallback(
             pageData,
@@ -1023,8 +1040,7 @@ class LegadoParser {
                 item,
                 _sourceScopedRule(isVolumeRule, source),
               );
-              isVolume =
-                  val.toLowerCase() == 'true' || val == '1' || val == '卷';
+              isVolume = _isLegadoTrue(val);
             }
 
             var fullUrl = '';
@@ -1158,7 +1174,7 @@ class LegadoParser {
               node,
               _sourceScopedRule(isVolumeRule, source),
             );
-            isVolume = val.toLowerCase() == 'true' || val == '1' || val == '卷';
+            isVolume = _isLegadoTrue(val);
           }
 
           var fullUrl = '';
@@ -1289,7 +1305,10 @@ class LegadoParser {
         uniqueChapters['empty_url_${c.title}_${c.index}'] = c;
       }
     }
-    final resultList = uniqueChapters.values.toList();
+    var resultList = uniqueChapters.values.toList();
+    if (reverseTocFromRule) {
+      resultList = resultList.reversed.toList();
+    }
     for (int i = 0; i < resultList.length; i++) {
       resultList[i].index = i;
     }
@@ -3937,6 +3956,14 @@ class LegadoParser {
     return LegadoRuleEvaluator.looksLikeJsonData(data, rule);
   }
 
+  static bool _isLegadoTrue(String? value) {
+    if (value == null) return false;
+    final text = value.trim();
+    if (text.isEmpty || text == 'null') return false;
+    return !RegExp(r'^(?:false|no|not|0|0\.0)$', caseSensitive: false)
+        .hasMatch(text);
+  }
+
   static String _sample(dynamic data) {
     final text = data.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
     return text.length > 220 ? '${text.substring(0, 220)}...' : text;
@@ -4126,6 +4153,181 @@ class LegadoParser {
     }
   }
 
+  static List<Chapter> _parseChaptersByRegexList(
+    dynamic data,
+    Map<String, dynamic> rule,
+    Book book,
+    String baseUrl,
+    String regexRule, {
+    int startIndex = 0,
+    int? limit,
+  }) {
+    final matches = _extractRegexGroupRows(data.toString(), regexRule);
+    if (matches.isEmpty) return [];
+
+    var titleRule =
+        _firstRule(rule, const [
+          'chapterName',
+          'chapterNameTOC',
+          'chapterNameToc',
+          'name',
+          'title',
+          'ChapterName',
+          'N',
+        ]) ??
+        '';
+    if (titleRule.trim().isEmpty) titleRule = r'$1';
+
+    final urlRule =
+        _firstRule(rule, const [
+          'chapterUrl',
+          'chapterUrlTOC',
+          'chapterUrlToc',
+          'url',
+          'link',
+          'ChapterUrl',
+          'C',
+        ]) ??
+        '';
+    final isVolumeRule = _firstRule(rule, const ['isVolume']);
+    final formatJsRule = _firstRule(rule, const ['formatJs']);
+
+    final chapters = <Chapter>[];
+    var index = startIndex;
+    for (final groups in matches) {
+      if (limit != null && chapters.length >= limit) break;
+
+      final title = _valueFromRegexGroups(groups, titleRule).trim();
+      final url = _valueFromRegexGroups(groups, urlRule).trim();
+      final isVolume = isVolumeRule == null || isVolumeRule.isEmpty
+          ? false
+          : _isLegadoTrue(_valueFromRegexGroups(groups, isVolumeRule));
+
+      final fullUrl = url.isEmpty
+          ? (isVolume ? 'volume://$baseUrl#$index' : baseUrl)
+          : _resolveUrl(baseUrl, url);
+
+      if (title.isEmpty && url.isEmpty) continue;
+
+      var finalTitle = title.isEmpty ? 'Chapter ${index + 1}' : title;
+      if (formatJsRule != null && formatJsRule.isNotEmpty) {
+        finalTitle = _applyFormatJsSync(
+          formatJsRule,
+          index: index,
+          title: finalTitle,
+          url: fullUrl,
+        );
+      }
+
+      chapters.add(
+        Chapter(
+          bookId: book.id,
+          title: finalTitle,
+          index: index++,
+          content: fullUrl,
+          url: fullUrl,
+          wordCount: 0,
+          isDownloaded: false,
+        ),
+      );
+    }
+    return chapters;
+  }
+
+  static String? _regexListRule(String rule) {
+    final trimmed = rule.trimLeft();
+    if (trimmed.startsWith(':')) {
+      final body = trimmed.substring(1).trim();
+      return body.isEmpty ? null : body;
+    }
+    if (trimmed.toLowerCase().startsWith('@regex:')) {
+      final body = trimmed.substring('@regex:'.length).trim();
+      return body.isEmpty ? null : body;
+    }
+    return null;
+  }
+
+  static List<List<String>> _extractRegexGroupRows(String input, String rule) {
+    var text = input;
+    final parts = rule
+        .split('&&')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return const [];
+
+    for (var i = 0; i < parts.length; i++) {
+      final List<RegExpMatch> matches;
+      try {
+        final regex = _compileLegadoRegex(parts[i]);
+        matches = regex.allMatches(text).toList();
+      } catch (_) {
+        return const [];
+      }
+      if (matches.isEmpty) return const [];
+      final isLast = i == parts.length - 1;
+      if (!isLast) {
+        text = matches.map((match) => match.group(0) ?? '').join();
+        continue;
+      }
+      return matches.map(_regexGroups).toList();
+    }
+    return const [];
+  }
+
+  static List<String> _regexGroups(RegExpMatch match) {
+    return [
+      for (var i = 0; i <= match.groupCount; i++) match.group(i) ?? '',
+    ];
+  }
+
+  static RegExp _compileLegadoRegex(String pattern) {
+    var caseSensitive = true;
+    var dotAll = false;
+    var multiLine = false;
+    for (final match in RegExp(r'\(\?([ismxuU]+)\)').allMatches(pattern)) {
+      final flags = match.group(1) ?? '';
+      if (flags.contains('i')) caseSensitive = false;
+      if (flags.contains('s')) dotAll = true;
+      if (flags.contains('m')) multiLine = true;
+    }
+    final normalized = pattern
+        .replaceAll(RegExp(r'\(\?[ismxuU]+\)'), '')
+        .replaceAll(r'\h', r'[\t \u00A0]');
+    return RegExp(
+      normalized,
+      caseSensitive: caseSensitive,
+      multiLine: multiLine,
+      dotAll: dotAll,
+    );
+  }
+
+  static String _valueFromRegexGroups(List<String> groups, String rule) {
+    final trimmed = rule.trim();
+    if (trimmed.isEmpty) return '';
+    final raw = groups.isEmpty ? '' : groups[0];
+    if (trimmed.startsWith('##')) {
+      return LegadoRuleEvaluator.applyPostProcessors(raw, trimmed);
+    }
+    final expanded = _expandRegexGroupTemplate(trimmed, groups);
+    if (!expanded.contains('##')) return expanded;
+
+    final marker = expanded.indexOf('##');
+    final base = expanded.substring(0, marker);
+    final processors = expanded.substring(marker);
+    return LegadoRuleEvaluator.applyPostProcessors(base, processors);
+  }
+
+  static String _expandRegexGroupTemplate(String template, List<String> groups) {
+    return template.replaceAllMapped(RegExp(r'\\([\\$])|\$(\d+)'), (match) {
+      final escaped = match.group(1);
+      if (escaped != null) return escaped;
+      final index = int.tryParse(match.group(2) ?? '');
+      if (index == null || index < 0 || index >= groups.length) return '';
+      return groups[index];
+    });
+  }
+
   static bool _looksLikeChapterTitle(String title) {
     final normalized = title.trim();
     return RegExp(
@@ -4204,7 +4406,7 @@ class LegadoParser {
             item,
             _sourceScopedRule(isVolumeRule, source),
           );
-          isVolume = val.toLowerCase() == 'true' || val == '1' || val == '卷';
+          isVolume = _isLegadoTrue(val);
         }
 
         var fullUrl = '';

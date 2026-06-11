@@ -1736,6 +1736,133 @@ body=urlEncode(params)
       });
     });
 
+    test('strips toc list direction prefixes', () async {
+      final book = Book(
+        title: 'Prefixed Toc',
+        author: '',
+        filePath: 'https://example.com/toc',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data:
+            '<html><body><div class="toc"><a href="/c1">C1</a><a href="/c2">C2</a><a href="/c3">C3</a></div></body></html>',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final forwardSource = BookSource()
+        ..bookSourceName = 'Plus Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': '+.toc a',
+          'chapterName': '@text',
+          'chapterUrl': '@href',
+        });
+      final reversedSource = BookSource()
+        ..bookSourceName = 'Minus Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': '-.toc a',
+          'chapterName': '@text',
+          'chapterUrl': '@href',
+        });
+
+      final forward = await LegadoParser.getChapterList(
+        forwardSource,
+        book,
+        preFetchedResponse: response,
+      );
+      final reversed = await LegadoParser.getChapterList(
+        reversedSource,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(forward.map((chapter) => chapter.title), ['C1', 'C2', 'C3']);
+      expect(reversed.map((chapter) => chapter.title), ['C3', 'C2', 'C1']);
+    });
+
+    test('parses regex toc lists with capture group rules', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Regex Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': r'-:f="([^"]+)" title="([^"]+)">',
+          'chapterName': r'$2',
+          'chapterUrl': r'$1',
+        });
+      final book = Book(
+        title: 'Regex Toc',
+        author: '',
+        filePath: 'https://example.com/toc/',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data:
+            '<a f="1.html" title="C1"></a><a f="2.html" title="C2"></a><a f="3.html" title="C3"></a>',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters.map((chapter) => chapter.title), ['C3', 'C2', 'C1']);
+      expect(chapters.map((chapter) => chapter.url), [
+        'https://example.com/toc/3.html',
+        'https://example.com/toc/2.html',
+        'https://example.com/toc/1.html',
+      ]);
+    });
+
+    test('parses regex toc item post processors and volume markers', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Regex Volume Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList':
+              r':("name":"(?!正文卷?)[^\n"]+","list":|"id":\d+,"name":"[^\n"]+","hasContent":1)',
+          'chapterName': r'##"name":"([^\n"]+)"##$1###',
+          'chapterUrl': r'##"id":(\d+)##$1.html###',
+          'isVolume': r'##"list":##$0###',
+        });
+      final book = Book(
+        title: 'Regex Volume Toc',
+        author: '',
+        filePath: 'https://example.com/book/',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data:
+            '"name":"Volume 1","list":,"id":100,"name":"C1","hasContent":1,"id":101,"name":"C2","hasContent":1',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters.map((chapter) => chapter.title), [
+        'Volume 1',
+        'C1',
+        'C2',
+      ]);
+      expect(chapters.first.url, startsWith('volume://'));
+      expect(chapters.skip(1).map((chapter) => chapter.url), [
+        'https://example.com/book/100.html',
+        'https://example.com/book/101.html',
+      ]);
+    });
+
     test('loads all toc pages when nextTocUrl returns multiple urls', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
