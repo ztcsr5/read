@@ -3124,12 +3124,14 @@ class LegadoParser {
       }
       if (searchUrl.isEmpty) return '';
     } else {
-      searchUrl = LegadoRequestBuilder.replaceVariables(
-        raw,
-        keyword: keyword,
-        page: page,
-        source: source,
-      );
+      searchUrl =
+          await _evaluateMixedSearchUrlJs(source, raw, keyword, page) ??
+          LegadoRequestBuilder.replaceVariables(
+            raw,
+            keyword: keyword,
+            page: page,
+            source: source,
+          );
       if (_isWholeJsRule(searchUrl)) {
         final variables = _jsVariables(
           source,
@@ -3174,6 +3176,62 @@ class LegadoParser {
     final resolved = _resolveUrl(source.bookSourceUrl, embedded.url);
     if (embedded.config.isEmpty) return resolved;
     return '$resolved,${jsonEncode(embedded.config)}';
+  }
+
+  static Future<String?> _evaluateMixedSearchUrlJs(
+    BookSource source,
+    String raw,
+    String keyword,
+    int page,
+  ) async {
+    final matches = RegExp(
+      r'<js>([\s\S]*?)</js>|@js:([\s\S]*)',
+      caseSensitive: false,
+    ).allMatches(raw).toList();
+    if (matches.isEmpty) return null;
+
+    var start = 0;
+    var result = raw;
+    for (final match in matches) {
+      if (match.start > start) {
+        final prefix = raw.substring(start, match.start).trim();
+        if (prefix.isNotEmpty) result = prefix.replaceAll('@result', result);
+      }
+
+      final js = match.group(1) ?? match.group(2) ?? '';
+      final variables = _jsVariables(
+        source,
+        keyword: keyword,
+        page: page,
+        baseUrl: source.bookSourceUrl,
+        result: result,
+      );
+      try {
+        result = await LegadoJsEngine().evaluateWithAjax(
+          js,
+          variables: variables,
+          libraries: await _sourceLibraryCodes(
+            source,
+            baseUrl: source.bookSourceUrl,
+          ),
+          ajax: (request) => _ajaxForJs(
+            source,
+            request,
+            baseUrl: source.bookSourceUrl,
+            keyword: keyword,
+          ),
+        );
+      } catch (_) {
+        return null;
+      }
+      start = match.end;
+    }
+
+    if (raw.length > start) {
+      final suffix = raw.substring(start).trim();
+      if (suffix.isNotEmpty) result = suffix.replaceAll('@result', result);
+    }
+    return result.trim();
   }
 
   static bool _isWholeJsRule(String text) {

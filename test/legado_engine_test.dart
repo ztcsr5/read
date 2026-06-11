@@ -1067,6 +1067,22 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(url, contains('"X-Test":"1"'));
     });
 
+    test('evaluates mixed searchUrl js blocks before URL resolution', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'Mixed JS'
+        ..bookSourceUrl = 'https://example.com/api/'
+        ..searchUrl =
+            'search/<js>result + "?q=" + java.encodeURIComponent(key)</js>';
+
+      final url = await LegadoParser.buildSearchUrl(source, '斗破 苍穹');
+
+      expect(
+        url,
+        'https://example.com/api/search/?q=%E6%96%97%E7%A0%B4%20%E8%8B%8D%E7%A9%B9',
+      );
+    });
+
     test('keeps embedded post config returned by raw @js searchUrl', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final source = BookSource()
