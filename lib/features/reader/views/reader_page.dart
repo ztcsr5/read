@@ -1190,15 +1190,28 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     ReaderNavigationTarget target,
   ) {
     if (pages.isEmpty) return 0;
-    final index = pages.indexWhere(
-      (page) => page.entries.any(
+    int? firstChapterPage;
+    int? bestPage;
+    for (var i = 0; i < pages.length; i++) {
+      final entries = pages[i].entries.where(
         (entry) =>
             entry.item.chapterIndex == target.chapterIndex &&
-            entry.item.charOffset >= target.charOffset &&
             !entry.item.isDivider,
-      ),
-    );
-    if (index >= 0) return index;
+      );
+      if (entries.isEmpty) continue;
+      firstChapterPage ??= i;
+
+      final pageStartOffset = entries
+          .map((entry) => entry.item.charOffset)
+          .reduce((a, b) => a < b ? a : b);
+      if (pageStartOffset <= target.charOffset) {
+        bestPage = i;
+      } else if (bestPage != null) {
+        break;
+      }
+    }
+    if (bestPage != null) return bestPage;
+    if (firstChapterPage != null) return firstChapterPage;
     return _pageIndexForChapter(pages, target.chapterIndex);
   }
 
@@ -1301,12 +1314,18 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     final state = ref.read(readerViewModelProvider(widget.bookId));
     if (!_scrollController.hasClients || state.items.isEmpty) return;
 
-    var targetIndex = state.items.indexWhere(
-      (item) =>
-          item.chapterIndex == target.chapterIndex &&
-          item.charOffset >= target.charOffset &&
-          !item.isDivider,
-    );
+    var targetIndex = -1;
+    for (var i = 0; i < state.items.length; i++) {
+      final item = state.items[i];
+      if (item.chapterIndex != target.chapterIndex || item.isDivider) {
+        continue;
+      }
+      if (item.charOffset <= target.charOffset) {
+        targetIndex = i;
+      } else if (targetIndex >= 0) {
+        break;
+      }
+    }
     if (targetIndex < 0) {
       targetIndex = state.items.indexWhere(
         (item) => item.chapterIndex == target.chapterIndex,
