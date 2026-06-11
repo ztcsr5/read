@@ -943,7 +943,8 @@ let current = null;
 let tab = "base";
 let loadTimer = 0;
 let sourceOffset = 0;
-const sourcePageSize = 400;
+let loadSeq = 0;
+const sourcePageSize = 160;
 const tabs = [
   ["base","基础"],["search","搜索"],["detail","详情"],["toc","目录"],["content","正文"],["explore","发现"],["raw","完整 JSON"]
 ];
@@ -980,11 +981,15 @@ async function loadMoreSources() {
   return loadSourcePage(true);
 }
 async function loadSourcePage(append) {
+  const seq = ++loadSeq;
+  const loadMoreBtn = document.getElementById("loadMoreBtn");
+  if (loadMoreBtn) loadMoreBtn.disabled = true;
   try {
     const q = document.getElementById("filter").value.trim();
     const params = new URLSearchParams({summary:"1", limit:String(sourcePageSize), offset:String(append ? sourceOffset : 0)});
     if (q) params.set("q", q);
     const res = await api(`/api/sources?${params}`);
+    if (seq !== loadSeq) return;
     const page = res.data || [];
     sources = append ? sources.concat(page) : page;
     sourceOffset = (res.offset ?? (append ? sourceOffset : 0)) + page.length;
@@ -995,7 +1000,11 @@ async function loadSourcePage(append) {
       hasMore: !!res.hasMore,
     };
     renderList();
-  } catch(e) { toast("连接失败：" + e.message, true); }
+  } catch(e) {
+    if (seq === loadSeq) toast("连接失败：" + e.message, true);
+  } finally {
+    if (seq === loadSeq && loadMoreBtn) loadMoreBtn.disabled = false;
+  }
 }
 function renderList() {
   document.getElementById("totalCount").textContent = sourceStats.total;
