@@ -641,6 +641,7 @@ void main() {
       final node = document.querySelector('.card')!;
 
       expect(LegadoRuleEvaluator.extractHtmlValue(node, 'ownText'), 'Own');
+      expect(LegadoRuleEvaluator.extractHtmlValue(node, 'textNodes'), 'Own');
       expect(
         LegadoRuleEvaluator.extractHtmlValue(node, 'all'),
         contains('data-id="42"'),
@@ -2571,6 +2572,10 @@ list.add("A");
 list.add("B");
 list.join(",");
 ''');
+      final textNodes = LegadoJsEngine().evaluate(r'''@js:
+var doc = org.jsoup.Jsoup.parse('<div id="intro">Lead <span>Skip</span> Tail</div>');
+doc.selectFirst("#intro").textNodes().toArray().join("|");
+''');
 
       expect(cleaned, contains('A'));
       expect(cleaned, contains('B'));
@@ -2582,6 +2587,7 @@ list.join(",");
       expect(children, 'B::2');
       expect(htmlParts, '<span>A</span>::<div><span>A</span></div>');
       expect(list, 'A,B');
+      expect(textNodes, 'Lead|Tail');
     });
 
     test('supports jsoup parent and index helpers in js bridge', () {

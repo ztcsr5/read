@@ -354,6 +354,17 @@ class LegadoJsEngine {
     return parts.join(' ');
   }
 
+  List<String> _directTextNodes(Element element) {
+    final parts = <String>[];
+    for (final node in element.nodes) {
+      if (node is Text) {
+        final text = node.data.trim();
+        if (text.isNotEmpty) parts.add(text);
+      }
+    }
+    return parts;
+  }
+
   Map<String, dynamic> _serializeJsoupElement(
     Element element, {
     int parentDepth = 6,
@@ -362,6 +373,7 @@ class LegadoJsEngine {
     return {
       'text': element.text.trim(),
       'ownText': _ownText(element),
+      'textNodes': _directTextNodes(element),
       'html': element.innerHtml,
       'outerHtml': element.outerHtml,
       'attr': element.attributes,
@@ -466,6 +478,9 @@ class LegadoJsEngine {
         return {
           text: function() { return String(node.text || ""); },
           ownText: function() { return String(node.ownText || node.text || ""); },
+          textNodes: function() {
+            return __arrayWithToArray((node.textNodes || []).map(function(v) { return String(v || ""); }));
+          },
           html: elementHtml,
           outerHtml: elementOuterHtml,
           attr: function(name) {
@@ -606,6 +621,15 @@ class LegadoJsEngine {
         define("text", function() { return currentNodes().map(function(n) { return n.text || ""; }).join("\n"); });
         define("eachText", function() {
           return __arrayWithToArray(currentNodes().map(function(n) { return String(n.text || ""); }));
+        });
+        define("textNodes", function() {
+          var values = [];
+          var list = currentNodes();
+          for (var i = 0; i < list.length; i++) {
+            var textNodes = list[i].textNodes || [];
+            for (var j = 0; j < textNodes.length; j++) values.push(String(textNodes[j] || ""));
+          }
+          return __arrayWithToArray(values);
         });
         define("html", function() { return currentNodes().map(nodeHtml).join("\n"); });
         define("outerHtml", function() { return currentNodes().map(nodeOuterHtml).join("\n"); });
@@ -931,6 +955,7 @@ class LegadoJsEngine {
         var value = String(token || "").trim();
         var lower = value.toLowerCase();
         return lower === "text" ||
+          lower === "textnodes" ||
           lower === "owntext" ||
           lower === "html" ||
           lower === "outerhtml" ||
@@ -988,13 +1013,17 @@ class LegadoJsEngine {
 
       function __nodeValueByAttr(node, attr) {
         attr = String(attr || "text");
-        if (attr === "text" || attr === "ownText") return String(node.text || "");
-        if (attr === "innerHtml") return String(node.html || "");
-        if (attr === "html" || attr === "outerHtml" || attr === "all") {
+        var lowerAttr = attr.toLowerCase();
+        if (lowerAttr === "text" || lowerAttr === "owntext") return String(node.text || "");
+        if (lowerAttr === "textnodes") {
+          return (node.textNodes || []).map(function(v) { return String(v || ""); }).join("\n");
+        }
+        if (lowerAttr === "innerhtml") return String(node.html || "");
+        if (lowerAttr === "html" || lowerAttr === "outerhtml" || lowerAttr === "all") {
           return String(node.outerHtml || node.html || "");
         }
-        if (attr === "href" || attr === "src") return node.attr ? String(node.attr[attr] || "") : "";
-        if (attr.indexOf("attr.") === 0) attr = attr.substring(5);
+        if (lowerAttr === "href" || lowerAttr === "src") return node.attr ? String(node.attr[lowerAttr] || "") : "";
+        if (lowerAttr.indexOf("attr.") === 0) attr = attr.substring(5);
         var attrFn = /^attr\(\s*([^)]+?)\s*\)$/.exec(attr);
         if (attrFn) attr = attrFn[1];
         return node.attr ? String(node.attr[attr] || "") : "";

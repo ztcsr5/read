@@ -918,10 +918,10 @@ class LegadoRuleEvaluator {
       final lowerLine = line.toLowerCase();
 
       if (lowerLine.contains('@get:')) {
-        final key = _directiveTail(line, '@get:')
-            .split(RegExp(r'[@#]'))
-            .first
-            .trim();
+        final key = _directiveTail(
+          line,
+          '@get:',
+        ).split(RegExp(r'[@#]')).first.trim();
         try {
           final cached = LegadoJsEngine().evaluate('java.get("$key")');
           if (cached.trim().isNotEmpty) output = cached;
@@ -942,10 +942,10 @@ class LegadoRuleEvaluator {
           if (evaluated.trim().isNotEmpty) output = evaluated;
         } catch (_) {}
       } else if (lowerLine.contains('@put:')) {
-        final key = _directiveTail(line, '@put:')
-            .split(RegExp(r'[@#]'))
-            .first
-            .trim();
+        final key = _directiveTail(
+          line,
+          '@put:',
+        ).split(RegExp(r'[@#]')).first.trim();
         try {
           LegadoJsEngine().evaluate(
             'java.put("$key", result)',
@@ -1039,10 +1039,10 @@ class LegadoRuleEvaluator {
     var output = value;
     final lowerRule = rule.toLowerCase();
     if (lowerRule.contains('@get:')) {
-      final key = _directiveTail(rule, '@get:')
-          .split(RegExp(r'[@#]'))
-          .first
-          .trim();
+      final key = _directiveTail(
+        rule,
+        '@get:',
+      ).split(RegExp(r'[@#]')).first.trim();
       try {
         final cached = LegadoJsEngine().evaluate('java.get("$key")');
         if (cached.trim().isNotEmpty) output = cached;
@@ -1064,10 +1064,10 @@ class LegadoRuleEvaluator {
     }
 
     if (lowerRule.contains('@put:')) {
-      final key = _directiveTail(rule, '@put:')
-          .split(RegExp(r'[@#]'))
-          .first
-          .trim();
+      final key = _directiveTail(
+        rule,
+        '@put:',
+      ).split(RegExp(r'[@#]')).first.trim();
       try {
         LegadoJsEngine().evaluate(
           'java.put("$key", result)',
@@ -1469,10 +1469,7 @@ class LegadoRuleEvaluator {
     return double.tryParse(expression);
   }
 
-  static String _jsonTemplateGetString(
-    Map<dynamic, dynamic> json,
-    String key,
-  ) {
+  static String _jsonTemplateGetString(Map<dynamic, dynamic> json, String key) {
     final trimmed = key.trim();
     if (trimmed.startsWith(r'$') || trimmed.contains('.')) {
       return _extractSingleJsonValue(json, trimmed);
@@ -1883,9 +1880,7 @@ class LegadoRuleEvaluator {
   }
 
   static _HtmlRule _parseHtmlRule(String rule, {bool attrAllowed = true}) {
-    var cleaned = stripPostProcessors(
-      rule,
-    )
+    var cleaned = stripPostProcessors(rule)
         .replaceFirst(RegExp(r'^@css:', caseSensitive: false), '')
         .replaceFirst(RegExp(r'^@get:', caseSensitive: false), '')
         .trim();
@@ -3019,27 +3014,31 @@ class LegadoRuleEvaluator {
     if (node is Text) {
       final t = node.text.trim();
       if (t.isNotEmpty) result.add(t);
-    } else {
-      for (final child in node.nodes) {
-        _collectTextNodes(child, result);
+      return;
+    }
+    for (final child in node.nodes) {
+      if (child is Text) {
+        final t = child.text.trim();
+        if (t.isNotEmpty) result.add(t);
       }
     }
   }
 
   static String _htmlValue(Element target, String attrName) {
     final normalizedAttr = _normalizeAttrName(attrName);
-    switch (attrName) {
+    final attrKey = normalizedAttr.toLowerCase();
+    switch (attrKey) {
       case 'text':
         return target.text.trim();
-      case 'textNodes':
+      case 'textnodes':
         final list = <String>[];
         _collectTextNodes(target, list);
         return list.join('\n');
-      case 'ownText':
+      case 'owntext':
         return _ownText(target);
       case 'html':
         return target.innerHtml.trim();
-      case 'outerHtml':
+      case 'outerhtml':
       case 'all':
         return target.outerHtml.trim();
       default:
@@ -3104,8 +3103,10 @@ class LegadoRuleEvaluator {
       final fourth = aesMatch.group(3) ?? '';
       final thirdIsTransformation =
           third.contains('/') ||
-          RegExp(r'^(?:AES|DES|DESede|TripleDES)', caseSensitive: false)
-              .hasMatch(third);
+          RegExp(
+            r'^(?:AES|DES|DESede|TripleDES)',
+            caseSensitive: false,
+          ).hasMatch(third);
       final transformation = thirdIsTransformation
           ? third
           : (fourth.isEmpty ? 'AES/CBC/PKCS5Padding' : fourth);
@@ -3370,7 +3371,8 @@ class LegadoRuleEvaluator {
       if (value == r'$') return r'$';
       if (value == '&') return match.group(0) ?? '';
       final index = int.tryParse(value);
-      if (index == null || index > match.groupCount) return token.group(0) ?? '';
+      if (index == null || index > match.groupCount)
+        return token.group(0) ?? '';
       return match.group(index) ?? '';
     });
   }
