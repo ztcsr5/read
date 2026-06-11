@@ -417,6 +417,95 @@ class BookRepository {
     return await isar!.collection<BookSource>().where().findAll();
   }
 
+  Future<BookSource?> getBookSourceById(int sourceId) async {
+    if (isar == null) {
+      try {
+        return _mockBookSources.firstWhere((source) => source.id == sourceId);
+      } catch (_) {
+        return null;
+      }
+    }
+    return await isar!.collection<BookSource>().get(sourceId);
+  }
+
+  Future<int> countBookSources({String query = '', bool? enabled}) async {
+    final q = query.trim().toLowerCase();
+    if (isar == null) {
+      return _mockBookSources
+          .where((source) => _bookSourceMatches(source, q, enabled))
+          .length;
+    }
+    if (q.isEmpty && enabled == null) {
+      return await isar!.collection<BookSource>().where().count();
+    }
+    return await isar!
+        .collection<BookSource>()
+        .filter()
+        .optional(enabled != null, (q) => q.enabledEqualTo(enabled!))
+        .optional(q.isNotEmpty, (builder) {
+          return builder
+              .bookSourceNameContains(q, caseSensitive: false)
+              .or()
+              .bookSourceUrlContains(q, caseSensitive: false)
+              .or()
+              .bookSourceGroupContains(q, caseSensitive: false)
+              .or()
+              .searchUrlContains(q, caseSensitive: false);
+        })
+        .count();
+  }
+
+  Future<List<BookSource>> getBookSourcesPage({
+    int offset = 0,
+    int? limit,
+    String query = '',
+  }) async {
+    final q = query.trim().toLowerCase();
+    final start = offset < 0 ? 0 : offset;
+    final safeLimit = limit == null || limit <= 0 ? null : limit;
+    if (isar == null) {
+      final filtered =
+          _mockBookSources
+              .where((source) => _bookSourceMatches(source, q, null))
+              .toList()
+            ..sort((a, b) => a.bookSourceName.compareTo(b.bookSourceName));
+      if (start >= filtered.length) return const [];
+      final end = safeLimit == null
+          ? filtered.length
+          : (start + safeLimit).clamp(start, filtered.length).toInt();
+      return filtered.sublist(start, end);
+    }
+
+    final queryBuilder = q.isEmpty
+        ? isar!.collection<BookSource>().where().sortByBookSourceName()
+        : isar!
+              .collection<BookSource>()
+              .filter()
+              .bookSourceNameContains(q, caseSensitive: false)
+              .or()
+              .bookSourceUrlContains(q, caseSensitive: false)
+              .or()
+              .bookSourceGroupContains(q, caseSensitive: false)
+              .or()
+              .searchUrlContains(q, caseSensitive: false)
+              .sortByBookSourceName();
+    final paged = queryBuilder.offset(start);
+    if (safeLimit == null) return await paged.findAll();
+    return await paged.limit(safeLimit).findAll();
+  }
+
+  bool _bookSourceMatches(BookSource source, String query, bool? enabled) {
+    if (enabled != null && source.enabled != enabled) return false;
+    if (query.isEmpty) return true;
+    final haystack = [
+      source.bookSourceName,
+      source.bookSourceUrl,
+      source.bookSourceGroup ?? '',
+      source.searchUrl ?? '',
+    ].join('\n').toLowerCase();
+    return haystack.contains(query);
+  }
+
   // --- SourceCatalog Methods ---
 
   Future<int> saveSourceCatalog(SourceCatalog catalog) async {

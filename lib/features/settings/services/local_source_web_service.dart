@@ -195,7 +195,10 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     }
 
     if (request.method == 'GET' && path == '/api/status') {
-      final sources = await _repository.getAllBookSources();
+      final sourceCount = await _repository.countBookSources();
+      final enabledSourceCount = await _repository.countBookSources(
+        enabled: true,
+      );
       await _json(request, {
         'ok': true,
         'service': 'read-source-web',
@@ -203,44 +206,37 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         'urls': state.urls,
         'interfaces': state.interfaceLabels,
         'permissionProbeSent': state.permissionProbeSent,
-        'sourceCount': sources.length,
-        'enabledSourceCount': sources.where((source) => source.enabled).length,
+        'sourceCount': sourceCount,
+        'enabledSourceCount': enabledSourceCount,
       });
       return;
     }
 
     if (request.method == 'GET' && path == '/api/sources') {
-      final sources = await _repository.getAllBookSources();
-      sources.sort((a, b) => a.bookSourceName.compareTo(b.bookSourceName));
       final q = request.uri.queryParameters['q']?.trim().toLowerCase() ?? '';
       final summary = _queryBool(request, 'summary');
       final offset = int.tryParse(request.uri.queryParameters['offset'] ?? '');
       final limit = int.tryParse(request.uri.queryParameters['limit'] ?? '');
-      final filtered = q.isEmpty
-          ? sources
-          : sources.where((source) {
-              final haystack = [
-                source.bookSourceName,
-                source.bookSourceUrl,
-                source.bookSourceGroup ?? '',
-                source.searchUrl ?? '',
-              ].join('\n').toLowerCase();
-              return haystack.contains(q);
-            }).toList();
-      final start = (offset ?? 0).clamp(0, filtered.length).toInt();
-      final safeLimit = limit == null ? null : limit.clamp(1, 1000).toInt();
-      final end = safeLimit == null
-          ? filtered.length
-          : (start + safeLimit).clamp(start, filtered.length).toInt();
-      final page = filtered.sublist(start, end);
+      final total = await _repository.countBookSources();
+      final filteredTotal = q.isEmpty
+          ? total
+          : await _repository.countBookSources(query: q);
+      final start = (offset ?? 0).clamp(0, filteredTotal).toInt();
+      final safeLimit = limit?.clamp(1, 1000).toInt();
+      final page = await _repository.getBookSourcesPage(
+        offset: start,
+        limit: safeLimit,
+        query: q,
+      );
+      final enabledCount = await _repository.countBookSources(enabled: true);
       await _json(request, {
         'ok': true,
-        'total': sources.length,
-        'filteredTotal': filtered.length,
+        'total': total,
+        'filteredTotal': filteredTotal,
         'offset': start,
         'limit': safeLimit,
-        'hasMore': end < filtered.length,
-        'enabledCount': sources.where((source) => source.enabled).length,
+        'hasMore': start + page.length < filteredTotal,
+        'enabledCount': enabledCount,
         'data': page
             .map(summary ? _sourceSummaryJsonWithId : _sourceJsonWithId)
             .toList(),
@@ -318,11 +314,7 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
   }
 
   Future<BookSource?> _sourceById(int id) async {
-    final sources = await _repository.getAllBookSources();
-    for (final source in sources) {
-      if (source.id == id) return source;
-    }
-    return null;
+    return _repository.getBookSourceById(id);
   }
 
   Map<String, dynamic> _sourceJsonWithId(BookSource source) {
@@ -541,7 +533,13 @@ Future<List<_LocalWebEndpoint>> _localWebEndpoints(
     // Fall back to loopback below.
   }
 
-  endpoints.sort((a, b) => a.score.compareTo(b.score));
+  endpoints.sort((a, b) {
+    final score = a.score.compareTo(b.score);
+    if (score != 0) return score;
+    final name = a.name.compareTo(b.name);
+    if (name != 0) return name;
+    return a.address.compareTo(b.address);
+  });
 
   final result = <_LocalWebEndpoint>[];
   for (final endpoint in endpoints) {
@@ -564,13 +562,27 @@ Future<List<_LocalWebEndpoint>> _localWebEndpoints(
 
 int _addressPriority(String interfaceName, String address) {
   final name = interfaceName.toLowerCase();
+  if (_isLowPriorityInterface(name)) return 8;
   if (name == 'en0' || name.contains('wi-fi') || name.contains('wlan')) {
     return 0;
   }
   if (name.startsWith('eth') || name.contains('ethernet')) return 1;
   if (_isPrivateLanAddress(address)) return 2;
-  if (name.startsWith('pdp') || name.startsWith('utun')) return 5;
   return 3;
+}
+
+bool _isLowPriorityInterface(String name) {
+  return name.startsWith('pdp') ||
+      name.startsWith('utun') ||
+      name.startsWith('awdl') ||
+      name.startsWith('llw') ||
+      name.contains('vpn') ||
+      name.contains('tailscale') ||
+      name.contains('zerotier') ||
+      name.contains('vmnet') ||
+      name.contains('vbox') ||
+      name.contains('docker') ||
+      name.contains('bridge');
 }
 
 bool _isPrivateLanAddress(String address) {
