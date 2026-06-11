@@ -194,6 +194,13 @@ class LegadoRequestBuilder {
           final offset = int.tryParse(match.group(1) ?? '') ?? 0;
           return (page + offset).toString();
         })
+        .replaceAllMapped(RegExp(r'<([^<>]+)>'), (match) {
+          return _replacePageSequence(
+            match.group(0) ?? '',
+            match.group(1),
+            page,
+          );
+        })
         .replaceAll('{{key}}', encoded)
         .replaceAll('{{keyword}}', encoded)
         .replaceAll('{{searchKey}}', encoded)
@@ -216,6 +223,18 @@ class LegadoRequestBuilder {
         .replaceAll('{source.bookSourceUrl}', baseUrl)
         .replaceAll('{baseUrl}', baseUrl)
         .replaceAll('%s', encoded);
+  }
+
+  static String _replacePageSequence(String original, String? body, int page) {
+    final value = body?.trim() ?? '';
+    if (value.isEmpty || !value.contains(',')) return original;
+    final parts = value.split(',').map((part) => part.trim()).toList();
+    if (parts.any((part) => part.isEmpty)) return original;
+    if (parts.any((part) => part.contains('{') || part.contains('}'))) {
+      return original;
+    }
+    final index = page - 1;
+    return index >= 0 && index < parts.length ? parts[index] : parts.last;
   }
 
   static String _replaceEncodedPlaceholders(String text) {

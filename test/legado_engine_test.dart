@@ -92,6 +92,26 @@ void main() {
       );
     });
 
+    test('replaces legado angle-bracket page sequences', () {
+      final source = BookSource()
+        ..bookSourceName = 'Test'
+        ..bookSourceUrl = 'https://example.com/api/'
+        ..searchUrl = 'search?q={{key}}&page=<1,2,2>';
+
+      expect(
+        LegadoRequestBuilder.buildSearchUrl(source, 'abc', page: 1),
+        'https://example.com/api/search?q=abc&page=1',
+      );
+      expect(
+        LegadoRequestBuilder.buildSearchUrl(source, 'abc', page: 2),
+        'https://example.com/api/search?q=abc&page=2',
+      );
+      expect(
+        LegadoRequestBuilder.buildSearchUrl(source, 'abc', page: 9),
+        'https://example.com/api/search?q=abc&page=2',
+      );
+    });
+
     test('evaluates inline javascript search url blocks', () {
       if (!LegadoJsEngine().isAvailable) return;
       final source = BookSource()
