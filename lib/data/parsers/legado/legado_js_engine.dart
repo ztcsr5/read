@@ -8,6 +8,8 @@ import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' show parse;
 
+import 'legado_session_store.dart';
+
 class LegadoJsEngine {
   static final LegadoJsEngine _instance = LegadoJsEngine._internal();
 
@@ -166,6 +168,40 @@ class LegadoJsEngine {
 
       _runtime!.onMessage('java_time', (dynamic args) {
         return DateTime.now().millisecondsSinceEpoch;
+      });
+
+      _runtime!.onMessage('cookie_get', (dynamic args) {
+        try {
+          final uri = Uri.tryParse(args?.toString() ?? '');
+          if (uri == null) return '';
+          return LegadoSessionStore.cookieHeaderFor(uri) ?? '';
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('cookie_set', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final uri = Uri.tryParse(data['url']?.toString() ?? '');
+          final value = data['cookie']?.toString() ?? '';
+          if (uri == null || value.trim().isEmpty) return false;
+          LegadoSessionStore.setCookieString(uri, value);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      });
+
+      _runtime!.onMessage('cookie_remove', (dynamic args) {
+        try {
+          final uri = Uri.tryParse(args?.toString() ?? '');
+          if (uri == null) return false;
+          LegadoSessionStore.clearHost(uri);
+          return true;
+        } catch (_) {
+          return false;
+        }
       });
     } catch (e) {
       print('JS Engine Initialization Error: $e');
@@ -652,11 +688,34 @@ class LegadoJsEngine {
         return String(input || "").replace(/\s+/g, "");
       }
 
+      function __cookieKey(header, key) {
+        var name = String(key || "");
+        if (!name) return "";
+        var parts = String(header || "").split(";");
+        for (var i = 0; i < parts.length; i++) {
+          var part = parts[i].trim();
+          var pos = part.indexOf("=");
+          if (pos <= 0) continue;
+          if (part.substring(0, pos).trim() === name) {
+            return part.substring(pos + 1).trim();
+          }
+        }
+        return "";
+      }
+
       var cookie = {
-        getCookie: function(url) { return ""; },
-        getKey: function(url, key) { return ""; },
-        setCookie: function(url, c) { },
-        removeCookie: function(url) { }
+        getCookie: function(url) {
+          return sendMessage("cookie_get", String(url || (typeof baseUrl === "undefined" ? "" : baseUrl)));
+        },
+        getKey: function(url, key) {
+          return __cookieKey(cookie.getCookie(url), key);
+        },
+        setCookie: function(url, c) {
+          return sendMessage("cookie_set", JSON.stringify({url: String(url || (typeof baseUrl === "undefined" ? "" : baseUrl)), cookie: String(c || "")}));
+        },
+        removeCookie: function(url) {
+          return sendMessage("cookie_remove", String(url || (typeof baseUrl === "undefined" ? "" : baseUrl)));
+        }
       };
 
       var cache = {

@@ -1282,6 +1282,20 @@ body=urlEncode(params)
       expect(jsonDecode(list), ['第一段', '第二段']);
     });
 
+    test('supports cookie bridge backed by session store', () {
+      if (!LegadoJsEngine().isAvailable) return;
+      final uri = Uri.parse('https://cookie.example/path');
+      LegadoSessionStore.clearHost(uri);
+      addTearDown(() => LegadoSessionStore.clearHost(uri));
+
+      final sid = LegadoJsEngine().evaluate(
+        '@js:cookie.setCookie("https://cookie.example/path", "sid=abc; Path=/"); cookie.getKey("https://cookie.example/path", "sid")',
+      );
+
+      expect(sid, 'abc');
+      expect(LegadoSessionStore.cookieHeaderFor(uri), contains('sid=abc'));
+    });
+
     test('supports legacy class selector with multiple class tokens', () {
       final document = parse('''
         <ul class="float-list fill-block">
