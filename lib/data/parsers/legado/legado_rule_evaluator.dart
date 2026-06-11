@@ -579,25 +579,12 @@ class LegadoRuleEvaluator {
           final replacement = idx + 1 < processors.length
               ? processors[idx + 1]
               : '';
-          try {
-            if (onlyFirst) {
-              output = output.replaceFirst(
-                _compileFlexibleRegExp(pattern),
-                replacement,
-              );
-            } else {
-              output = output.replaceAll(
-                _compileFlexibleRegExp(pattern),
-                replacement,
-              );
-            }
-          } catch (_) {
-            if (onlyFirst) {
-              output = output.replaceFirst(pattern, replacement);
-            } else {
-              output = output.replaceAll(pattern, replacement);
-            }
-          }
+          output = _applyRegexPostProcessor(
+            output,
+            pattern,
+            replacement,
+            onlyFirst: onlyFirst,
+          );
         }
       } else {
         if (line.contains('{result}') ||
@@ -706,29 +693,62 @@ class LegadoRuleEvaluator {
         final replacement = index + 1 < processors.length
             ? processors[index + 1]
             : '';
-        try {
-          if (onlyFirst) {
-            output = output.replaceFirst(
-              _compileFlexibleRegExp(pattern),
-              replacement,
-            );
-          } else {
-            output = output.replaceAll(
-              _compileFlexibleRegExp(pattern),
-              replacement,
-            );
-          }
-        } catch (_) {
-          if (onlyFirst) {
-            output = output.replaceFirst(pattern, replacement);
-          } else {
-            output = output.replaceAll(pattern, replacement);
-          }
-        }
+        output = _applyRegexPostProcessor(
+          output,
+          pattern,
+          replacement,
+          onlyFirst: onlyFirst,
+        );
       }
     }
     output = _applyJsPostProcessors(output, rule);
     return output.trim();
+  }
+
+  static String _applyRegexPostProcessor(
+    String value,
+    String pattern,
+    String replacement, {
+    required bool onlyFirst,
+  }) {
+    try {
+      final regex = _compileFlexibleRegExp(pattern);
+      if (onlyFirst) {
+        final match = regex.firstMatch(value);
+        if (match == null) return '';
+        return _expandRegexReplacement(match, replacement);
+      }
+      return value.replaceAllMapped(
+        regex,
+        (match) => _expandRegexReplacement(match, replacement),
+      );
+    } catch (_) {
+      if (onlyFirst) return replacement;
+      return value.replaceAll(pattern, replacement);
+    }
+  }
+
+  static String _expandRegexReplacement(Match match, String replacement) {
+    return replacement.replaceAllMapped(
+      RegExp(r'\\([\\$])|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$(\d+)'),
+      (token) {
+        final escaped = token.group(1);
+        if (escaped != null) return escaped;
+        final name = token.group(2);
+        if (name != null) {
+          try {
+            return (match as RegExpMatch).namedGroup(name) ?? '';
+          } catch (_) {
+            return '';
+          }
+        }
+        final index = int.tryParse(token.group(3) ?? '');
+        if (index == null || index < 0 || index > match.groupCount) {
+          return '';
+        }
+        return match.group(index) ?? '';
+      },
+    );
   }
 
   static bool isJsOnlyRule(String rule) {

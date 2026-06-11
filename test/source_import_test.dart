@@ -195,6 +195,73 @@ page footer
     expect(vm.state.sources.single.bookSourceName, '本地文件书源');
   });
 
+  test('imports string typed enabled and weight fields', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+
+    await vm.importFromJson(
+      jsonEncode([
+        {
+          'bookSourceName': 'String typed flags',
+          'bookSourceUrl': 'https://flags.example.com',
+          'enabled': 'false',
+          'weight': '88',
+          'searchUrl': '/search?q={{key}}',
+          'ruleSearch': {'bookList': 'data.list', 'name': 'title'},
+        },
+      ]),
+    );
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    expect(vm.state.sources.single.enabled, isFalse);
+    expect(vm.state.sources.single.weight, 88);
+  });
+
+  test('imports old legado rule fields through migration aliases', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+
+    await vm.importFromJson(
+      jsonEncode([
+        {
+          'bookSourceName': 'Old format source',
+          'bookSourceUrl': 'https://old.example.com',
+          'ruleSearchUrl':
+              'https://old.example.com/search?kw=searchKey&page=searchPage',
+          'ruleSearchList': 'class.result@tag.li',
+          'ruleSearchName': 'tag.a@text',
+          'ruleSearchNoteUrl': 'tag.a@href',
+          'ruleChapterUrl': 'class.title@tag.a@href',
+          'ruleChapterList': 'class.chapter-list@tag.li',
+          'ruleChapterName': 'tag.a@text',
+          'ruleContentUrl': 'tag.a@href',
+          'ruleBookContent': 'class.content@tag.p@text',
+          'ruleBookContentReplace': '#ad#',
+          'ruleContentUrlNext': 'text.下一页@href',
+          'enable': '1',
+          'serialNumber': '7',
+        },
+      ]),
+    );
+
+    expect(vm.state.error, isNull);
+    final source = vm.state.sources.single;
+    expect(source.searchUrl, contains('{{key}}'));
+    expect(source.searchUrl, contains('{{page}}'));
+    expect(source.weight, 7);
+    expect(jsonDecode(source.ruleSearch!)['bookList'], 'class.result@tag.li');
+    expect(jsonDecode(source.ruleSearch!)['bookUrl'], 'tag.a@href');
+    expect(
+      jsonDecode(source.ruleBookInfo!)['tocUrl'],
+      'class.title@tag.a@href',
+    );
+    expect(jsonDecode(source.ruleToc!)['chapterUrl'], 'tag.a@href');
+    expect(
+      jsonDecode(source.ruleContent!)['content'],
+      'class.content@tag.p@text',
+    );
+    expect(jsonDecode(source.ruleContent!)['replaceRegex'], '##ad##');
+  });
+
   test(
     'updates duplicate book source by url instead of adding copies',
     () async {

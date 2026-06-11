@@ -100,6 +100,8 @@ class BookSource {
       'webViewDelayTime',
       'bookSourceComment',
       'bookSourceHeader',
+      'loginCheckJs',
+      'coverDecodeJs',
       'variableComment',
       'respondTime',
     ]) {
@@ -107,6 +109,81 @@ class BookSource {
         customConfig[key] = json[key];
       }
     }
+    if (!customConfig.containsKey('bookUrlPattern') &&
+        json['ruleBookUrlPattern'] != null) {
+      customConfig['bookUrlPattern'] = json['ruleBookUrlPattern'];
+    }
+    if (!customConfig.containsKey('header')) {
+      final userAgent = _firstString(json, const ['httpUserAgent']);
+      if (userAgent != null) {
+        customConfig['header'] = jsonEncode({'User-Agent': userAgent});
+      }
+    }
+
+    final searchUrl =
+        _firstString(json, const ['searchUrl', 'searchURL']) ??
+        _toNewLegacyUrl(_firstString(json, const ['ruleSearchUrl']));
+    final exploreUrl =
+        _firstString(json, const ['exploreUrl', 'exploreURL']) ??
+        _toNewLegacyUrls(_firstString(json, const ['ruleFindUrl']));
+    final ruleSearchValue =
+        _firstValue(json, const ['ruleSearch', 'rulesSearch']) ??
+        _legacyRuleMap(json, const {
+          'bookList': 'ruleSearchList',
+          'name': 'ruleSearchName',
+          'author': 'ruleSearchAuthor',
+          'intro': 'ruleSearchIntroduce',
+          'kind': 'ruleSearchKind',
+          'bookUrl': 'ruleSearchNoteUrl',
+          'coverUrl': 'ruleSearchCoverUrl',
+          'lastChapter': 'ruleSearchLastChapter',
+        });
+    final ruleBookInfoValue =
+        _firstValue(json, const [
+          'ruleBookInfo',
+          'rulesBookInfo',
+          'ruleBook',
+        ]) ??
+        _legacyRuleMap(json, const {
+          'init': 'ruleBookInfoInit',
+          'name': 'ruleBookName',
+          'author': 'ruleBookAuthor',
+          'intro': 'ruleIntroduce',
+          'kind': 'ruleBookKind',
+          'coverUrl': 'ruleCoverUrl',
+          'lastChapter': 'ruleBookLastChapter',
+          'tocUrl': 'ruleChapterUrl',
+        });
+    final ruleTocValue =
+        _firstValue(json, const ['ruleToc', 'rulesToc']) ??
+        _legacyRuleMap(json, const {
+          'chapterList': 'ruleChapterList',
+          'chapterName': 'ruleChapterName',
+          'chapterUrl': 'ruleContentUrl',
+          'nextTocUrl': 'ruleChapterUrlNext',
+        });
+    final modernRuleContent = _firstValue(json, const [
+      'ruleContent',
+      'rulesContent',
+    ]);
+    final legacyRuleBookContent = _firstValue(json, const ['ruleBookContent']);
+    final ruleContentValue =
+        modernRuleContent ??
+        (legacyRuleBookContent is Map
+            ? legacyRuleBookContent
+            : _legacyContentRuleMap(json));
+    final ruleExploreValue =
+        _firstValue(json, const ['ruleExplore', 'rulesExplore']) ??
+        _legacyRuleMap(json, const {
+          'bookList': 'ruleFindList',
+          'name': 'ruleFindName',
+          'author': 'ruleFindAuthor',
+          'intro': 'ruleFindIntroduce',
+          'kind': 'ruleFindKind',
+          'bookUrl': 'ruleFindNoteUrl',
+          'coverUrl': 'ruleFindCoverUrl',
+          'lastChapter': 'ruleFindLastChapter',
+        });
 
     return BookSource()
       ..bookSourceName =
@@ -120,52 +197,29 @@ class BookSource {
         'group',
       ])
       ..bookSourceType = _firstInt(json, const ['bookSourceType', 'sourceType'])
-      ..searchUrl = _firstString(json, const ['searchUrl', 'searchURL'])
-      ..exploreUrl = _firstString(json, const ['exploreUrl', 'exploreURL'])
-      ..enabled = json['enabled'] ?? true
-      ..weight = json['weight'] ?? 0
-      ..ruleSearch =
-          _firstValue(json, const ['ruleSearch', 'rulesSearch']) != null
-          ? _jsonEncode(_firstValue(json, const ['ruleSearch', 'rulesSearch']))
+      ..searchUrl = searchUrl
+      ..exploreUrl = exploreUrl
+      ..enabled = _firstBool(json, const [
+        'enabled',
+        'enable',
+      ], defaultValue: true)
+      ..weight = _firstInt(json, const [
+        'weight',
+        'serialNumber',
+        'customOrder',
+      ])
+      ..ruleSearch = ruleSearchValue != null
+          ? _jsonEncode(ruleSearchValue)
           : null
-      ..ruleBookInfo =
-          _firstValue(json, const [
-                'ruleBookInfo',
-                'rulesBookInfo',
-                'ruleBook',
-              ]) !=
-              null
-          ? _jsonEncode(
-              _firstValue(json, const [
-                'ruleBookInfo',
-                'rulesBookInfo',
-                'ruleBook',
-              ]),
-            )
+      ..ruleBookInfo = ruleBookInfoValue != null
+          ? _jsonEncode(ruleBookInfoValue)
           : null
-      ..ruleToc = _firstValue(json, const ['ruleToc', 'rulesToc']) != null
-          ? _jsonEncode(_firstValue(json, const ['ruleToc', 'rulesToc']))
+      ..ruleToc = ruleTocValue != null ? _jsonEncode(ruleTocValue) : null
+      ..ruleContent = ruleContentValue != null
+          ? _jsonEncode(ruleContentValue)
           : null
-      ..ruleContent =
-          _firstValue(json, const [
-                'ruleContent',
-                'rulesContent',
-                'ruleBookContent',
-              ]) !=
-              null
-          ? _jsonEncode(
-              _firstValue(json, const [
-                'ruleContent',
-                'rulesContent',
-                'ruleBookContent',
-              ]),
-            )
-          : null
-      ..ruleExplore =
-          _firstValue(json, const ['ruleExplore', 'rulesExplore']) != null
-          ? _jsonEncode(
-              _firstValue(json, const ['ruleExplore', 'rulesExplore']),
-            )
+      ..ruleExplore = ruleExploreValue != null
+          ? _jsonEncode(ruleExploreValue)
           : null
       ..customConfig = customConfig.isEmpty ? null : jsonEncode(customConfig);
   }
@@ -239,7 +293,211 @@ String? _firstString(Map<String, dynamic> json, List<String> keys) {
 int _firstInt(Map<String, dynamic> json, List<String> keys) {
   final value = _firstValue(json, keys);
   if (value is int) return value;
+  if (value is num) return value.toInt();
   return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+bool _firstBool(
+  Map<String, dynamic> json,
+  List<String> keys, {
+  required bool defaultValue,
+}) {
+  final value = _firstValue(json, keys);
+  if (value == null) return defaultValue;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text.isEmpty) return defaultValue;
+  if (const {
+    'true',
+    '1',
+    'yes',
+    'y',
+    'on',
+    'enable',
+    'enabled',
+  }.contains(text)) {
+    return true;
+  }
+  if (const {
+    'false',
+    '0',
+    'no',
+    'n',
+    'off',
+    'disable',
+    'disabled',
+  }.contains(text)) {
+    return false;
+  }
+  return defaultValue;
+}
+
+Map<String, dynamic>? _legacyRuleMap(
+  Map<String, dynamic> json,
+  Map<String, String> fields,
+) {
+  final map = <String, dynamic>{};
+  fields.forEach((newKey, oldKey) {
+    final value = _toNewLegacyRule(_firstString(json, [oldKey]));
+    if (value != null && value.trim().isNotEmpty) {
+      map[newKey] = value;
+    }
+  });
+  return map.isEmpty ? null : map;
+}
+
+Map<String, dynamic>? _legacyContentRuleMap(Map<String, dynamic> json) {
+  var content = _toNewLegacyRule(_firstString(json, const ['ruleBookContent']));
+  if (content != null &&
+      content.startsWith(r'$') &&
+      !content.startsWith(r'$.')) {
+    content = content.substring(1);
+  }
+  final map = <String, dynamic>{};
+  if (content != null && content.trim().isNotEmpty) {
+    map['content'] = content;
+  }
+  final replaceRegex = _toNewLegacyRule(
+    _firstString(json, const ['ruleBookContentReplace']),
+  );
+  if (replaceRegex != null && replaceRegex.trim().isNotEmpty) {
+    map['replaceRegex'] = replaceRegex;
+  }
+  final nextContentUrl = _toNewLegacyRule(
+    _firstString(json, const ['ruleContentUrlNext']),
+  );
+  if (nextContentUrl != null && nextContentUrl.trim().isNotEmpty) {
+    map['nextContentUrl'] = nextContentUrl;
+  }
+  return map.isEmpty ? null : map;
+}
+
+String? _toNewLegacyRule(String? oldRule) {
+  if (oldRule == null || oldRule.trim().isEmpty) return null;
+  var newRule = oldRule.trim();
+  var reverse = false;
+  var allInOne = false;
+  if (newRule.startsWith('-')) {
+    reverse = true;
+    newRule = newRule.substring(1);
+  }
+  if (newRule.startsWith('+')) {
+    allInOne = true;
+    newRule = newRule.substring(1);
+  }
+  final lower = newRule.toLowerCase();
+  final shouldConvertSeparators =
+      !lower.startsWith('@css:') &&
+      !lower.startsWith('@xpath:') &&
+      !newRule.startsWith('//') &&
+      !newRule.startsWith('##') &&
+      !newRule.startsWith(':') &&
+      !lower.contains('@js:') &&
+      !lower.contains('<js>');
+  if (shouldConvertSeparators) {
+    if (newRule.contains('#') && !newRule.contains('##')) {
+      newRule = newRule.replaceAll('#', '##');
+    }
+    if (newRule.contains('|') && !newRule.contains('||')) {
+      if (newRule.contains('##')) {
+        final parts = newRule.split('##');
+        final first = parts.first.replaceAll('|', '||');
+        newRule = [first, ...parts.skip(1)].join('##');
+      } else {
+        newRule = newRule.replaceAll('|', '||');
+      }
+    }
+    if (newRule.contains('&') &&
+        !newRule.contains('&&') &&
+        !newRule.contains('http') &&
+        !newRule.startsWith('/')) {
+      newRule = newRule.replaceAll('&', '&&');
+    }
+  }
+  if (allInOne) newRule = '+$newRule';
+  if (reverse) newRule = '-$newRule';
+  return newRule;
+}
+
+String? _toNewLegacyUrls(String? oldUrls) {
+  if (oldUrls == null || oldUrls.trim().isEmpty) return null;
+  final text = oldUrls.trim();
+  if (text.startsWith('@js:') || text.startsWith('<js>')) return text;
+  if (!text.contains('\n') && !text.contains('&&')) {
+    return _toNewLegacyUrl(text);
+  }
+  final urls = text
+      .split(RegExp(r'(?:&&|\r?\n)+'))
+      .map((url) => _toNewLegacyUrl(url)?.replaceAll(RegExp(r'\n\s*'), ''))
+      .whereType<String>()
+      .where((url) => url.trim().isNotEmpty)
+      .toList();
+  return urls.isEmpty ? null : urls.join('\n');
+}
+
+String? _toNewLegacyUrl(String? oldUrl) {
+  if (oldUrl == null || oldUrl.trim().isEmpty) return null;
+  var url = oldUrl.trim();
+  if (url.toLowerCase().startsWith('<js>')) {
+    return url
+        .replaceAll('=searchKey', '={{key}}')
+        .replaceAll('=searchPage', '={{page}}');
+  }
+
+  final config = <String, dynamic>{};
+  final headerMatch = RegExp(
+    r'@Header:\{.+?\}',
+    caseSensitive: false,
+  ).firstMatch(url);
+  if (headerMatch != null) {
+    final header = headerMatch.group(0) ?? '';
+    url = url.replaceFirst(header, '');
+    config['headers'] = header.substring(8);
+  }
+
+  final charsetParts = url.split('|');
+  url = charsetParts.first;
+  if (charsetParts.length > 1) {
+    final charsetText = charsetParts[1];
+    final separator = charsetText.indexOf('=');
+    if (separator >= 0 && separator < charsetText.length - 1) {
+      config['charset'] = charsetText.substring(separator + 1);
+    }
+  }
+
+  final scripts = <String>[];
+  url = url.replaceAllMapped(RegExp(r'\{\{.+?\}\}'), (match) {
+    scripts.add(match.group(0) ?? '');
+    return r'$'
+        '${scripts.length - 1}';
+  });
+  url = url.replaceAll('{', '<').replaceAll('}', '>');
+  url = url
+      .replaceAll('searchKey', '{{key}}')
+      .replaceAllMapped(RegExp(r'<searchPage([-+]\d+)>'), (match) {
+        return '{{page${match.group(1)}}}';
+      })
+      .replaceAllMapped(RegExp(r'searchPage([-+]\d+)'), (match) {
+        return '{{page${match.group(1)}}}';
+      })
+      .replaceAll('searchPage', '{{page}}');
+  for (var index = 0; index < scripts.length; index++) {
+    url = url.replaceAll(
+      '\$$index',
+      scripts[index]
+          .replaceAll('searchKey', 'key')
+          .replaceAll('searchPage', 'page'),
+    );
+  }
+
+  final bodyParts = url.split('@');
+  url = bodyParts.first;
+  if (bodyParts.length > 1) {
+    config['method'] = 'POST';
+    config['body'] = bodyParts.sublist(1).join('@');
+  }
+  return config.isEmpty ? url : '$url,${jsonEncode(config)}';
 }
 
 String _jsonEncode(dynamic data) {

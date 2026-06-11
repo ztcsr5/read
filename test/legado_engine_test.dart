@@ -1258,6 +1258,24 @@ body=urlEncode(params)
       },
     );
 
+    test('expands capture groups in replaceRegex post processors', () {
+      final value = LegadoRuleEvaluator.applyPostProcessors(
+        'cover http://img.example.com/a.webp done',
+        r'##(http.*webp)##<img src="$1">',
+      );
+
+      expect(value, 'cover <img src="http://img.example.com/a.webp"> done');
+    });
+
+    test('uses legado first-match replaceRegex semantics', () {
+      final value = LegadoRuleEvaluator.applyPostProcessors(
+        'noise callback({"ok":true}) tail',
+        r'##callback\((.*)\)##$1###',
+      );
+
+      expect(value, '{"ok":true}');
+    });
+
     test('keeps text for t2s and s2t javascript post processors', () {
       expect(
         LegadoRuleEvaluator.applyPostProcessors('繁體', r'@js:java.t2s(result)'),
