@@ -181,15 +181,54 @@ class LegadoRuleEvaluator {
     // Handle %% (cross merge)
     if (rule.contains('%%')) {
       final parts = rule.split('%%');
-      final results = <String>[];
-      for (final part in parts) {
-        final val = extractHtmlValue(node, part.trim());
-        if (val.isNotEmpty) results.add(val);
-      }
-      return results.join('\n');
+      final lists = parts
+          .map((part) => _extractHtmlValueList(node, part.trim()))
+          .where((list) => list.isNotEmpty)
+          .toList();
+      return _interleaveLists(lists).join('\n');
     }
 
     return _extractSingleHtmlValue(node, rule);
+  }
+
+  static List<String> _extractHtmlValueList(Element node, String rule) {
+    if (rule.isEmpty) return const [];
+    if (rule.contains('||')) {
+      for (final part in rule.split('||')) {
+        final values = _extractHtmlValueList(node, part.trim());
+        if (values.isNotEmpty) return values;
+      }
+      return const [];
+    }
+    if (rule.contains('&&')) {
+      return rule
+          .split('&&')
+          .expand((part) => _extractHtmlValueList(node, part.trim()))
+          .toList();
+    }
+    if (rule.contains('%%')) {
+      final lists = rule
+          .split('%%')
+          .map((part) => _extractHtmlValueList(node, part.trim()))
+          .where((list) => list.isNotEmpty)
+          .toList();
+      return _interleaveLists(lists);
+    }
+    if (rule.contains('@@') || isXPathRule(rule)) {
+      final value = _extractSingleHtmlValue(node, rule);
+      return value.isEmpty ? const [] : [value];
+    }
+
+    final parsed = _parseHtmlRule(rule);
+    final targets = _queryChain(node, parsed.selectors);
+    if (targets.isEmpty) return const [];
+    return targets
+        .map(
+          (target) =>
+              applyPostProcessors(_htmlValue(target, parsed.attr), rule),
+        )
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
   }
 
   static String _extractSingleHtmlValue(Element node, String rule) {
@@ -252,11 +291,11 @@ class LegadoRuleEvaluator {
     // Handle %% (cross merge)
     if (rule.contains('%%')) {
       final parts = rule.split('%%');
-      final results = <Element>[];
-      for (final part in parts) {
-        results.addAll(queryAll(document, part.trim()));
-      }
-      return results;
+      final lists = parts
+          .map((part) => queryAll(document, part.trim()))
+          .where((list) => list.isNotEmpty)
+          .toList();
+      return _interleaveLists(lists);
     }
 
     if (isXPathRule(rule)) {
@@ -458,9 +497,15 @@ class LegadoRuleEvaluator {
               : '';
           try {
             if (onlyFirst) {
-              output = output.replaceFirst(_compileFlexibleRegExp(pattern), replacement);
+              output = output.replaceFirst(
+                _compileFlexibleRegExp(pattern),
+                replacement,
+              );
             } else {
-              output = output.replaceAll(_compileFlexibleRegExp(pattern), replacement);
+              output = output.replaceAll(
+                _compileFlexibleRegExp(pattern),
+                replacement,
+              );
             }
           } catch (_) {
             if (onlyFirst) {
@@ -471,10 +516,20 @@ class LegadoRuleEvaluator {
           }
         }
       } else {
-        if (line.contains('{result}') || line.contains('{' '{result}' '}')) {
+        if (line.contains('{result}') ||
+            line.contains(
+              '{'
+              '{result}'
+              '}',
+            )) {
           output = line
               .replaceAll('{result}', output)
-              .replaceAll('{' '{result}' '}', output);
+              .replaceAll(
+                '{'
+                '{result}'
+                '}',
+                output,
+              );
         } else if (line.contains('{}') || line.contains('{{}}')) {
           output = line.replaceAll('{}', output).replaceAll('{{}}', output);
         } else if (line.contains('{') && originalJson != null) {
@@ -569,9 +624,15 @@ class LegadoRuleEvaluator {
             : '';
         try {
           if (onlyFirst) {
-            output = output.replaceFirst(_compileFlexibleRegExp(pattern), replacement);
+            output = output.replaceFirst(
+              _compileFlexibleRegExp(pattern),
+              replacement,
+            );
           } else {
-            output = output.replaceAll(_compileFlexibleRegExp(pattern), replacement);
+            output = output.replaceAll(
+              _compileFlexibleRegExp(pattern),
+              replacement,
+            );
           }
         } catch (_) {
           if (onlyFirst) {
@@ -1058,9 +1119,7 @@ class LegadoRuleEvaluator {
     }
     final has = _extractTrailingHasPseudo(rawSelector.trim());
     if (has != null) {
-      final base = _normalizeCssSelector(
-        has.base.isEmpty ? '*' : has.base,
-      );
+      final base = _normalizeCssSelector(has.base.isEmpty ? '*' : has.base);
       return _queryHasPseudo(node, base, has.inner);
     }
     final parsed = _parseIndexConfig(rawSelector);
@@ -1141,9 +1200,7 @@ class LegadoRuleEvaluator {
     } catch (_) {
       return const [];
     }
-    return candidates
-        .where((el) => _matchesTextPseudo(el, type, arg))
-        .toList();
+    return candidates.where((el) => _matchesTextPseudo(el, type, arg)).toList();
   }
 
   static bool _matchesTextPseudo(Element el, String type, String arg) {
@@ -1398,6 +1455,20 @@ class LegadoRuleEvaluator {
     to = to.clamp(0, nodes.length);
     if (to < from) return const [];
     return nodes.sublist(from, to);
+  }
+
+  static List<T> _interleaveLists<T>(List<List<T>> lists) {
+    if (lists.isEmpty) return const [];
+    final result = <T>[];
+    final maxLength = lists
+        .map((list) => list.length)
+        .fold<int>(0, (max, length) => length > max ? length : max);
+    for (var i = 0; i < maxLength; i++) {
+      for (final list in lists) {
+        if (i < list.length) result.add(list[i]);
+      }
+    }
+    return result;
   }
 
   static int _normalizeIndex(int index, int length) {

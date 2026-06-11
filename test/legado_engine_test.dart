@@ -404,6 +404,33 @@ void main() {
       );
     });
 
+    test('interleaves html values and nodes for %% rules', () {
+      final document = parse('''
+        <div class="toc">
+          <a class="free" href="/1">第一章</a>
+          <a class="free" href="/3">第三章</a>
+          <a class="vip" href="/2">第二章</a>
+          <a class="vip" href="/4">第四章</a>
+        </div>
+      ''');
+
+      expect(
+        LegadoRuleEvaluator.extractHtmlValue(
+          document.body!,
+          '.free@text%%.vip@text',
+        ),
+        '第一章\n第二章\n第三章\n第四章',
+      );
+
+      final nodes = LegadoRuleEvaluator.queryAll(document, '.free%%.vip');
+      expect(nodes.map((node) => node.text).toList(), [
+        '第一章',
+        '第二章',
+        '第三章',
+        '第四章',
+      ]);
+    });
+
     test('extracts chained html selectors and indexed selectors', () {
       final document = parse('''
         <div id="chaptercontent">
