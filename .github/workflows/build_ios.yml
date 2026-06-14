@@ -2,7 +2,7 @@ name: Build iOS IPA
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "feat/source-engine-v1" ]
   workflow_dispatch:
 
 jobs:
