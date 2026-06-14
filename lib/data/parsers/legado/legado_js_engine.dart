@@ -585,11 +585,9 @@ class LegadoJsEngine {
     }
     return ttf;
   }
-=======
   bool get canEvaluate => _runtime != null || _nodeFallbackAvailable;
 
   bool get isUsingNodeFallback => _runtime == null && _nodeFallbackAvailable;
->>>>>>> ec10bfd (fix: engine hardening, memory & js leakage patched)
 
   String _ownText(Element element) {
     final parts = <String>[];
