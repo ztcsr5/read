@@ -1520,6 +1520,8 @@ class LegadoParser {
                 ),
                 ajax: (request) =>
                     _ajaxForJs(source, request, baseUrl: currentUrl),
+                ajaxBytes: (request) =>
+                    _ajaxBytesForJs(source, request, baseUrl: currentUrl),
               );
               if (output.trim().isNotEmpty) {
                 rawData = output.trim();
@@ -1743,6 +1745,8 @@ class LegadoParser {
         ),
         libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
         ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
+        ajaxBytes: (request) =>
+            _ajaxBytesForJs(source, request, baseUrl: baseUrl),
       );
       final suffix = block.suffix.trim();
       if (suffix.isEmpty) return _contentHtmlToText(output);
@@ -2209,6 +2213,8 @@ class LegadoParser {
       libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
       ajax: (request) =>
           _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+      ajaxBytes: (request) =>
+          _ajaxBytesForJs(source, request, baseUrl: baseUrl, keyword: keyword),
     );
     final value = _applyAjaxFieldSuffix(output, block.suffix);
     return value.trim().isEmpty ? null : value;
@@ -2898,6 +2904,12 @@ class LegadoParser {
         libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
         ajax: (request) =>
             _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+        ajaxBytes: (request) => _ajaxBytesForJs(
+          source,
+          request,
+          baseUrl: baseUrl,
+          keyword: keyword,
+        ),
       );
       final resolvedRule = _resolvePreparedRuleSuffix(block.suffix, variables);
       return (
@@ -3125,6 +3137,79 @@ class LegadoParser {
     return response.data?.toString() ?? '';
   }
 
+  static Future<Uint8List> _ajaxBytesForJs(
+    BookSource source,
+    String request, {
+    String? baseUrl,
+    String? keyword,
+  }) async {
+    final decoded = _decodeAjaxBytesRequest(request);
+    final requestUrl = decoded['url']?.toString() ?? request;
+    final resolved = _resolveRequestUrl(
+      baseUrl ?? source.bookSourceUrl,
+      requestUrl,
+    );
+    final req = _buildRequest(source, resolved, keyword: keyword);
+    final headers = Map<String, dynamic>.from(req.headers ?? const {});
+    final uri = Uri.parse(req.url);
+    LegadoSessionStore.apply(uri, headers);
+    final extraHeaders = decoded['headers'];
+    if (extraHeaders is Map) {
+      extraHeaders.forEach((key, value) {
+        final name = key?.toString() ?? '';
+        if (name.isNotEmpty && value != null) headers[name] = value.toString();
+      });
+    }
+    final referer = decoded['referer']?.toString();
+    if (referer != null && referer.isNotEmpty) {
+      headers[HttpHeaders.refererHeader] = referer;
+    }
+
+    final response = await _dio
+        .request<dynamic>(
+          req.url,
+          data: req.body,
+          options: Options(
+            method: req.method,
+            headers: headers.isEmpty ? null : headers,
+            responseType: ResponseType.bytes,
+            followRedirects: true,
+            receiveTimeout: const Duration(seconds: 15),
+            sendTimeout: const Duration(seconds: 15),
+            validateStatus: (status) =>
+                status != null && status >= 200 && status < 400,
+          ),
+        )
+        .timeout(const Duration(seconds: 15));
+    LegadoSessionStore.rememberResponse(response.realUri, response.headers);
+    final bytes = response.data is List<int>
+        ? Uint8List.fromList(response.data as List<int>)
+        : Uint8List.fromList(utf8.encode(response.data?.toString() ?? ''));
+    if (bytes.isEmpty) {
+      throw Exception('Font response is empty: ${req.url}');
+    }
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw Exception('Font response is too large: ${bytes.length}');
+    }
+    return bytes;
+  }
+
+  static Map<String, dynamic> _decodeAjaxBytesRequest(String rawRequest) {
+    final text = rawRequest.trim();
+    if (text.startsWith('{') && text.endsWith('}')) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) {
+          return decoded.map((key, value) => MapEntry(key.toString(), value));
+        }
+      } catch (_) {
+        // Fall through and treat it as a URL.
+      }
+    }
+    return <String, dynamic>{'url': text};
+  }
+
   static String _resolveRequestUrl(String baseUrl, String request) {
     final embedded = LegadoRequestBuilder.splitEmbeddedConfig(request);
     final resolved = _resolveUrl(baseUrl, embedded.url);
@@ -3155,6 +3240,12 @@ class LegadoParser {
         ),
         libraries: await _sourceLibraryCodes(source, baseUrl: resolvedInput),
         ajax: (request) => _ajaxForJs(
+          source,
+          request,
+          baseUrl: resolvedInput,
+          keyword: keyword,
+        ),
+        ajaxBytes: (request) => _ajaxBytesForJs(
           source,
           request,
           baseUrl: resolvedInput,
@@ -3204,6 +3295,12 @@ class LegadoParser {
         libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
         ajax: (request) =>
             _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+        ajaxBytes: (request) => _ajaxBytesForJs(
+          source,
+          request,
+          baseUrl: baseUrl,
+          keyword: keyword,
+        ),
       );
       return output.trim().isEmpty ? body : output;
     } catch (e) {
@@ -4038,6 +4135,12 @@ class LegadoParser {
             baseUrl: source.bookSourceUrl,
             keyword: keyword,
           ),
+          ajaxBytes: (request) => _ajaxBytesForJs(
+            source,
+            request,
+            baseUrl: source.bookSourceUrl,
+            keyword: keyword,
+          ),
         );
       } catch (_) {}
       searchUrl = output.trim();
@@ -4074,6 +4177,12 @@ class LegadoParser {
               baseUrl: source.bookSourceUrl,
             ),
             ajax: (request) => _ajaxForJs(
+              source,
+              request,
+              baseUrl: source.bookSourceUrl,
+              keyword: keyword,
+            ),
+            ajaxBytes: (request) => _ajaxBytesForJs(
               source,
               request,
               baseUrl: source.bookSourceUrl,
@@ -4139,6 +4248,12 @@ class LegadoParser {
             baseUrl: source.bookSourceUrl,
           ),
           ajax: (request) => _ajaxForJs(
+            source,
+            request,
+            baseUrl: source.bookSourceUrl,
+            keyword: keyword,
+          ),
+          ajaxBytes: (request) => _ajaxBytesForJs(
             source,
             request,
             baseUrl: source.bookSourceUrl,

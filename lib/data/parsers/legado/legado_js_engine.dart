@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import 'package:html/dom.dart';
 import 'package:html/parser.dart' show parse, parseFragment;
 
 import 'legado_session_store.dart';
+import 'query_ttf.dart';
 
 class LegadoJsEngine {
   static final LegadoJsEngine _instance = LegadoJsEngine._internal();
@@ -19,8 +21,18 @@ class LegadoJsEngine {
   JavascriptRuntime? _runtime;
   final Set<String> _loadedLibraryKeys = <String>{};
   Future<String> Function(String request)? _currentAjaxHandler;
+  Future<Uint8List> Function(String request)? _currentAjaxBytesHandler;
   final Map<String, dynamic> _javaStorage = <String, dynamic>{};
   final Map<String, Document> _jsoupDocuments = {};
+  final LinkedHashMap<String, QueryTTF> _queryTtfCache =
+      LinkedHashMap<String, QueryTTF>();
+  static const int _maxTtfCacheEntries = 16;
+  static const int _maxFontBytes = 5 * 1024 * 1024;
+  static const Duration _fontTimeout = Duration(seconds: 15);
+  static const String _defaultUserAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
+      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 '
+      'Mobile/15E148 Safari/604.1';
 
   LegadoJsEngine._internal() {
     try {
@@ -336,12 +348,186 @@ class LegadoJsEngine {
           return false;
         }
       });
+
+      _runtime!.onMessage('java_ajax_bytes', (dynamic args) async {
+        try {
+          final bytes = await _fetchAjaxBytes(args?.toString() ?? '');
+          return base64Encode(bytes);
+        } catch (e) {
+          print('java_ajax_bytes failed: $e');
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('query_ttf_parse', (dynamic args) {
+        try {
+          final data = jsonDecode(args?.toString() ?? '{}');
+          final b64 = data['data']?.toString() ?? '';
+          if (b64.isEmpty) return '';
+          final bytes = Uint8List.fromList(base64Decode(b64));
+          final key = data['key']?.toString().trim();
+          final cacheKey = (key == null || key.isEmpty)
+              ? sha1.convert(bytes).toString()
+              : '$key#${bytes.length}';
+          _getOrParseTtf(cacheKey, bytes);
+          return cacheKey;
+        } catch (e) {
+          print('query_ttf_parse failed: $e');
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('query_ttf_glyf_by_unicode', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final ttf = _queryTtfCache[data['h']?.toString() ?? ''];
+          if (ttf == null) return '';
+          final code = (data['code'] as num?)?.toInt() ?? 0;
+          return ttf.getGlyfByUnicode(code) ?? '';
+        } catch (e) {
+          print('query_ttf_glyf_by_unicode failed: $e');
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('query_ttf_unicode_by_glyf', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final ttf = _queryTtfCache[data['h']?.toString() ?? ''];
+          if (ttf == null) return 0;
+          return ttf.getUnicodeByGlyf(data['glyf']?.toString() ?? '');
+        } catch (e) {
+          print('query_ttf_unicode_by_glyf failed: $e');
+          return 0;
+        }
+      });
+
+      _runtime!.onMessage('query_ttf_glyf_id_by_unicode', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final ttf = _queryTtfCache[data['h']?.toString() ?? ''];
+          if (ttf == null) return 0;
+          final code = (data['code'] as num?)?.toInt() ?? 0;
+          return ttf.getGlyfIdByUnicode(code);
+        } catch (e) {
+          print('query_ttf_glyf_id_by_unicode failed: $e');
+          return 0;
+        }
+      });
+
+      _runtime!.onMessage('query_ttf_is_blank', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          final ttf = _queryTtfCache[data['h']?.toString() ?? ''];
+          if (ttf == null) return false;
+          final code = (data['code'] as num?)?.toInt() ?? 0;
+          return ttf.isBlankUnicode(code);
+        } catch (_) {
+          return false;
+        }
+      });
     } catch (e) {
       print('JS Engine Initialization Error: $e');
     }
   }
 
   bool get isAvailable => _runtime != null;
+
+  Future<Uint8List> _fetchAjaxBytes(String rawRequest) async {
+    final handler = _currentAjaxBytesHandler;
+    if (handler != null) {
+      final bytes = await handler(rawRequest).timeout(_fontTimeout);
+      _validateFontBytes(bytes);
+      return bytes;
+    }
+
+    final data = _decodeAjaxBytesRequest(rawRequest);
+    final url = data['url']?.toString() ?? rawRequest;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) {
+      throw ArgumentError('Invalid font url: $url');
+    }
+
+    final headers = <String, String>{
+      HttpHeaders.userAgentHeader:
+          LegadoSessionStore.userAgentFor(uri) ?? _defaultUserAgent,
+    };
+    final cookie = LegadoSessionStore.cookieHeaderFor(uri);
+    if (cookie != null && cookie.isNotEmpty) {
+      headers[HttpHeaders.cookieHeader] = cookie;
+    }
+    final referer = data['referer']?.toString();
+    if (referer != null && referer.isNotEmpty) {
+      headers[HttpHeaders.refererHeader] = referer;
+    }
+    final requestHeaders = data['headers'];
+    if (requestHeaders is Map) {
+      requestHeaders.forEach((key, value) {
+        final name = key?.toString() ?? '';
+        if (name.isNotEmpty && value != null) {
+          headers[name] = value.toString();
+        }
+      });
+    }
+
+    final client = HttpClient()..connectionTimeout = _fontTimeout;
+    try {
+      final request = await client.getUrl(uri).timeout(_fontTimeout);
+      headers.forEach(request.headers.set);
+      final response = await request.close().timeout(_fontTimeout);
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in response.timeout(_fontTimeout)) {
+        builder.add(chunk);
+        if (builder.length > _maxFontBytes) {
+          throw StateError('Font response exceeds $_maxFontBytes bytes');
+        }
+      }
+      final bytes = builder.takeBytes();
+      _validateFontBytes(bytes);
+      return bytes;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Map<String, dynamic> _decodeAjaxBytesRequest(String rawRequest) {
+    final text = rawRequest.trim();
+    if (text.startsWith('{') && text.endsWith('}')) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) {
+          return decoded.map((key, value) => MapEntry(key.toString(), value));
+        }
+      } catch (_) {
+        // Fall through and treat it as a URL.
+      }
+    }
+    return <String, dynamic>{'url': text};
+  }
+
+  void _validateFontBytes(Uint8List bytes) {
+    if (bytes.isEmpty) {
+      throw StateError('Font response is empty');
+    }
+    if (bytes.length > _maxFontBytes) {
+      throw StateError('Font response exceeds $_maxFontBytes bytes');
+    }
+  }
+
+  QueryTTF _getOrParseTtf(String key, Uint8List fontBytes) {
+    final cached = _queryTtfCache.remove(key);
+    if (cached != null) {
+      _queryTtfCache[key] = cached;
+      return cached;
+    }
+    final ttf = QueryTTF(fontBytes);
+    _queryTtfCache[key] = ttf;
+    if (_queryTtfCache.length > _maxTtfCacheEntries) {
+      _queryTtfCache.remove(_queryTtfCache.keys.first);
+    }
+    return ttf;
+  }
 
   String _ownText(Element element) {
     final parts = <String>[];
@@ -1273,6 +1459,48 @@ class LegadoJsEngine {
           }
           try { return decodeURIComponent(escape(out)); } catch(e) { return out; }
         },
+        queryTTF: function(str, opts) {
+          if (str == null) return null;
+          var s = String(str);
+          var b64 = "";
+          var key = "";
+          if (/^https?:/i.test(s)) {
+            key = s;
+            b64 = String(sendMessage("java_ajax_bytes", JSON.stringify({
+              url: s,
+              headers: opts && opts.headers ? opts.headers : {},
+              referer: opts && opts.referer ? String(opts.referer) : ""
+            })) || "");
+          } else if (s.indexOf("data:") === 0) {
+            var ci = s.indexOf("base64,");
+            b64 = ci >= 0 ? s.substring(ci + 7) : "";
+            key = "data:" + String(b64.length);
+          } else {
+            b64 = s;
+            key = "base64:" + String(b64.length);
+          }
+          if (!b64) return null;
+          var handle = String(sendMessage("query_ttf_parse", JSON.stringify({
+            key: key,
+            data: b64
+          })) || "");
+          if (!handle) return null;
+          return {
+            getGlyfByUnicode: function(code) {
+              return String(sendMessage("query_ttf_glyf_by_unicode", JSON.stringify({h: handle, code: Number(code) || 0})) || "");
+            },
+            getUnicodeByGlyf: function(glyf) {
+              return Number(sendMessage("query_ttf_unicode_by_glyf", JSON.stringify({h: handle, glyf: String(glyf || "")})) || 0);
+            },
+            getGlyfIdByUnicode: function(code) {
+              return Number(sendMessage("query_ttf_glyf_id_by_unicode", JSON.stringify({h: handle, code: Number(code) || 0})) || 0);
+            },
+            isBlankUnicode: function(code) {
+              var r = sendMessage("query_ttf_is_blank", JSON.stringify({h: handle, code: Number(code) || 0}));
+              return r === true || r === "true";
+            }
+          };
+        },
         t2s: function(str) { return String(str || ""); },
         s2t: function(str) { return String(str || ""); },
         toNumChapter: function(str) { return String(str || ""); },
@@ -1907,11 +2135,13 @@ class LegadoJsEngine {
     Map<String, dynamic>? variables,
     Iterable<String> libraries = const [],
     required Future<String> Function(String request) ajax,
+    Future<Uint8List> Function(String request)? ajaxBytes,
     int maxRequests = 12,
   }) async {
     if (_runtime == null) return '';
 
     _currentAjaxHandler = ajax;
+    _currentAjaxBytesHandler = ajaxBytes;
     _injectVariables(variables);
     loadLibraries(libraries);
     try {
@@ -1929,6 +2159,7 @@ class LegadoJsEngine {
       rethrow;
     } finally {
       _currentAjaxHandler = null;
+      _currentAjaxBytesHandler = null;
       _jsoupDocuments.clear();
     }
   }
@@ -2448,21 +2679,129 @@ class LegadoJsEngine {
     required String transformation,
   }) {
     try {
-      final cipher = _decodeCipher(
-        transformation: transformation,
+      return _cipherProcessBytes(
+        input: input,
         keyBytes: keyBytes,
         ivBytes: ivBytes,
+        transformation: transformation,
+        encrypting: false,
       );
-      return cipher.process(input);
     } catch (_) {
       return Uint8List(0);
     }
+  }
+
+  Uint8List cipherProcessBytesForTesting({
+    required Uint8List input,
+    required Uint8List keyBytes,
+    required Uint8List ivBytes,
+    required String transformation,
+    required bool encrypting,
+  }) {
+    return _cipherProcessBytes(
+      input: input,
+      keyBytes: keyBytes,
+      ivBytes: ivBytes,
+      transformation: transformation,
+      encrypting: encrypting,
+    );
+  }
+
+  Uint8List _cipherProcessBytes({
+    required Uint8List input,
+    required Uint8List keyBytes,
+    required Uint8List ivBytes,
+    required String transformation,
+    required bool encrypting,
+  }) {
+    final upper = transformation.toUpperCase();
+    final isNoPadding = upper.contains('NOPADDING');
+    final isZeroPadding =
+        upper.contains('ZEROPADDING') || upper.contains('ZEROBYTEPADDING');
+    if (isNoPadding || isZeroPadding) {
+      return _rawBlockProcess(
+        input: input,
+        keyBytes: keyBytes,
+        ivBytes: ivBytes,
+        transformation: transformation,
+        encrypting: encrypting,
+        zeroPad: isZeroPadding,
+      );
+    }
+
+    final cipher = _decodeCipher(
+      transformation: transformation,
+      keyBytes: keyBytes,
+      ivBytes: ivBytes,
+      encrypting: encrypting,
+    );
+    return cipher.process(input);
+  }
+
+  Uint8List _rawBlockProcess({
+    required Uint8List input,
+    required Uint8List keyBytes,
+    required Uint8List ivBytes,
+    required String transformation,
+    required bool encrypting,
+    required bool zeroPad,
+  }) {
+    final upper = transformation.toUpperCase();
+    final isDes = upper.contains('DES');
+    final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
+    final engine = isDes ? DESedeEngine() : AESEngine();
+    final blockSize = engine.blockSize;
+    final normalizedKeyBytes = isDes
+        ? _desCompatibleKeyBytes(keyBytes)
+        : keyBytes;
+    if (!isDes &&
+        normalizedKeyBytes.length != 16 &&
+        normalizedKeyBytes.length != 24 &&
+        normalizedKeyBytes.length != 32) {
+      throw ArgumentError('Invalid AES key length');
+    }
+    final CipherParameters keyParam = isDes
+        ? DESedeParameters(normalizedKeyBytes)
+        : KeyParameter(normalizedKeyBytes);
+
+    final BlockCipher blockCipher = mode == 'ecb'
+        ? ECBBlockCipher(engine)
+        : CBCBlockCipher(engine);
+    if (mode == 'ecb') {
+      blockCipher.init(encrypting, keyParam);
+    } else {
+      var normalizedIvBytes = ivBytes;
+      if (normalizedIvBytes.length != blockSize) {
+        normalizedIvBytes = Uint8List(blockSize);
+      }
+      blockCipher.init(
+        encrypting,
+        ParametersWithIV<CipherParameters>(keyParam, normalizedIvBytes),
+      );
+    }
+
+    var data = input;
+    if (encrypting && zeroPad && data.length % blockSize != 0) {
+      final padded = Uint8List(((data.length ~/ blockSize) + 1) * blockSize);
+      padded.setAll(0, data);
+      data = padded;
+    }
+    if (data.isEmpty || data.length % blockSize != 0) {
+      throw ArgumentError('Input is not block aligned');
+    }
+    final out = Uint8List(data.length);
+    var offset = 0;
+    while (offset < data.length) {
+      offset += blockCipher.processBlock(data, offset, out, offset);
+    }
+    return out;
   }
 
   PaddedBlockCipher _decodeCipher({
     required String transformation,
     required Uint8List keyBytes,
     required Uint8List ivBytes,
+    required bool encrypting,
   }) {
     final upper = transformation.toUpperCase();
     final isDes = upper.contains('DES');
@@ -2487,7 +2826,7 @@ class LegadoJsEngine {
     );
     if (mode == 'ecb') {
       cipher.init(
-        false,
+        encrypting,
         PaddedBlockCipherParameters<CipherParameters, Null>(keyParam, null),
       );
     } else {
@@ -2496,7 +2835,7 @@ class LegadoJsEngine {
         normalizedIvBytes = Uint8List(engine.blockSize);
       }
       cipher.init(
-        false,
+        encrypting,
         PaddedBlockCipherParameters<ParametersWithIV<CipherParameters>, Null>(
           ParametersWithIV<CipherParameters>(keyParam, normalizedIvBytes),
           null,

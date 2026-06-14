@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +19,93 @@ import 'package:read/features/source_diagnostic/services/compatibility_analyzer.
 import 'package:read/features/source_diagnostic/services/source_auto_repair_service.dart';
 
 void main() {
+  group('LegadoJsEngine cipher padding', () {
+    final engine = LegadoJsEngine();
+    final key16 = Uint8List.fromList(utf8.encode('0123456789abcdef'));
+    final iv16 = Uint8List.fromList(utf8.encode('abcdef0123456789'));
+
+    Uint8List trimZeros(Uint8List bytes) {
+      var end = bytes.length;
+      while (end > 0 && bytes[end - 1] == 0) {
+        end--;
+      }
+      return Uint8List.sublistView(bytes, 0, end);
+    }
+
+    test('AES/CBC/NoPadding round trips aligned blocks', () {
+      final input = Uint8List.fromList(utf8.encode('1234567890ABCDEF'));
+      final encrypted = engine.cipherProcessBytesForTesting(
+        input: input,
+        keyBytes: key16,
+        ivBytes: iv16,
+        transformation: 'AES/CBC/NoPadding',
+        encrypting: true,
+      );
+      final decrypted = engine.cipherProcessBytesForTesting(
+        input: encrypted,
+        keyBytes: key16,
+        ivBytes: iv16,
+        transformation: 'AES/CBC/NoPadding',
+        encrypting: false,
+      );
+      expect(decrypted, input);
+    });
+
+    test('AES/CBC/NoPadding rejects unaligned input', () {
+      final input = Uint8List.fromList(utf8.encode('not-aligned'));
+      expect(
+        () => engine.cipherProcessBytesForTesting(
+          input: input,
+          keyBytes: key16,
+          ivBytes: iv16,
+          transformation: 'AES/CBC/NoPadding',
+          encrypting: true,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('AES/CBC/ZeroPadding pads and decrypts to zero-tailed plaintext', () {
+      final input = Uint8List.fromList(utf8.encode('hello'));
+      final encrypted = engine.cipherProcessBytesForTesting(
+        input: input,
+        keyBytes: key16,
+        ivBytes: iv16,
+        transformation: 'AES/CBC/ZeroPadding',
+        encrypting: true,
+      );
+      expect(encrypted.length % 16, 0);
+      final decrypted = engine.cipherProcessBytesForTesting(
+        input: encrypted,
+        keyBytes: key16,
+        ivBytes: iv16,
+        transformation: 'AES/CBC/ZeroPadding',
+        encrypting: false,
+      );
+      expect(trimZeros(decrypted), input);
+    });
+
+    test('DES/ECB/NoPadding round trips aligned blocks', () {
+      final key8 = Uint8List.fromList(utf8.encode('8bytekey'));
+      final input = Uint8List.fromList(utf8.encode('12345678'));
+      final encrypted = engine.cipherProcessBytesForTesting(
+        input: input,
+        keyBytes: key8,
+        ivBytes: Uint8List(0),
+        transformation: 'DES/ECB/NoPadding',
+        encrypting: true,
+      );
+      final decrypted = engine.cipherProcessBytesForTesting(
+        input: encrypted,
+        keyBytes: key8,
+        ivBytes: Uint8List(0),
+        transformation: 'DES/ECB/NoPadding',
+        encrypting: false,
+      );
+      expect(decrypted, input);
+    });
+  });
+
   group('LegadoRequestBuilder', () {
     test('builds search url with key page and source variables', () {
       final source = BookSource()
