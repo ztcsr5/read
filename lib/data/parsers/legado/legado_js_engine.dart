@@ -585,9 +585,6 @@ class LegadoJsEngine {
     }
     return ttf;
   }
-  bool get canEvaluate => _runtime != null || _nodeFallbackAvailable;
-
-  bool get isUsingNodeFallback => _runtime == null && _nodeFallbackAvailable;
 
   String _ownText(Element element) {
     final parts = <String>[];
@@ -3657,7 +3654,7 @@ async function __stringifyResult(value) {
     required bool encrypting,
   }) {
     try {
-      return _cipherProcessBytes(
+      return _cipherProcessBytesInternal(
         input: input,
         keyBytes: keyBytes,
         ivBytes: ivBytes,
@@ -3685,7 +3682,7 @@ async function __stringifyResult(value) {
     );
   }
 
-  Uint8List _cipherProcessBytes({
+  Uint8List _cipherProcessBytesInternal({
     required Uint8List input,
     required Uint8List keyBytes,
     required Uint8List ivBytes,
