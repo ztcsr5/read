@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
+import '../services/source_check_classifier.dart';
 
 class SourceTestPage extends StatefulWidget {
   final BookSource source;
@@ -103,7 +104,9 @@ class _SourceTestPageState extends State<SourceTestPage> {
                   SizedBox(
                     width: double.infinity,
                     child: CupertinoButton(
-                      onPressed: _isTesting ? null : () => _runTest(diagnostic: true),
+                      onPressed: _isTesting
+                          ? null
+                          : () => _runTest(diagnostic: true),
                       child: const Text('抓取诊断 (收集详细日志)'),
                     ),
                   ),
@@ -124,7 +127,9 @@ class _SourceTestPageState extends State<SourceTestPage> {
                 ),
               )
             else ...[
+              _buildReportSummary(),
               ..._report!.steps.map(_buildStep),
+              _buildCopyReportButton(),
               if (_isDiagnosticMode) _buildDiagnosticConsole(),
             ],
           ],
@@ -162,21 +167,101 @@ class _SourceTestPageState extends State<SourceTestPage> {
     }
   }
 
+  Widget _buildReportSummary() {
+    final report = _report;
+    if (report == null) return const SizedBox.shrink();
+    final failStep = _firstFailingStep(report);
+    final blocked = failStep != null && _isBlockedStep(failStep);
+    final color = !report.hasFailure
+        ? CupertinoColors.activeGreen
+        : blocked
+        ? CupertinoColors.systemOrange
+        : CupertinoColors.destructiveRed;
+    final title = !report.hasFailure
+        ? '检测通过'
+        : blocked
+        ? '待复测/需处理'
+        : '确定失败';
+    final message = !report.hasFailure
+        ? '搜索、详情、目录和正文链路已跑通。'
+        : blocked
+        ? '当前失败更像是运行时依赖、登录/Cookie、验证码、WebView 或网络问题，不建议直接判定书源失效。'
+        : '当前失败更像规则或解析器问题，可以展开失败步骤查看具体位置。';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              failStep == null
+                  ? message
+                  : '$message\n失败阶段：${failStep.title}；原因：${failStep.message}',
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: CupertinoColors.secondaryLabel,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  LegadoTestStep? _firstFailingStep(LegadoTestReport report) {
+    for (final step in report.steps) {
+      if (step.status == LegadoStepStatus.fail) return step;
+    }
+    return null;
+  }
+
+  bool _isBlockedStep(LegadoTestStep step) {
+    return sourceCheckFailureIsBlocked(
+      widget.source,
+      failStep: step.title,
+      message: step.message,
+    );
+  }
+
   Widget _buildStep(LegadoTestStep step) {
     final isDark = CupertinoTheme.of(context).brightness == Brightness.dark;
     final index = _report?.steps.indexOf(step) ?? -1;
     final isExpanded = _expandedSteps[index] ?? false;
+    final blocked =
+        step.status == LegadoStepStatus.fail && _isBlockedStep(step);
 
-    final color = switch (step.status) {
-      LegadoStepStatus.ok => CupertinoColors.activeGreen,
-      LegadoStepStatus.fail => CupertinoColors.destructiveRed,
-      LegadoStepStatus.skip => CupertinoColors.systemGrey,
-    };
-    final icon = switch (step.status) {
-      LegadoStepStatus.ok => CupertinoIcons.check_mark_circled_solid,
-      LegadoStepStatus.fail => CupertinoIcons.xmark_circle_fill,
-      LegadoStepStatus.skip => CupertinoIcons.minus_circle_fill,
-    };
+    final color = blocked
+        ? CupertinoColors.systemOrange
+        : switch (step.status) {
+            LegadoStepStatus.ok => CupertinoColors.activeGreen,
+            LegadoStepStatus.fail => CupertinoColors.destructiveRed,
+            LegadoStepStatus.skip => CupertinoColors.systemGrey,
+          };
+    final icon = blocked
+        ? CupertinoIcons.exclamationmark_triangle_fill
+        : switch (step.status) {
+            LegadoStepStatus.ok => CupertinoIcons.check_mark_circled_solid,
+            LegadoStepStatus.fail => CupertinoIcons.xmark_circle_fill,
+            LegadoStepStatus.skip => CupertinoIcons.minus_circle_fill,
+          };
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
@@ -192,12 +277,39 @@ class _SourceTestPageState extends State<SourceTestPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      step.title,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            step.title,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (blocked)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: CupertinoColors.systemOrange.withValues(
+                                alpha: 0.14,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              '待复测',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: CupertinoColors.systemOrange,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -241,7 +353,7 @@ class _SourceTestPageState extends State<SourceTestPage> {
               padding: const EdgeInsets.only(left: 36, top: 6),
               child: CupertinoButton(
                 padding: EdgeInsets.zero,
-                minSize: 0,
+                minimumSize: Size.zero,
                 onPressed: () {
                   setState(() {
                     _expandedSteps[index] = !isExpanded;
@@ -272,10 +384,14 @@ class _SourceTestPageState extends State<SourceTestPage> {
                   constraints: const BoxConstraints(maxHeight: 250),
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1C1C1E) : CupertinoColors.systemGrey6,
+                    color: isDark
+                        ? const Color(0xFF1C1C1E)
+                        : CupertinoColors.systemGrey6,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isDark ? const Color(0xFF2C2C2E) : CupertinoColors.systemGrey4,
+                      color: isDark
+                          ? const Color(0xFF2C2C2E)
+                          : CupertinoColors.systemGrey4,
                       width: 0.5,
                     ),
                   ),
@@ -286,7 +402,9 @@ class _SourceTestPageState extends State<SourceTestPage> {
                         fontFamily: 'Courier',
                         fontSize: 11,
                         height: 1.3,
-                        color: isDark ? CupertinoColors.white : CupertinoColors.black,
+                        color: isDark
+                            ? CupertinoColors.white
+                            : CupertinoColors.black,
                       ),
                     ),
                   ),
@@ -321,10 +439,7 @@ class _SourceTestPageState extends State<SourceTestPage> {
         children: [
           const Text(
             '诊断日志控制台',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
           Container(
@@ -332,10 +447,14 @@ class _SourceTestPageState extends State<SourceTestPage> {
             height: 250,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1C1C1E) : CupertinoColors.systemGrey6,
+              color: isDark
+                  ? const Color(0xFF1C1C1E)
+                  : CupertinoColors.systemGrey6,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: isDark ? const Color(0xFF2C2C2E) : CupertinoColors.systemGrey4,
+                color: isDark
+                    ? const Color(0xFF2C2C2E)
+                    : CupertinoColors.systemGrey4,
                 width: 0.5,
               ),
             ),
@@ -375,6 +494,69 @@ class _SourceTestPageState extends State<SourceTestPage> {
               },
               child: const Text('复制全部诊断日志'),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCopyReportButton() {
+    final report = _report;
+    if (report == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+      child: SizedBox(
+        width: double.infinity,
+        child: CupertinoButton(
+          color: CupertinoColors.activeBlue,
+          onPressed: _copyReport,
+          child: const Text('复制完整测试报告'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _copyReport() async {
+    final report = _report;
+    if (report == null) return;
+    final buffer = StringBuffer()
+      ..writeln('# 书源测试报告')
+      ..writeln()
+      ..writeln('- 书源: ${widget.source.bookSourceName}')
+      ..writeln('- 地址: ${widget.source.bookSourceUrl}')
+      ..writeln('- 关键词: ${_keywordController.text.trim()}')
+      ..writeln('- 结论: ${report.hasFailure ? '未通过' : '通过'}')
+      ..writeln();
+
+    for (final step in report.steps) {
+      final blocked =
+          step.status == LegadoStepStatus.fail && _isBlockedStep(step);
+      buffer
+        ..writeln('## ${step.title}')
+        ..writeln('- 状态: ${blocked ? '待复测' : step.status.name}')
+        ..writeln('- 信息: ${step.message}');
+      if (step.sample?.isNotEmpty == true) {
+        buffer.writeln('- 采样: ${step.sample}');
+      }
+      if (step.logs.isNotEmpty) {
+        buffer
+          ..writeln('- 日志:')
+          ..writeln(step.logs.map((line) => '  $line').join('\n'));
+      }
+      buffer.writeln();
+    }
+
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    if (!mounted) return;
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('已复制'),
+        content: const Text('完整测试报告已复制到剪贴板。'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('确定'),
+            onPressed: () => Navigator.pop(context),
           ),
         ],
       ),

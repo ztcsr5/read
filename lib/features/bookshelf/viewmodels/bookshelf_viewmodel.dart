@@ -1,10 +1,12 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
 
 import '../../../data/models/book.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/book_group.dart';
+import '../../../data/parsers/legado_parser.dart';
 import '../../../data/parsers/epub_parser.dart';
 import '../../../data/parsers/txt_parser.dart';
 import '../../../data/repositories/book_repository.dart';
@@ -43,6 +45,7 @@ class BookshelfState {
 
 class BookshelfViewModel extends StateNotifier<BookshelfState> {
   final BookRepository _bookRepository;
+  DateTime? _lastOnlineRefreshAt;
 
   BookshelfViewModel(this._bookRepository) : super(BookshelfState()) {
     loadBooks();
@@ -72,6 +75,76 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
       );
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
+    }
+  }
+
+  Future<void> refreshOnlineBookUpdates({
+    bool force = false,
+    int maxBooks = 6,
+  }) async {
+    final now = DateTime.now();
+    final last = _lastOnlineRefreshAt;
+    if (!force &&
+        last != null &&
+        now.difference(last) < const Duration(minutes: 20)) {
+      return;
+    }
+    _lastOnlineRefreshAt = now;
+
+    final candidates = state.allBooks
+        .where((book) => book.isFavorite && book.isFromSource)
+        .where((book) => int.tryParse(book.sourceUrl ?? '') != null)
+        .take(maxBooks)
+        .toList();
+    if (candidates.isEmpty) return;
+
+    var changed = false;
+    for (final book in candidates) {
+      final sourceId = int.tryParse(book.sourceUrl ?? '');
+      if (sourceId == null) continue;
+      final source = await _bookRepository.getBookSourceById(sourceId);
+      if (source == null || source.ruleToc?.trim().isEmpty == true) continue;
+      try {
+        var target = book;
+        if (source.ruleBookInfo?.trim().isNotEmpty == true) {
+          target = await LegadoParser.parseBookInfo(
+            source,
+            book,
+          ).timeout(const Duration(seconds: 8));
+        }
+        final chapters = await LegadoParser.getChapterList(
+          source,
+          target,
+        ).timeout(const Duration(seconds: 10));
+        if (chapters.isEmpty || chapters.length <= book.totalChapters) {
+          continue;
+        }
+        for (final chapter in chapters) {
+          chapter.bookId = book.id;
+        }
+        await _bookRepository.deleteChaptersForBook(book.id);
+        await _bookRepository.saveChapters(chapters);
+        final updatedBook = target.copyWith(
+          id: book.id,
+          totalChapters: chapters.length,
+          isFavorite: true,
+          sourceUrl: book.sourceUrl,
+          currentChapter: book.currentChapter,
+          currentPosition: book.currentPosition,
+          readingProgress: book.readingProgress,
+          lastReadTime: book.lastReadTime,
+          dateAdded: book.dateAdded,
+          groupId: book.groupId,
+        )..isFromSource = true;
+        await _bookRepository.saveBook(updatedBook);
+        changed = true;
+      } catch (_) {
+        // 单本刷新失败不影响主页和其他书。
+      }
+    }
+
+    if (changed) {
+      await loadBooks();
     }
   }
 
@@ -122,7 +195,7 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
         state = state.copyWith(isLoading: false);
       }
     } catch (e, st) {
-      print('Import Error: $e\n$st');
+      debugPrint('Import Error: $e\n$st');
       state = state.copyWith(isLoading: false, error: '导入失败: $e');
     }
   }
@@ -161,7 +234,7 @@ class BookshelfViewModel extends StateNotifier<BookshelfState> {
       await loadBooks();
       return bookId;
     } catch (e, st) {
-      print('External Import Error: $e\n$st');
+      debugPrint('External Import Error: $e\n$st');
       state = state.copyWith(isLoading: false, error: '导入失败: $e');
       return null;
     }

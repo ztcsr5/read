@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'dart:ui' show Brightness, Color;
@@ -112,6 +113,52 @@ String _decodeReaderHtmlEntities(String text) {
     }
   });
   return value;
+}
+
+bool readerNeedsOnlineContentRefresh({
+  required String? cachedContent,
+  required String? chapterUrl,
+  bool isDownloaded = false,
+  int wordCount = 0,
+}) {
+  final url = chapterUrl?.trim() ?? '';
+  if (!_readerLooksLikeHttpUrl(url)) return false;
+
+  final content = cachedContent?.trim() ?? '';
+  if (content.isEmpty) return true;
+  if (_readerLooksLikeHttpUrl(content)) return true;
+
+  final plain = readerChapterContentToPlainText(content).trim();
+  if (plain.isEmpty) return true;
+  if (_readerLooksSuspiciousCachedContent(plain)) return true;
+
+  // Older reader versions cached fetched text without marking the chapter as
+  // downloaded. Short old caches are the main reason users still see only a
+  // small fragment after parser fixes.
+  return !isDownloaded && wordCount <= 0 && plain.length < 180;
+}
+
+bool _readerLooksLikeHttpUrl(String value) {
+  final lower = value.toLowerCase();
+  return lower.startsWith('http://') || lower.startsWith('https://');
+}
+
+bool _readerLooksSuspiciousCachedContent(String value) {
+  final lower = value.toLowerCase();
+  const markers = [
+    '解析失败',
+    '内容加载中',
+    '章节内容当前不可用',
+    '请登录',
+    '登录后',
+    '验证码',
+    '安全验证',
+    '404',
+    '403',
+    'just a moment',
+    'cloudflare',
+  ];
+  return markers.any(lower.contains);
 }
 
 /// 阅读器状态
@@ -431,7 +478,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       try {
         await _bookRepository.saveBook(book);
       } catch (e) {
-        print(
+        debugPrint(
           'Database Error saving book in loadBook: $e. Retaining in memory.',
         );
       }
@@ -440,14 +487,16 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       try {
         chapters = await _bookRepository.getChaptersForBook(id);
       } catch (e) {
-        print('Database Error reading chapters: $e. Using empty catalog.');
+        debugPrint('Database Error reading chapters: $e. Using empty catalog.');
       }
 
       List<Bookmark> bookmarks = [];
       try {
         bookmarks = await _bookRepository.getBookmarks(id);
       } catch (e) {
-        print('Database Error reading bookmarks: $e. Using empty bookmarks.');
+        debugPrint(
+          'Database Error reading bookmarks: $e. Using empty bookmarks.',
+        );
       }
 
       int charOffset = 0;
@@ -457,7 +506,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
           charOffset = progress.charOffset;
         }
       } catch (e) {
-        print('Database Error reading ReadingProgress: $e. Defaulting to 0.');
+        debugPrint(
+          'Database Error reading ReadingProgress: $e. Defaulting to 0.',
+        );
       }
 
       // 在线书籍如果目录为空或明显少于详情页记录，按 Legado 流程先刷新详情页再拉目录。
@@ -482,13 +533,13 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
                   await _bookRepository.saveChapters(chapters);
                 } catch (e) {
                   // 容错与缓存隔离：数据库存储失败，不阻塞内存数据加载
-                  print(
+                  debugPrint(
                     'Database Error during catalog persistence: $e. Falling back to memory-only catalog.',
                   );
                 }
               }
             } catch (e) {
-              print('Error fetching catalog from source: $e');
+              debugPrint('Error fetching catalog from source: $e');
             }
           }
         }
@@ -576,7 +627,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
           .values[backgroundIndex.clamp(0, ReaderBackground.values.length - 1)],
       customBackgroundColor: Color(
         prefs.getInt('reader.customBackgroundColor') ??
-            state.customBackgroundColor.value,
+            state.customBackgroundColor.toARGB32(),
       ),
       mode:
           ReaderMode.values[(prefs.getInt('reader.mode') ?? state.mode.index)
@@ -608,7 +659,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     await prefs.setInt('reader.background.v2', state.background.index);
     await prefs.setInt(
       'reader.customBackgroundColor',
-      state.customBackgroundColor.value,
+      state.customBackgroundColor.toARGB32(),
     );
     await prefs.setInt('reader.mode', state.mode.index);
     await prefs.setStringList(
@@ -928,21 +979,21 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       try {
         await _bookRepository.saveBook(updatedBook);
       } catch (e) {
-        print(
+        debugPrint(
           'Database Error saving book in switchBookSource: $e. Continuing.',
         );
       }
       try {
         await _bookRepository.deleteChaptersForBook(updatedBook.id);
       } catch (e) {
-        print(
+        debugPrint(
           'Database Error deleting chapters in switchBookSource: $e. Continuing.',
         );
       }
       try {
         await _bookRepository.saveChapters(chapters);
       } catch (e) {
-        print(
+        debugPrint(
           'Database Error saving chapters in switchBookSource: $e. Continuing.',
         );
       }
@@ -1009,7 +1060,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         await _bookRepository.deleteChaptersForBook(refreshedBook.id);
         await _bookRepository.saveChapters(chapters);
       } catch (e) {
-        print('Database Error refreshing catalog: $e. Keeping memory state.');
+        debugPrint(
+          'Database Error refreshing catalog: $e. Keeping memory state.',
+        );
       }
 
       state = state.copyWith(
@@ -1235,31 +1288,47 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
       String? textContent = chapter.content;
 
-      // 如果是在线书籍且正文存的是 URL，则加载正文
+      // 在线书籍：正文仍是 URL、旧缓存过短或缓存了错误页时，重新拉取正文。
+      final contentUrl = _chapterContentUrl(chapter);
       if (book.isFromSource &&
-          textContent != null &&
-          textContent.startsWith('http')) {
+          readerNeedsOnlineContentRefresh(
+            cachedContent: textContent,
+            chapterUrl: contentUrl,
+            isDownloaded: chapter.isDownloaded,
+            wordCount: chapter.wordCount,
+          )) {
         final sourceId = int.tryParse(book.sourceUrl ?? '');
         final isar = _bookRepository.isar;
-        if (sourceId != null && isar != null) {
+        if (sourceId != null && isar != null && contentUrl != null) {
           final source = await isar.bookSources.get(sourceId);
           if (source != null) {
-            textContent = await LegadoParser.getChapterContent(
-              source,
-              textContent,
-              book: book,
-              chapter: chapter,
-            );
-            // 存回本地以免重复请求
-            chapter.content = textContent;
             try {
-              await isar.writeTxn(() async {
-                await isar.chapters.put(chapter);
-              });
-            } catch (e) {
-              print(
-                'Database Error caching chapter content: $e. Retaining in memory.',
+              final fetchedContent = await LegadoParser.getChapterContent(
+                source,
+                contentUrl,
+                book: book,
+                chapter: chapter,
               );
+              textContent = fetchedContent;
+              chapter.content = fetchedContent;
+              chapter.isDownloaded = true;
+              chapter.wordCount = readerChapterContentToPlainText(
+                fetchedContent,
+              ).trim().length;
+              try {
+                await isar.writeTxn(() async {
+                  await isar.chapters.put(chapter);
+                });
+              } catch (e) {
+                debugPrint(
+                  'Database Error caching chapter content: $e. Retaining in memory.',
+                );
+              }
+            } catch (e) {
+              if ((textContent ?? '').trim().isEmpty ||
+                  _readerLooksLikeHttpUrl((textContent ?? '').trim())) {
+                textContent = '正文加载失败：$e';
+              }
             }
           }
         }
@@ -1315,6 +1384,14 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       globalChapIdx++;
     }
     return flattened;
+  }
+
+  String? _chapterContentUrl(Chapter chapter) {
+    final url = chapter.url?.trim() ?? '';
+    if (_readerLooksLikeHttpUrl(url)) return url;
+    final content = chapter.content?.trim() ?? '';
+    if (_readerLooksLikeHttpUrl(content)) return content;
+    return null;
   }
 
   String _normalizeChapterContent(String content, String title) {
@@ -1447,10 +1524,12 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     final toDownload = allChapters
         .skip(startIdx)
         .where(
-          (c) =>
-              !c.isDownloaded &&
-              c.content != null &&
-              c.content!.startsWith('http'),
+          (c) => readerNeedsOnlineContentRefresh(
+            cachedContent: c.content,
+            chapterUrl: _chapterContentUrl(c),
+            isDownloaded: c.isDownloaded,
+            wordCount: c.wordCount,
+          ),
         )
         .toList();
 
@@ -1459,7 +1538,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         : toDownload;
     if (limitList.isEmpty) return;
 
-    final int maxConcurrent = 3;
+    const int maxConcurrent = 3;
     var index = 0;
 
     Future<void> worker() async {
@@ -1468,7 +1547,8 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         if (currentJobIndex >= limitList.length) break;
         final chapter = limitList[currentJobIndex];
         try {
-          final contentUrl = chapter.content!;
+          final contentUrl = _chapterContentUrl(chapter);
+          if (contentUrl == null) continue;
           final content = await LegadoParser.getChapterContent(
             source,
             contentUrl,
@@ -1493,7 +1573,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
             }
           }
         } catch (e) {
-          print('Failed to download chapter ${chapter.title}: $e');
+          debugPrint('Failed to download chapter ${chapter.title}: $e');
         }
       }
     }

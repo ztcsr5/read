@@ -11,6 +11,7 @@ import 'package:isar/isar.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
+import 'source_check_classifier.dart';
 import '../viewmodels/book_source_viewmodel.dart';
 
 final localSourceWebServiceProvider =
@@ -333,7 +334,10 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
         source,
         keyword == null || keyword.isEmpty ? '斗破苍穹' : keyword,
       );
-      await _json(request, {'ok': true, 'data': _testReportJson(report)});
+      await _json(request, {
+        'ok': true,
+        'data': _testReportJson(source, report),
+      });
       return;
     }
 
@@ -514,19 +518,46 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
     await response.close();
   }
 
-  Map<String, dynamic> _testReportJson(LegadoTestReport report) {
+  Map<String, dynamic> _testReportJson(
+    BookSource source,
+    LegadoTestReport report,
+  ) {
+    final firstFailure = _firstFailingStep(report);
+    final failureClass = firstFailure == null
+        ? null
+        : classifySourceCheckFailure(
+            source,
+            failStep: firstFailure.title,
+            message: firstFailure.message,
+          ).name;
     return {
       'hasFailure': report.hasFailure,
+      'failureClass': failureClass,
       'steps': report.steps.map((step) {
+        final stepFailureClass = step.status == LegadoStepStatus.fail
+            ? classifySourceCheckFailure(
+                source,
+                failStep: step.title,
+                message: step.message,
+              ).name
+            : null;
         return {
           'title': step.title,
           'message': step.message,
           'sample': step.sample,
           'status': step.status.name,
+          'failureClass': stepFailureClass,
           'logs': step.logs,
         };
       }).toList(),
     };
+  }
+
+  LegadoTestStep? _firstFailingStep(LegadoTestReport report) {
+    for (final step in report.steps) {
+      if (step.status == LegadoStepStatus.fail) return step;
+    }
+    return null;
   }
 
   Future<void> _html(HttpRequest request, String body) async {
@@ -582,9 +613,11 @@ class LocalSourceWebService extends StateNotifier<LocalSourceWebState> {
       ..set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
       ..set(
         'Access-Control-Allow-Headers',
-        'content-type,x-read-token,authorization',
+        'accept,authorization,content-type,origin,x-read-token,x-requested-with',
       )
       ..set('Access-Control-Allow-Private-Network', 'true')
+      ..set('Access-Control-Expose-Headers', 'content-disposition')
+      ..set('Access-Control-Max-Age', '600')
       ..set('Cache-Control', 'no-store');
   }
 }
@@ -1211,13 +1244,19 @@ async function testSource() {
   try {
     const res = await api(`/api/sources/${current.id}/test`, {method:"POST", body:JSON.stringify({keyword}), timeoutMs: 90000});
     const steps = res.data.steps || [];
-    panel.innerHTML = `<div class="section-title"><div><h3>测试结果</h3><span>${res.data.hasFailure ? "存在失败步骤" : "全部通过"}</span></div><span class="pill ${res.data.hasFailure ? "status-fail" : "status-ok"}">${res.data.hasFailure ? "FAIL" : "OK"}</span></div><div class="steps">${steps.map(stepHtml).join("")}</div>`;
+    const blocked = res.data.failureClass === "blocked";
+    const pillClass = res.data.hasFailure ? (blocked ? "status-skip" : "status-fail") : "status-ok";
+    const pillText = res.data.hasFailure ? (blocked ? "待复测" : "FAIL") : "OK";
+    const subtitle = res.data.hasFailure ? (blocked ? "待复测/需处理，不建议直接禁用" : "存在失败步骤") : "全部通过";
+    panel.innerHTML = `<div class="section-title"><div><h3>测试结果</h3><span>${subtitle}</span></div><span class="pill ${pillClass}">${pillText}</span></div><div class="steps">${steps.map(stepHtml).join("")}</div>`;
   } catch(e) { panel.innerHTML = `<span class="pill status-fail">测试失败</span><p>${escapeHtml(e.message)}</p>`; }
 }
 function stepHtml(s) {
-  const cls = s.status === "fail" ? "status-fail" : (s.status === "skip" ? "status-skip" : "status-ok");
+  const blocked = s.failureClass === "blocked";
+  const cls = blocked ? "status-skip" : (s.status === "fail" ? "status-fail" : (s.status === "skip" ? "status-skip" : "status-ok"));
+  const label = blocked ? "待复测" : s.status;
   const logs = [s.sample, ...(s.logs || [])].filter(Boolean).join("\n");
-  return `<div class="step"><div class="step-head"><h4>${escapeHtml(s.title)}</h4><span class="pill ${cls}">${escapeHtml(s.status)}</span></div><div>${escapeHtml(s.message || "")}</div>${logs ? `<pre>${escapeHtml(logs)}</pre>` : ""}</div>`;
+  return `<div class="step"><div class="step-head"><h4>${escapeHtml(s.title)}</h4><span class="pill ${cls}">${escapeHtml(label)}</span></div><div>${escapeHtml(s.message || "")}</div>${logs ? `<pre>${escapeHtml(logs)}</pre>` : ""}</div>`;
 }
 function showImport(){ document.getElementById("importDialog").showModal(); }
 async function importJson(event) {

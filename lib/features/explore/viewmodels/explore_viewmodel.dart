@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/models/book.dart';
@@ -20,6 +21,48 @@ final exploreViewModelProvider =
 
 enum SearchMatchMode { fuzzy, precise }
 
+enum SearchResultFilterScope { all, title, author, source }
+
+@visibleForTesting
+List<Book> filterExploreSearchResults(
+  List<Book> books,
+  String filter,
+  SearchResultFilterScope scope,
+) {
+  final q = _normalizeExploreText(filter);
+  if (q.isEmpty) return books;
+  return books.where((book) {
+    final values = _exploreFilterValues(book, scope).map(_normalizeExploreText);
+    return values.any((value) => value.contains(q));
+  }).toList();
+}
+
+List<String> _exploreFilterValues(Book book, SearchResultFilterScope scope) {
+  return switch (scope) {
+    SearchResultFilterScope.title => [book.title],
+    SearchResultFilterScope.author => [book.author],
+    SearchResultFilterScope.source => [
+      book.filePath,
+      ...book.tags.where(
+        (tag) => tag.startsWith('source:') || tag.startsWith('group:'),
+      ),
+    ],
+    SearchResultFilterScope.all => [
+      book.title,
+      book.author,
+      book.filePath,
+      ...book.tags,
+    ],
+  };
+}
+
+String _normalizeExploreText(String value) {
+  return value.toLowerCase().replaceAll(
+    RegExp(r'[\s\p{P}\p{S}]+', unicode: true),
+    '',
+  );
+}
+
 class ExploreState {
   final bool isSearching;
   final List<Book> searchResults;
@@ -31,6 +74,10 @@ class ExploreState {
   final String verificationUrl;
   final String lastQuery;
   final String resultFilter;
+  final SearchResultFilterScope resultFilterScope;
+  final int searchTotalSources;
+  final int searchedSources;
+  final int matchedSources;
 
   ExploreState({
     this.isSearching = false,
@@ -43,6 +90,10 @@ class ExploreState {
     this.verificationUrl = '',
     this.lastQuery = '',
     this.resultFilter = '',
+    this.resultFilterScope = SearchResultFilterScope.all,
+    this.searchTotalSources = 0,
+    this.searchedSources = 0,
+    this.matchedSources = 0,
   });
 
   ExploreState copyWith({
@@ -56,6 +107,10 @@ class ExploreState {
     String? verificationUrl,
     String? lastQuery,
     String? resultFilter,
+    SearchResultFilterScope? resultFilterScope,
+    int? searchTotalSources,
+    int? searchedSources,
+    int? matchedSources,
     bool clearVerificationSource = false,
   }) {
     return ExploreState(
@@ -73,6 +128,10 @@ class ExploreState {
           : verificationUrl ?? this.verificationUrl,
       lastQuery: lastQuery ?? this.lastQuery,
       resultFilter: resultFilter ?? this.resultFilter,
+      resultFilterScope: resultFilterScope ?? this.resultFilterScope,
+      searchTotalSources: searchTotalSources ?? this.searchTotalSources,
+      searchedSources: searchedSources ?? this.searchedSources,
+      matchedSources: matchedSources ?? this.matchedSources,
     );
   }
 }
@@ -117,6 +176,10 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     state = state.copyWith(resultFilter: value.trim());
   }
 
+  void setResultFilterScope(SearchResultFilterScope scope) {
+    state = state.copyWith(resultFilterScope: scope);
+  }
+
   Future<void> loadRssSources() async {
     final sources = await _sourceRepository.getEnabledRssSources();
     state = state.copyWith(rssSources: sources);
@@ -135,6 +198,9 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       error: '',
       searchResults: [],
       lastQuery: query,
+      searchTotalSources: 0,
+      searchedSources: 0,
+      matchedSources: 0,
       clearVerificationSource: true,
     );
 
@@ -143,10 +209,14 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
       if (sources.isEmpty) {
         state = state.copyWith(
           isSearching: false,
+          searchTotalSources: 0,
+          searchedSources: 0,
+          matchedSources: 0,
           error: '没有可用书源，请先在设置里导入并启用书源',
         );
         return;
       }
+      state = state.copyWith(searchTotalSources: sources.length);
 
       final allResults = <Book>[];
       final seen = <String>{};
@@ -174,7 +244,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
               if (currentCancelToken.isCancelled) return <Book>[];
               if (books.isNotEmpty) sourcesWithParsedResults++;
               final filtered = books
-                  .where((book) => _matchesSearchMode(book, query, mode))
+                  .where((book) => _matchScore(book, query, mode) > 0)
                   .map((book) {
                     final tags = <String>{...book.tags};
                     if (source.bookSourceName.trim().isNotEmpty) {
@@ -209,7 +279,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                     : _sourceDefaultUrl(source);
               }
               _appendFailureSample(failureSamples, source, _compactError(e));
-              print('Search Error from ${source.bookSourceName}: $e');
+              debugPrint('Search Error from ${source.bookSourceName}: $e');
               return <Book>[];
             }
           }),
@@ -231,33 +301,26 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
           }
           if (allResults.length >= maxResults) break;
         }
+        _sortSearchResults(allResults, query, mode);
+        state = state.copyWith(
+          searchResults: List.unmodifiable(allResults),
+          searchTotalSources: sources.length,
+          searchedSources: tried,
+          matchedSources: sourcesWithParsedResults,
+        );
         if (allResults.length >= maxResults) break;
       }
 
       if (currentCancelToken.isCancelled) return;
 
-      // 搜索双重优先排序算法
-      allResults.sort((a, b) {
-        // 第一维优先权重（精准匹配）
-        final aExact = a.title.trim() == query;
-        final bExact = b.title.trim() == query;
-        if (aExact != bExact) {
-          return aExact ? -1 : 1;
-        }
-
-        // 第二维优先权重（内容完整度）：章节数或字数降序
-        // 优先比较章节数 totalChapters 降序
-        if (a.totalChapters != b.totalChapters) {
-          return b.totalChapters.compareTo(a.totalChapters);
-        }
-
-        // 其次比较字数 (用 fileSize 存储) 降序
-        return b.fileSize.compareTo(a.fileSize);
-      });
+      _sortSearchResults(allResults, query, mode);
 
       state = state.copyWith(
         isSearching: false,
         searchResults: allResults,
+        searchTotalSources: sources.length,
+        searchedSources: tried,
+        matchedSources: sourcesWithParsedResults,
         verificationSource: allResults.isEmpty ? verificationSource : null,
         verificationUrl: allResults.isEmpty ? verificationUrl : '',
         clearVerificationSource: allResults.isNotEmpty,
@@ -361,38 +424,68 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     return null;
   }
 
-  bool _matchesSearchMode(Book book, String query, SearchMatchMode mode) {
+  int _matchScore(Book book, String query, SearchMatchMode mode) {
     final q = _normalizeText(query);
-    if (q.isEmpty) return true;
+    if (q.isEmpty) return 1;
     final title = _normalizeText(book.title);
     final author = _normalizeText(book.author);
+    if (title.isEmpty && author.isEmpty) return 0;
+    if (title == q) return 1000;
+    if (title.startsWith(q)) return 850;
+
     if (mode == SearchMatchMode.precise) {
-      return title == q || title.startsWith(q) || author == q;
+      return author == q ? 500 : 0;
     }
-    return title.contains(q) ||
-        author.contains(q) ||
-        (title.length >= 2 && q.contains(title));
+
+    if (title.contains(q)) return 700;
+    if (author == q) return 520;
+    if (author.contains(q)) return 420;
+    if (_isMeaningfulReverseTitleMatch(title, q)) return 260;
+    return 0;
   }
 
-  List<Book> filterVisibleResults(List<Book> books, String filter) {
-    final q = _normalizeText(filter);
-    if (q.isEmpty) return books;
-    return books.where((book) {
-      final values = [
-        book.title,
-        book.author,
-        book.filePath,
-        ...book.tags,
-      ].map(_normalizeText);
-      return values.any((value) => value.contains(q));
-    }).toList();
+  bool _isMeaningfulReverseTitleMatch(String title, String query) {
+    if (title.length < 3 || query.length < 3) return false;
+    final minTitleLength = query.length <= 5 ? 3 : (query.length * 0.6).ceil();
+    return title.length >= minTitleLength && query.contains(title);
+  }
+
+  void _sortSearchResults(
+    List<Book> books,
+    String query,
+    SearchMatchMode mode,
+  ) {
+    final q = _normalizeText(query);
+    books.sort((a, b) {
+      final score = _matchScore(
+        b,
+        query,
+        mode,
+      ).compareTo(_matchScore(a, query, mode));
+      if (score != 0) return score;
+
+      final lengthDistance = (a.title.length - q.length).abs().compareTo(
+        (b.title.length - q.length).abs(),
+      );
+      if (lengthDistance != 0) return lengthDistance;
+
+      if (a.totalChapters != b.totalChapters) {
+        return b.totalChapters.compareTo(a.totalChapters);
+      }
+      return b.fileSize.compareTo(a.fileSize);
+    });
+  }
+
+  List<Book> filterVisibleResults(
+    List<Book> books,
+    String filter,
+    SearchResultFilterScope scope,
+  ) {
+    return filterExploreSearchResults(books, filter, scope);
   }
 
   String _normalizeText(String value) {
-    return value.toLowerCase().replaceAll(
-      RegExp(r'[\s\p{P}\p{S}]+', unicode: true),
-      '',
-    );
+    return _normalizeExploreText(value);
   }
 
   void _appendFailureSample(

@@ -287,7 +287,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                 children: [
                   CupertinoButton(
                     padding: EdgeInsets.zero,
-                    minSize: 30,
+                    minimumSize: const Size(30, 30),
                     child: const Text('复制推荐地址'),
                     onPressed: () async {
                       await Clipboard.setData(ClipboardData(text: urls.first));
@@ -296,7 +296,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                   ),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
-                    minSize: 30,
+                    minimumSize: const Size(30, 30),
                     child: const Text('复制全部'),
                     onPressed: () async {
                       await Clipboard.setData(
@@ -307,7 +307,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                   ),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
-                    minSize: 30,
+                    minimumSize: const Size(30, 30),
                     child: const Text('重启服务'),
                     onPressed: () => ref
                         .read(localSourceWebServiceProvider.notifier)
@@ -383,7 +383,7 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
               if (_isManaging) {
                 _toggleSelection(_selectedBookSourceIds, source.id);
               } else {
-                context.push('/source_explore', extra: source);
+                context.push('/book_source', extra: source);
               }
             },
             title: Text(source.bookSourceName),
@@ -398,15 +398,23 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (source.exploreUrl?.trim().isNotEmpty == true)
+                        CupertinoButton(
+                          minimumSize: const Size(32, 32),
+                          padding: EdgeInsets.zero,
+                          child: const Icon(CupertinoIcons.compass),
+                          onPressed: () =>
+                              context.push('/source_explore', extra: source),
+                        ),
                       CupertinoButton(
-                        minSize: 32,
+                        minimumSize: const Size(32, 32),
                         padding: EdgeInsets.zero,
                         child: const Icon(CupertinoIcons.doc_text),
                         onPressed: () =>
                             context.push('/source_json_editor', extra: source),
                       ),
                       CupertinoButton(
-                        minSize: 32,
+                        minimumSize: const Size(32, 32),
                         padding: EdgeInsets.zero,
                         child: const Icon(
                           CupertinoIcons.waveform_path_ecg,
@@ -416,14 +424,14 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
                             context.push('/source_diagnostic', extra: source),
                       ),
                       CupertinoButton(
-                        minSize: 32,
+                        minimumSize: const Size(32, 32),
                         padding: EdgeInsets.zero,
                         child: const Icon(CupertinoIcons.checkmark_seal),
                         onPressed: () =>
                             context.push('/source_test', extra: source),
                       ),
                       CupertinoButton(
-                        minSize: 32,
+                        minimumSize: const Size(32, 32),
                         padding: EdgeInsets.zero,
                         child: const Icon(
                           CupertinoIcons.trash,
@@ -614,12 +622,12 @@ class _SourceManagementPageState extends ConsumerState<SourceManagementPage> {
     bool destructive = false,
   }) {
     return CupertinoButton(
-      minSize: 30,
+      minimumSize: const Size(30, 30),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       color: destructive
-          ? CupertinoColors.destructiveRed.withOpacity(0.12)
+          ? CupertinoColors.destructiveRed.withValues(alpha: 0.12)
           : CupertinoColors.systemGrey5,
-      disabledColor: CupertinoColors.systemGrey5.withOpacity(0.5),
+      disabledColor: CupertinoColors.systemGrey5.withValues(alpha: 0.5),
       borderRadius: BorderRadius.circular(8),
       onPressed: onPressed,
       child: Text(

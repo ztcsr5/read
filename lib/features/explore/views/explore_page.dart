@@ -54,6 +54,7 @@ class ExplorePage extends ConsumerWidget {
     final visibleResults = viewModel.filterVisibleResults(
       state.searchResults,
       state.resultFilter,
+      state.resultFilterScope,
     );
     return [
       SliverToBoxAdapter(
@@ -71,7 +72,7 @@ class ExplorePage extends ConsumerWidget {
                 width: double.infinity,
                 child: CupertinoButton(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  color: CupertinoColors.activeBlue.withOpacity(0.1),
+                  color: CupertinoColors.activeBlue.withValues(alpha: 0.1),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -126,10 +127,42 @@ class ExplorePage extends ConsumerWidget {
                 '搜索结果',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
+              _buildSearchSummary(context, state, visibleResults.length),
               if (state.searchResults.isNotEmpty) ...[
                 const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child:
+                      CupertinoSlidingSegmentedControl<SearchResultFilterScope>(
+                        groupValue: state.resultFilterScope,
+                        children: const {
+                          SearchResultFilterScope.all: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('全部'),
+                          ),
+                          SearchResultFilterScope.title: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('书名'),
+                          ),
+                          SearchResultFilterScope.author: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('作者'),
+                          ),
+                          SearchResultFilterScope.source: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text('来源'),
+                          ),
+                        },
+                        onValueChanged: (scope) {
+                          if (scope != null) {
+                            viewModel.setResultFilterScope(scope);
+                          }
+                        },
+                      ),
+                ),
+                const SizedBox(height: 10),
                 CupertinoSearchTextField(
-                  placeholder: '筛选结果：书名、作者、来源、地址',
+                  placeholder: _filterPlaceholder(state.resultFilterScope),
                   onChanged: viewModel.setResultFilter,
                 ),
                 const SizedBox(height: 8),
@@ -154,6 +187,19 @@ class ExplorePage extends ConsumerWidget {
               children: [
                 const CupertinoActivityIndicator(radius: 14),
                 const SizedBox(height: 12),
+                if (state.searchTotalSources > 0) ...[
+                  Text(
+                    '已检测 ${state.searchedSources}/${state.searchTotalSources} 个书源'
+                    ' · 命中 ${state.matchedSources} 个源'
+                    ' · 当前 ${state.searchResults.length} 条',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: CupertinoColors.secondaryLabel,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 CupertinoButton(
                   child: const Text('取消搜索'),
                   onPressed: () {
@@ -164,7 +210,7 @@ class ExplorePage extends ConsumerWidget {
             ),
           ),
         )
-      else if (state.error.isNotEmpty)
+      else if (!state.isSearching && state.error.isNotEmpty)
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.all(40),
@@ -208,21 +254,28 @@ class ExplorePage extends ConsumerWidget {
             ),
           ),
         )
-      else if (state.searchResults.isEmpty)
-        const SliverToBoxAdapter(
+      else if (!state.isSearching && state.searchResults.isEmpty)
+        SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.all(40),
-            child: Center(child: Text('没有搜索结果，请导入书源后尝试搜索')),
+            padding: const EdgeInsets.all(40),
+            child: Center(
+              child: Text(
+                state.lastQuery.isEmpty
+                    ? '输入书名后，会从启用的小说书源里搜索'
+                    : '没有搜索结果，可切换精准/模糊、筛选可用书源或跳验证后重试',
+                textAlign: TextAlign.center,
+              ),
+            ),
           ),
         )
-      else if (visibleResults.isEmpty)
+      else if (state.searchResults.isNotEmpty && visibleResults.isEmpty)
         const SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.all(40),
             child: Center(child: Text('没有符合当前筛选的结果')),
           ),
         )
-      else
+      else if (state.searchResults.isNotEmpty)
         SliverList(
           delegate: SliverChildBuilderDelegate((context, index) {
             final book = visibleResults[index];
@@ -265,7 +318,7 @@ class ExplorePage extends ConsumerWidget {
                   Text(
                     '导入、测试、验证和管理网络书源',
                     style: TextStyle(
-                      color: CupertinoColors.white.withOpacity(0.82),
+                      color: CupertinoColors.white.withValues(alpha: 0.82),
                       fontSize: 13,
                     ),
                   ),
@@ -321,6 +374,47 @@ class ExplorePage extends ConsumerWidget {
     ];
   }
 
+  Widget _buildSearchSummary(
+    BuildContext context,
+    ExploreState state,
+    int visibleCount,
+  ) {
+    final pieces = <String>[];
+    if (state.searchTotalSources > 0) {
+      pieces.add('已检测 ${state.searchedSources}/${state.searchTotalSources} 个源');
+    }
+    if (state.matchedSources > 0) {
+      pieces.add('命中 ${state.matchedSources} 个源');
+    }
+    if (state.searchResults.isNotEmpty) {
+      pieces.add('结果 ${state.searchResults.length} 条');
+    }
+    if (state.resultFilter.isNotEmpty) {
+      pieces.add('筛选后 $visibleCount 条');
+    }
+    if (pieces.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(
+        pieces.join(' · '),
+        style: TextStyle(
+          fontSize: 12,
+          color: CupertinoColors.secondaryLabel.resolveFrom(context),
+        ),
+      ),
+    );
+  }
+
+  String _filterPlaceholder(SearchResultFilterScope scope) {
+    return switch (scope) {
+      SearchResultFilterScope.title => '筛选书名',
+      SearchResultFilterScope.author => '筛选作者',
+      SearchResultFilterScope.source => '筛选来源/分组/地址',
+      SearchResultFilterScope.all => '筛选结果：书名、作者、来源、地址',
+    };
+  }
+
   Widget _buildRssItem(BuildContext context, RssSource source) {
     return GestureDetector(
       onTap: () => context.push('/rss_articles', extra: source),
@@ -331,7 +425,7 @@ class ExplorePage extends ConsumerWidget {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: CupertinoColors.systemGrey.withOpacity(0.1),
+              color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -344,7 +438,9 @@ class ExplorePage extends ConsumerWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: CupertinoTheme.of(context).primaryColor.withOpacity(0.1),
+                color: CupertinoTheme.of(
+                  context,
+                ).primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
@@ -458,7 +554,7 @@ class ExplorePage extends ConsumerWidget {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: CupertinoColors.systemGrey.withOpacity(0.1),
+              color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),

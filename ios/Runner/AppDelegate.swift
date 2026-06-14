@@ -5,6 +5,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let localNetworkPermissionHelper = LocalNetworkPermissionHelper()
+  private var localNetworkChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -12,27 +13,31 @@ import UIKit
   ) -> Bool {
     let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
-      let channel = FlutterMethodChannel(
+      localNetworkChannel = FlutterMethodChannel(
         name: "read/local_network",
         binaryMessenger: controller.binaryMessenger
       )
-      channel.setMethodCallHandler { [weak self] call, result in
-        guard call.method == "requestLocalNetworkAuthorization" else {
-          result(FlutterMethodNotImplemented)
-          return
-        }
-        guard #available(iOS 14.0, *) else {
-          result("not_required")
-          return
-        }
-        let args = call.arguments as? [String: Any]
-        let timeoutMs = args?["timeoutMs"] as? Int ?? 2500
-        self?.localNetworkPermissionHelper.request(timeoutMs: timeoutMs) { status in
-          result(status)
-        }
+      localNetworkChannel?.setMethodCallHandler { [weak self] call, result in
+        self?.handleLocalNetworkCall(call, result: result)
       }
     }
     return result
+  }
+
+  private func handleLocalNetworkCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard call.method == "requestLocalNetworkAuthorization" else {
+      result(FlutterMethodNotImplemented)
+      return
+    }
+    guard #available(iOS 14.0, *) else {
+      result("not_required")
+      return
+    }
+    let args = call.arguments as? [String: Any]
+    let timeoutMs = args?["timeoutMs"] as? Int ?? 2500
+    localNetworkPermissionHelper.request(timeoutMs: timeoutMs) { status in
+      result(status)
+    }
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -40,7 +45,7 @@ import UIKit
   }
 }
 
-private final class LocalNetworkPermissionHelper {
+final class LocalNetworkPermissionHelper {
   private let serviceType = "_preflight_check._tcp"
   private let queue = DispatchQueue(label: "read.local-network-preflight")
   private var listener: NWListener?

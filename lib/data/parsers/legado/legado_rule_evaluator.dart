@@ -119,11 +119,23 @@ class LegadoRuleEvaluator {
     Map<String, dynamic>? variables,
   }) {
     if (rule.isEmpty) return '';
+    if (json is String && looksLikeJsonData(json, rule)) {
+      try {
+        return _extractJsonValueInternal(
+          jsonDecode(json),
+          rule,
+          applyPut: applyPut,
+          variables: variables,
+        );
+      } catch (_) {
+        // Keep string handling for non-JSON payloads that merely look similar.
+      }
+    }
     if (applyPut) {
       rule = _applyJsonPutDirectives(json, rule);
     }
     rule = _replaceGetDirectives(rule);
-    if (isJsOnlyRule(rule)) {
+    if (isJsOnlyRule(rule) && !_containsJsonTemplate(rule)) {
       try {
         final jsonStr = json is String ? json : jsonEncode(json);
         final value = LegadoJsEngine().evaluate(
@@ -184,9 +196,25 @@ class LegadoRuleEvaluator {
     if (json is Map || json is List) {
       if (_containsJsonTemplate(ruleText)) {
         final templateRule = _stripJsonRulePrefix(ruleText);
+        final rawBase = _literalBeforePostProcessors(templateRule);
+        final interpolated = _interpolateJsonTemplate(json, templateRule);
+        if (_containsEmbeddedRequestConfig(interpolated)) {
+          return interpolated.trim();
+        }
+        final interpolatedBase = _literalBeforePostProcessors(interpolated);
+        final baseContainsTemplate = _containsJsonTemplate(rawBase);
+        final base = baseContainsTemplate
+            ? interpolatedBase
+            : _extractSingleJsonValue(json, rawBase);
+        if (!baseContainsTemplate &&
+            rawBase.trim().isNotEmpty &&
+            base.trim().isEmpty &&
+            !_shouldUseJsonLiteralFallback(rawBase)) {
+          return '';
+        }
         return applyPostProcessors(
-          _interpolateJsonTemplate(json, templateRule),
-          ruleText,
+          base,
+          interpolated,
           originalJson: json,
           variables: variables,
         );
@@ -204,7 +232,7 @@ class LegadoRuleEvaluator {
       originalJson: json,
       variables: variables,
     );
-    if (value.isEmpty && !cleaned.contains(r'$')) {
+    if (value.isEmpty && _shouldUseJsonLiteralFallback(cleaned)) {
       value = applyPostProcessors(
         cleaned,
         ruleText,
@@ -215,6 +243,16 @@ class LegadoRuleEvaluator {
     return value;
   }
 
+  static bool _shouldUseJsonLiteralFallback(String cleanedRule) {
+    final text = _cleanJsonRule(cleanedRule).trim();
+    if (text.isEmpty || text.contains(r'$')) return false;
+    if (text.startsWith('.') || text.startsWith('[')) return false;
+    if (RegExp(r'^[A-Za-z_][A-Za-z0-9_]*(?:[.\[].*)?$').hasMatch(text)) {
+      return false;
+    }
+    return true;
+  }
+
   static List<dynamic> extractJsonNodes(
     dynamic json,
     String rule, {
@@ -223,7 +261,7 @@ class LegadoRuleEvaluator {
     if (rule.isEmpty) return const [];
     rule = _applyJsonPutDirectives(json, rule);
     rule = _replaceGetDirectives(rule);
-    if (isJsOnlyRule(rule)) {
+    if (isJsOnlyRule(rule) && !_containsJsonTemplate(rule)) {
       try {
         final jsonStr = json is String ? json : jsonEncode(json);
         final value = LegadoJsEngine().evaluate(
@@ -814,8 +852,17 @@ class LegadoRuleEvaluator {
     return false;
   }
 
+  static bool _containsEmbeddedRequestConfig(String value) {
+    return RegExp(
+      r''',\s*\{[\s\S]*["'](?:method|body|headers?|charset|webView)["']\s*:''',
+      caseSensitive: false,
+    ).hasMatch(value);
+  }
+
   static String _literalBeforePostProcessors(String rule) {
     var text = rule.trim();
+    final jsTagIndex = text.toLowerCase().indexOf('<js>');
+    if (jsTagIndex >= 0) text = text.substring(0, jsTagIndex);
     final jsIndex = text.toLowerCase().indexOf('@js:');
     if (jsIndex >= 0) text = text.substring(0, jsIndex);
     final hashIndex = text.indexOf('##');
@@ -1175,6 +1222,7 @@ class LegadoRuleEvaluator {
   }) {
     var output = value;
     final lowerRule = rule.toLowerCase();
+    var appliedRawAtJs = false;
     if (lowerRule.contains('@get:')) {
       final key = _directiveTail(
         rule,
@@ -1187,17 +1235,30 @@ class LegadoRuleEvaluator {
     }
 
     if (lowerRule.contains('@js:') || lowerRule.contains('<js>')) {
-      try {
-        final atJs = lowerRule.indexOf('@js:');
-        final jsPart = atJs >= 0
-            ? '@js:${rule.substring(atJs + 4).split('##').first}'
-            : '<js>${_jsTagBody(rule) ?? ''}</js>';
-        final evaluated = LegadoJsEngine().evaluate(
-          jsPart,
-          variables: _postProcessorVariables(output, variables),
-        );
-        if (evaluated.trim().isNotEmpty) output = evaluated;
-      } catch (_) {}
+      if (lowerRule.contains('<js>')) {
+        try {
+          final evaluated = LegadoJsEngine().evaluate(
+            '<js>${_jsTagBody(rule) ?? ''}</js>',
+            variables: _postProcessorVariables(output, variables),
+          );
+          if (evaluated.trim().isNotEmpty) output = evaluated;
+        } catch (_) {}
+      }
+      if (lowerRule.contains('@js:')) {
+        try {
+          final atJs = lowerRule.indexOf('@js:');
+          final hasPriorJsBlock =
+              lowerRule.contains('<js>') && lowerRule.indexOf('<js>') < atJs;
+          final evaluated = LegadoJsEngine().evaluate(
+            '@js:${rule.substring(atJs + 4).split('##').first}',
+            variables: _postProcessorVariables(output, variables),
+          );
+          if (evaluated.trim().isNotEmpty || hasPriorJsBlock) {
+            output = evaluated;
+            appliedRawAtJs = !hasPriorJsBlock;
+          }
+        } catch (_) {}
+      }
     }
 
     if (lowerRule.contains('@put:')) {
@@ -1229,7 +1290,9 @@ class LegadoRuleEvaluator {
         );
       }
     }
-    output = _applyJsPostProcessors(output, rule, variables: variables);
+    if (!appliedRawAtJs) {
+      output = _applyJsPostProcessors(output, rule, variables: variables);
+    }
     return output.trim();
   }
 
@@ -1514,6 +1577,7 @@ class LegadoRuleEvaluator {
     var output = rule.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (match) {
       final expression = match.group(1)?.trim() ?? '';
       if (expression.isEmpty) return '';
+      if (expression == 'result') return match.group(0) ?? '';
       if (_looksLikeJsonTemplateExpression(expression)) {
         final evaluated = _evaluateJsonTemplateExpression(
           json,
@@ -3467,12 +3531,21 @@ class LegadoRuleEvaluator {
     var output = result;
     if (titleToken.isNotEmpty &&
         expression.contains('result.substring(0,90).includes') &&
-        expression.contains('result.split') &&
-        output
-            .substring(0, output.length < 90 ? output.length : 90)
-            .contains(titleToken)) {
-      final index = output.indexOf(titleToken);
-      if (index >= 0) output = output.substring(index + titleToken.length);
+        expression.contains('result.split')) {
+      final scan = output.substring(0, output.length < 90 ? output.length : 90);
+      if (scan.contains(titleToken)) {
+        final index = output.indexOf(titleToken);
+        if (index >= 0) output = output.substring(index + titleToken.length);
+      } else {
+        final titlePattern = RegExp(
+          RegExp.escape(title).replaceAll(RegExp(r'\\\s+'), r'\s+'),
+          caseSensitive: false,
+        );
+        final match = titlePattern.firstMatch(scan);
+        if (match != null) {
+          output = output.substring(match.end);
+        }
+      }
     }
 
     if (RegExp(r'\bresult\.toLowerCase\(\)').hasMatch(expression) ||
@@ -3649,8 +3722,9 @@ class LegadoRuleEvaluator {
       if (value == r'$') return r'$';
       if (value == '&') return match.group(0) ?? '';
       final index = int.tryParse(value);
-      if (index == null || index > match.groupCount)
+      if (index == null || index > match.groupCount) {
         return token.group(0) ?? '';
+      }
       return match.group(index) ?? '';
     });
   }

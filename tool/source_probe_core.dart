@@ -16,6 +16,22 @@ List<LoadedSource> selectProbeSources(
   var selected = loaded
       .where((entry) => !options.novelOnly || readSourceType(entry.raw) == 0)
       .toList();
+  if (options.nameFilter != null && options.nameFilter!.trim().isNotEmpty) {
+    final needle = options.nameFilter!.trim().toLowerCase();
+    selected = selected
+        .where(
+          (entry) => readSourceName(entry.raw).toLowerCase().contains(needle),
+        )
+        .toList();
+  }
+  if (options.urlFilter != null && options.urlFilter!.trim().isNotEmpty) {
+    final needle = options.urlFilter!.trim().toLowerCase();
+    selected = selected
+        .where(
+          (entry) => readSourceUrl(entry.raw).toLowerCase().contains(needle),
+        )
+        .toList();
+  }
   if (options.dedupeByUrl) {
     final byUrl = <String, LoadedSource>{};
     for (final entry in selected) {
@@ -183,6 +199,24 @@ List<String> featureTags(Map<String, dynamic> raw) {
   return tags;
 }
 
+bool hasJsFeature(Map<String, dynamic> raw) {
+  final features = featureTags(raw);
+  return features.any(
+    (feature) =>
+        feature == '@js' ||
+        feature == '<js>' ||
+        feature == 'java.ajax' ||
+        feature == 'java.get' ||
+        feature == 'java.put' ||
+        feature == 'jsLib' ||
+        feature == 'bodyJs',
+  );
+}
+
+bool hasWebViewFeature(Map<String, dynamic> raw) {
+  return featureTags(raw).contains('webView');
+}
+
 String buildCompatHint(
   String? failStep,
   List<String> features,
@@ -190,6 +224,21 @@ String buildCompatHint(
 ) {
   final lowerMessage = message.toLowerCase();
   if (failStep == null) return '';
+  if (failStep == 'JS 环境') return 'quickjs-unavailable';
+  if (failStep == 'WebView 环境') return 'webview-unavailable';
+  if (failStep == '站点验证') return 'manual-verification';
+  if (_looksLikeAuthOrSignatureFailure(lowerMessage)) {
+    return 'auth-or-signature';
+  }
+  if (_looksLikeEmptyResponse(lowerMessage)) {
+    return 'empty-response';
+  }
+  if (_looksLikeJsFallbackUnsupported(lowerMessage)) {
+    return 'js-fallback-unsupported';
+  }
+  if (_looksLikeTransientNetworkFailure(lowerMessage)) {
+    return 'network-transient';
+  }
   if (failStep == '搜索 URL' &&
       (features.contains('@js') || features.contains('<js>'))) {
     return 'searchUrl-js';
@@ -214,6 +263,102 @@ String buildCompatHint(
     return 'auth-or-cookie';
   }
   return '';
+}
+
+bool shouldTreatProbeFailureAsBlocked({
+  required String? failStep,
+  required List<String> features,
+  required String message,
+}) {
+  if (failStep == null) return false;
+  final hint = buildCompatHint(failStep, features, message);
+  if (const {
+    'quickjs-unavailable',
+    'webview-unavailable',
+    'manual-verification',
+    'network-transient',
+    'network-or-webview',
+    'js-fallback-unsupported',
+    'auth-or-signature',
+    'empty-response',
+    'toc-rule-context',
+  }.contains(hint)) {
+    return true;
+  }
+  if (failStep == '搜索结果' &&
+      (features.contains('cookie') ||
+          features.contains('header') ||
+          features.contains('login') ||
+          features.contains('webView') ||
+          features.contains('@js') ||
+          features.contains('<js>') ||
+          features.contains('java.ajax') ||
+          features.contains('java.get') ||
+          features.contains('java.put'))) {
+    return true;
+  }
+  if (failStep == '正文' &&
+      (features.contains('cookie') ||
+          features.contains('header') ||
+          features.contains('login') ||
+          features.contains('webView') ||
+          features.contains('nextContentUrl'))) {
+    return true;
+  }
+  if ((failStep == '搜索 URL' || failStep == '目录') &&
+      (features.contains('@js') ||
+          features.contains('<js>') ||
+          features.contains('java.ajax') ||
+          features.contains('java.get') ||
+          features.contains('java.put') ||
+          features.contains('jsLib') ||
+          features.contains('jsonPath'))) {
+    return true;
+  }
+  return false;
+}
+
+bool _looksLikeJsFallbackUnsupported(String lowerMessage) {
+  return lowerMessage.contains('node js fallback') ||
+      lowerMessage.contains('javaimporter') ||
+      lowerMessage.contains('packages.javax') ||
+      lowerMessage.contains('packages.java') ||
+      lowerMessage.contains('desencodetobase64string') ||
+      lowerMessage.contains('aesbase64') ||
+      lowerMessage.contains('is not a function') &&
+          lowerMessage.contains('java.');
+}
+
+bool _looksLikeTransientNetworkFailure(String lowerMessage) {
+  return lowerMessage.contains('timeout') ||
+      lowerMessage.contains('timed out') ||
+      lowerMessage.contains('connection timeout') ||
+      lowerMessage.contains('connection terminated') ||
+      lowerMessage.contains('handshake') ||
+      lowerMessage.contains('socketexception') ||
+      lowerMessage.contains('connection reset') ||
+      lowerMessage.contains('network is unreachable') ||
+      lowerMessage.contains('failed host lookup') ||
+      lowerMessage.contains('connection refused');
+}
+
+bool _looksLikeAuthOrSignatureFailure(String lowerMessage) {
+  return lowerMessage.contains('接口鉴权不合法') ||
+      lowerMessage.contains('鉴权不合法') ||
+      lowerMessage.contains('签名错误') ||
+      lowerMessage.contains('签名失败') ||
+      lowerMessage.contains('invalid signature') ||
+      lowerMessage.contains('signature error') ||
+      lowerMessage.contains('"retcode":2') ||
+      lowerMessage.contains("'retcode':2");
+}
+
+bool _looksLikeEmptyResponse(String lowerMessage) {
+  return lowerMessage.contains('响应体为空') ||
+      lowerMessage.contains('empty response') ||
+      lowerMessage.contains('response body empty') ||
+      lowerMessage.contains('响应内容前缀采样: \n') ||
+      lowerMessage.endsWith('响应内容前缀采样:');
 }
 
 class LoadedSource {
@@ -310,6 +455,31 @@ class ProbeResult {
     );
   }
 
+  factory ProbeResult.blocked({
+    required LoadedSource entry,
+    required String failStep,
+    required String message,
+    required int durationMs,
+    List<String> logs = const [],
+  }) {
+    final features = featureTags(entry.raw);
+    return ProbeResult(
+      file: entry.file,
+      rawIndex: entry.rawIndex,
+      sourceName: readSourceName(entry.raw),
+      sourceUrl: readSourceUrl(entry.raw),
+      sourceGroup: readSourceGroup(entry.raw),
+      sourceType: readSourceType(entry.raw),
+      status: 'blocked',
+      failStep: failStep,
+      message: message,
+      durationMs: durationMs,
+      features: features,
+      compatHint: buildCompatHint(failStep, features, message),
+      failLogs: logs,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'file': file,
@@ -368,6 +538,7 @@ class ProbeReport {
       'fail': results.where((result) => result.status == 'fail').length,
       'timeout': results.where((result) => result.status == 'timeout').length,
       'error': results.where((result) => result.status == 'error').length,
+      'blocked': results.where((result) => result.status == 'blocked').length,
       'static': results.where((result) => result.status == 'static').length,
       'byStatus': countBy(results.map((result) => result.status)),
       'byFailStep': countBy(
@@ -392,6 +563,7 @@ class ProbeReport {
     return 'Summary: selected=${summary['selectedSources']} '
         'ok=${summary['ok']} fail=${summary['fail']} '
         'timeout=${summary['timeout']} error=${summary['error']} '
+        'blocked=${summary['blocked']} '
         'static=${summary['static']}';
   }
 
@@ -455,6 +627,7 @@ class ProbeReport {
     buffer.writeln(
       '- Result: ok ${summary['ok']}, fail ${summary['fail']}, '
       'timeout ${summary['timeout']}, error ${summary['error']}, '
+      'blocked ${summary['blocked']}, '
       'static ${summary['static']}',
     );
     buffer.writeln();
@@ -574,6 +747,8 @@ class ProbeOptions {
   final int timeoutSeconds;
   final int? limit;
   final int offset;
+  final String? nameFilter;
+  final String? urlFilter;
   final String outDir;
   final bool dryRun;
   final bool novelOnly;
@@ -589,6 +764,8 @@ class ProbeOptions {
     required this.timeoutSeconds,
     required this.limit,
     required this.offset,
+    required this.nameFilter,
+    required this.urlFilter,
     required this.outDir,
     required this.dryRun,
     required this.novelOnly,
@@ -622,6 +799,8 @@ class ProbeOptions {
         'timeout',
         'limit',
         'offset',
+        'name',
+        'url',
         'out',
         'fail-log-lines',
       };
@@ -641,6 +820,8 @@ class ProbeOptions {
       timeoutSeconds: intValue(values['timeout'], 45).clamp(5, 300),
       limit: values.containsKey('limit') ? intValue(values['limit'], 0) : null,
       offset: intValue(values['offset'], 0).clamp(0, 1 << 30),
+      nameFilter: values['name'],
+      urlFilter: values['url'],
       outDir: values['out'] ?? 'build/source_probe',
       dryRun: flags.contains('dry-run'),
       novelOnly: !flags.contains('all-types'),
@@ -666,6 +847,8 @@ class ProbeOptions {
           ? null
           : intValue(json['limit'].toString(), 0),
       offset: intValue(json['offset']?.toString(), 0).clamp(0, 1 << 30),
+      nameFilter: json['nameFilter']?.toString(),
+      urlFilter: json['urlFilter']?.toString(),
       outDir: json['outDir']?.toString() ?? 'build/source_probe',
       dryRun: json['dryRun'] == true,
       novelOnly: json['novelOnly'] != false,
@@ -687,6 +870,8 @@ class ProbeOptions {
       'timeoutSeconds': timeoutSeconds,
       'limit': limit,
       'offset': offset,
+      'nameFilter': nameFilter,
+      'urlFilter': urlFilter,
       'outDir': outDir,
       'dryRun': dryRun,
       'novelOnly': novelOnly,
@@ -704,6 +889,8 @@ class ProbeOptions {
       timeoutSeconds: timeoutSeconds,
       limit: limit,
       offset: offset,
+      nameFilter: nameFilter,
+      urlFilter: urlFilter,
       outDir: outDir,
       dryRun: dryRun ?? this.dryRun,
       novelOnly: novelOnly,
@@ -729,6 +916,8 @@ Options:
   --timeout <seconds>    Timeout per source. Default: 45
   --limit <n>            Test at most n selected sources.
   --offset <n>           Skip n selected sources.
+  --name <text>          Only test sources whose name contains text.
+  --url <text>           Only test sources whose source URL contains text.
   --out <dir>            Output directory. Default: build/source_probe
   --dry-run              Static feature scan only; no network requests.
   --all-types            Include non-novel sources. Default only bookSourceType 0.

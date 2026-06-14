@@ -3,17 +3,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart'
-    show
-        TabBar,
-        TabBarView,
-        Tab,
-        TabController,
-        Material,
-        Colors,
-        TabPageSelector;
+    show TabBar, TabBarView, Tab, TabController, Material, Colors;
 
 import '../../../data/models/book.dart';
 import '../../../data/models/book_source.dart';
+import '../../../data/parsers/legado/legado_request_builder.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../../../widgets/book_cover.dart';
@@ -40,29 +34,59 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
   final Map<int, bool> _isLoading = {};
   final Map<int, bool> _hasMore = {};
   final Map<int, String> _errorMessage = {};
+  bool _isPreparingExplore = true;
+  String _prepareError = '';
 
   @override
   void initState() {
     super.initState();
-    _parseExploreUrl();
+    _prepareExploreUrl();
   }
 
-  void _parseExploreUrl() {
-    final urlStr = widget.source.exploreUrl ?? '';
-    _groups = parseExploreUrl(urlStr);
-    if (_groups.isNotEmpty) {
-      _tabController = TabController(length: _groups.length, vsync: this);
-      for (var i = 0; i < _groups.length; i++) {
-        _selectedSub[i] = _groups[i].subCategories.first;
+  Future<void> _prepareExploreUrl() async {
+    var urlStr = widget.source.exploreUrl ?? '';
+    var error = '';
+    try {
+      urlStr = await LegadoParser.buildExploreUrl(
+        widget.source,
+      ).timeout(const Duration(seconds: 18));
+    } catch (e) {
+      error = '分类生成失败：$e';
+    }
+
+    final groups = parseExploreUrl(urlStr);
+    if (!mounted) return;
+
+    _tabController?.dispose();
+    _selectedSub.clear();
+    _books.clear();
+    _currentPage.clear();
+    _isLoading.clear();
+    _hasMore.clear();
+    _errorMessage.clear();
+
+    setState(() {
+      _groups = groups;
+      _prepareError = groups.isEmpty && error.isEmpty
+          ? _emptyExploreReason(widget.source.exploreUrl ?? '')
+          : error;
+      _isPreparingExplore = false;
+      _tabController = groups.isEmpty
+          ? null
+          : TabController(length: groups.length, vsync: this);
+      for (var i = 0; i < groups.length; i++) {
+        _selectedSub[i] = groups[i].subCategories.first;
         _books[i] = [];
         _currentPage[i] = 1;
         _isLoading[i] = false;
         _hasMore[i] = true;
         _errorMessage[i] = '';
       }
-      // Trigger initial load for first tab
+    });
+
+    if (groups.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadBooks(0);
+        if (mounted) _loadBooks(0);
       });
     }
   }
@@ -76,6 +100,7 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
   Future<void> _loadBooks(int groupIndex, {bool loadMore = false}) async {
     final sub = _selectedSub[groupIndex];
     if (sub == null || _isLoading[groupIndex] == true) return;
+    if (sub.url.trim().isEmpty) return;
 
     setState(() {
       _isLoading[groupIndex] = true;
@@ -89,10 +114,12 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
 
     final page = _currentPage[groupIndex] ?? 1;
 
-    // Replace {page} or {{page}} in URL
-    var relativeUrl = sub.url
-        .replaceAll('{{page}}', page.toString())
-        .replaceAll('{page}', page.toString());
+    final relativeUrl = LegadoRequestBuilder.replaceVariables(
+      sub.url,
+      keyword: '',
+      page: page,
+      source: widget.source,
+    );
 
     // Resolve absolute URL
     final absoluteUrl = LegadoParser.resolveUrl(
@@ -133,6 +160,15 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
 
   @override
   Widget build(BuildContext context) {
+    if (_isPreparingExplore) {
+      return CupertinoPageScaffold(
+        navigationBar: CupertinoNavigationBar(
+          middle: Text(widget.source.bookSourceName),
+        ),
+        child: const Center(child: CupertinoActivityIndicator(radius: 14)),
+      );
+    }
+
     if (_groups.isEmpty) {
       return CupertinoPageScaffold(
         navigationBar: CupertinoNavigationBar(
@@ -142,23 +178,67 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
             children: [
               CupertinoButton(
                 padding: EdgeInsets.zero,
-                child: const Icon(CupertinoIcons.search, size: 22),
                 onPressed: () {
-                  context.go('/explore');
+                  context.push('/book_source', extra: widget.source);
                 },
+                child: const Icon(CupertinoIcons.search, size: 22),
               ),
               CupertinoButton(
                 padding: EdgeInsets.zero,
-                child: const Icon(CupertinoIcons.person_crop_circle, size: 22),
-                onPressed: () {},
+                onPressed: _openSourceWeb,
+                child: const Icon(CupertinoIcons.globe, size: 22),
               ),
             ],
           ),
         ),
-        child: const Center(
-          child: Text(
-            '当前书源未配置有效发现/分类页链接。',
-            style: TextStyle(color: CupertinoColors.secondaryLabel),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '当前书源没有生成可用分类。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: CupertinoColors.secondaryLabel),
+                ),
+                if (_prepareError.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _prepareError,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.35,
+                      color: CupertinoColors.systemGrey,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                CupertinoButton.filled(
+                  onPressed: () =>
+                      context.push('/book_source', extra: widget.source),
+                  child: const Text('搜索当前书源'),
+                ),
+                const SizedBox(height: 8),
+                CupertinoButton(
+                  onPressed: _openSourceWeb,
+                  child: const Text('打开网页/跳验证'),
+                ),
+                const SizedBox(height: 8),
+                CupertinoButton(
+                  onPressed: () =>
+                      context.push('/source_test', extra: widget.source),
+                  child: const Text('测试书源'),
+                ),
+                const SizedBox(height: 8),
+                CupertinoButton(
+                  onPressed: () =>
+                      context.push('/source_json_editor', extra: widget.source),
+                  child: const Text('编辑 JSON'),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -174,15 +254,15 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
           children: [
             CupertinoButton(
               padding: EdgeInsets.zero,
-              child: const Icon(CupertinoIcons.search, size: 22),
               onPressed: () {
-                context.go('/explore');
+                context.push('/book_source', extra: widget.source);
               },
+              child: const Icon(CupertinoIcons.search, size: 22),
             ),
             CupertinoButton(
               padding: EdgeInsets.zero,
-              child: const Icon(CupertinoIcons.person_crop_circle, size: 22),
-              onPressed: () {},
+              onPressed: _openSourceWeb,
+              child: const Icon(CupertinoIcons.globe, size: 22),
             ),
           ],
         ),
@@ -226,6 +306,21 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
         ),
       ),
     );
+  }
+
+  void _openSourceWeb() {
+    final url = _sourceHomeUrl();
+    context.push(
+      '/source_verify',
+      extra: {'source': widget.source, 'url': url},
+    );
+  }
+
+  String _sourceHomeUrl() {
+    final raw = widget.source.bookSourceUrl.split(RegExp(r'[#\s]')).first;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    if (raw.isEmpty) return 'https://example.com';
+    return 'https://$raw';
   }
 
   Widget _buildCategoryTab(int groupIndex) {
@@ -353,7 +448,9 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                           child: CupertinoButton(
-                            color: CupertinoColors.activeBlue.withOpacity(0.1),
+                            color: CupertinoColors.activeBlue.withValues(
+                              alpha: 0.1,
+                            ),
                             onPressed: () =>
                                 _loadBooks(groupIndex, loadMore: true),
                             child: const Text(
@@ -572,6 +669,15 @@ List<ExploreCategoryGroup> parseExploreUrl(String exploreUrl) {
   }
 
   final lines = trimmedInput.split(RegExp(r'[\r\n]+'));
+  var defaultSubCategories = <ExploreSubCategory>[];
+  void flushDefaultGroup() {
+    if (defaultSubCategories.isEmpty) return;
+    groups.add(
+      ExploreCategoryGroup(name: '全部', subCategories: defaultSubCategories),
+    );
+    defaultSubCategories = <ExploreSubCategory>[];
+  }
+
   for (final line in lines) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
@@ -580,18 +686,15 @@ List<ExploreCategoryGroup> parseExploreUrl(String exploreUrl) {
     final colonCount = '::'.allMatches(firstItem).length;
 
     if (colonCount >= 2) {
+      flushDefaultGroup();
       final firstDoubleColon = trimmed.indexOf('::');
       final categoryName = trimmed.substring(0, firstDoubleColon).trim();
       final subcategoriesPart = trimmed.substring(firstDoubleColon + 2).trim();
 
       final subCategories = <ExploreSubCategory>[];
       for (final item in subcategoriesPart.split('&&')) {
-        final parts = item.split('::');
-        if (parts.length >= 2) {
-          subCategories.add(
-            ExploreSubCategory(name: parts[0].trim(), url: parts[1].trim()),
-          );
-        }
+        final subCategory = _parseExploreTextItem(item);
+        if (subCategory != null) subCategories.add(subCategory);
       }
       if (subCategories.isNotEmpty) {
         groups.add(
@@ -602,21 +705,30 @@ List<ExploreCategoryGroup> parseExploreUrl(String exploreUrl) {
         );
       }
     } else {
-      final subCategories = <ExploreSubCategory>[];
       for (final item in trimmed.split('&&')) {
-        final parts = item.split('::');
-        if (parts.length >= 2) {
-          subCategories.add(
-            ExploreSubCategory(name: parts[0].trim(), url: parts[1].trim()),
-          );
-        }
-      }
-      if (subCategories.isNotEmpty) {
-        groups.add(
-          ExploreCategoryGroup(name: '全部', subCategories: subCategories),
-        );
+        final subCategory = _parseExploreTextItem(item);
+        if (subCategory != null) defaultSubCategories.add(subCategory);
       }
     }
   }
+  flushDefaultGroup();
   return groups;
+}
+
+ExploreSubCategory? _parseExploreTextItem(String item) {
+  final parts = item.split('::');
+  if (parts.length < 2) return null;
+  final title = parts[0].trim();
+  final url = parts[1].trim();
+  if (title.isEmpty || url.isEmpty) return null;
+  return ExploreSubCategory(name: title, url: url);
+}
+
+String _emptyExploreReason(String raw) {
+  final value = raw.trim();
+  if (value.isEmpty) return '该源没有填写 exploreUrl，可以直接搜索或打开网页。';
+  if (value.startsWith('@js:') || value.startsWith('<js>')) {
+    return '该源的分类由 JS 动态生成，但当前运行结果为空；通常需要登录、Cookie、远端接口或更完整 JS 桥。';
+  }
+  return 'exploreUrl 存在，但未解析出 title/url 分类项。';
 }

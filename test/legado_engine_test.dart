@@ -527,6 +527,41 @@ void main() {
       );
     });
 
+    test('keeps result placeholder after json field post processors', () {
+      final data = {'BookId': 1209977};
+
+      final value = LegadoRuleEvaluator.extractJsonValue(
+        data,
+        'BookId\n'
+        '<js>java.base64Encode(result)</js>\n'
+        'data:bookId;base64,{{result}},{"type":"ywc"}',
+      );
+
+      expect(value, 'data:bookId;base64,MTIwOTk3Nw==,{"type":"ywc"}');
+    });
+
+    test('does not run json field post processors on missing fields', () {
+      final value = LegadoRuleEvaluator.extractJsonValue(
+        {'OtherId': 1209977},
+        'BookId\n'
+        '<js>java.base64Encode(result)</js>\n'
+        'data:bookId;base64,{{result}},{"type":"ywc"}',
+      );
+
+      expect(value, isEmpty);
+    });
+
+    test('does not treat missing fields in json strings as literals', () {
+      final value = LegadoRuleEvaluator.extractJsonValue(
+        '{"Result":-3,"Message":"签名错误"}',
+        'BookId\n'
+        '<js>java.base64Encode(result)</js>\n'
+        'data:bookId;base64,{{result}},{"type":"ywc"}',
+      );
+
+      expect(value, isEmpty);
+    });
+
     test('expands json list nodes when rule points to an array', () {
       final data = {
         'data': {
@@ -613,6 +648,25 @@ void main() {
       expect((nodes.first as Map)['name'], 'A');
     });
 
+    test('expands dotted json list alternatives on api responses', () {
+      final data = {
+        'Data': {
+          'Books': [
+            {'BookName': '重生霍雨浩，但是斗破苍穹', 'BookId': 1044903196},
+            {'BookName': '斗破苍穹', 'BookId': 1209977},
+          ],
+        },
+      };
+
+      final nodes = LegadoRuleEvaluator.extractJsonNodes(
+        data,
+        '.BookCard&&Data.Books&&Data.Data.Items||Data.RankBookList',
+      );
+
+      expect(nodes, hasLength(2));
+      expect((nodes.last as Map)['BookName'], '斗破苍穹');
+    });
+
     test('interpolates json template values', () {
       final item = {'bookId': 42, 'title': '第一本'};
 
@@ -623,6 +677,37 @@ void main() {
         ),
         '/reading/bookapi/detail/v1?book_id=42',
       );
+    });
+
+    test('runs json template js blocks with node context as result', () {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final item = {'order': 1, 'name': '正文', 'type': 'volume'};
+
+      final title = LegadoRuleEvaluator.extractJsonValue(
+        item,
+        r'''第{{$.order}}章 {{$.name}}
+<js>
+vol = "{{$.type}}"=="volume"?" 📖 ":""
+vol+result+vol
+</js>
+##第章\s*|第\d+章\s*(?=第\d+章)''',
+      );
+
+      expect(title, '📖 第1章 正文 📖');
+    });
+
+    test('runs chained json js and @js blocks for chapter url', () {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final item = {'id': 456, 'type': 'chapter'};
+
+      final url = LegadoRuleEvaluator.extractJsonValue(item, r'''<js>
+var ids = "{{$.id}}"
+result = "https://api.example.com/read?chapter_ids=" + ids
+</js>
+@js:
+"{{$.type}}"=="volume"?"":result''');
+
+      expect(url, 'https://api.example.com/read?chapter_ids=456');
     });
 
     test('interpolates json template java expression fallbacks', () {
@@ -1225,6 +1310,13 @@ void main() {
         ),
         'https://example.com/book/42/7.html',
       );
+      LegadoRuleEvaluator.extractJsonValue({
+        'BOOKID': 953528,
+      }, r'@put:{"savebid":"$.BOOKID"}');
+      expect(
+        LegadoRuleEvaluator.extractJsonValue({}, r'@get:{savebid}'),
+        '953528',
+      );
       expect(
         LegadoRuleEvaluator.extractJsonValue(item, r'$.id@PUT:{BID:$.id}'),
         '42',
@@ -1453,6 +1545,188 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       },
     );
 
+    test(
+      'keeps original book url when book info tocUrl points to category page',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Category Toc Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..ruleBookInfo = jsonEncode({
+            'name': 'h1@text',
+            'tocUrl': '.btns a.-2@href',
+          });
+        final book = Book(
+          title: 'Alpha Novel',
+          author: 'Author A',
+          filePath: 'https://example.com/book/159555/',
+          fileType: 'online',
+          isFromSource: true,
+        );
+        final response = Response<dynamic>(
+          data: '''
+            <html><body>
+              <h1>Alpha Novel</h1>
+              <div class="btns">
+                <a href="/read/159555/1.html">Read</a>
+                <a href="/cat/45/">Category</a>
+                <a href="/user/fav">Favorite</a>
+              </div>
+            </body></html>
+          ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: book.filePath),
+        );
+
+        final parsed = await LegadoParser.parseBookInfo(
+          source,
+          book,
+          preFetchedResponse: response,
+        );
+
+        expect(parsed.filePath, 'https://example.com/book/159555/');
+      },
+    );
+
+    test(
+      'keeps original book url when book info tocUrl contains inert javascript',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Javascript Toc Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..ruleBookInfo = jsonEncode({
+            'name': 'h1@text',
+            'tocUrl': 'a.catalog@href',
+          });
+        final book = Book(
+          title: 'Alpha Novel',
+          author: 'Author A',
+          filePath: 'https://example.com/book/159555/',
+          fileType: 'online',
+          isFromSource: true,
+        );
+        final response = Response<dynamic>(
+          data: '''
+            <html><body>
+              <h1>Alpha Novel</h1>
+              <a class="catalog" href="/book/159555/MainIndex/javascript:">Catalog</a>
+            </body></html>
+          ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: book.filePath),
+        );
+
+        final parsed = await LegadoParser.parseBookInfo(
+          source,
+          book,
+          preFetchedResponse: response,
+        );
+
+        expect(parsed.filePath, 'https://example.com/book/159555/');
+      },
+    );
+
+    test('keeps original book url when book info has no tocUrl rule', () async {
+      final source = BookSource()
+        ..bookSourceName = 'No Toc Url Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleBookInfo = jsonEncode({
+          'name': 'h1@text',
+          'lastChapter': '.latest a@text',
+        });
+      final book = Book(
+        title: 'Alpha Novel',
+        author: 'Author A',
+        filePath: 'https://example.com/book/159555/',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '''
+            <html><body>
+              <h1>Alpha Novel</h1>
+              <div class="latest"><a href="/chapter/1.html">Chapter One</a></div>
+            </body></html>
+          ''',
+        statusCode: 200,
+        requestOptions: RequestOptions(path: book.filePath),
+      );
+
+      final parsed = await LegadoParser.parseBookInfo(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(parsed.filePath, 'https://example.com/book/159555/');
+    });
+
+    test('does not build data toc url from missing json book id', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Missing Json Toc Id Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleBookInfo = jsonEncode({
+          'init': r'$.Data',
+          'name': 'BookName',
+          'tocUrl':
+              'BookId\n<js>java.base64Encode(result)</js>\ndata:bookId;base64,{{result}},{"type":"ywc"}',
+        });
+      final book = Book(
+        title: 'Existing',
+        author: '',
+        filePath: 'https://example.com/detail?bookId=1209977',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '{"Result":-3,"Message":"签名错误"}',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final parsed = await LegadoParser.parseBookInfo(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(parsed.filePath, isNot(contains('Qm9va0lk')));
+      expect(parsed.filePath, book.filePath);
+    });
+
+    test('repairs data toc payload field name from original book id', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Literal Json Toc Id Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleBookInfo = jsonEncode({
+          'name': 'BookName',
+          'tocUrl':
+              'BookId\n<js>java.base64Encode(result)</js>\ndata:bookId;base64,{{result}},{"type":"ywc"}',
+        });
+      final book = Book(
+        title: 'Existing',
+        author: '',
+        filePath: 'https://example.com/detail?bookId=1209977',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '{"BookName":"Existing","BookId":"BookId"}',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final parsed = await LegadoParser.parseBookInfo(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(
+        parsed.filePath,
+        'data:bookId;base64,MTIwOTk3Nw==,{"type":"ywc"}',
+      );
+    });
+
     test('repairs TOC alias fields and preserves editable source json', () {
       final source = BookSource()
         ..bookSourceName = 'Alias Source'
@@ -1661,6 +1935,47 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
     );
 
     test(
+      'falls back to chapter-like html anchors when chapterList is missing',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'No ChapterList Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..ruleToc = jsonEncode({
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          });
+        final book = Book(
+          title: 'Book',
+          filePath: 'https://example.com/book/2',
+          fileType: 'online',
+          isFromSource: true,
+        );
+        final response = Response<dynamic>(
+          data: '''
+          <html><body>
+            <div class="catalog">
+              <a href="/book/2/001.html">001. 序幕</a>
+              <a href="/book/2/002.html">002. 出发</a>
+            </div>
+          </body></html>
+        ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: book.filePath),
+        );
+
+        final chapters = await LegadoParser.getChapterList(
+          source,
+          book,
+          preFetchedResponse: response,
+        );
+
+        expect(chapters, hasLength(2));
+        expect(chapters.first.title, '001. 序幕');
+        expect(chapters.last.url, 'https://example.com/book/2/002.html');
+      },
+    );
+
+    test(
       'cleans URLs of trailing control characters and percent-encoded controls',
       () {
         final baseUrl = 'https://example.com/api/\n\r%0A%0D';
@@ -1764,6 +2079,25 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(url, isNot(contains('/@js:')));
     });
 
+    test('keeps relative URL after empty inline cookie helper', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Inline Cookie'
+        ..bookSourceUrl = 'https://www.dmx5.cc#tag'
+        ..searchUrl = '''
+{{cookie.removeCookie(source.getKey())}}
+/search/book,{
+  "charset": "gbk",
+  "method": "post",
+  "body": "searchkey={{key}}"
+}''';
+
+      final url = await LegadoParser.buildSearchUrl(source, '斗破苍穹');
+
+      expect(url, startsWith('https://www.dmx5.cc/search/book,'));
+      expect(url, contains('"charset":"gbk"'));
+      expect(url, contains('%B6%B7%C6%C6%B2%D4%F1%B7'));
+    });
+
     test('wraps raw js search url scripts so the last expression returns', () {
       final prepared = LegadoJsEngine().prepareForTesting('''
 @js:
@@ -1856,6 +2190,24 @@ body=urlEncode(params)
       }, r'$.iconUrlSmall@js:"https://b.heiyanimg.com"+result');
 
       expect(value, 'https://b.heiyanimg.com/book/155711.jpg@!bns?1');
+    });
+
+    test('does not treat missing bare json keys as literal field values', () {
+      final errorPayload = {'code': 16, 'data': null, 'msg': '鉴权参数无效'};
+
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(errorPayload, 'bookName'),
+        isEmpty,
+      );
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(errorPayload, 'data.list[*]'),
+        isEmpty,
+      );
+      expect(LegadoRuleEvaluator.extractJsonValue(errorPayload, '0'), '0');
+      expect(
+        LegadoRuleEvaluator.extractJsonValue(errorPayload, '固定分类'),
+        '固定分类',
+      );
     });
 
     test('exposes book origin to javascript post processors', () {
@@ -2027,6 +2379,253 @@ body=urlEncode(params)
       },
     );
 
+    test('keeps multiline embedded request config as one book url', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Embedded Config Search Source'
+        ..bookSourceUrl = 'http://h5.example.com'
+        ..searchUrl = '/search'
+        ..ruleSearch = jsonEncode({
+          'bookList': r'$.KEYLIST[*]',
+          'name': r'$.BOOKNAME',
+          'bookUrl': r'''/book/h,{
+  "charset": "UTF-8",
+  "method": "POST",
+  "body":"bID={{$.BOOKID}}"
+}''',
+        });
+      final response = Response<dynamic>(
+        data: jsonEncode({
+          'KEYLIST': [
+            {'BOOKID': 953528, 'BOOKNAME': '斗破苍穹'},
+          ],
+        }),
+        requestOptions: RequestOptions(path: 'http://h5.example.com/search'),
+        statusCode: 200,
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        '斗破',
+        preFetchedResponse: response,
+      );
+
+      expect(books, hasLength(1));
+      expect(books.first.filePath, startsWith('http://h5.example.com/book/h,'));
+      expect(books.first.filePath, contains('"body":"bID=953528"'));
+      expect(books.first.filePath, isNot(contains('}"body"')));
+    });
+
+    test(
+      'falls back to keyword-matched links when search selector misses',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Search Fallback Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..searchUrl = '/search?key={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.old-result',
+            'name': 'a@text',
+            'bookUrl': 'a@href',
+          });
+        final response = Response<dynamic>(
+          data: '''
+          <html><body>
+            <div class="result-item">
+              <a href="/book/12345/">Alpha Novel</a>
+              <span>Author A</span>
+            </div>
+            <a href="/help">Help</a>
+          </body></html>
+        ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: 'https://example.com/search'),
+        );
+
+        final books = await LegadoParser.searchBooks(
+          source,
+          'Alpha',
+          preFetchedResponse: response,
+        );
+
+        expect(books, hasLength(1));
+        expect(books.first.title, 'Alpha Novel');
+        expect(books.first.filePath, 'https://example.com/book/12345/');
+      },
+    );
+
+    test(
+      'uses sibling book href when configured search href is inert',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Inert Href Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..searchUrl = '/search?key={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.novel-item',
+            'name': '.title@text',
+            'bookUrl': '.title@href',
+          });
+        final response = Response<dynamic>(
+          data: '''
+          <html><body>
+            <div class="novel-item">
+              <a class="title" href="javascript:void(0)">Alpha Novel</a>
+              <a class="detail" href="/book/12345/">Read</a>
+            </div>
+          </body></html>
+        ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: 'https://example.com/search'),
+        );
+
+        final books = await LegadoParser.searchBooks(
+          source,
+          'Alpha',
+          preFetchedResponse: response,
+        );
+
+        expect(books, hasLength(1));
+        expect(books.first.filePath, 'https://example.com/book/12345/');
+      },
+    );
+
+    test(
+      'uses first plausible detail href when a search rule returns multiple hrefs',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Multi Href Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..searchUrl = '/search?key={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.bookbox',
+            'name': '.bookname@text',
+            'bookUrl': 'a@href',
+          });
+        final response = Response<dynamic>(
+          data: '''
+          <html><body>
+            <div class="bookbox">
+              <h4 class="bookname"><a href="/book/51841/">Alpha Novel</a></h4>
+              <div class="update">
+                <a href="/read/51841/13213185.html">Latest Chapter</a>
+              </div>
+            </div>
+          </body></html>
+        ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: 'https://example.com/search'),
+        );
+
+        final books = await LegadoParser.searchBooks(
+          source,
+          'Alpha',
+          preFetchedResponse: response,
+        );
+
+        expect(books, hasLength(1));
+        expect(books.first.filePath, 'https://example.com/book/51841/');
+      },
+    );
+
+    test('collapses repeated path groups in search book urls', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Repeated Path Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl = '/search?key={{key}}'
+        ..ruleSearch = jsonEncode({
+          'bookList': '.item',
+          'name': 'a@text',
+          'bookUrl': 'a@href',
+        });
+      final response = Response<dynamic>(
+        data: '''
+          <html><body>
+            <div class="item">
+              <a href="/book/e3587891856ffc8c/book/e3587891856ffc8c/book/e3587891856ffc8c">Alpha Novel</a>
+            </div>
+          </body></html>
+        ''',
+        statusCode: 200,
+        requestOptions: RequestOptions(path: 'https://example.com/search'),
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        'Alpha',
+        preFetchedResponse: response,
+      );
+
+      expect(books, hasLength(1));
+      expect(books.first.filePath, 'https://example.com/book/e3587891856ffc8c');
+    });
+
+    test(
+      'trims embedded absolute url pollution from search book urls',
+      () async {
+        final source = BookSource()
+          ..bookSourceName = 'Embedded Url Source'
+          ..bookSourceUrl = 'https://example.com'
+          ..searchUrl = '/search?key={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.item',
+            'name': 'a@text',
+            'bookUrl': 'a@href',
+          });
+        final response = Response<dynamic>(
+          data: '''
+          <html><body>
+            <div class="item">
+              <a href="https://example.com/book/51841/https://example.com/read/51841/13213185.html">Alpha Novel</a>
+            </div>
+          </body></html>
+        ''',
+          statusCode: 200,
+          requestOptions: RequestOptions(path: 'https://example.com/search'),
+        );
+
+        final books = await LegadoParser.searchBooks(
+          source,
+          'Alpha',
+          preFetchedResponse: response,
+        );
+
+        expect(books, hasLength(1));
+        expect(books.first.filePath, 'https://example.com/book/51841/');
+      },
+    );
+
+    test('ignores placeholder search rows without a book url', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Empty Search Row Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..searchUrl = '/search?key={{key}}'
+        ..ruleSearch = jsonEncode({
+          'bookList': '#j li',
+          'name': 'b@text',
+          'bookUrl': 'a@href',
+          'intro': 'p@text',
+        });
+      final response = Response<dynamic>(
+        data: '''
+          <html><body>
+            <ul id="j">
+              <li><p>抱歉，无相关作品……</p></li>
+            </ul>
+          </body></html>
+        ''',
+        statusCode: 200,
+        requestOptions: RequestOptions(path: 'https://example.com/search'),
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        'Alpha',
+        preFetchedResponse: response,
+      );
+
+      expect(books, isEmpty);
+    });
+
     test('applies embedded url js and bodyJs request options', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -2070,6 +2669,37 @@ body=urlEncode(params)
       expect(books.first.title, '斗破苍穹');
       expect(books.first.filePath, '$base/book/1');
     });
+
+    test(
+      'keeps embedded POST config out of request path and realUri',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final observed = <String>[];
+        server.listen((request) async {
+          final body = await utf8.decoder.bind(request).join();
+          observed.add('${request.method} ${request.uri.path} $body');
+          request.response.headers.contentType = ContentType.html;
+          request.response.write('<html><body>ok</body></html>');
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'POST Config Source'
+          ..bookSourceUrl = base;
+        final response = await LegadoParser.fetchHtml(
+          source,
+          '$base/search,{"method":"POST","body":"q={{key}}"}',
+          keyword: '斗破苍穹',
+        );
+
+        expect(observed, [
+          'POST /search q=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9',
+        ]);
+        expect(response.realUri.toString(), '$base/search');
+      },
+    );
 
     test('parses regex search lists with capture group field rules', () async {
       final source = BookSource()
@@ -2372,6 +3002,63 @@ body=urlEncode(params)
     });
 
     test(
+      'follows implicit read/catalog link when toc selector misses',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final requestedPaths = <String>[];
+        server.listen((request) async {
+          requestedPaths.add(request.uri.path);
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/book':
+              request.response.write('''
+              <html><body>
+                <a class="btn" href="/book/MainIndex/">点击阅读</a>
+              </body></html>
+            ''');
+              break;
+            case '/book/MainIndex/':
+              request.response.write('''
+              <div class="catalog-list">
+                <a href="/c1">Chapter One</a>
+                <a href="/c2">Chapter Two</a>
+              </div>
+            ''');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Implicit Toc Source'
+          ..bookSourceUrl = base
+          ..ruleToc = jsonEncode({
+            'chapterList': '.catalog-list a',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          });
+        final book = Book(
+          title: 'Implicit Toc Book',
+          author: 'Author A',
+          filePath: '$base/book',
+          fileType: 'online',
+          isFromSource: true,
+        );
+
+        final chapters = await LegadoParser.getChapterList(source, book);
+
+        expect(chapters, hasLength(2));
+        expect(chapters.first.title, 'Chapter One');
+        expect(requestedPaths, ['/book', '/book/MainIndex/']);
+      },
+    );
+
+    test(
       'skips broken toc pages and continues pending nextTocUrl queue',
       () async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -2482,6 +3169,144 @@ body=urlEncode(params)
         'https://example.com/read?page=1&books_id=123',
         'https://example.com/read?page=2&books_id=123',
         'https://example.com/read?page=3&books_id=123',
+      ]);
+    });
+
+    test('loads toc from custom data url payloads', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final source = BookSource()
+        ..bookSourceName = 'Data Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': r'''@js:
+var id = java.hexDecodeToString(result);
+[
+  {ChapterName: "第一章", chapterUrl: "/read/" + id + "/1"},
+  {ChapterName: "第二章", chapterUrl: "/read/" + id + "/2"}
+];''',
+          'chapterName': 'ChapterName',
+          'chapterUrl': 'chapterUrl',
+        });
+      final book = Book(
+        title: 'Data Toc',
+        author: '',
+        filePath: 'data:bookId;base64,MTIwOTk3Nw==,{"type":"ywc"}',
+        fileType: 'online',
+        isFromSource: true,
+      );
+
+      final chapters = await LegadoParser.getChapterList(source, book);
+
+      expect(chapters.map((chapter) => chapter.title), ['第一章', '第二章']);
+      expect(chapters.map((chapter) => chapter.url), [
+        'https://example.com/read/1209977/1',
+        'https://example.com/read/1209977/2',
+      ]);
+    });
+
+    test('passes toc baseUrl variables into json template js rules', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final source = BookSource()
+        ..bookSourceName = 'Json Toc JS Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': r'$.data.list[*]',
+          'chapterName': r'''第{{$.order}}章 {{$.name}}
+<js>
+vol = "{{$.type}}"=="volume"?" 📖 ":""
+vol+result+vol
+</js>
+##第章\s*|第\d+章\s*(?=第\d+章)''',
+          'chapterUrl': r'''<js>
+var nid = baseUrl.match(/nid=.*/)[0].replace("nid=","")
+var ids = "{{$.id}}"
+var url = "https://api.example.com/read?nid="+nid+"&chapter_ids="+ids
+result = url
+</js>
+@js:
+"{{$.type}}"=="volume"?"":result''',
+          'isVolume': r'''<js>
+"{{$.type}}"=="volume"?true:false
+</js>''',
+        });
+      final book = Book(
+        title: 'Json Toc JS',
+        author: '',
+        filePath: 'https://example.com/api/toc?nid=1404068',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: jsonEncode({
+          'data': {
+            'list': [
+              {'order': '', 'name': '正文', 'type': 'volume', 'id': 'v1'},
+              {'order': 1, 'name': '第一章', 'type': 'chapter', 'id': 'c1'},
+            ],
+          },
+        }),
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters, hasLength(2));
+      expect(chapters.first.title, '📖 第章 正文 📖');
+      expect(
+        chapters.first.url,
+        'volume://https://example.com/api/toc?nid=1404068#0',
+      );
+      expect(
+        chapters.last.url,
+        'https://api.example.com/read?nid=1404068&chapter_ids=c1',
+      );
+    });
+
+    test('parses toc when chapterList is a js-generated list', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final source = BookSource()
+        ..bookSourceName = 'HTML JS Toc Source'
+        ..bookSourceUrl = 'https://example.com'
+        ..ruleToc = jsonEncode({
+          'chapterList': r'''@js:
+var list = [];
+var re = /href="([^"]+)">([^<]+)<\/a>/g;
+var m;
+while ((m = re.exec(result)) != null) {
+  list.push({k:m[2], v:m[1]});
+}
+list;''',
+          'chapterName': 'k',
+          'chapterUrl': 'v',
+        });
+      final book = Book(
+        title: 'HTML JS Toc',
+        author: '',
+        filePath: 'https://example.com/toc',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '<a href="/c/1/">第一章</a><a href="/c/2/">第二章</a>',
+        requestOptions: RequestOptions(path: book.filePath),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters.map((chapter) => chapter.title), ['第一章', '第二章']);
+      expect(chapters.map((chapter) => chapter.url), [
+        'https://example.com/c/1/',
+        'https://example.com/c/2/',
       ]);
     });
 
@@ -2660,6 +3485,81 @@ body=urlEncode(params)
       },
     );
 
+    test('ignores inert javascript urls from nextContentUrl', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requestedPaths = <String>[];
+      server.listen((request) async {
+        requestedPaths.add(request.uri.path);
+        request.response.headers.contentType = ContentType.html;
+        request.response.write('''
+          <div id="content"><p>Only page</p></div>
+          <div class="pages">
+            <a href="javascript:alert('no more')">Next</a>
+          </div>
+        ''');
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Inert Next Content Source'
+        ..bookSourceUrl = base
+        ..ruleContent = jsonEncode({
+          'content': '#content@html',
+          'nextContentUrl': '.pages a@href',
+        });
+
+      final content = await LegadoParser.getChapterContent(source, '$base/c1');
+
+      expect(content, contains('Only page'));
+      expect(requestedPaths, ['/c1']);
+    });
+
+    test(
+      'uses safe next-page fallback when nextContentUrl is absent',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final requestedPaths = <String>[];
+        server.listen((request) async {
+          requestedPaths.add(request.uri.path);
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/c1':
+              request.response.write('''
+              <div id="content"><p>Part 1</p></div>
+              <a href="/c1_2">下一页</a>
+              <a href="/c2">下一章</a>
+            ''');
+              break;
+            case '/c1_2':
+              request.response.write('<div id="content"><p>Part 2</p></div>');
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Fallback Paged Content Source'
+          ..bookSourceUrl = base
+          ..ruleContent = jsonEncode({'content': '#content@html'});
+
+        final content = await LegadoParser.getChapterContent(
+          source,
+          '$base/c1',
+        );
+
+        expect(content, contains('Part 1'));
+        expect(content, contains('Part 2'));
+        expect(requestedPaths, ['/c1', '/c1_2']);
+      },
+    );
+
     test(
       'skips broken content pages and continues pending nextContentUrl queue',
       () async {
@@ -2791,7 +3691,9 @@ body=urlEncode(params)
             ''');
               break;
             case '/chapter':
-              request.response.write('<div id="ChapterOne">Context Body</div>');
+              request.response.write(
+                "<div id=\"ChapterOne\">${List.filled(12, 'Context Body').join(' ')}</div>",
+              );
               break;
             default:
               request.response.statusCode = HttpStatus.notFound;
@@ -2828,6 +3730,73 @@ body=urlEncode(params)
     );
 
     test(
+      'testSource tries later chapters when first content is unavailable',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        final requestedPaths = <String>[];
+        server.listen((request) async {
+          requestedPaths.add(request.uri.path);
+          request.response.headers.contentType = ContentType.html;
+          switch (request.uri.path) {
+            case '/search':
+              request.response.write('''
+              <div class="book">
+                <a href="/book"><span class="title">Demo Book</span></a>
+              </div>
+            ''');
+              break;
+            case '/book':
+              request.response.write('''
+              <div class="toc">
+                <a class="chapter" href="/c1">Chapter One</a>
+                <a class="chapter" href="/c2">Chapter Two</a>
+              </div>
+            ''');
+              break;
+            case '/c1':
+              request.response.write(
+                '<div class="error">Content unavailable</div>',
+              );
+              break;
+            case '/c2':
+              request.response.write(
+                "<div id=\"content\">${List.filled(20, 'Readable second chapter body').join(' ')}</div>",
+              );
+              break;
+            default:
+              request.response.statusCode = HttpStatus.notFound;
+              request.response.write('');
+          }
+          await request.response.close();
+        });
+
+        final base = 'http://${server.address.host}:${server.port}';
+        final source = BookSource()
+          ..bookSourceName = 'Later Chapter Test Source'
+          ..bookSourceUrl = base
+          ..searchUrl = '/search?q={{key}}'
+          ..ruleSearch = jsonEncode({
+            'bookList': '.book',
+            'name': '.title@text',
+            'bookUrl': 'a@href',
+          })
+          ..ruleToc = jsonEncode({
+            'chapterList': '.chapter',
+            'chapterName': '@text',
+            'chapterUrl': '@href',
+          })
+          ..ruleContent = jsonEncode({'content': '#content@text'});
+
+        final report = await LegadoParser.testSource(source, 'demo');
+
+        expect(report.hasFailure, isFalse);
+        expect(requestedPaths, contains('/c1'));
+        expect(requestedPaths, contains('/c2'));
+      },
+    );
+
+    test(
       'testSource uses a keyword-matching result instead of first noise item',
       () async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -2854,7 +3823,9 @@ body=urlEncode(params)
             ''');
               break;
             case '/chapter':
-              request.response.write('<div id="content">正文内容</div>');
+              request.response.write(
+                "<div id=\"content\">${List.filled(50, '正文内容').join('，')}</div>",
+              );
               break;
             default:
               request.response.statusCode = HttpStatus.notFound;
@@ -2891,6 +3862,70 @@ body=urlEncode(params)
         expect(searchStep.sample, contains('斗破苍穹'));
       },
     );
+
+    test('testSource prefers ruleSearch.checkKeyWord for probing', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      String? receivedKeyword;
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.html;
+        switch (request.uri.path) {
+          case '/search':
+            receivedKeyword = request.uri.queryParameters['q'];
+            if (receivedKeyword == '道观') {
+              request.response.write('''
+              <div class="book"><a href="/book"><span class="title">道观</span></a></div>
+            ''');
+            } else {
+              request.response.write('<div class="empty"></div>');
+            }
+            break;
+          case '/book':
+            request.response.write('''
+              <div class="toc">
+                <a class="chapter" href="/chapter">第一章</a>
+              </div>
+            ''');
+            break;
+          case '/chapter':
+            request.response.write(
+              "<div id=\"content\">${List.filled(50, '正文内容').join('，')}</div>",
+            );
+            break;
+          default:
+            request.response.statusCode = HttpStatus.notFound;
+            request.response.write('');
+        }
+        await request.response.close();
+      });
+
+      final base = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'Check Keyword Source'
+        ..bookSourceUrl = base
+        ..searchUrl = '/search?q={{key}}'
+        ..ruleSearch = jsonEncode({
+          'bookList': '.book',
+          'name': '.title@text',
+          'bookUrl': 'a@href',
+          'checkKeyWord': '道观',
+        })
+        ..ruleToc = jsonEncode({
+          'chapterList': '.chapter',
+          'chapterName': '@text',
+          'chapterUrl': '@href',
+        })
+        ..ruleContent = jsonEncode({'content': '#content@text'});
+
+      final report = await LegadoParser.testSource(source, '斗破苍穹');
+
+      expect(report.hasFailure, isFalse);
+      expect(receivedKeyword, '道观');
+      expect(
+        report.steps.first.logs.join('\n'),
+        contains('ruleSearch.checkKeyWord'),
+      );
+    });
 
     test('follows content url templates with chapter context', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -3527,7 +4562,7 @@ decrypt(result);
         expect(report.hasFailure, isTrue);
         expect(report.steps.first.title, '搜索 URL');
         expect(report.steps.first.status, LegadoStepStatus.fail);
-        expect(report.steps.first.message, contains('构建结果为空'));
+        expect(report.steps.first.message, contains('JS 搜索 URL 执行失败'));
       },
     );
   });

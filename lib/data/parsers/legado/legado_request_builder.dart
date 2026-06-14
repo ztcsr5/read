@@ -960,6 +960,7 @@ class LegadoRequestBuilder {
         final baseUrl = source == null
             ? ''
             : cleanBaseUrl(source.bookSourceUrl);
+        final sideEffectOnly = _isInlineSideEffectOnlyScript(script);
         final value = LegadoJsEngine().evaluate(
           script,
           variables: {
@@ -970,8 +971,9 @@ class LegadoRequestBuilder {
             'params': {'pageIndex': page, 'tabIndex': 0, 'filters': {}},
           },
         );
-        return value.trim();
+        return sideEffectOnly ? '' : value.trim();
       } catch (_) {
+        if (_isInlineSideEffectOnlyScript(script)) return '';
         return _evaluateInlineScriptFallback(
               script,
               keyword: keyword,
@@ -980,6 +982,14 @@ class LegadoRequestBuilder {
             '';
       }
     });
+  }
+
+  static bool _isInlineSideEffectOnlyScript(String script) {
+    final text = script.trim();
+    return RegExp(
+      r'^cookie\.(?:removeCookie|setCookie)\s*\([\s\S]*\)\s*;?$',
+      caseSensitive: false,
+    ).hasMatch(text);
   }
 
   static bool _shouldEvaluateAsInlineScript(String expression) {
@@ -1143,6 +1153,8 @@ class LegadoRequestBuilder {
         text.contains('var ') ||
         text.contains('let ') ||
         text.contains('const ') ||
+        text.contains('cookie.') ||
+        (text.contains('source.') && text.contains('(')) ||
         text.contains('java.') ||
         text.contains('return ') ||
         text.contains('=>');

@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../viewmodels/bookshelf_viewmodel.dart';
 import '../../../data/models/book.dart';
 import '../../../widgets/book_cover.dart';
+import '../../settings/viewmodels/book_source_viewmodel.dart';
 
 class BookshelfPage extends ConsumerStatefulWidget {
   const BookshelfPage({super.key});
@@ -20,7 +21,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
   late final WidgetsBindingObserver _lifecycleObserver =
       _BookshelfLifecycleObserver(() {
         if (!mounted) return;
-        ref.read(bookshelfViewModelProvider.notifier).loadBooks();
+        final notifier = ref.read(bookshelfViewModelProvider.notifier);
+        notifier.loadBooks();
+        unawaited(notifier.refreshOnlineBookUpdates());
       });
 
   @override
@@ -30,6 +33,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(bookshelfViewModelProvider.notifier).loadBooks();
+      unawaited(
+        ref
+            .read(bookshelfViewModelProvider.notifier)
+            .refreshOnlineBookUpdates(),
+      );
     });
   }
 
@@ -99,6 +107,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
           CupertinoSliverRefreshControl(
             onRefresh: () async {
               await viewModel.loadBooks();
+              await viewModel.refreshOnlineBookUpdates(force: true);
             },
           ),
           CupertinoSliverNavigationBar(
@@ -107,7 +116,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
               style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5),
             ),
             border: null, // 去掉底边框
-            backgroundColor: bgColor.withOpacity(0.8),
+            backgroundColor: bgColor.withValues(alpha: 0.8),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -436,8 +445,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: CupertinoColors.white.withOpacity(
-                                        0.6,
+                                      color: CupertinoColors.white.withValues(
+                                        alpha: 0.6,
                                       ),
                                     ),
                                   ),
@@ -458,8 +467,8 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                                     book.author.isEmpty ? '未知作者' : book.author,
                                     style: TextStyle(
                                       fontSize: 14,
-                                      color: CupertinoColors.white.withOpacity(
-                                        0.6,
+                                      color: CupertinoColors.white.withValues(
+                                        alpha: 0.6,
                                       ),
                                     ),
                                     maxLines: 1,
@@ -489,16 +498,16 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                               color: CupertinoColors.white,
                               borderRadius: BorderRadius.circular(20),
                             ),
-                            child: Row(
+                            child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(
+                                Icon(
                                   CupertinoIcons.play_arrow_solid,
                                   size: 16,
                                   color: CupertinoColors.black,
                                 ),
-                                const SizedBox(width: 6),
-                                const Text(
+                                SizedBox(width: 6),
+                                Text(
                                   '继续阅读',
                                   style: TextStyle(
                                     fontSize: 15,
@@ -517,7 +526,9 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                             },
                             child: Icon(
                               CupertinoIcons.trash,
-                              color: CupertinoColors.white.withOpacity(0.6),
+                              color: CupertinoColors.white.withValues(
+                                alpha: 0.6,
+                              ),
                               size: 24,
                             ),
                           ),
@@ -659,6 +670,20 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(popupContext);
+              _openBatchSourceCheck(context);
+            },
+            child: const Text('批量检测书源'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(popupContext);
+              context.push('/web_source');
+            },
+            child: const Text('Web / JSON 写源'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(popupContext);
               context.push('/settings');
             },
             child: const Text('设置'),
@@ -677,6 +702,40 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _openBatchSourceCheck(BuildContext context) async {
+    await ref.read(bookSourceViewModelProvider.notifier).loadSources();
+    if (!mounted || !context.mounted) return;
+    final sources = ref
+        .read(bookSourceViewModelProvider)
+        .sources
+        .where((source) => source.bookSourceType == 0)
+        .toList(growable: false);
+    if (sources.isEmpty) {
+      showCupertinoDialog(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: const Text('没有可检测的小说源'),
+          content: const Text('请先导入或新建 JSON 小说源。'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('知道了'),
+            ),
+            CupertinoDialogAction(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                context.push('/sources');
+              },
+              child: const Text('去书源管理'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    context.push('/source_batch_check', extra: sources);
   }
 }
 

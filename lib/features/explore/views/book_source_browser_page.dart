@@ -53,6 +53,12 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
             ],
             CupertinoButton(
               padding: EdgeInsets.zero,
+              onPressed: _openSourceWeb,
+              child: const Icon(CupertinoIcons.globe),
+            ),
+            const SizedBox(width: 8),
+            CupertinoButton(
+              padding: EdgeInsets.zero,
               onPressed: _isLoading ? null : _search,
               child: _isLoading
                   ? const CupertinoActivityIndicator()
@@ -103,6 +109,13 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
                             child: const Text('跳验证后重试'),
                           ),
                         ],
+                        if (!_needsVerification) ...[
+                          const SizedBox(height: 14),
+                          CupertinoButton(
+                            onPressed: _openSourceWeb,
+                            child: const Text('打开网页/跳验证'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -122,6 +135,15 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
   Future<void> _search() async {
     final keyword = _controller.text.trim();
     if (keyword.isEmpty || _isLoading) return;
+    if ((widget.source.searchUrl?.trim().isEmpty ?? true) ||
+        (widget.source.ruleSearch?.trim().isEmpty ?? true)) {
+      setState(() {
+        _books = const [];
+        _needsVerification = false;
+        _message = '当前书源没有配置搜索 URL 或搜索规则，可以进入 JSON 编辑补全，或直接打开网页。';
+      });
+      return;
+    }
     setState(() {
       _isLoading = true;
       _books = const [];
@@ -163,6 +185,21 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
     if (result == true && mounted) {
       await _search();
     }
+  }
+
+  void _openSourceWeb() {
+    final url = _sourceHomeUrl();
+    context.push(
+      '/source_verify',
+      extra: {'source': widget.source, 'url': url},
+    );
+  }
+
+  String _sourceHomeUrl() {
+    final raw = widget.source.bookSourceUrl.split(RegExp(r'[#\s]')).first;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    if (raw.isEmpty) return 'https://example.com';
+    return 'https://$raw';
   }
 
   Widget _bookRow(Book book) {

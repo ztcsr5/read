@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:read/data/models/book_source.dart';
+import 'package:read/data/parsers/legado/legado_js_engine.dart';
 import 'package:read/data/parsers/legado_parser.dart';
 
 import '../tool/source_probe_core.dart';
@@ -32,6 +33,20 @@ void main() {
       'concurrency=${options.concurrency}, '
       'timeout=${options.timeoutSeconds}s.',
     );
+    final jsEngine = LegadoJsEngine();
+    final quickJsAvailable = jsEngine.isAvailable;
+    final jsRuntimeAvailable = jsEngine.canEvaluate;
+    if (!quickJsAvailable && jsRuntimeAvailable) {
+      stdout.writeln(
+        'QuickJS is unavailable in this test runner. Using Node.js fallback '
+        'for JS-heavy sources.',
+      );
+    } else if (!jsRuntimeAvailable) {
+      stdout.writeln(
+        'No JS runtime is available in this test runner. JS-heavy sources '
+        'will be marked blocked instead of failed.',
+      );
+    }
 
     final results = List<ProbeResult?>.filled(selected.length, null);
     var next = 0;
@@ -39,7 +54,11 @@ void main() {
       while (true) {
         final index = next++;
         if (index >= selected.length) return;
-        final result = await _runProbe(selected[index], options);
+        final result = await _runProbe(
+          selected[index],
+          options,
+          jsRuntimeAvailable: jsRuntimeAvailable,
+        );
         results[index] = result;
         _printProgress(index + 1, selected.length, result);
       }
@@ -60,9 +79,35 @@ void main() {
   }, timeout: const Timeout(Duration(hours: 12)));
 }
 
-Future<ProbeResult> _runProbe(LoadedSource entry, ProbeOptions options) async {
+Future<ProbeResult> _runProbe(
+  LoadedSource entry,
+  ProbeOptions options, {
+  required bool jsRuntimeAvailable,
+}) async {
   final watch = Stopwatch()..start();
   try {
+    if (!jsRuntimeAvailable && hasJsFeature(entry.raw)) {
+      watch.stop();
+      return ProbeResult.blocked(
+        entry: entry,
+        failStep: 'JS 环境',
+        message:
+            'Windows flutter test 未加载 QuickJS native DLL，跳过 JS 书源以避免误判；'
+            '请先构建 quickjs_c_bridge_plugin.dll 或在 iOS/App 内复测。',
+        durationMs: watch.elapsedMilliseconds,
+      );
+    }
+    if (hasWebViewFeature(entry.raw)) {
+      watch.stop();
+      return ProbeResult.blocked(
+        entry: entry,
+        failStep: 'WebView 环境',
+        message:
+            'Windows flutter test 没有可用 WebViewPlatform，跳过 webView 书源以避免误判；'
+            '请在 iOS/App 内复测这类源。',
+        durationMs: watch.elapsedMilliseconds,
+      );
+    }
     final source = BookSource.fromJson(entry.raw);
     final report = await LegadoParser.testSource(
       source,
@@ -84,6 +129,14 @@ Future<ProbeResult> _runProbe(LoadedSource entry, ProbeOptions options) async {
       status: 'timeout',
       failStep: 'timeout',
       message: e.message ?? 'timeout after ${options.timeoutSeconds}s',
+      durationMs: watch.elapsedMilliseconds,
+    );
+  } on LegadoVerificationRequiredException catch (e) {
+    watch.stop();
+    return ProbeResult.blocked(
+      entry: entry,
+      failStep: '站点验证',
+      message: e.toString(),
       durationMs: watch.elapsedMilliseconds,
     );
   } catch (e, stack) {
@@ -123,6 +176,18 @@ ProbeResult _resultFromReport({
   final failLogs = fail == null
       ? const <String>[]
       : fail.logs.take(failLogLines).toList();
+  final evidence = fail == null ? message : '$message\n${fail.logs.join('\n')}';
+  final status =
+      fail != null &&
+          shouldTreatProbeFailureAsBlocked(
+            failStep: fail.title,
+            features: features,
+            message: evidence,
+          )
+      ? 'blocked'
+      : report.hasFailure
+      ? 'fail'
+      : 'ok';
   return ProbeResult(
     file: entry.file,
     rawIndex: entry.rawIndex,
@@ -130,7 +195,7 @@ ProbeResult _resultFromReport({
     sourceUrl: source.bookSourceUrl,
     sourceGroup: source.bookSourceGroup ?? '',
     sourceType: source.bookSourceType,
-    status: report.hasFailure ? 'fail' : 'ok',
+    status: status,
     failStep: fail?.title,
     message: message,
     durationMs: durationMs,
@@ -138,7 +203,7 @@ ProbeResult _resultFromReport({
     chaptersCount: _extractCount(report, RegExp(r'解析到\s*(\d+)\s*章')),
     contentLength: _extractCount(report, RegExp(r'正文字数:\s*(\d+)')),
     features: features,
-    compatHint: buildCompatHint(fail?.title, features, message),
+    compatHint: buildCompatHint(fail?.title, features, evidence),
     steps: steps,
     failLogs: failLogs,
   );

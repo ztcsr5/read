@@ -3,27 +3,37 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show LinearProgressIndicator, Divider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
+import '../services/source_check_classifier.dart';
 import '../viewmodels/book_source_viewmodel.dart';
 
 class SourceCheckResult {
   final BookSource source;
   final bool isSuccess;
+  final bool isBlocked;
   final int booksCount;
   final String? errorMessage;
+  final String? failStep;
   final int durationInMs;
 
   SourceCheckResult({
     required this.source,
     required this.isSuccess,
+    this.isBlocked = false,
     this.booksCount = 0,
     this.errorMessage,
+    this.failStep,
     required this.durationInMs,
   });
+
+  bool get canDisable => !isSuccess && !isBlocked;
 }
+
+enum SourceCheckFilter { all, success, failed, blocked }
 
 class SourceBatchCheckPage extends ConsumerStatefulWidget {
   final List<BookSource> sources;
@@ -41,11 +51,13 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   int _currentIndex = 0;
   int _successCount = 0;
   int _failCount = 0;
+  int _blockedCount = 0;
   bool _isChecking = true;
   bool _isDisabling = false;
   final List<SourceCheckResult> _results = [];
   final ScrollController _scrollController = ScrollController();
   bool _cancelled = false;
+  SourceCheckFilter _filter = SourceCheckFilter.all;
 
   @override
   void initState() {
@@ -87,6 +99,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       var success = false;
       var booksCount = 0;
       String? errorMessage;
+      String? failStepTitle;
+      var blocked = false;
 
       try {
         // 统一测源：复用单源测试的 testSource，确保「一键测源」与单源测试判定标准一致，
@@ -112,10 +126,22 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 ? report.steps.last
                 : const LegadoTestStep.fail('测试', '未知错误'),
           );
+          failStepTitle = failStep.title;
           errorMessage = '${failStep.title}：${failStep.message}';
+          blocked = sourceCheckFailureIsBlocked(
+            source,
+            failStep: failStepTitle,
+            message: errorMessage,
+          );
         }
       } catch (e) {
+        failStepTitle = '异常';
         errorMessage = e.toString().replaceFirst('Exception: ', '');
+        blocked = sourceCheckFailureIsBlocked(
+          source,
+          failStep: failStepTitle,
+          message: errorMessage,
+        );
       }
 
       watch.stop();
@@ -126,13 +152,17 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             SourceCheckResult(
               source: source,
               isSuccess: success,
+              isBlocked: blocked,
               booksCount: booksCount,
               errorMessage: errorMessage,
+              failStep: failStepTitle,
               durationInMs: watch.elapsedMilliseconds,
             ),
           );
           if (success) {
             _successCount++;
+          } else if (blocked) {
+            _blockedCount++;
           } else {
             _failCount++;
           }
@@ -150,13 +180,77 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
     }
   }
 
+  Future<void> _copyReport() async {
+    final buffer = StringBuffer()
+      ..writeln('# 书源批量检测报告')
+      ..writeln()
+      ..writeln('- 总数: ${_results.length}')
+      ..writeln('- 成功: $_successCount')
+      ..writeln('- 失败: $_failCount')
+      ..writeln('- 待复测/需处理: $_blockedCount')
+      ..writeln('- 默认关键词: $_batchKeyword')
+      ..writeln('- 说明: 单源规则配置了 checkKeyWord 时会自动覆盖默认关键词')
+      ..writeln()
+      ..writeln('## 失败阶段统计');
+    final counts = _failureStepCounts();
+    if (counts.isEmpty) {
+      buffer.writeln('_无_');
+    } else {
+      counts.forEach((step, count) => buffer.writeln('- $step: $count'));
+    }
+    buffer
+      ..writeln()
+      ..writeln('## 明细');
+    for (final result in _results) {
+      final status = result.isSuccess
+          ? 'OK'
+          : result.isBlocked
+          ? 'BLOCKED'
+          : 'FAIL';
+      buffer.writeln(
+        '- $status '
+        '${result.source.bookSourceName} '
+        '[${result.durationInMs}ms]'
+        '${result.failStep == null ? "" : " ${result.failStep}"}'
+        '${result.errorMessage == null ? "" : " - ${result.errorMessage}"}',
+      );
+    }
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    if (!mounted) return;
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('已复制'),
+        content: const Text('检测报告已复制到剪贴板。'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('确定'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, int> _failureStepCounts() {
+    final counts = <String, int>{};
+    for (final result in _results) {
+      if (result.isSuccess) continue;
+      final key = result.failStep ?? '未知';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return Map.fromEntries(
+      counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)),
+    );
+  }
+
   Future<void> _disableFailedSources() async {
     setState(() {
       _isDisabling = true;
     });
 
     final failedSources = _results
-        .where((r) => !r.isSuccess)
+        .where((r) => r.canDisable)
         .map((r) => r.source)
         .toList();
 
@@ -179,7 +273,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         context: context,
         builder: (context) => CupertinoAlertDialog(
           title: const Text('禁用完成'),
-          content: Text('已成功禁用 ${failedSources.length} 个失效书源。'),
+          content: Text(
+            '已成功禁用 ${failedSources.length} 个确定失效书源；待复测/需处理书源不会自动禁用。',
+          ),
           actions: [
             CupertinoDialogAction(
               child: const Text('确定'),
@@ -197,8 +293,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Widget build(BuildContext context) {
     final bgColor = CupertinoTheme.of(context).scaffoldBackgroundColor;
     final total = widget.sources.length;
-    final checked = _successCount + _failCount;
+    final checked = _successCount + _failCount + _blockedCount;
     final progress = total == 0 ? 0.0 : checked / total;
+    final nonSuccessCount = _failCount + _blockedCount;
+    final visibleResults = _filteredResults();
 
     return CupertinoPageScaffold(
       backgroundColor: bgColor,
@@ -206,7 +304,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         middle: const Text('一键测源'),
         backgroundColor: CupertinoTheme.of(
           context,
-        ).barBackgroundColor.withOpacity(0.9),
+        ).barBackgroundColor.withValues(alpha: 0.9),
         border: null,
         trailing: _isChecking ? const CupertinoActivityIndicator() : null,
       ),
@@ -214,36 +312,104 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         child: Column(
           children: [
             _buildProgressHeader(progress, checked, total),
+            _buildFilterBar(),
             const Divider(height: 1, color: CupertinoColors.systemGrey5),
             Expanded(
-              child: ListView.separated(
-                controller: _scrollController,
-                itemCount: _results.length,
-                separatorBuilder: (_, __) => const Divider(
-                  height: 1,
-                  color: CupertinoColors.systemGrey5,
-                ),
-                itemBuilder: (context, index) {
-                  final result = _results[index];
-                  return _buildResultItem(result);
-                },
-              ),
+              child: visibleResults.isEmpty
+                  ? Center(
+                      child: Text(
+                        _emptyFilterText(),
+                        style: const TextStyle(
+                          color: CupertinoColors.secondaryLabel,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      controller: _scrollController,
+                      itemCount: visibleResults.length,
+                      separatorBuilder: (_, __) => const Divider(
+                        height: 1,
+                        color: CupertinoColors.systemGrey5,
+                      ),
+                      itemBuilder: (context, index) {
+                        final result = visibleResults[index];
+                        return _buildResultItem(result);
+                      },
+                    ),
             ),
-            if (!_isChecking && _failCount > 0)
+            if (!_isChecking && nonSuccessCount > 0)
               Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: CupertinoButton.filled(
-                    onPressed: _isDisabling ? null : _disableFailedSources,
-                    child: _isDisabling
-                        ? const CupertinoActivityIndicator()
-                        : const Text('一键禁用失效书源'),
-                  ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    CupertinoButton(
+                      onPressed: _copyReport,
+                      child: const Text('复制检测报告'),
+                    ),
+                    if (_failCount > 0) ...[
+                      const SizedBox(height: 8),
+                      CupertinoButton.filled(
+                        onPressed: _isDisabling ? null : _disableFailedSources,
+                        child: _isDisabling
+                            ? const CupertinoActivityIndicator()
+                            : Text('一键禁用确定失效书源 ($_failCount)'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  List<SourceCheckResult> _filteredResults() {
+    return switch (_filter) {
+      SourceCheckFilter.all => _results,
+      SourceCheckFilter.success => _results.where((r) => r.isSuccess).toList(),
+      SourceCheckFilter.failed => _results.where((r) => r.canDisable).toList(),
+      SourceCheckFilter.blocked => _results.where((r) => r.isBlocked).toList(),
+    };
+  }
+
+  String _emptyFilterText() {
+    return switch (_filter) {
+      SourceCheckFilter.all => _isChecking ? '正在等待检测结果...' : '暂无检测结果',
+      SourceCheckFilter.success => '当前没有检测通过的书源',
+      SourceCheckFilter.failed => '当前没有确定失效的书源',
+      SourceCheckFilter.blocked => '当前没有待复测书源',
+    };
+  }
+
+  Widget _buildFilterBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: CupertinoSlidingSegmentedControl<SourceCheckFilter>(
+        groupValue: _filter,
+        children: {
+          SourceCheckFilter.all: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('全部 ${_results.length}'),
+          ),
+          SourceCheckFilter.success: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('有效 $_successCount'),
+          ),
+          SourceCheckFilter.failed: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('失效 $_failCount'),
+          ),
+          SourceCheckFilter.blocked: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('待复测 $_blockedCount'),
+          ),
+        },
+        onValueChanged: (value) {
+          if (value == null) return;
+          setState(() => _filter = value);
+        },
       ),
     );
   }
@@ -274,7 +440,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           ),
           const SizedBox(height: 16),
           const Text(
-            '检测关键词：斗破苍穹；并发：2。降低并发可减少站点频控导致的假红。',
+            '默认关键词：$_batchKeyword；单源配置 checkKeyWord 时自动使用源内测试词；并发：2。',
             style: TextStyle(fontSize: 13, color: CupertinoColors.systemGrey),
           ),
           const SizedBox(height: 12),
@@ -295,10 +461,44 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             children: [
               _buildStatCard('有效', _successCount, CupertinoColors.activeGreen),
               _buildStatCard('失效', _failCount, CupertinoColors.destructiveRed),
+              _buildStatCard(
+                '待复测',
+                _blockedCount,
+                CupertinoColors.systemOrange,
+              ),
             ],
           ),
+          if (!_isChecking && (_failCount + _blockedCount) > 0) ...[
+            const SizedBox(height: 12),
+            _buildFailureStepSummary(),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildFailureStepSummary() {
+    final counts = _failureStepCounts();
+    if (counts.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: counts.entries.map((entry) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: CupertinoColors.systemGrey5,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '${entry.key} ${entry.value}',
+            style: const TextStyle(
+              fontSize: 12,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -326,20 +526,22 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   }
 
   Widget _buildResultItem(SourceCheckResult result) {
+    final color = result.isSuccess
+        ? CupertinoColors.activeGreen
+        : result.isBlocked
+        ? CupertinoColors.systemOrange
+        : CupertinoColors.destructiveRed;
+    final icon = result.isSuccess
+        ? CupertinoIcons.check_mark_circled_solid
+        : result.isBlocked
+        ? CupertinoIcons.exclamationmark_triangle_fill
+        : CupertinoIcons.clear_circled_solid;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            result.isSuccess
-                ? CupertinoIcons.check_mark_circled_solid
-                : CupertinoIcons.clear_circled_solid,
-            color: result.isSuccess
-                ? CupertinoColors.activeGreen
-                : CupertinoColors.destructiveRed,
-            size: 20,
-          ),
+          Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -360,7 +562,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                       ),
                     ),
                     Text(
-                      "${result.durationInMs}ms",
+                      '${result.durationInMs}ms',
                       style: const TextStyle(
                         fontSize: 12,
                         color: CupertinoColors.systemGrey2,
@@ -371,16 +573,16 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 const SizedBox(height: 4),
                 Text(
                   result.isSuccess
-                      ? "成功搜索到 ${result.booksCount} 本书"
+                      ? '成功搜索到 ${result.booksCount} 本书'
                       : result.errorMessage != null &&
                             result.errorMessage!.length > 50
-                      ? "${result.errorMessage!.substring(0, 50)}..."
-                      : "${result.errorMessage}",
+                      ? '${result.errorMessage!.substring(0, 50)}...'
+                      : '${result.errorMessage}',
                   style: TextStyle(
                     fontSize: 13,
                     color: result.isSuccess
                         ? CupertinoColors.systemGrey
-                        : CupertinoColors.destructiveRed.withOpacity(0.8),
+                        : color.withValues(alpha: 0.85),
                   ),
                 ),
               ],

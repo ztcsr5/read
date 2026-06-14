@@ -54,8 +54,27 @@ Important columns:
 ## Notes
 
 - Keep `--concurrency` low for live probing. Many sources rate-limit quickly.
-- If Windows reports missing `quickjs_c_bridge_plugin.dll`, JS-heavy sources
-  will cluster under `searchUrl-js` or related JS failure buckets. That is still
-  useful for prioritizing QuickJS packaging/runtime work.
+- On Windows, the CLI preflights `quickjs_c_bridge_plugin.dll` before starting
+  live probing. If it finds a built DLL, it automatically sets
+  `LIBQUICKJSC_TEST_PATH` for the Flutter test runner. If it cannot find one,
+  JS-heavy sources are marked `BLOCKED / JS 环境` instead of failed to avoid
+  false negatives.
+- To enable JS source probing on Windows, install CMake and Visual Studio Build
+  Tools with the C++ workload, then build the QuickJS native library once:
+
+```powershell
+$pkg = Join-Path $env:LOCALAPPDATA 'Pub\Cache\hosted\pub.dev\quickjs_engine-0.1.1'
+Set-Location $pkg
+powershell.exe -ExecutionPolicy Bypass -File tool\build_native.ps1
+```
+
+  The next `tool/source_probe.dart` run should auto-detect
+  `native\build\Release\quickjs_c_bridge_plugin.dll`. You can also point to a
+  custom copy explicitly:
+
+```powershell
+$env:LIBQUICKJSC_TEST_PATH = 'C:\path\to\quickjs_c_bridge_plugin.dll'
+```
+
 - Reports under `build/` are generated artifacts and are not intended to be
   committed.

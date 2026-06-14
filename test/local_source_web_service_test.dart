@@ -40,6 +40,23 @@ void main() {
     expect(healthResponse.statusCode, 200);
     expect(healthResponse.body, contains('READ_SOURCE_WEB_OK'));
 
+    final preflightRequest =
+        http.Request('OPTIONS', Uri.parse('$base/api/sources'))
+          ..headers['Access-Control-Request-Method'] = 'GET'
+          ..headers['Access-Control-Request-Private-Network'] = 'true';
+    final preflightResponse = await http.Response.fromStream(
+      await preflightRequest.send(),
+    );
+    expect(preflightResponse.statusCode, 204);
+    expect(
+      preflightResponse.headers['access-control-allow-private-network'],
+      'true',
+    );
+    expect(
+      preflightResponse.headers['access-control-allow-headers'],
+      contains('x-read-token'),
+    );
+
     final statusResponse = await http.get(
       Uri.parse('$base/api/status'),
       headers: headers,
@@ -76,6 +93,10 @@ void main() {
     expect(
       exportResponse.headers['content-disposition'],
       contains('read-book-sources.json'),
+    );
+    expect(
+      exportResponse.headers['access-control-expose-headers'],
+      contains('content-disposition'),
     );
     final exported = jsonDecode(exportResponse.body) as List;
     expect(exported, hasLength(1));

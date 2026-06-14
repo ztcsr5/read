@@ -1,0 +1,50 @@
+128: // 向下滑动 — 80% 位置预加载下一章
+578: padding: const EdgeInsets.all(24.0),
+622: padding: EdgeInsets.only(
+623: top: MediaQuery.of(context).padding.top + readerState.topPadding,
+647: padding: EdgeInsets.only(
+648: bottom: readerState.footerHeight + readerState.bottomPadding,
+711: padding: EdgeInsets.only(
+712: top: MediaQuery.of(context).padding.top + readerState.topPadding,
+756: if (state.footerHeight <= 0) return const SizedBox.shrink();
+759: final progress = pageCount <= 0
+763: height: state.footerHeight,
+777: '$progress%',
+796: animation: _pageController,
+836: MediaQuery.of(context).padding.top -
+837: MediaQuery.of(context).padding.bottom -
+840: state.footerHeight;
+872: final padding = MediaQuery.of(context).padding;
+878: padding.top.round(),
+879: padding.bottom.round(),
+887: state.footerHeight,
+915: return AppDimensions.paddingLarge +
+977: final topInset = MediaQuery.of(context).padding.top + 8;
+1132: padding: const EdgeInsets.symmetric(vertical: 5),
+1148: padding: EdgeInsets.only(
+1151: top: AppDimensions.paddingLarge,
+1213: padding: EdgeInsets.only(
+1259: final topPad = MediaQuery.of(context).padding.top + state.topPadding;
+1263: padding: EdgeInsets.only(top: topPad, left: pagePad, right: pagePad),
+1275: padding: EdgeInsets.only(bottom: state.paragraphSpacing + 2),
+1384: padding: const EdgeInsets.symmetric(
+1385: horizontal: AppDimensions.paddingMedium,
+1386: vertical: AppDimensions.paddingSmall,
+1392: padding: EdgeInsets.zero,
+1432: padding: EdgeInsets.zero,
+1447: padding: EdgeInsets.zero,
+1644: padding: EdgeInsets.only(top: 14),
+1759: final progress = readerState.chapters.isNotEmpty
+1820: final double sliderMax = (chapterPages.isEmpty ? 1 : chapterPages.length - 1).toDouble();
+1821: final double sliderValue = currentPageIndexInChapter.clamp(0, sliderMax.toInt()).toDouble();
+1824: padding: const EdgeInsets.symmetric(
+1825: horizontal: AppDimensions.paddingLarge,
+1835: value: sliderValue,
+1837: max: sliderMax <= 0.0 ? 1.0 : sliderMax,
+1838: onChanged: sliderMax <= 0.0 ? null : (value) {
+1874: padding: const EdgeInsets.symmetric(
+1875: horizontal: AppDimensions.paddingLarge,
+1876: vertical: AppDimensions.paddingSmall,
+1891: label: '上一章',
+1905: label: '下一章',
+1952: padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

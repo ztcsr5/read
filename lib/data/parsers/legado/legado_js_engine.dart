@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:collection';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:fast_gbk/fast_gbk.dart';
+import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
@@ -20,6 +20,8 @@ class LegadoJsEngine {
 
   JavascriptRuntime? _runtime;
   final Set<String> _loadedLibraryKeys = <String>{};
+  final Set<String> _loadedNodeLibraryKeys = <String>{};
+  final List<String> _loadedNodeLibraries = <String>[];
   Future<String> Function(String request)? _currentAjaxHandler;
   Future<Uint8List> Function(String request)? _currentAjaxBytesHandler;
   final Map<String, dynamic> _javaStorage = <String, dynamic>{};
@@ -34,6 +36,10 @@ class LegadoJsEngine {
       'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 '
       'Mobile/15E148 Safari/604.1';
 
+  bool? _nodeFallbackAvailableCache;
+  String? _nodePathCache;
+  File? _nodeScriptFile;
+
   LegadoJsEngine._internal() {
     try {
       _runtime = getJavascriptRuntime();
@@ -44,7 +50,7 @@ class LegadoJsEngine {
           try {
             return await handler(args.toString());
           } catch (e) {
-            print('Ajax in JS failed: $e');
+            debugPrint('Ajax in JS failed: $e');
             return 'Error: $e';
           }
         }
@@ -74,7 +80,7 @@ class LegadoJsEngine {
             return jsonEncode(resultList);
           }
         } catch (e) {
-          print('Jsoup select failed: $e');
+          debugPrint('Jsoup select failed: $e');
         }
         return '[]';
       });
@@ -88,7 +94,7 @@ class LegadoJsEngine {
               .toList();
           return jsonEncode(resultList);
         } catch (e) {
-          print('Jsoup children failed: $e');
+          debugPrint('Jsoup children failed: $e');
           return '[]';
         }
       });
@@ -125,7 +131,7 @@ class LegadoJsEngine {
           }
           return true;
         } catch (e) {
-          print('Jsoup remove failed: $e');
+          debugPrint('Jsoup remove failed: $e');
           return false;
         }
       });
@@ -148,7 +154,7 @@ class LegadoJsEngine {
           }
           return true;
         } catch (e) {
-          print('Jsoup before failed: $e');
+          debugPrint('Jsoup before failed: $e');
           return false;
         }
       });
@@ -161,7 +167,7 @@ class LegadoJsEngine {
           _javaStorage[key] = value;
           return value;
         } catch (e) {
-          print('java_put failed: $e');
+          debugPrint('java_put failed: $e');
           return null;
         }
       });
@@ -184,6 +190,34 @@ class LegadoJsEngine {
           return _hashHex(
             data['type']?.toString() ?? '',
             data['value']?.toString() ?? '',
+          );
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_hmac_hex', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _hmac(
+            data['algorithm']?.toString() ?? 'HmacSHA1',
+            data['key']?.toString() ?? '',
+            data['value']?.toString() ?? '',
+            base64Output: false,
+          );
+        } catch (_) {
+          return '';
+        }
+      });
+
+      _runtime!.onMessage('java_hmac_base64', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _hmac(
+            data['algorithm']?.toString() ?? 'HmacSHA1',
+            data['key']?.toString() ?? '',
+            data['value']?.toString() ?? '',
+            base64Output: true,
           );
         } catch (_) {
           return '';
@@ -227,6 +261,21 @@ class LegadoJsEngine {
         }
       });
 
+      _runtime!.onMessage('java_cipher_base64_encode', (dynamic args) {
+        try {
+          final data = jsonDecode(args.toString());
+          return _cipherBase64Encode(
+            data['value']?.toString() ?? '',
+            data['key']?.toString() ?? '',
+            data['iv']?.toString() ?? '',
+            data['transformation']?.toString() ?? 'AES/CBC/PKCS5Padding',
+          );
+        } catch (e) {
+          debugPrint('java_cipher_base64_encode failed: $e');
+          return '';
+        }
+      });
+
       _runtime!.onMessage('java_aes_base64_encode', (dynamic args) {
         try {
           final data = jsonDecode(args.toString());
@@ -239,9 +288,13 @@ class LegadoJsEngine {
             ),
           );
         } catch (e) {
-          print('java_aes_base64_encode failed: $e');
+          debugPrint('java_aes_base64_encode failed: $e');
           return '{}';
         }
+      });
+
+      _runtime!.onMessage('java_rsa_decrypt', (dynamic args) {
+        return '';
       });
 
       _runtime!.onMessage('java_aes_base64_decode', (dynamic args) {
@@ -254,7 +307,7 @@ class LegadoJsEngine {
             data['transformation']?.toString() ?? 'AES/CBC/PKCS5Padding',
           );
         } catch (e) {
-          print('java_aes_base64_decode failed: $e');
+          debugPrint('java_aes_base64_decode failed: $e');
           return '';
         }
       });
@@ -270,7 +323,7 @@ class LegadoJsEngine {
           );
           return base64Encode(decoded);
         } catch (e) {
-          print('java_aes_base64_decode_bytes failed: $e');
+          debugPrint('java_aes_base64_decode_bytes failed: $e');
           return '';
         }
       });
@@ -293,7 +346,7 @@ class LegadoJsEngine {
           );
           return base64Encode(decoded);
         } catch (e) {
-          print('java_cipher_bytes_decode failed: $e');
+          debugPrint('java_cipher_bytes_decode failed: $e');
           return '';
         }
       });
@@ -306,7 +359,7 @@ class LegadoJsEngine {
           );
           return _inflateBytesToString(bytes);
         } catch (e) {
-          print('java_inflate_bytes failed: $e');
+          debugPrint('java_inflate_bytes failed: $e');
           return '';
         }
       });
@@ -427,11 +480,15 @@ class LegadoJsEngine {
         }
       });
     } catch (e) {
-      print('JS Engine Initialization Error: $e');
+      debugPrint('JS Engine Initialization Error: $e');
     }
   }
 
   bool get isAvailable => _runtime != null;
+
+  bool get canEvaluate => _runtime != null || _nodeFallbackAvailable;
+
+  bool get isUsingNodeFallback => _runtime == null && _nodeFallbackAvailable;
 
   Future<Uint8List> _fetchAjaxBytes(String rawRequest) async {
     final handler = _currentAjaxBytesHandler;
@@ -528,6 +585,11 @@ class LegadoJsEngine {
     }
     return ttf;
   }
+=======
+  bool get canEvaluate => _runtime != null || _nodeFallbackAvailable;
+
+  bool get isUsingNodeFallback => _runtime == null && _nodeFallbackAvailable;
+>>>>>>> ec10bfd (fix: engine hardening, memory & js leakage patched)
 
   String _ownText(Element element) {
     final parts = <String>[];
@@ -581,8 +643,9 @@ class LegadoJsEngine {
   }
 
   void _initJavaObject() {
-    final jsCode = r'''
+    const jsCode = r'''
       var __cache_store = {};
+      var __storage = {};
       var __b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
       if (typeof btoa === "undefined") {
@@ -1406,8 +1469,82 @@ class LegadoJsEngine {
         decodeURIComponent: function(str) {
           return decodeURIComponent(String(str || ""));
         },
+        uriEncode: function(str) {
+          return java.encodeURI(str);
+        },
+        uriDecode: function(str) {
+          return java.decodeURI(str);
+        },
+        htmlFormat: function(str) {
+          return String(str || "").replace(/<\/?(?:br|p|div|span)[^>]*>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        },
         md5Encode: function(string) {
           return sendMessage("java_md5", String(string || ""));
+        },
+        sha1Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha1", value: String(str || "")})); },
+        sha256Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha256", value: String(str || "")})); },
+        sha512Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha512", value: String(str || "")})); },
+        rsaDecrypt: function(value, key) {
+          return sendMessage("java_rsa_decrypt", JSON.stringify({value: String(value || ""), key: String(key || "")}));
+        },
+        digestHex: function(value, algorithm) {
+          return sendMessage("java_hash", JSON.stringify({
+            type: String(algorithm || "sha256"),
+            value: String(value || "")
+          }));
+        },
+        HMacHex: function(value, algorithm, key) {
+          return sendMessage("java_hmac_hex", JSON.stringify({
+            value: String(value || ""),
+            algorithm: String(algorithm || "HmacSHA1"),
+            key: String(key || "")
+          }));
+        },
+        HMacBase64: function(value, algorithm, key) {
+          return sendMessage("java_hmac_base64", JSON.stringify({
+            value: String(value || ""),
+            algorithm: String(algorithm || "HmacSHA1"),
+            key: String(key || "")
+          }));
+        },
+        aesEncodeToBase64String: function(value, key, iv, transformation) {
+          var actualIv = iv;
+          var actualTransformation = transformation;
+          var third = String(iv || "");
+          if (third.indexOf("/") >= 0 || /^(AES|DES|DESede|TripleDES)/i.test(third)) {
+            actualTransformation = iv;
+            actualIv = transformation;
+          }
+          return sendMessage("java_cipher_base64_encode", JSON.stringify({
+            value: String(value || ""),
+            key: String(key || ""),
+            iv: String(actualIv || ""),
+            transformation: String(actualTransformation || "AES/CBC/PKCS5Padding")
+          }));
+        },
+        desEncodeToBase64String: function(value, key, iv, transformation) {
+          var actualIv = iv;
+          var actualTransformation = transformation;
+          var third = String(iv || "");
+          if (third.indexOf("/") >= 0 || /^(AES|DES|DESede|TripleDES)/i.test(third)) {
+            actualTransformation = iv;
+            actualIv = transformation;
+          }
+          return sendMessage("java_cipher_base64_encode", JSON.stringify({
+            value: String(value || ""),
+            key: String(key || ""),
+            iv: String(actualIv || ""),
+            transformation: String(actualTransformation || "DES/CBC/PKCS5Padding")
+          }));
+        },
+        tripleDESEncodeBase64Str: function(value, key, mode, padding, iv) {
+          var transformation = "DESede/" + String(mode || "CBC") + "/" + String(padding || "PKCS5Padding");
+          return sendMessage("java_cipher_base64_encode", JSON.stringify({
+            value: String(value || ""),
+            key: String(key || ""),
+            iv: String(iv || ""),
+            transformation: transformation
+          }));
         },
         aesBase64DecodeToString: function(value, key, iv, transformation) {
           var actualIv = iv;
@@ -1504,9 +1641,10 @@ class LegadoJsEngine {
         t2s: function(str) { return String(str || ""); },
         s2t: function(str) { return String(str || ""); },
         toNumChapter: function(str) { return String(str || ""); },
-        log: function() { return ""; },
-        toast: function() { return ""; },
-        longToast: function() { return ""; },
+        log: function(msg) {
+          console.log(String(msg || ""));
+          return msg;
+        },
         timeFormat: function(timestamp) {
           return new Date(Number(timestamp || 0)).toLocaleString();
         },
@@ -1529,6 +1667,25 @@ class LegadoJsEngine {
         },
         now: function() {
           return this.currentTimeMillis();
+        },
+        putCache: function(key, value) {
+          return cache.put(key, value);
+        },
+        getCache: function(key) {
+          return cache.get(key);
+        },
+        putField: function(key, value) {
+          __storage[String(key)] = value;
+          return value;
+        },
+        getField: function(key) {
+          return __storage[String(key)] || "";
+        },
+        putVariable: function(key, value) {
+          return java.put(key, value);
+        },
+        getVariable: function(key) {
+          return java.get(key);
         }
       };
 
@@ -1786,6 +1943,28 @@ class LegadoJsEngine {
         };
       }
 
+      var __Mac = {
+        getInstance: function(algorithm) {
+          var mac = {
+            __algorithm: String(algorithm || "HmacSHA1"),
+            __keyBytes: [],
+            init: function(keySpec) {
+              mac.__keyBytes = __javaBytes(keySpec && keySpec.__keyBytes ? keySpec.__keyBytes : keySpec);
+              return mac;
+            },
+            doFinal: function(bytes) {
+              var raw = sendMessage("java_hmac_base64", JSON.stringify({
+                value: __bytesToString(__javaBytes(bytes), "utf-8"),
+                algorithm: mac.__algorithm,
+                key: __bytesToString(mac.__keyBytes, "utf-8")
+              }));
+              return __base64ToBytes(raw);
+            }
+          };
+          return mac;
+        }
+      };
+
       var __Cipher = {
         DECRYPT_MODE: 2,
         ENCRYPT_MODE: 1,
@@ -1869,9 +2048,23 @@ class LegadoJsEngine {
       }
 
       function __JavaImporter() {
-        return {
-          importPackage: function() {},
-          importClass: function() {},
+        var importer = {
+          importPackage: function() {
+            for (var i = 0; i < arguments.length; i++) {
+              var pkg = arguments[i];
+              if (pkg && typeof pkg === "object") {
+                for (var key in pkg) {
+                  if (/^[A-Za-z_$][\w$]*$/.test(key)) importer[key] = pkg[key];
+                }
+              }
+            }
+            return importer;
+          },
+          importClass: function(classRef) {
+            var name = classRef && classRef.__javaSimpleName ? String(classRef.__javaSimpleName) : "";
+            if (name) importer[name] = classRef;
+            return classRef;
+          },
           String: function(value) { return __javaString(value); },
           Integer: __JavaInteger,
           Long: __JavaLong,
@@ -1880,6 +2073,7 @@ class LegadoJsEngine {
           ArrayList: __ArrayList,
           URLEncoder: __JavaURLEncoder,
           URLDecoder: __JavaURLDecoder,
+          Mac: __Mac,
           Cipher: __Cipher,
           SecretKeySpec: __SecretKeySpec,
           IvParameterSpec: __IvParameterSpec,
@@ -1887,6 +2081,7 @@ class LegadoJsEngine {
           ByteArrayOutputStream: __ByteArrayOutputStream,
           InflaterInputStream: __InflaterInputStream
         };
+        return importer;
       }
 
       var JavaImporter = __JavaImporter;
@@ -1906,7 +2101,14 @@ class LegadoJsEngine {
             ByteArrayInputStream: __ByteArrayInputStream,
             ByteArrayOutputStream: __ByteArrayOutputStream
           },
+          security: {
+            interfaces: {},
+            spec: {}
+          },
           util: {
+            UUID: {
+              randomUUID: function() { return java.randomUUID(); }
+            },
             Arrays: __javaArrays,
             Base64: __javaBase64,
             ArrayList: __ArrayList,
@@ -1917,6 +2119,7 @@ class LegadoJsEngine {
         },
         javax: {
           crypto: {
+            Mac: __Mac,
             Cipher: __Cipher,
             spec: {
               SecretKeySpec: __SecretKeySpec,
@@ -1925,6 +2128,18 @@ class LegadoJsEngine {
           }
         },
         android: {
+          os: {
+            Build: {
+              MODEL: "Android",
+              MANUFACTURER: "Android",
+              BRAND: "Android"
+            }
+          },
+          text: {
+            TextUtils: {
+              isEmpty: function(value) { return value == null || String(value).length === 0; }
+            }
+          },
           util: {
             Base64: __javaBase64
           }
@@ -1942,6 +2157,8 @@ class LegadoJsEngine {
       var URLDecoder = __JavaURLDecoder;
 
       var android = {
+        os: Packages.android.os,
+        text: Packages.android.text,
         util: {
           Base64: __javaBase64
         }
@@ -2075,6 +2292,7 @@ class LegadoJsEngine {
 
       __markJavaClass(org.jsoup.Jsoup, "Jsoup");
       __markJavaClass(__ArrayList, "ArrayList");
+      __markJavaClass(__Mac, "Mac");
       __markJavaClass(__Cipher, "Cipher");
       __markJavaClass(__SecretKeySpec, "SecretKeySpec");
       __markJavaClass(__IvParameterSpec, "IvParameterSpec");
@@ -2107,15 +2325,17 @@ class LegadoJsEngine {
     try {
       final result = _runtime!.evaluate(jsCode);
       if (result.isError) {
-        print('JS Engine Initialization Error: ${result.stringResult}');
+        debugPrint('JS Engine Initialization Error: ${result.stringResult}');
       }
     } catch (e) {
-      print('JS Engine init failed: $e');
+      debugPrint('JS Engine init failed: $e');
     }
   }
 
   String evaluate(String jsCode, {Map<String, dynamic>? variables}) {
-    if (_runtime == null) return '';
+    if (_runtime == null) {
+      return _evaluateWithNodeFallbackSync(jsCode, variables: variables);
+    }
     _injectVariables(variables);
 
     try {
@@ -2123,7 +2343,7 @@ class LegadoJsEngine {
       if (result.isError) throw Exception(result.stringResult);
       return _stringifyResult(result);
     } catch (e) {
-      print('JS Eval failed: $e');
+      debugPrint('JS Eval failed: $e');
       throw Exception('JS执行异常: $e');
     } finally {
       _jsoupDocuments.clear();
@@ -2138,7 +2358,13 @@ class LegadoJsEngine {
     Future<Uint8List> Function(String request)? ajaxBytes,
     int maxRequests = 12,
   }) async {
-    if (_runtime == null) return '';
+    if (_runtime == null) {
+      return _evaluateWithNodeFallback(
+        jsCode,
+        variables: variables,
+        libraries: libraries,
+      );
+    }
 
     _currentAjaxHandler = ajax;
     _currentAjaxBytesHandler = ajaxBytes;
@@ -2155,7 +2381,7 @@ class LegadoJsEngine {
       }
       return _stringifyResult(result);
     } catch (e) {
-      print('JS Eval with AJAX failed: $e');
+      debugPrint('JS Eval with AJAX failed: $e');
       rethrow;
     } finally {
       _currentAjaxHandler = null;
@@ -2165,7 +2391,17 @@ class LegadoJsEngine {
   }
 
   void loadLibraries(Iterable<String> libraries) {
-    if (_runtime == null) return;
+    if (_runtime == null) {
+      for (final library in libraries) {
+        final code = library.trim();
+        if (code.isEmpty) continue;
+        final key = code.hashCode.toString();
+        if (_loadedNodeLibraryKeys.add(key)) {
+          _loadedNodeLibraries.add(code);
+        }
+      }
+      return;
+    }
     for (final library in libraries) {
       final code = library.trim();
       if (code.isEmpty) continue;
@@ -2177,45 +2413,747 @@ class LegadoJsEngine {
           _loadedLibraryKeys.add(key);
         }
       } catch (e) {
-        print('JS library load failed: $e');
+        debugPrint('JS library load failed: $e');
       }
     }
   }
 
-  void _injectVariables(Map<String, dynamic>? variables) {
-    if (_runtime == null) return;
-    final Map<String, dynamic> vars = <String, dynamic>{};
+  Map<String, dynamic> _normalizedVariables(Map<String, dynamic>? variables) {
+    final vars = <String, dynamic>{};
     if (variables != null) {
       vars.addAll(variables);
     }
 
     // Alias data flow
-    if (vars.containsKey('result') && !vars.containsKey('input'))
+    if (vars.containsKey('result') && !vars.containsKey('input')) {
       vars['input'] = vars['result'];
-    if (vars.containsKey('result') && !vars.containsKey('src'))
+    }
+    if (vars.containsKey('result') && !vars.containsKey('src')) {
       vars['src'] = vars['result'];
-    if (vars.containsKey('input') && !vars.containsKey('result'))
+    }
+    if (vars.containsKey('input') && !vars.containsKey('result')) {
       vars['result'] = vars['input'];
-    if (vars.containsKey('input') && !vars.containsKey('src'))
+    }
+    if (vars.containsKey('input') && !vars.containsKey('src')) {
       vars['src'] = vars['input'];
-    if (vars.containsKey('src') && !vars.containsKey('result'))
+    }
+    if (vars.containsKey('src') && !vars.containsKey('result')) {
       vars['result'] = vars['src'];
-    if (vars.containsKey('src') && !vars.containsKey('input'))
+    }
+    if (vars.containsKey('src') && !vars.containsKey('input')) {
       vars['input'] = vars['src'];
+    }
 
     // Alias URL
-    if (vars.containsKey('baseUrl') && !vars.containsKey('base_url'))
+    if (vars.containsKey('baseUrl') && !vars.containsKey('base_url')) {
       vars['base_url'] = vars['baseUrl'];
-    if (vars.containsKey('baseUrl') && !vars.containsKey('url'))
+    }
+    if (vars.containsKey('baseUrl') && !vars.containsKey('url')) {
       vars['url'] = vars['baseUrl'];
-    if (vars.containsKey('base_url') && !vars.containsKey('baseUrl'))
+    }
+    if (vars.containsKey('base_url') && !vars.containsKey('baseUrl')) {
       vars['baseUrl'] = vars['base_url'];
-    if (vars.containsKey('base_url') && !vars.containsKey('url'))
+    }
+    if (vars.containsKey('base_url') && !vars.containsKey('url')) {
       vars['url'] = vars['base_url'];
-    if (vars.containsKey('url') && !vars.containsKey('baseUrl'))
+    }
+    if (vars.containsKey('url') && !vars.containsKey('baseUrl')) {
       vars['baseUrl'] = vars['url'];
-    if (vars.containsKey('url') && !vars.containsKey('base_url'))
+    }
+    if (vars.containsKey('url') && !vars.containsKey('base_url')) {
       vars['base_url'] = vars['url'];
+    }
+
+    return vars;
+  }
+
+  bool get _nodeFallbackAvailable {
+    if (kIsWeb) return false;
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return false;
+    }
+    if (Platform.environment['LEGADO_DISABLE_NODE_JS_FALLBACK'] == '1') {
+      return false;
+    }
+    final cached = _nodeFallbackAvailableCache;
+    if (cached != null) return cached;
+    final path = _resolveNodePath();
+    final available = path != null && File(path).existsSync();
+    _nodeFallbackAvailableCache = available;
+    return available;
+  }
+
+  String? _resolveNodePath() {
+    final cached = _nodePathCache;
+    if (cached != null) return cached;
+
+    final envPath = Platform.environment['LEGADO_NODE_PATH'];
+    if (envPath != null && envPath.trim().isNotEmpty) {
+      final file = File(envPath.trim());
+      if (file.existsSync()) {
+        _nodePathCache = file.path;
+        return _nodePathCache;
+      }
+    }
+
+    final candidates = <String>[if (Platform.isWindows) r'D:\Node\node.exe'];
+    for (final candidate in candidates) {
+      final file = File(candidate);
+      if (file.existsSync()) {
+        _nodePathCache = file.path;
+        return _nodePathCache;
+      }
+    }
+
+    try {
+      final result = Process.runSync(
+        Platform.isWindows ? 'where.exe' : 'which',
+        ['node'],
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
+      if (result.exitCode == 0) {
+        final first = result.stdout
+            .toString()
+            .split(RegExp(r'\r?\n'))
+            .map((line) => line.trim())
+            .firstWhere((line) => line.isNotEmpty, orElse: () => '');
+        if (first.isNotEmpty && File(first).existsSync()) {
+          _nodePathCache = first;
+          return _nodePathCache;
+        }
+      }
+    } catch (_) {
+      // Node is optional. QuickJS remains the production runtime.
+    }
+    return null;
+  }
+
+  String _evaluateWithNodeFallbackSync(
+    String jsCode, {
+    Map<String, dynamic>? variables,
+  }) {
+    if (!_nodeFallbackAvailable) return '';
+    final payloadFile = _writeNodePayloadFile(
+      _nodePayload(jsCode, variables: variables, libraries: const []),
+    );
+    try {
+      final result = Process.runSync(
+        _resolveNodePath()!,
+        [_ensureNodeScriptPath(), payloadFile.path],
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
+      return _decodeNodeResult(result.exitCode, result.stdout, result.stderr);
+    } catch (e) {
+      throw Exception('JS鎵ц寮傚父: $e');
+    } finally {
+      try {
+        if (payloadFile.existsSync()) payloadFile.deleteSync();
+        final parent = payloadFile.parent;
+        if (parent.existsSync()) parent.deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  Future<String> _evaluateWithNodeFallback(
+    String jsCode, {
+    Map<String, dynamic>? variables,
+    Iterable<String> libraries = const [],
+  }) async {
+    if (!_nodeFallbackAvailable) return '';
+    final payloadFile = _writeNodePayloadFile(
+      _nodePayload(jsCode, variables: variables, libraries: libraries),
+    );
+    try {
+      final result = await Process.run(
+        _resolveNodePath()!,
+        [_ensureNodeScriptPath(), payloadFile.path],
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
+      return _decodeNodeResult(result.exitCode, result.stdout, result.stderr);
+    } catch (e) {
+      throw Exception('JS鎵ц寮傚父: $e');
+    } finally {
+      try {
+        if (payloadFile.existsSync()) await payloadFile.delete();
+        final parent = payloadFile.parent;
+        if (await parent.exists()) await parent.delete();
+      } catch (_) {}
+    }
+  }
+
+  Map<String, dynamic> _nodePayload(
+    String jsCode, {
+    Map<String, dynamic>? variables,
+    Iterable<String> libraries = const [],
+  }) {
+    return {
+      'code': _prepareCode(jsCode),
+      'variables': _normalizedVariables(variables),
+      'storage': _javaStorage,
+      'libraries': [..._loadedNodeLibraries, ...libraries],
+    };
+  }
+
+  String _decodeNodeResult(int exitCode, dynamic stdout, dynamic stderr) {
+    final output = stdout?.toString().trim() ?? '';
+    if (exitCode != 0) {
+      final err = stderr?.toString().trim() ?? '';
+      throw Exception(err.isEmpty ? 'Node exited with code $exitCode' : err);
+    }
+    if (output.isEmpty) return '';
+    final decoded = jsonDecode(output);
+    if (decoded is! Map || decoded['ok'] != true) {
+      throw Exception(decoded.toString());
+    }
+    final storage = decoded['storage'];
+    if (storage is Map) {
+      _javaStorage
+        ..clear()
+        ..addAll(storage.map((key, value) => MapEntry(key.toString(), value)));
+    }
+    return decoded['result']?.toString() ?? '';
+  }
+
+  String _ensureNodeScriptPath() {
+    final existing = _nodeScriptFile;
+    if (existing != null && existing.existsSync()) return existing.path;
+    final dir = Directory.systemTemp.createTempSync('legado_node_js_');
+    final file = File('${dir.path}${Platform.pathSeparator}runner.cjs');
+    file.writeAsStringSync(_nodeFallbackScript, encoding: utf8);
+    _nodeScriptFile = file;
+    return file.path;
+  }
+
+  File _writeNodePayloadFile(Map<String, dynamic> payload) {
+    final dir = Directory.systemTemp.createTempSync('legado_node_payload_');
+    final file = File('${dir.path}${Platform.pathSeparator}payload.json');
+    file.writeAsStringSync(jsonEncode(payload), encoding: utf8);
+    return file;
+  }
+
+  static const String _nodeFallbackScript = r'''
+const fs = require("fs");
+const crypto = require("crypto");
+const { TextDecoder } = require("util");
+
+const payloadPath = process.argv[2];
+const payload = JSON.parse(fs.readFileSync(payloadPath || 0, "utf8") || "{}");
+const __storage = Object.assign({}, payload.storage || {});
+const __vars = Object.assign({}, payload.variables || {});
+const __libraries = Array.isArray(payload.libraries) ? payload.libraries : [];
+const __ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+console.log = function() {};
+console.warn = function() {};
+console.error = function() {};
+
+Object.assign(globalThis, __vars);
+try {
+  if (globalThis.result != null && globalThis.$ == null) {
+    globalThis.$ = typeof globalThis.result === "string"
+      ? JSON.parse(globalThis.result)
+      : globalThis.result;
+  }
+} catch (_) {}
+
+function __str(value) {
+  return value == null ? "" : String(value);
+}
+
+function __looseLegadoJs(code) {
+  return __str(code)
+    .replace(/<\/?js>/gi, "")
+    .replace(/\b(let|const)\s+/g, "var ");
+}
+
+function __hash(algorithm, value) {
+  return crypto.createHash(String(algorithm || "md5").toLowerCase().replace(/^sha-/, "sha")).update(__str(value)).digest("hex");
+}
+
+function __hmacHex(value, algorithm, key) {
+  let alg = String(algorithm || "HmacMD5").toLowerCase().replace(/^hmac-?/, "");
+  if (alg === "sha") alg = "sha1";
+  return crypto.createHmac(alg, __str(key)).update(__str(value)).digest("hex");
+}
+
+function __jsonPathValue(sourceValue, path) {
+  let source = sourceValue;
+  try {
+    if (typeof source === "string") source = JSON.parse(source);
+  } catch (_) {
+    return "";
+  }
+  let p = String(path || "").trim();
+  if (!p || p === "$") return typeof source === "object" ? JSON.stringify(source) : __str(source);
+  const deep = /^\$\.\.?(.+)$/.exec(p);
+  if (p.indexOf("..") >= 0) {
+    const key = p.split("..").pop().replace(/^\./, "").replace(/\[.*$/, "");
+    const found = [];
+    (function walk(node) {
+      if (node == null) return;
+      if (Array.isArray(node)) {
+        node.forEach(walk);
+      } else if (typeof node === "object") {
+        if (Object.prototype.hasOwnProperty.call(node, key)) found.push(node[key]);
+        Object.keys(node).forEach(k => walk(node[k]));
+      }
+    })(source);
+    const value = found.length ? found[0] : "";
+    return typeof value === "object" ? JSON.stringify(value) : __str(value);
+  }
+  p = p.replace(/^\$\.?/, "").replace(/\[(\d+)\]/g, ".$1");
+  let current = source;
+  for (const part of p.split(".")) {
+    if (!part) continue;
+    if (Array.isArray(current)) {
+      const index = Number(part);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) return "";
+      current = current[index];
+    } else if (current && Object.prototype.hasOwnProperty.call(current, part)) {
+      current = current[part];
+    } else {
+      return "";
+    }
+  }
+  return typeof current === "object" ? JSON.stringify(current) : __str(current);
+}
+
+function __resolveUrl(rawUrl) {
+  const text = __str(rawUrl).trim();
+  if (!text) return text;
+  try {
+    return new URL(text).toString();
+  } catch (_) {
+    const base = __str(globalThis.baseUrl || globalThis.base_url || globalThis.url || (globalThis.source && globalThis.source.bookSourceUrl) || "");
+    try {
+      return base ? new URL(text, base).toString() : text;
+    } catch (_) {
+      return text;
+    }
+  }
+}
+
+function __splitRequest(request) {
+  const text = __str(request);
+  let url = text;
+  let config = {};
+  const comma = text.indexOf(",");
+  if (comma > 0) {
+    const tail = text.slice(comma + 1).trim();
+    if (tail.startsWith("{")) {
+      try {
+        config = JSON.parse(tail);
+        url = text.slice(0, comma);
+      } catch (_) {}
+    }
+  }
+  return { url: __resolveUrl(url), config };
+}
+
+async function __fetchText(rawUrl, config) {
+  const url = __resolveUrl(rawUrl);
+  config = config || {};
+  const headers = Object.assign({ "User-Agent": __ua }, config.headers || {});
+  if (globalThis.cookieHeader && !headers.Cookie && !headers.cookie) {
+    headers.Cookie = __str(globalThis.cookieHeader);
+  }
+  const method = __str(config.method || "GET").toUpperCase() || "GET";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(config.timeout || config.timeoutMs || 15000));
+  try {
+    const init = { method, headers, signal: controller.signal };
+    if (method !== "GET" && method !== "HEAD" && config.body != null) {
+      init.body = typeof config.body === "string" ? config.body : JSON.stringify(config.body);
+    }
+    const response = await fetch(url, init);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get("content-type") || "";
+    const charsetMatch = /charset\s*=\s*([^;\s]+)/i.exec(contentType);
+    const charset = charsetMatch ? charsetMatch[1].toLowerCase() : "utf-8";
+    try {
+      return new TextDecoder(charset).decode(buffer);
+    } catch (_) {
+      return buffer.toString("utf8");
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function __ajax(request) {
+  const parsed = __splitRequest(request);
+  return __fetchText(parsed.url, parsed.config);
+}
+
+function __responseProxy(url, config) {
+  let cached;
+  return {
+    body: async function() {
+      if (cached === undefined) cached = await __fetchText(url, config || {});
+      return cached;
+    },
+    text: async function() { return this.body(); },
+    string: async function() { return this.body(); },
+    json: async function() { return JSON.parse(await this.body()); },
+    code: function() { return 200; },
+    statusCode: function() { return 200; },
+    headers: function() { return {}; },
+    toString: function() { return cached == null ? "" : String(cached); }
+  };
+}
+
+function __base64Encode(value) {
+  return Buffer.from(__str(value), "utf8").toString("base64");
+}
+
+function __base64Decode(value) {
+  return Buffer.from(__str(value), "base64").toString("utf8");
+}
+
+function __hexDecode(value) {
+  const text = __str(value).trim();
+  if (text.startsWith("data:")) {
+    const parts = text.split(",");
+    if (parts.length >= 3 && parts[1].toLowerCase() === "base64") {
+      return __base64Decode(parts[2]);
+    }
+  }
+  const hex = text.replace(/\s+/g, "");
+  if (!hex || hex.length % 2 || !/^[0-9a-f]+$/i.test(hex)) return text;
+  return Buffer.from(hex, "hex").toString("utf8");
+}
+
+function __desCompatibleKey(raw) {
+  const key = Buffer.from(raw);
+  if (key.length === 24) return key;
+  if (key.length === 16) return Buffer.concat([key, key.subarray(0, 8)]);
+  if (key.length === 8) return Buffer.concat([key, key, key]);
+  return Buffer.alloc(24);
+}
+
+function __cipherBase64Encode(value, key, iv, transformation) {
+  const upper = __str(transformation || "AES/CBC/PKCS5Padding").toUpperCase();
+  const isDes = upper.indexOf("DES") >= 0;
+  const mode = upper.indexOf("/ECB/") >= 0 ? "ecb" : "cbc";
+  let keyBytes = Buffer.from(__str(key), "utf8");
+  let algorithm = "";
+  let blockSize = 16;
+  if (isDes) {
+    keyBytes = __desCompatibleKey(keyBytes);
+    algorithm = mode === "ecb" ? "des-ede3-ecb" : "des-ede3-cbc";
+    blockSize = 8;
+  } else {
+    const bits = keyBytes.length * 8;
+    if (![128, 192, 256].includes(bits)) return "";
+    algorithm = "aes-" + bits + "-" + mode;
+  }
+  let ivBytes = null;
+  if (mode !== "ecb") {
+    ivBytes = Buffer.from(__str(iv), "utf8");
+    if (ivBytes.length !== blockSize) ivBytes = Buffer.alloc(blockSize);
+  }
+  try {
+    const cipher = crypto.createCipheriv(algorithm, keyBytes, ivBytes);
+    return Buffer.concat([
+      cipher.update(Buffer.from(__str(value), "utf8")),
+      cipher.final()
+    ]).toString("base64");
+  } catch (_) {
+    return "";
+  }
+}
+
+function __normalizeTransformation(third, fourth, fallback) {
+  const t = __str(third);
+  if (t.indexOf("/") >= 0 || /^(AES|DES|DESede|TripleDES)/i.test(t)) {
+    return { transformation: t || fallback, iv: fourth };
+  }
+  return { transformation: fourth || fallback, iv: third };
+}
+
+const java = {
+  put: function(key, value) {
+    const k = __str(key);
+    if (k.startsWith("http://") || k.startsWith("https://")) {
+      return __responseProxy(k, { method: "PUT", body: value == null ? "" : __str(value) });
+    }
+    __storage[k] = value;
+    return value == null ? "" : value;
+  },
+  get: function(key, headers) {
+    const k = __str(key);
+    if (k.startsWith("http://") || k.startsWith("https://")) {
+      return __responseProxy(k, { method: "GET", headers: headers || {} });
+    }
+    const value = __storage[k];
+    return value == null ? "" : value;
+  },
+  ajax: __ajax,
+  post: function(url, body, headers) {
+    return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} });
+  },
+  fetch: function(url, options) {
+    return __responseProxy(url, options || {});
+  },
+  connect: function(url) {
+    const config = { method: "GET", headers: {}, body: "" };
+    const chain = {
+      header: function(k, v) { if (k != null) config.headers[__str(k)] = __str(v); return chain; },
+      headers: function(value) {
+        if (typeof value === "string") {
+          try { value = JSON.parse(value); } catch (_) { value = {}; }
+        }
+        Object.assign(config.headers, value || {});
+        return chain;
+      },
+      cookie: function(value) { if (value != null) config.headers.Cookie = __str(value); return chain; },
+      cookies: function(value) { if (value != null) config.headers.Cookie = __str(value); return chain; },
+      timeout: function(value) { if (value != null) config.timeoutMs = Number(value); return chain; },
+      ignoreContentType: function() { return chain; },
+      followRedirects: function() { return chain; },
+      get: function() { config.method = "GET"; return chain; },
+      post: function(body) { config.method = "POST"; config.body = body == null ? "" : __str(body); return chain; },
+      data: function(body) { config.body = body == null ? "" : __str(body); return chain; },
+      requestBody: function(body) { config.body = body == null ? "" : __str(body); return chain; },
+      raw: function() { return chain; },
+      request: function() { return chain; },
+      body: async function() { return __fetchText(url, config); },
+      execute: async function() { return chain.body(); },
+      url: function() { return __resolveUrl(url); },
+      toString: function() { return __resolveUrl(url); }
+    };
+    return chain;
+  },
+  getString: function(path, sourceValue) {
+    if (arguments.length > 1) {
+      const value = __jsonPathValue(sourceValue, path);
+      return value === "" ? __str(sourceValue) : value;
+    }
+    const stored = java.get(path);
+    if (stored !== "") return __str(stored);
+    if (__str(path).startsWith("$") && globalThis.result != null) {
+      return __jsonPathValue(globalThis.result, path);
+    }
+    return "";
+  },
+  getInt: function(path, def) { const n = parseInt(java.getString(path, def == null ? "0" : def), 10); return Number.isNaN(n) ? Number(def || 0) : n; },
+  getLong: function(path, def) { return java.getInt(path, def); },
+  getDouble: function(path, def) { const n = parseFloat(java.getString(path, def == null ? "0" : def)); return Number.isNaN(n) ? Number(def || 0) : n; },
+  getStringList: function(path) {
+    const value = java.getString(path, "[]");
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_) { return value ? __str(value).split(",") : []; }
+  },
+  getElement: function(path) { return java.getString(path); },
+  getElements: function() { return []; },
+  setContent: function(value) { globalThis.result = value == null ? "" : __str(value); return globalThis.result; },
+  md5Encode: function(value) { return __hash("md5", value); },
+  md5: function(value) { return __hash("md5", value); },
+  digestHex: function(value, algorithm) { return __hash(algorithm || "sha256", value); },
+  HMacHex: function(value, algorithm, key) { return __hmacHex(value, algorithm, key); },
+  HMacBase64: function(value, algorithm, key) {
+    let alg = __str(algorithm || "HmacSHA1").toLowerCase().replace(/^hmac-?/, "");
+    return crypto.createHmac(alg, __str(key)).update(__str(value)).digest("base64");
+  },
+  aesEncodeToBase64String: function(value, key, iv, transformation) {
+    const normalized = __normalizeTransformation(iv, transformation, "AES/CBC/PKCS5Padding");
+    return __cipherBase64Encode(value, key, normalized.iv, normalized.transformation);
+  },
+  desEncodeToBase64String: function(value, key, iv, transformation) {
+    const normalized = __normalizeTransformation(iv, transformation, "DES/CBC/PKCS5Padding");
+    return __cipherBase64Encode(value, key, normalized.iv, normalized.transformation);
+  },
+  tripleDESEncodeBase64Str: function(value, key, mode, padding, iv) {
+    const transformation = "DESede/" + __str(mode || "CBC") + "/" + __str(padding || "PKCS5Padding");
+    return __cipherBase64Encode(value, key, iv || "", transformation);
+  },
+  cipherEncodeToBase64String: function(value, key, iv, transformation) {
+    const normalized = __normalizeTransformation(iv, transformation, "AES/CBC/PKCS5Padding");
+    return __cipherBase64Encode(value, key, normalized.iv, normalized.transformation);
+  },
+  base64Encode: __base64Encode,
+  base64Decode: __base64Decode,
+  base64DecodeToString: __base64Decode,
+  hexDecodeToString: __hexDecode,
+  encodeURI: function(value) { return encodeURI(__str(value)); },
+  encodeURIComponent: function(value) { return encodeURIComponent(__str(value)); },
+  decodeURI: function(value) { return decodeURI(__str(value)); },
+  decodeURIComponent: function(value) { return decodeURIComponent(__str(value)); },
+  randomUUID: function() { return crypto.randomUUID(); },
+  uuid: function() { return crypto.randomUUID(); },
+  currentTimeMillis: function() { return Date.now(); },
+  now: function() { return Date.now(); },
+  timeFormat: function(timestamp) { return new Date(Number(timestamp || Date.now())).toISOString().replace("T", " ").substring(0, 19); },
+  timeFormatUTC: function(timestamp) { return new Date(Number(timestamp || Date.now())).toISOString().replace("T", " ").substring(0, 19); },
+  t2s: function(value) { return __str(value); },
+  s2t: function(value) { return __str(value); },
+  toNumChapter: function(value) { return __str(value); },
+  getCookie: function() { return __str(globalThis.cookieHeader || ""); },
+  getWebViewUA: function() { return __ua; },
+  startBrowser: function() { return ""; },
+  startBrowserAwait: function() { return ""; },
+  webView: function() { return ""; },
+  log: function() { return ""; },
+  toast: function() { return ""; },
+  longToast: function() { return ""; }
+};
+
+const cookie = {
+  getCookie: function() { return __str(globalThis.cookieHeader || ""); },
+  getKey: function(url, key) {
+    const name = __str(key);
+    return __str(globalThis.cookieHeader || "").split(";").map(v => v.trim()).reduce((found, part) => {
+      if (found) return found;
+      const pos = part.indexOf("=");
+      return pos > 0 && part.slice(0, pos).trim() === name ? part.slice(pos + 1).trim() : "";
+    }, "");
+  },
+  setCookie: function(value) { globalThis.cookieHeader = __str(value); return globalThis.cookieHeader; },
+  removeCookie: function() { globalThis.cookieHeader = ""; return true; }
+};
+
+function __installSourceAndBook() {
+  if (globalThis.source == null || typeof globalThis.source !== "object") globalThis.source = {};
+  source.getKey = function() { return source.key || source.bookSourceUrl || source.bookSourceUrlName || ""; };
+  source.getVariable = function(key) {
+    if (arguments.length > 0 && key != null && __str(key) !== "") return java.get("source.variable." + __str(key));
+    return source.variable || java.get("source.variable") || "";
+  };
+  source.setVariable = function(key, value) {
+    if (arguments.length > 1) {
+      java.put("source.variable." + __str(key), value == null ? "" : __str(value));
+      return value == null ? "" : __str(value);
+    }
+    source.variable = key == null ? "" : __str(key);
+    java.put("source.variable", source.variable);
+    return source.variable;
+  };
+  source.getVariableMap = function() {
+    let parsed = {};
+    try { parsed = JSON.parse(source.getVariable() || "{}"); } catch (_) {}
+    return { get: function(k) { const value = parsed[__str(k)]; return value == null ? "" : value; } };
+  };
+  source.getLoginInfoMap = function() { return { get: function(k) { return java.get("source.login." + __str(k)); } }; };
+  source.putLoginHeader = function(k, v) { return java.put("source.loginHeader." + __str(k || ""), v == null ? "" : __str(v)); };
+  source.getLoginHeader = function(k) { return java.get("source.loginHeader." + __str(k || "")); };
+  if (globalThis.book == null || typeof globalThis.book !== "object") globalThis.book = {};
+  book.getVariable = function(key) {
+    if (arguments.length > 0 && key != null && __str(key) !== "") return java.get("book.variable." + __str(key));
+    return book.variable || java.get("book.variable") || "";
+  };
+  book.setVariable = function(key, value) {
+    if (arguments.length > 1) return java.put("book.variable." + __str(key), value == null ? "" : __str(value));
+    book.variable = key == null ? "" : __str(key);
+    java.put("book.variable", book.variable);
+    return book.variable;
+  };
+}
+
+globalThis.java = java;
+globalThis.cookie = cookie;
+if (!String.prototype.getBytes) {
+  Object.defineProperty(String.prototype, "getBytes", {
+    value: function() { return Array.from(Buffer.from(String(this), "utf8")); },
+    enumerable: false
+  });
+}
+function __nodeBytes(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (Array.isArray(value)) return Buffer.from(value.map(v => Number(v) & 0xff));
+  if (value && value.__keyBytes) return __nodeBytes(value.__keyBytes);
+  return Buffer.from(__str(value), "utf8");
+}
+function __nodeSecretKeySpec(bytes, algorithm) {
+  return { __keyBytes: __nodeBytes(bytes), algorithm: __str(algorithm) };
+}
+const __nodeMac = {
+  getInstance: function(algorithm) {
+    const state = { algorithm: __str(algorithm || "HmacSHA1"), key: Buffer.alloc(0) };
+    return {
+      init: function(keySpec) { state.key = __nodeBytes(keySpec && keySpec.__keyBytes ? keySpec.__keyBytes : keySpec); },
+      doFinal: function(bytes) {
+        const alg = state.algorithm.toLowerCase().replace(/^hmac-?/, "");
+        return Array.from(crypto.createHmac(alg, state.key).update(__nodeBytes(bytes)).digest());
+      }
+    };
+  }
+};
+const __nodeBase64 = {
+  encodeToString: function(v) { return Buffer.from(__nodeBytes(v)).toString("base64"); },
+  decode: function(v) { return Array.from(Buffer.from(__str(v), "base64")); }
+};
+globalThis.Packages = globalThis.Packages || {
+  java: {
+    lang: {
+      String: function(v) { return new String(__str(v)); },
+      Thread: { sleep: function() {} }
+    },
+    io: {},
+    security: { interfaces: {}, spec: {} },
+    util: {
+      UUID: { randomUUID: function() { return crypto.randomUUID(); } },
+      Base64: __nodeBase64
+    }
+  },
+  javax: {
+    crypto: {
+      Mac: __nodeMac,
+      spec: { SecretKeySpec: __nodeSecretKeySpec }
+    }
+  },
+  android: {
+    os: { Build: { MODEL: "Android", MANUFACTURER: "Android", BRAND: "Android" } },
+    text: { TextUtils: { isEmpty: function(value) { return value == null || __str(value).length === 0; } } },
+    util: { Base64: __nodeBase64 }
+  }
+};
+globalThis.Packages.util = globalThis.Packages.java.util;
+globalThis.java.lang = globalThis.Packages.java.lang;
+globalThis.java.util = globalThis.Packages.java.util;
+globalThis.JavaImporter = function() {
+  return {
+    importPackage: function() {},
+    importClass: function() {},
+    Mac: __nodeMac,
+    SecretKeySpec: __nodeSecretKeySpec,
+    String: globalThis.Packages.java.lang.String
+  };
+};
+globalThis.importClass = function(value) { return value; };
+globalThis.importPackage = function(value) { return value; };
+globalThis.esoTools = { md5Encode: java.md5Encode, base64Encode: java.base64Encode, base64Decode: java.base64Decode };
+__installSourceAndBook();
+
+async function __stringifyResult(value) {
+  if (value && typeof value.then === "function") value = await value;
+  if (value === undefined && globalThis.result !== undefined) value = globalThis.result;
+  if (value && typeof value.body === "function") value = await value.body();
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Buffer.isBuffer(value)) return value.toString("utf8");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+(async function main() {
+  for (const library of __libraries) {
+    if (!__str(library).trim()) continue;
+    (0, eval)(__looseLegadoJs(library));
+  }
+  const value = await (0, eval)(__looseLegadoJs(payload.code || ""));
+  const result = await __stringifyResult(value);
+  process.stdout.write(JSON.stringify({ ok: true, result, storage: __storage }));
+})().catch(error => {
+  process.stderr.write(error && error.stack ? error.stack : String(error));
+  process.exit(1);
+});
+''';
+
+  void _injectVariables(Map<String, dynamic>? variables) {
+    if (_runtime == null) return;
+    final vars = _normalizedVariables(variables);
 
     try {
       vars.forEach((key, value) {
@@ -2312,7 +3250,7 @@ class LegadoJsEngine {
         }
       ''');
     } catch (e) {
-      print('JS variables injection failed: $e');
+      debugPrint('JS variables injection failed: $e');
     }
   }
 
@@ -2367,6 +3305,12 @@ class LegadoJsEngine {
         return '(async () => { return ($codeToRun); })()';
       }
     } else {
+      final clean = codeToRun.trim();
+      if (clean.startsWith('(function(') ||
+          clean.startsWith('(()=>') ||
+          clean.startsWith('(() =>')) {
+        return clean;
+      }
       if (codeToRun.contains('return ') && !codeToRun.contains('function')) {
         codeToRun = '(function() { $codeToRun })()';
       }
@@ -2672,11 +3616,47 @@ class LegadoJsEngine {
     }
   }
 
+  String _cipherBase64Encode(
+    String value,
+    String key,
+    String iv,
+    String transformation,
+  ) {
+    try {
+      final encoded = _cipherProcessBytes(
+        input: Uint8List.fromList(utf8.encode(value)),
+        keyBytes: Uint8List.fromList(utf8.encode(key)),
+        ivBytes: Uint8List.fromList(utf8.encode(iv)),
+        transformation: transformation,
+        encrypting: true,
+      );
+      return base64Encode(encoded);
+    } catch (_) {
+      return '';
+    }
+  }
+
   Uint8List _cipherDecodeBytes({
     required Uint8List input,
     required Uint8List keyBytes,
     required Uint8List ivBytes,
     required String transformation,
+  }) {
+    return _cipherProcessBytes(
+      input: input,
+      keyBytes: keyBytes,
+      ivBytes: ivBytes,
+      transformation: transformation,
+      encrypting: false,
+    );
+  }
+
+  Uint8List _cipherProcessBytes({
+    required Uint8List input,
+    required Uint8List keyBytes,
+    required Uint8List ivBytes,
+    required String transformation,
+    required bool encrypting,
   }) {
     try {
       return _cipherProcessBytes(
@@ -2684,7 +3664,7 @@ class LegadoJsEngine {
         keyBytes: keyBytes,
         ivBytes: ivBytes,
         transformation: transformation,
-        encrypting: false,
+        encrypting: encrypting,
       );
     } catch (_) {
       return Uint8List(0);
@@ -2967,6 +3947,51 @@ class LegadoJsEngine {
     }
   }
 
+  String _hmac(
+    String algorithm,
+    String key,
+    String value, {
+    required bool base64Output,
+  }) {
+    final normalized = algorithm.toLowerCase().replaceFirst(
+      RegExp(r'^hmac-?'),
+      '',
+    );
+    final mac = HMac(_digestForHmac(normalized), _hmacBlockLength(normalized))
+      ..init(KeyParameter(Uint8List.fromList(utf8.encode(key))));
+    final digest = mac.process(Uint8List.fromList(utf8.encode(value)));
+    return base64Output ? base64Encode(digest) : _bytesToHex(digest);
+  }
+
+  dynamic _digestForHmac(String algorithm) {
+    switch (algorithm) {
+      case 'md5':
+        return MD5Digest();
+      case 'sha1':
+        return SHA1Digest();
+      case 'sha224':
+        return SHA224Digest();
+      case 'sha256':
+        return SHA256Digest();
+      case 'sha384':
+        return SHA384Digest();
+      case 'sha512':
+        return SHA512Digest();
+      default:
+        return SHA1Digest();
+    }
+  }
+
+  int _hmacBlockLength(String algorithm) {
+    switch (algorithm) {
+      case 'sha384':
+      case 'sha512':
+        return 128;
+      default:
+        return 64;
+    }
+  }
+
   String _encodeByType(String type, String value) {
     switch (type.toLowerCase()) {
       case 'base64':
@@ -3050,13 +4075,16 @@ class LegadoJsEngine {
 }
 
 class JsCompatibilityTransformer {
-  static String transform(String code) {
+  static String transform(String code, {bool wrapScript = true}) {
     var transformed = code;
 
     final hasJavaCall = RegExp(
-      r'java\.(ajax|post|connect|startBrowser)\b',
+      r'java\.(ajax|post|connect|startBrowser|get|fetch|postForm|ajax_bytes)\b',
     ).hasMatch(transformed);
-    if (!hasJavaCall) {
+    final hasDynamicLoginEval = RegExp(
+      r'eval\s*\(\s*(?:String\s*\(\s*)?source\.loginUrl',
+    ).hasMatch(transformed);
+    if (!hasJavaCall && !hasDynamicLoginEval) {
       return transformed;
     }
 
@@ -3099,15 +4127,42 @@ class JsCompatibilityTransformer {
     );
 
     transformed = transformed.replaceAllMapped(
-      RegExp(r'(?<!await\s+)java\.(ajax|post|connect|startBrowser)\b'),
+      RegExp(r'(?<!await\s+)java\.(ajax|post|connect|startBrowser|get|fetch|postForm|ajax_bytes)\b'),
       (match) => 'await java.${match.group(1)}',
     );
 
-    if (!transformed.contains('await') || _isAsyncIife(transformed)) {
+    if (hasDynamicLoginEval) {
+      transformed = _awaitKnownFunctionCalls(transformed, const ['login']);
+    }
+
+    if (!wrapScript ||
+        !transformed.contains('await') ||
+        _isAsyncIife(transformed)) {
       return transformed;
     }
 
     return '(async function() { ${_returnLastExpression(transformed)} })()';
+  }
+
+  static String _awaitKnownFunctionCalls(String code, Iterable<String> names) {
+    var transformed = code;
+    for (final name in names) {
+      transformed = transformed.replaceAllMapped(
+        RegExp('(^|[^\\w\$.])(${RegExp.escape(name)})\\s*\\('),
+        (match) {
+          final prefix = match.group(1) ?? '';
+          final before = match.input.substring(0, match.start + prefix.length);
+          final tail = before.trimRight();
+          if (tail.endsWith('await') ||
+              tail.endsWith('function') ||
+              tail.endsWith('async function')) {
+            return match.group(0)!;
+          }
+          return '${prefix}await ${match.group(2)}(';
+        },
+      );
+    }
+    return transformed;
   }
 
   static bool _isAsyncIife(String code) {
@@ -3123,13 +4178,13 @@ class JsCompatibilityTransformer {
       return code;
     }
 
-    final split = _lastTopLevelSemicolon(trimmed);
-    final prefix = split < 0 ? '' : trimmed.substring(0, split + 1);
-    final last = split < 0 ? trimmed : trimmed.substring(split + 1).trim();
-    if (last.isEmpty || _isStatementOnly(last)) {
-      return '$trimmed;';
-    }
-    return '$prefix return ($last);';
+    final split = _splitLastTopLevelStatement(trimmed);
+    if (split == null) return '$trimmed;';
+    final prefix = split.$1.trimRight();
+    final last = split.$2.trim();
+    if (last.isEmpty || _isStatementOnly(last)) return '$trimmed;';
+    final body = prefix.isEmpty ? '' : '$prefix\n';
+    return '$body return ($last);';
   }
 
   static bool _isStatementOnly(String text) {
@@ -3139,43 +4194,42 @@ class JsCompatibilityTransformer {
     ).hasMatch(trimmed);
   }
 
-  static int _lastTopLevelSemicolon(String code) {
+  static (String, String)? _splitLastTopLevelStatement(String code) {
     var quote = 0;
-    var escaping = false;
+    var escaped = false;
     var depth = 0;
-    var last = -1;
 
-    for (var i = 0; i < code.length; i++) {
+    for (var i = code.length - 1; i >= 0; i--) {
       final unit = code.codeUnitAt(i);
-      if (escaping) {
-        escaping = false;
-        continue;
-      }
-      if (unit == 0x5C) {
-        escaping = true;
-        continue;
-      }
       if (quote != 0) {
-        if (unit == quote) quote = 0;
+        if (escaped) {
+          escaped = false;
+        } else if (unit == 0x5c) {
+          escaped = true;
+        } else if (unit == quote) {
+          quote = 0;
+        }
         continue;
       }
       if (unit == 0x22 || unit == 0x27 || unit == 0x60) {
         quote = unit;
         continue;
       }
-      if (unit == 0x28 || unit == 0x5B || unit == 0x7B) {
+      if (unit == 0x29 || unit == 0x5d || unit == 0x7d) {
         depth++;
         continue;
       }
-      if (unit == 0x29 || unit == 0x5D || unit == 0x7D) {
-        if (depth > 0) depth--;
+      if (unit == 0x28 || unit == 0x5b || unit == 0x7b) {
+        if (depth > 0) {
+          depth--;
+        }
         continue;
       }
-      if (unit == 0x3B && depth == 0) {
-        last = i;
+      if (depth == 0 && (unit == 0x3b || unit == 0x0a || unit == 0x0d)) {
+        return (code.substring(0, i), code.substring(i + 1));
       }
     }
 
-    return last;
+    return _isStatementOnly(code) ? null : ('', code);
   }
 }

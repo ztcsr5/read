@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 import '../../../data/models/book_source.dart';
 import '../viewmodels/book_source_viewmodel.dart';
@@ -80,12 +81,13 @@ class _SourceJsonEditorPageState extends ConsumerState<SourceJsonEditorPage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
+                      _actionButton('粘贴', _pasteFromClipboard),
                       _actionButton('格式化', _format),
-                      const SizedBox(width: 8),
                       _actionButton('重置', _reset),
-                      const SizedBox(width: 8),
                       _actionButton('校验', _validateOnly),
                     ],
                   ),
@@ -139,7 +141,7 @@ class _SourceJsonEditorPageState extends ConsumerState<SourceJsonEditorPage> {
 
   Widget _actionButton(String label, VoidCallback onPressed) {
     return CupertinoButton(
-      minSize: 32,
+      minimumSize: const Size(0, 32),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       color: CupertinoColors.systemGrey5,
       borderRadius: BorderRadius.circular(8),
@@ -157,12 +159,23 @@ class _SourceJsonEditorPageState extends ConsumerState<SourceJsonEditorPage> {
 
   void _format() {
     try {
-      final decoded = jsonDecode(_controller.text);
+      final decoded = _decodeSingleSourceJson(_controller.text);
       _controller.text = const JsonEncoder.withIndent('  ').convert(decoded);
       setState(() => _error = 'JSON 格式正确');
     } catch (e) {
       setState(() => _error = 'JSON 格式错误: $e');
     }
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) {
+      setState(() => _error = '剪贴板没有可用文本');
+      return;
+    }
+    _controller.text = text;
+    _format();
   }
 
   void _reset() {
@@ -172,16 +185,11 @@ class _SourceJsonEditorPageState extends ConsumerState<SourceJsonEditorPage> {
 
   void _validateOnly() {
     try {
-      final decoded = jsonDecode(_controller.text);
-      if (decoded is! Map) {
-        setState(() => _error = '根节点必须是一个 JSON 对象');
-        return;
-      }
-      final next = BookSource.fromJson(
-        decoded.map((key, value) => MapEntry(key.toString(), value)),
-      );
-      if (next.bookSourceUrl.trim().isEmpty) {
-        setState(() => _error = 'bookSourceUrl 不能为空');
+      final decoded = _decodeSingleSourceJson(_controller.text);
+      final next = _bookSourceFromDecodedJson(decoded);
+      final error = _validateSource(next);
+      if (error != null) {
+        setState(() => _error = error);
         return;
       }
       setState(() => _error = 'JSON 可保存');
@@ -196,13 +204,11 @@ class _SourceJsonEditorPageState extends ConsumerState<SourceJsonEditorPage> {
       _error = null;
     });
     try {
-      final decoded = jsonDecode(_controller.text);
-      if (decoded is! Map) {
-        throw const FormatException('根节点必须是一个 JSON 对象');
-      }
-      final updated = BookSource.fromJson(
-        decoded.map((key, value) => MapEntry(key.toString(), value)),
-      )..id = widget.source.id;
+      final decoded = _decodeSingleSourceJson(_controller.text);
+      final updated = _bookSourceFromDecodedJson(decoded)
+        ..id = widget.source.id;
+      final error = _validateSource(updated);
+      if (error != null) throw FormatException(error);
       await ref.read(bookSourceViewModelProvider.notifier).saveSource(updated);
       if (!mounted) return;
       Navigator.pop(context);
@@ -217,5 +223,43 @@ class _SourceJsonEditorPageState extends ConsumerState<SourceJsonEditorPage> {
 
   String _prettyJson(BookSource source) {
     return const JsonEncoder.withIndent('  ').convert(source.toJson());
+  }
+
+  Map<String, dynamic> _decodeSingleSourceJson(String text) {
+    final decoded = jsonDecode(text);
+    if (decoded is Map) {
+      return decoded.map((key, value) => MapEntry(key.toString(), value));
+    }
+    if (decoded is List && decoded.length == 1 && decoded.first is Map) {
+      return (decoded.first as Map).map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+    }
+    if (decoded is List) {
+      throw const FormatException('这里只编辑单个书源；批量 JSON 请回到书源管理导入');
+    }
+    throw const FormatException('根节点必须是书源 JSON 对象');
+  }
+
+  BookSource _bookSourceFromDecodedJson(Map<String, dynamic> decoded) {
+    return BookSource.fromJson(decoded);
+  }
+
+  String? _validateSource(BookSource source) {
+    if (source.bookSourceName.trim().isEmpty) {
+      return 'bookSourceName 不能为空';
+    }
+    if (source.bookSourceUrl.trim().isEmpty) {
+      return 'bookSourceUrl 不能为空';
+    }
+    if (source.bookSourceType == 0 &&
+        (source.searchUrl?.trim().isEmpty ?? true)) {
+      return '小说源 searchUrl 不能为空';
+    }
+    if (source.bookSourceType == 0 &&
+        (source.ruleSearch?.trim().isEmpty ?? true)) {
+      return '小说源 ruleSearch 不能为空';
+    }
+    return null;
   }
 }

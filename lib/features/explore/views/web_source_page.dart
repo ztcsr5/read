@@ -56,6 +56,22 @@ class _WebSourcePageState extends ConsumerState<WebSourcePage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            CupertinoButton.filled(
+              onPressed: () {
+                context.push('/source_json_editor', extra: _draftSource());
+              },
+              child: const Text('直接粘贴 / 编辑完整 JSON 书源'),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '适合从开源阅读、网页仓库或自己手写 Legado JSON。下面表单只适合简单 CSS 源。',
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.35,
+                color: CupertinoColors.secondaryLabel.resolveFrom(context),
+              ),
+            ),
+            const SizedBox(height: 18),
             _field(_nameController, '书源名称', '例如：某某中文网'),
             _field(_baseUrlController, '网站地址', 'https://example.com'),
             _field(
