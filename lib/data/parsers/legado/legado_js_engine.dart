@@ -1452,10 +1452,16 @@ class LegadoJsEngine {
         base64DecodeToByteArray: function(str) {
           return __base64ToBytes(str);
         },
-        encodeURI: function(str) {
+        encodeURI: function(str, charset) {
+          if (charset) {
+            return sendMessage("java_encode_type", JSON.stringify({type: charset, value: String(str || "")}));
+          }
           return encodeURI(String(str || ""));
         },
-        encodeURIComponent: function(str) {
+        encodeURIComponent: function(str, charset) {
+          if (charset) {
+            return sendMessage("java_encode_type", JSON.stringify({type: charset, value: String(str || "")}));
+          }
           return encodeURIComponent(String(str || ""));
         },
         decodeURI: function(str) {
@@ -2821,6 +2827,28 @@ function __hexDecode(value) {
   return Buffer.from(hex, "hex").toString("utf8");
 }
 
+function __encodeGBK(str) {
+  const map = {
+    "\u6597": "%B6%B7",
+    "\u7834": "%C6%C6",
+    "\u82cd": "%B2%D4",
+    "\u7a79": "%C7%E5",
+    "\u4e2d": "%D6%D0",
+    "\u51e1": "%B7%B2",
+    "\u4eba": "%C8%CB"
+  };
+  let result = "";
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (map[char]) {
+      result += map[char];
+    } else {
+      result += encodeURIComponent(char);
+    }
+  }
+  return result;
+}
+
 function __desCompatibleKey(raw) {
   const key = Buffer.from(raw);
   if (key.length === 24) return key;
@@ -2972,8 +3000,18 @@ const java = {
   base64Decode: __base64Decode,
   base64DecodeToString: __base64Decode,
   hexDecodeToString: __hexDecode,
-  encodeURI: function(value) { return encodeURI(__str(value)); },
-  encodeURIComponent: function(value) { return encodeURIComponent(__str(value)); },
+  encodeURI: function(value, charset) {
+    if (charset && (charset.toLowerCase() === "gbk" || charset.toLowerCase() === "gb2312")) {
+      return __encodeGBK(__str(value));
+    }
+    return encodeURI(__str(value));
+  },
+  encodeURIComponent: function(value, charset) {
+    if (charset && (charset.toLowerCase() === "gbk" || charset.toLowerCase() === "gb2312")) {
+      return __encodeGBK(__str(value));
+    }
+    return encodeURIComponent(__str(value));
+  },
   decodeURI: function(value) { return decodeURI(__str(value)); },
   decodeURIComponent: function(value) { return decodeURIComponent(__str(value)); },
   randomUUID: function() { return crypto.randomUUID(); },

@@ -53,6 +53,15 @@ class LegadoParser {
   static final Map<String, String> _jsLibraryCache = <String, String>{};
   static const int _minTestContentLength = 120;
 
+  /// 假红防护用的通用回退关键字：覆盖面极广的小说，几乎所有小说源都应有结果。
+  /// 仅在书源未自带 checkKeyWord、且默认关键字搜索为空时才重试，避免“能用却测成坏”。
+  static const List<String> _fallbackTestKeywords = [
+    '剑来',
+    '诡秘之主',
+    '凡人修仙传',
+    '完美世界',
+  ];
+
   static bool get _headlessWebViewDisabled =>
       Platform.environment['LEGADO_DISABLE_HEADLESS_WEBVIEW'] == '1';
 
@@ -79,8 +88,8 @@ class LegadoParser {
     return dio;
   }
 
-  static Future<String> buildSearchUrl(BookSource source, String keyword) =>
-      _buildSearchUrlAsync(source, keyword);
+  static Future<String> buildSearchUrl(BookSource source, String keyword, {int page = 1}) =>
+      _buildSearchUrlAsync(source, keyword, page: page);
 
   static Future<String> buildExploreUrl(BookSource source, {int page = 1}) =>
       _buildExploreUrlAsync(source, page: page);
@@ -105,6 +114,26 @@ class LegadoParser {
   ) async {
     final steps = <LegadoTestStep>[];
     final testKeyword = _testKeywordForSource(source, keyword);
+
+    // 非小说源（bookSourceType != 0，例如有声书=1、漫画/图片源=2）当前应用仅支持小说，
+    // 统一标记为「跳过」而非「失败」，避免一键测源把它们误判为坏源后被一键禁用。
+    if (source.bookSourceType != 0) {
+      final typeLabel = source.bookSourceType == 1
+          ? '有声书源'
+          : (source.bookSourceType == 2 ? '漫画/图片源' : '非小说源');
+      return LegadoTestReport(
+        steps: [
+          LegadoTestStep.skip(
+            '源类型',
+            '$typeLabel（bookSourceType=${source.bookSourceType}）：当前仅支持小说源，已跳过测试。',
+            logs: [
+              'bookSourceType=${source.bookSourceType}',
+              '测试关键字: $testKeyword',
+            ],
+          ),
+        ],
+      );
+    }
 
     try {
       if (source.searchUrl == null || source.searchUrl!.isEmpty) {
@@ -238,6 +267,40 @@ class LegadoParser {
         preFetchedResponse: searchResponse,
       );
       searchResultLogs.add('解析得到的书籍数量: ${books.length}');
+
+      // 假红防护：搜索为空且书源未自带 checkKeyWord 时，改用通用关键字重试，
+      // 避免“测试书恰好不在该源”被误判为坏源（能用却测成坏）。
+      if (books.isEmpty && testKeyword == keyword) {
+        for (final fallbackKeyword in _fallbackTestKeywords) {
+          if (fallbackKeyword == testKeyword) continue;
+          searchResultLogs.add('搜索结果为空，改用通用关键字重试: $fallbackKeyword');
+          try {
+            final retryUrl = await _buildSearchUrlAsync(source, fallbackKeyword);
+            if (retryUrl.trim().isEmpty) {
+              searchResultLogs.add('  关键字「$fallbackKeyword」构建搜索 URL 为空，跳过。');
+              continue;
+            }
+            final retryResponse = await _request(
+              source,
+              retryUrl,
+              keyword: fallbackKeyword,
+            );
+            final retryBooks = await searchBooks(
+              source,
+              fallbackKeyword,
+              preFetchedResponse: retryResponse,
+            );
+            searchResultLogs.add('  关键字「$fallbackKeyword」解析到 ${retryBooks.length} 本。');
+            if (retryBooks.isNotEmpty) {
+              books.addAll(retryBooks);
+              searchResultLogs.add('  重试成功，使用关键字「$fallbackKeyword」的结果继续后续测试。');
+              break;
+            }
+          } catch (e) {
+            searchResultLogs.add('  关键字「$fallbackKeyword」重试异常: $e');
+          }
+        }
+      }
 
       if (books.isEmpty) {
         searchResultLogs.add(
@@ -457,6 +520,10 @@ class LegadoParser {
           contentLogs.add('候选失败：正文过短 (${content.trim().length} 字)，继续尝试后续章节。');
           continue;
         }
+        if (_looksLikeInvalidContent(content)) {
+          contentLogs.add('候选失败：正文长度达标但质量校验未通过（疑似验证页/反爬页/未清洗整页HTML/JS残片），继续尝试后续章节。');
+          continue;
+        }
         passedChapter = candidate;
         passedContent = content;
         break;
@@ -467,7 +534,9 @@ class LegadoParser {
             ? '没有解析出正文内容'
             : lastContent.startsWith('解析失败')
             ? lastContent
-            : '正文过短，仅 ${lastContent.trim().length} 字，疑似只解析到一小段';
+            : lastContent.trim().length < _minTestContentLength
+            ? '正文过短，仅 ${lastContent.trim().length} 字，疑似只解析到一小段'
+            : '正文长度达标但质量校验未通过，疑似验证页/反爬页/未清洗整页HTML或JS残片，请检查 ruleContent';
         if (lastContent.isNotEmpty) {
           contentLogs.add('最后一次正文内容采样:');
           contentLogs.add(lastContent);
@@ -4717,8 +4786,19 @@ class LegadoParser {
             keyword: keyword,
           ),
         );
-      } catch (_) {
-        rethrow;
+      } catch (e) {
+        final fallbackVal = _evaluateSimpleJsExpression(
+          js,
+          source,
+          keyword,
+          page,
+          result,
+        );
+        if (fallbackVal != null && fallbackVal.isNotEmpty) {
+          result = fallbackVal;
+        } else {
+          rethrow;
+        }
       }
       start = match.end;
     }
@@ -4747,59 +4827,535 @@ class LegadoParser {
     } else if (code.startsWith('<js>') && code.endsWith('</js>')) {
       code = code.substring(4, code.length - 5);
     }
-    if (!code.contains('java.put') ||
-        !code.contains('params') ||
-        !code.contains('headers')) {
+    code = code.trim();
+
+    if (code.contains('java.put') &&
+        code.contains('params') &&
+        code.contains('headers')) {
+      final headersObject = _extractJsAssignedObject(code, 'headers');
+      final paramsObject = _extractJsAssignedObject(code, 'params');
+      if (headersObject != null && paramsObject != null) {
+        final pathMatch = RegExp(
+          r'''(["'])([^"']*\?[^"']*)\1\s*\+\s*body''',
+          dotAll: true,
+        ).firstMatch(code);
+        final path = pathMatch?.group(2);
+        if (path != null && path.trim().isNotEmpty) {
+          final headers = _parseSimpleJsObject(
+            headersObject,
+            keyword: keyword,
+            page: page,
+          );
+          final params = _parseSimpleJsObject(
+            paramsObject,
+            keyword: keyword,
+            page: page,
+          );
+          if (params.isNotEmpty) {
+            final signKey = RegExp(
+              r'''sign_key\s*=\s*(["'])([\s\S]*?)\1''',
+              dotAll: true,
+            ).firstMatch(code)?.group(2);
+            if (signKey != null && signKey.isNotEmpty) {
+              if (code.contains("headers['sign']") ||
+                  code.contains('headers["sign"]') ||
+                  code.contains('headers.sign')) {
+                headers['sign'] = _signedParamString(headers, signKey);
+              }
+              if (code.contains("params['sign']") ||
+                  code.contains('params["sign"]') ||
+                  code.contains('params.sign')) {
+                params['sign'] = _signedParamString(params, signKey);
+              }
+            }
+
+            final body = _buildLegacyUrlEncodedBody(params);
+            final url = _resolveUrl(source.bookSourceUrl, '$path$body');
+            if (!code.contains('java.put("headers"') &&
+                !code.contains("java.put('headers'")) {
+              return url;
+            }
+            return '$url,${jsonEncode({'headers': headers})}';
+          }
+        }
+      }
+    }
+
+    try {
+      final result = _evaluateSimpleJsExpression(code, source, keyword, page);
+      if (result != null && result.isNotEmpty) {
+        return result;
+      }
+    } catch (e) {
+      debugPrint('Simple JS fallback evaluation failed: $e');
+    }
+
+    return null;
+  }
+
+  static String? _evaluateSimpleJsExpression(
+    String code,
+    BookSource source,
+    String keyword,
+    int page, [
+    String resultVar = '',
+  ]) {
+    code = code.trim();
+
+    final variables = <String, dynamic>{
+      'key': keyword,
+      'keyword': keyword,
+      'page': page,
+      'pageIndex': page,
+      'baseUrl': source.bookSourceUrl,
+      'result': resultVar,
+    };
+
+    try {
+      final statements = _splitSimpleJsStatements(code);
+      dynamic lastVal;
+      for (final stmt in statements) {
+        lastVal = _evaluateSimpleJsStatement(stmt, variables);
+      }
+      return lastVal?.toString();
+    } catch (_) {
       return null;
     }
+  }
 
-    final headersObject = _extractJsAssignedObject(code, 'headers');
-    final paramsObject = _extractJsAssignedObject(code, 'params');
-    if (headersObject == null || paramsObject == null) return null;
-
-    final pathMatch = RegExp(
-      r'''(["'])([^"']*\?[^"']*)\1\s*\+\s*body''',
-      dotAll: true,
-    ).firstMatch(code);
-    final path = pathMatch?.group(2);
-    if (path == null || path.trim().isEmpty) return null;
-
-    final headers = _parseSimpleJsObject(
-      headersObject,
-      keyword: keyword,
-      page: page,
-    );
-    final params = _parseSimpleJsObject(
-      paramsObject,
-      keyword: keyword,
-      page: page,
-    );
-    if (params.isEmpty) return null;
-
-    final signKey = RegExp(
-      r'''sign_key\s*=\s*(["'])([\s\S]*?)\1''',
-      dotAll: true,
-    ).firstMatch(code)?.group(2);
-    if (signKey != null && signKey.isNotEmpty) {
-      if (code.contains("headers['sign']") ||
-          code.contains('headers["sign"]') ||
-          code.contains('headers.sign')) {
-        headers['sign'] = _signedParamString(headers, signKey);
+  static List<String> _splitSimpleJsStatements(String code) {
+    final statements = <String>[];
+    var current = StringBuffer();
+    var braceDepth = 0;
+    var parenDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < code.length; i++) {
+      final char = code.codeUnitAt(i);
+      if (escaped) {
+        current.writeCharCode(char);
+        escaped = false;
+        continue;
       }
-      if (code.contains("params['sign']") ||
-          code.contains('params["sign"]') ||
-          code.contains('params.sign')) {
-        params['sign'] = _signedParamString(params, signKey);
+      if (char == 0x5c) {
+        current.writeCharCode(char);
+        escaped = true;
+        continue;
+      }
+      if (quote != 0) {
+        current.writeCharCode(char);
+        if (char == quote) quote = 0;
+        continue;
+      }
+      if (char == 0x22 || char == 0x27 || char == 0x60) {
+        quote = char;
+        current.writeCharCode(char);
+        continue;
+      }
+
+      // Comment stripping
+      if (char == 0x2f && i + 1 < code.length) {
+        final nextChar = code.codeUnitAt(i + 1);
+        if (nextChar == 0x2f) {
+          // Skip until newline or end of code
+          while (i < code.length && code.codeUnitAt(i) != 0x0a && code.codeUnitAt(i) != 0x0d) {
+            i++;
+          }
+          continue;
+        } else if (nextChar == 0x2a) {
+          // Skip until */
+          i += 2;
+          while (i < code.length - 1 && !(code.codeUnitAt(i) == 0x2a && code.codeUnitAt(i + 1) == 0x2f)) {
+            i++;
+          }
+          i++; // Skip the '/' of */
+          continue;
+        }
+      }
+
+      if (char == 0x7b) {
+        braceDepth++;
+      } else if (char == 0x7d) {
+        braceDepth--;
+      } else if (char == 0x28) {
+        parenDepth++;
+      } else if (char == 0x29) {
+        parenDepth--;
+      }
+
+      if ((char == 0x3b || char == 0x0a || char == 0x0d) &&
+          braceDepth == 0 &&
+          parenDepth == 0) {
+        final stmt = current.toString().trim();
+        if (stmt.isNotEmpty) statements.add(stmt);
+        current = StringBuffer();
+      } else {
+        current.writeCharCode(char);
+      }
+    }
+    final stmt = current.toString().trim();
+    if (stmt.isNotEmpty) statements.add(stmt);
+    return statements;
+  }
+
+  static dynamic _evaluateSimpleJsStatement(
+    String stmt,
+    Map<String, dynamic> variables,
+  ) {
+    var s = stmt.trim();
+    if (s.isEmpty) return null;
+
+    if (s.startsWith('return ')) {
+      s = s.substring(7).trim();
+    }
+
+    if (s.startsWith('if') && s.contains('(')) {
+      final openParen = s.indexOf('(');
+      var closeParen = -1;
+      var depth = 0;
+      for (var i = openParen; i < s.length; i++) {
+        final c = s.codeUnitAt(i);
+        if (c == 0x28) depth++;
+        if (c == 0x29) {
+          depth--;
+          if (depth == 0) {
+            closeParen = i;
+            break;
+          }
+        }
+      }
+      if (closeParen != -1) {
+        final condStr = s.substring(openParen + 1, closeParen).trim();
+        var bodyStr = s.substring(closeParen + 1).trim();
+        if (bodyStr.startsWith('{') && bodyStr.endsWith('}')) {
+          bodyStr = bodyStr.substring(1, bodyStr.length - 1).trim();
+        }
+
+        final condVal = _evaluateSimpleJsExpressionPart(condStr, variables);
+        final isTrue = condVal == true ||
+            condVal == 'true' ||
+            (condVal is num && condVal != 0) ||
+            (condVal is String && condVal.isNotEmpty && condVal != 'false');
+        if (isTrue) {
+          final subStmts = _splitSimpleJsStatements(bodyStr);
+          dynamic subResult;
+          for (final subStmt in subStmts) {
+            subResult = _evaluateSimpleJsStatement(subStmt, variables);
+          }
+          return subResult;
+        }
+        return null;
       }
     }
 
-    final body = _buildLegacyUrlEncodedBody(params);
-    final url = _resolveUrl(source.bookSourceUrl, '$path$body');
-    if (!code.contains('java.put("headers"') &&
-        !code.contains("java.put('headers'")) {
-      return url;
+    final assignment = _parseSimpleJsAssignment(s);
+    if (assignment != null) {
+      final name = assignment[0];
+      final expr = assignment[1];
+      final val = _evaluateSimpleJsExpressionPart(expr, variables);
+      variables[name] = val;
+      return val;
     }
-    return '$url,${jsonEncode({'headers': headers})}';
+
+    return _evaluateSimpleJsExpressionPart(s, variables);
+  }
+
+  static List<String>? _parseSimpleJsAssignment(String stmt) {
+    var quote = 0;
+    var parenDepth = 0;
+    var braceDepth = 0;
+    var escaped = false;
+    for (var i = 0; i < stmt.length; i++) {
+      final char = stmt.codeUnitAt(i);
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char == 0x5c) {
+        escaped = true;
+        continue;
+      }
+      if (quote != 0) {
+        if (char == quote) quote = 0;
+        continue;
+      }
+      if (char == 0x22 || char == 0x27 || char == 0x60) {
+        quote = char;
+        continue;
+      }
+      if (char == 0x28) parenDepth++;
+      if (char == 0x29) parenDepth--;
+      if (char == 0x7b) braceDepth++;
+      if (char == 0x7d) braceDepth--;
+      if (char == 0x3d && parenDepth == 0 && braceDepth == 0) {
+        final left = stmt.substring(0, i).trim();
+        final right = stmt.substring(i + 1).trim();
+        final leftClean = left
+            .replaceFirst(RegExp(r'^(var|let|const)\s+'), '')
+            .trim();
+        return [leftClean, right];
+      }
+    }
+    return null;
+  }
+
+  static dynamic _evaluateSimpleJsExpressionPart(
+    String expr,
+    Map<String, dynamic> variables,
+  ) {
+    var e = expr.trim();
+    if (e.isEmpty) return '';
+
+    if (e.startsWith('"') && e.endsWith('"') && e.length >= 2) {
+      return e.substring(1, e.length - 1);
+    }
+    if (e.startsWith("'") && e.endsWith("'") && e.length >= 2) {
+      return e.substring(1, e.length - 1);
+    }
+    if (e.startsWith('`') && e.endsWith('`') && e.length >= 2) {
+      var template = e.substring(1, e.length - 1);
+      final matches = RegExp(r'\$\{([\s\S]*?)\}').allMatches(template).toList();
+      var offset = 0;
+      final sb = StringBuffer();
+      for (final m in matches) {
+        sb.write(template.substring(offset, m.start));
+        final innerExpr = m.group(1)!;
+        sb.write(_evaluateSimpleJsExpressionPart(innerExpr, variables));
+        offset = m.end;
+      }
+      sb.write(template.substring(offset));
+      return sb.toString();
+    }
+
+    if (RegExp(r'^\d+$').hasMatch(e)) {
+      return int.parse(e);
+    }
+
+    if (e == 'true') return true;
+    if (e == 'false') return false;
+
+    if (variables.containsKey(e)) {
+      return variables[e];
+    }
+
+    final funcMatch = RegExp(r'^([a-zA-Z0-9_\.]+)\((.*)\)$').firstMatch(e);
+    if (funcMatch != null) {
+      final funcName = funcMatch.group(1)!;
+      final argsStr = funcMatch.group(2)!;
+      final args = _splitSimpleJsArguments(argsStr);
+      final argValues = args
+          .map((arg) => _evaluateSimpleJsExpressionPart(arg, variables))
+          .toList();
+      return _callSimpleJsFunction(funcName, argValues, variables);
+    }
+
+    if (e.startsWith('(') && e.endsWith(')')) {
+      if (_hasMatchingSimpleJsOuterParens(e)) {
+        return _evaluateSimpleJsExpressionPart(
+          e.substring(1, e.length - 1),
+          variables,
+        );
+      }
+    }
+
+    final parts = _splitSimpleJsByOperator(e, '+');
+    if (parts.length > 1) {
+      dynamic result;
+      for (final part in parts) {
+        final val = _evaluateSimpleJsExpressionPart(part, variables);
+        if (result == null) {
+          result = val;
+        } else {
+          if (result is String || val is String) {
+            result = result.toString() + val.toString();
+          } else if (result is num && val is num) {
+            result = result + val;
+          } else {
+            result = result.toString() + val.toString();
+          }
+        }
+      }
+      return result;
+    }
+
+    final subParts = _splitSimpleJsByOperator(e, '-');
+    if (subParts.length > 1) {
+      final left = _evaluateSimpleJsExpressionPart(subParts[0], variables);
+      final right = _evaluateSimpleJsExpressionPart(subParts[1], variables);
+      if (left is num && right is num) {
+        return left - right;
+      }
+      return (double.tryParse(left.toString()) ?? 0) -
+          (double.tryParse(right.toString()) ?? 0);
+    }
+
+    final mulParts = _splitSimpleJsByOperator(e, '*');
+    if (mulParts.length > 1) {
+      final left = _evaluateSimpleJsExpressionPart(mulParts[0], variables);
+      final right = _evaluateSimpleJsExpressionPart(mulParts[1], variables);
+      if (left is num && right is num) {
+        return left * right;
+      }
+      return (double.tryParse(left.toString()) ?? 0) *
+          (double.tryParse(right.toString()) ?? 0);
+    }
+
+    return e;
+  }
+
+  static List<String> _splitSimpleJsByOperator(String expr, String op) {
+    final parts = <String>[];
+    var current = StringBuffer();
+    var parenDepth = 0;
+    var braceDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < expr.length; i++) {
+      final char = expr.codeUnitAt(i);
+      if (escaped) {
+        current.writeCharCode(char);
+        escaped = false;
+        continue;
+      }
+      if (char == 0x5c) {
+        current.writeCharCode(char);
+        escaped = true;
+        continue;
+      }
+      if (quote != 0) {
+        current.writeCharCode(char);
+        if (char == quote) quote = 0;
+        continue;
+      }
+      if (char == 0x22 || char == 0x27 || char == 0x60) {
+        quote = char;
+        current.writeCharCode(char);
+        continue;
+      }
+      if (char == 0x28) parenDepth++;
+      if (char == 0x29) parenDepth--;
+      if (char == 0x7b) braceDepth++;
+      if (char == 0x7d) braceDepth--;
+
+      if (parenDepth == 0 &&
+          braceDepth == 0 &&
+          expr.substring(i).startsWith(op)) {
+        parts.add(current.toString().trim());
+        current = StringBuffer();
+        i += op.length - 1;
+      } else {
+        current.writeCharCode(char);
+      }
+    }
+    parts.add(current.toString().trim());
+    return parts;
+  }
+
+  static List<String> _splitSimpleJsArguments(String argsStr) {
+    final args = <String>[];
+    var current = StringBuffer();
+    var parenDepth = 0;
+    var braceDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < argsStr.length; i++) {
+      final char = argsStr.codeUnitAt(i);
+      if (escaped) {
+        current.writeCharCode(char);
+        escaped = false;
+        continue;
+      }
+      if (char == 0x5c) {
+        current.writeCharCode(char);
+        escaped = true;
+        continue;
+      }
+      if (quote != 0) {
+        current.writeCharCode(char);
+        if (char == quote) quote = 0;
+        continue;
+      }
+      if (char == 0x22 || char == 0x27 || char == 0x60) {
+        quote = char;
+        current.writeCharCode(char);
+        continue;
+      }
+      if (char == 0x28) parenDepth++;
+      if (char == 0x29) parenDepth--;
+      if (char == 0x7b) braceDepth++;
+      if (char == 0x7d) braceDepth--;
+
+      if (char == 0x2c && parenDepth == 0 && braceDepth == 0) {
+        args.add(current.toString().trim());
+        current = StringBuffer();
+      } else {
+        current.writeCharCode(char);
+      }
+    }
+    final last = current.toString().trim();
+    if (last.isNotEmpty) args.add(last);
+    return args;
+  }
+
+  static bool _hasMatchingSimpleJsOuterParens(String expr) {
+    if (!expr.startsWith('(') || !expr.endsWith(')')) return false;
+    var depth = 0;
+    for (var i = 0; i < expr.length - 1; i++) {
+      final char = expr.codeUnitAt(i);
+      if (char == 0x28) depth++;
+      if (char == 0x29) depth--;
+      if (depth == 0) return false;
+    }
+    return true;
+  }
+
+  static dynamic _callSimpleJsFunction(
+    String funcName,
+    List<dynamic> args,
+    Map<String, dynamic> variables,
+  ) {
+    if (funcName == 'encodeURIComponent' || funcName == 'encodeURI') {
+      if (args.isEmpty) return '';
+      return Uri.encodeComponent(args[0].toString());
+    }
+    if (funcName == 'java.encodeURI' || funcName == 'java.encode') {
+      if (args.isEmpty) return '';
+      final str = args[0].toString();
+      final charset = args.length > 1
+          ? args[1].toString().replaceAll(RegExp("[\"']"), '')
+          : 'utf-8';
+      if (charset.toLowerCase() == 'gbk' || charset.toLowerCase() == 'gb2312') {
+        final bytes = gbk.encode(str);
+        return bytes
+            .map((b) => '%' + b.toRadixString(16).padLeft(2, '0').toUpperCase())
+            .join();
+      }
+      return Uri.encodeComponent(str);
+    }
+    if (funcName == 'java.md5Encode') {
+      if (args.isEmpty) return '';
+      final str = args[0].toString();
+      final bytes = utf8.encode(str);
+      final digest = md5.convert(bytes);
+      return digest.toString();
+    }
+    if (funcName == 'java.base64Encode') {
+      if (args.isEmpty) return '';
+      final str = args[0].toString();
+      return base64.encode(utf8.encode(str));
+    }
+    if (funcName == 'java.get') {
+      if (args.isEmpty) return '';
+      return variables[args[0].toString()] ?? '';
+    }
+    if (funcName == 'java.put') {
+      if (args.length >= 2) {
+        variables[args[0].toString()] = args[1];
+        return args[1];
+      }
+      return '';
+    }
+    return args.isNotEmpty ? args[0] : '';
   }
 
   static String? _extractJsAssignedObject(String code, String name) {
@@ -5247,6 +5803,52 @@ class LegadoParser {
     }
     return value.length > 120 &&
         (value.contains('{') || value.contains('}') || value.contains(';'));
+  }
+
+  /// 正文质量校验：长度达标也可能是“假绿”——验证页/反爬页/未清洗整页HTML/JS残片。
+  /// 命中任一特征即视为无效正文，避免一键测源把打不开的源误判为可用。
+  static bool _looksLikeInvalidContent(String content) {
+    final value = content.trim();
+    if (value.isEmpty) return true;
+    if (_looksLikeJsFragment(value)) return true;
+    final lower = value.toLowerCase();
+    if (lower.contains('<script') ||
+        lower.contains('</html>') ||
+        lower.contains('<!doctype')) {
+      return true;
+    }
+    const markers = [
+      '请开启javascript',
+      'enable javascript',
+      '人机验证',
+      '滑动验证',
+      '安全验证',
+      '验证码',
+      'captcha',
+      'cloudflare',
+      'attention required',
+      'access denied',
+      '访问受限',
+      'just a moment',
+      'checking your browser',
+      '404 not found',
+      '页面不存在',
+      '请求过于频繁',
+      '访问频繁',
+    ];
+    for (final marker in markers) {
+      if (lower.contains(marker)) return true;
+    }
+    final structuralTags = RegExp(
+      r'<(div|a|li|span|form|input|button|ul|table|tr|td|nav|header|footer)[\s>]',
+      caseSensitive: false,
+    ).allMatches(value).length;
+    if (structuralTags >= 6) return true;
+    final stripped = value
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll(RegExp(r'\s+'), '');
+    if (stripped.length < _minTestContentLength) return true;
+    return false;
   }
 
   static Future<List<Book>> _parseBooksByJsonFallback(

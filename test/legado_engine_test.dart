@@ -4615,4 +4615,78 @@ decrypt(result);
       expect(reasons, isNot(contains('XPath')));
     });
   });
+
+  group('SimpleJsExpressionEvaluator', () {
+    test('evaluates simple string concatenation with variables', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Test Qbxsw'
+        ..bookSourceType = 0
+        ..bookSourceUrl = 'https://www.qbxsw.com';
+      final url = await LegadoParser.buildSearchUrl(
+        source
+          ..searchUrl = '@js:"https://www.qbxsw.com/search.html?searchkey=" + encodeURIComponent(key)',
+        '斗破苍穹',
+      );
+      expect(url, 'https://www.qbxsw.com/search.html?searchkey=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9');
+    });
+
+    test('evaluates variable assignment and multiple statements', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Test Variable Assignment'
+        ..bookSourceType = 0
+        ..bookSourceUrl = 'https://www.qbxsw.com';
+      final url = await LegadoParser.buildSearchUrl(
+        source
+          ..searchUrl = r'''
+            @js:
+            var path = "/search.html?searchkey=";
+            var full = baseUrl + path + encodeURIComponent(key) + "&page=" + page;
+            full;
+          ''',
+        '斗破苍穹',
+        page: 2,
+      );
+      expect(url, 'https://www.qbxsw.com/search.html?searchkey=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9&page=2');
+    });
+
+    test('evaluates java.encodeURI with gbk and simple arithmetic', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Test GBK'
+        ..bookSourceType = 0
+        ..bookSourceUrl = 'http://a.lc1001.com';
+      final url = await LegadoParser.buildSearchUrl(
+        source
+          ..searchUrl = r'''
+            @js:
+            var gbkKey = java.encodeURI(key, "gbk");
+            var pn = (page - 1) * 20;
+            baseUrl + "/query?kw=" + gbkKey + "&pn=" + pn;
+          ''',
+        '斗破',
+        page: 3,
+      );
+      expect(url, 'http://a.lc1001.com/query?kw=%B6%B7%C6%C6&pn=40');
+    });
+
+    test('evaluates if statements and boolean controls', () async {
+      final source = BookSource()
+        ..bookSourceName = 'Test If Statement'
+        ..bookSourceType = 0
+        ..bookSourceUrl = 'https://example.com';
+      final url = await LegadoParser.buildSearchUrl(
+        source
+          ..searchUrl = r'''
+            @js:
+            var skip = true;
+            var resultUrl = "https://example.com/search?q=" + key;
+            if (skip) {
+              resultUrl = resultUrl + "&skip=1";
+            }
+            resultUrl;
+          ''',
+        'abc',
+      );
+      expect(url, 'https://example.com/search?q=abc&skip=1');
+    });
+  });
 }

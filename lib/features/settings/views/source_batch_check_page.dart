@@ -15,6 +15,7 @@ class SourceCheckResult {
   final BookSource source;
   final bool isSuccess;
   final bool isBlocked;
+  final bool isSkipped;
   final int booksCount;
   final String? errorMessage;
   final String? failStep;
@@ -24,16 +25,17 @@ class SourceCheckResult {
     required this.source,
     required this.isSuccess,
     this.isBlocked = false,
+    this.isSkipped = false,
     this.booksCount = 0,
     this.errorMessage,
     this.failStep,
     required this.durationInMs,
   });
 
-  bool get canDisable => !isSuccess && !isBlocked;
+  bool get canDisable => !isSuccess && !isBlocked && !isSkipped;
 }
 
-enum SourceCheckFilter { all, success, failed, blocked }
+enum SourceCheckFilter { all, success, failed, blocked, skipped }
 
 class SourceBatchCheckPage extends ConsumerStatefulWidget {
   final List<BookSource> sources;
@@ -52,6 +54,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   int _successCount = 0;
   int _failCount = 0;
   int _blockedCount = 0;
+  int _skippedCount = 0;
   bool _isChecking = true;
   bool _isDisabling = false;
   final List<SourceCheckResult> _results = [];
@@ -97,6 +100,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       final source = widget.sources[index];
       final watch = Stopwatch()..start();
       var success = false;
+      var skipped = false;
       var booksCount = 0;
       String? errorMessage;
       String? failStepTitle;
@@ -109,7 +113,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           source,
           _batchKeyword,
         ).timeout(const Duration(seconds: 45));
-        success = !report.hasFailure;
+        skipped = report.steps.isNotEmpty &&
+            report.steps.every((s) => s.status == LegadoStepStatus.skip);
+        success = !report.hasFailure && !skipped;
         if (success) {
           // 从「搜索结果」步骤提取书籍数量用于展示
           for (final step in report.steps) {
@@ -153,13 +159,16 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
               source: source,
               isSuccess: success,
               isBlocked: blocked,
+              isSkipped: skipped,
               booksCount: booksCount,
               errorMessage: errorMessage,
               failStep: failStepTitle,
               durationInMs: watch.elapsedMilliseconds,
             ),
           );
-          if (success) {
+          if (skipped) {
+            _skippedCount++;
+          } else if (success) {
             _successCount++;
           } else if (blocked) {
             _blockedCount++;
@@ -188,6 +197,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       ..writeln('- 成功: $_successCount')
       ..writeln('- 失败: $_failCount')
       ..writeln('- 待复测/需处理: $_blockedCount')
+      ..writeln('- 跳过(非小说源): $_skippedCount')
       ..writeln('- 默认关键词: $_batchKeyword')
       ..writeln('- 说明: 单源规则配置了 checkKeyWord 时会自动覆盖默认关键词')
       ..writeln()
@@ -204,6 +214,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
     for (final result in _results) {
       final status = result.isSuccess
           ? 'OK'
+          : result.isSkipped
+          ? 'SKIP'
           : result.isBlocked
           ? 'BLOCKED'
           : 'FAIL';
@@ -235,7 +247,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Map<String, int> _failureStepCounts() {
     final counts = <String, int>{};
     for (final result in _results) {
-      if (result.isSuccess) continue;
+      if (result.isSuccess || result.isSkipped) continue;
       final key = result.failStep ?? '未知';
       counts[key] = (counts[key] ?? 0) + 1;
     }
@@ -293,7 +305,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Widget build(BuildContext context) {
     final bgColor = CupertinoTheme.of(context).scaffoldBackgroundColor;
     final total = widget.sources.length;
-    final checked = _successCount + _failCount + _blockedCount;
+    final checked = _successCount + _failCount + _blockedCount + _skippedCount;
     final progress = total == 0 ? 0.0 : checked / total;
     final nonSuccessCount = _failCount + _blockedCount;
     final visibleResults = _filteredResults();
@@ -371,6 +383,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       SourceCheckFilter.success => _results.where((r) => r.isSuccess).toList(),
       SourceCheckFilter.failed => _results.where((r) => r.canDisable).toList(),
       SourceCheckFilter.blocked => _results.where((r) => r.isBlocked).toList(),
+      SourceCheckFilter.skipped => _results.where((r) => r.isSkipped).toList(),
     };
   }
 
@@ -380,6 +393,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       SourceCheckFilter.success => '当前没有检测通过的书源',
       SourceCheckFilter.failed => '当前没有确定失效的书源',
       SourceCheckFilter.blocked => '当前没有待复测书源',
+      SourceCheckFilter.skipped => '当前没有跳过的非小说源',
     };
   }
 
@@ -404,6 +418,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           SourceCheckFilter.blocked: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text('待复测 $_blockedCount'),
+          ),
+          SourceCheckFilter.skipped: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('跳过 $_skippedCount'),
           ),
         },
         onValueChanged: (value) {
@@ -466,6 +484,7 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 _blockedCount,
                 CupertinoColors.systemOrange,
               ),
+              _buildStatCard('跳过', _skippedCount, CupertinoColors.systemGrey),
             ],
           ),
           if (!_isChecking && (_failCount + _blockedCount) > 0) ...[
@@ -528,11 +547,15 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Widget _buildResultItem(SourceCheckResult result) {
     final color = result.isSuccess
         ? CupertinoColors.activeGreen
+        : result.isSkipped
+        ? CupertinoColors.systemGrey
         : result.isBlocked
         ? CupertinoColors.systemOrange
         : CupertinoColors.destructiveRed;
     final icon = result.isSuccess
         ? CupertinoIcons.check_mark_circled_solid
+        : result.isSkipped
+        ? CupertinoIcons.minus_circle_fill
         : result.isBlocked
         ? CupertinoIcons.exclamationmark_triangle_fill
         : CupertinoIcons.clear_circled_solid;

@@ -566,6 +566,8 @@ class LegadoRequestBuilder {
       } catch (_) {
         // Fall back to loose object extraction and safe browser defaults.
       }
+      final resolved = _resolveJsHeaderObject(text);
+      if (resolved.isNotEmpty) return resolved;
       final parsed = _parseLooseHeaderObject(text);
       return parsed.isEmpty ? _defaultBrowserHeaders() : parsed;
     }
@@ -748,6 +750,63 @@ class LegadoRequestBuilder {
         value.contains('JSON.stringify') ||
         value.contains('function') ||
         value.contains('=>');
+  }
+
+  /// Deterministically resolves simple JS header scripts (e.g. legado
+  /// `@js:` headers like `ua = "..."; var headers = {"User-Agent": ua};`
+  /// `return JSON.stringify(headers);`) WITHOUT requiring the JS runtime.
+  /// It collects top-level string-variable assignments and substitutes them
+  /// into the returned headers object literal. Returns an empty map when no
+  /// resolvable header object is found, so callers can fall back further.
+  static Map<String, dynamic> _resolveJsHeaderObject(String script) {
+    final headers = <String, dynamic>{};
+    final assignments = <String, String>{};
+    final assignPattern = RegExp(
+      r'''(?:var|let|const)?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*("([^"\r\n]*)"|'([^'\r\n]*)')''',
+    );
+    for (final m in assignPattern.allMatches(script)) {
+      final name = m.group(1) ?? '';
+      final value = m.group(3) ?? m.group(4) ?? '';
+      if (name.isNotEmpty && name != 'headers') {
+        assignments[name] = value;
+      }
+    }
+    String? objectText;
+    final stringifyMatch = RegExp(
+      r'JSON\s*\.\s*stringify\s*\(\s*(\{[\s\S]*?\})\s*\)',
+    ).firstMatch(script);
+    if (stringifyMatch != null) {
+      objectText = stringifyMatch.group(1);
+    } else {
+      final headersMatch = RegExp(
+        r'headers\s*=\s*(\{[\s\S]*?\})',
+      ).firstMatch(script);
+      if (headersMatch != null) {
+        objectText = headersMatch.group(1);
+      } else {
+        final returnMatch = RegExp(
+          r'return\s+(\{[\s\S]*?\})',
+        ).firstMatch(script);
+        objectText = returnMatch?.group(1);
+      }
+    }
+    if (objectText == null) return headers;
+    final pairPattern = RegExp(
+      r'''["']([^"':\r\n{}=]+)["']\s*:\s*("([^"\r\n]*)"|'([^'\r\n]*)'|([A-Za-z_$][A-Za-z0-9_$]*))''',
+    );
+    for (final m in pairPattern.allMatches(objectText)) {
+      final key = m.group(1)?.trim() ?? '';
+      final ident = m.group(5);
+      final value = ident != null && ident.isNotEmpty
+          ? assignments[ident]
+          : (m.group(3) ?? m.group(4) ?? '');
+      if (value != null &&
+          _isSafeHeaderName(key) &&
+          _isSafeHeaderValue(value)) {
+        headers[key] = value;
+      }
+    }
+    return headers;
   }
 
   static Map<String, dynamic> _defaultBrowserHeaders() {
@@ -961,13 +1020,39 @@ class LegadoRequestBuilder {
             ? ''
             : cleanBaseUrl(source.bookSourceUrl);
         final sideEffectOnly = _isInlineSideEffectOnlyScript(script);
+        final inlineConfig = source == null
+            ? const <String, dynamic>{}
+            : jsonConfig(source.customConfig);
+        final inlineComment =
+            (inlineConfig['bookSourceComment'] ??
+                    inlineConfig['sourceComment'] ??
+                    inlineConfig['comment'] ??
+                    '')
+                .toString();
+        final inlineHeader =
+            inlineConfig['header'] ?? inlineConfig['bookSourceHeader'] ?? '';
         final value = LegadoJsEngine().evaluate(
           script,
           variables: {
             'keyword': keyword,
             'key': keyword,
             'page': page,
-            'source': {'key': baseUrl, 'bookSourceUrl': baseUrl},
+            'source': {
+              'key': baseUrl,
+              'bookSourceUrl': baseUrl,
+              'bookSourceName': source?.bookSourceName ?? '',
+              'bookSourceGroup': source?.bookSourceGroup ?? '',
+              'bookSourceComment': inlineComment,
+              'bookSourceType': source?.bookSourceType ?? 0,
+              'bookSourceHeader': inlineHeader,
+              'header': inlineHeader,
+              'variable':
+                  inlineConfig['variable'] ??
+                  inlineConfig['variableComment'] ??
+                  '',
+              'variableComment': inlineConfig['variableComment'] ?? '',
+              'customConfig': inlineConfig,
+            },
             'params': {'pageIndex': page, 'tabIndex': 0, 'filters': {}},
           },
         );
@@ -1261,11 +1346,47 @@ class LegadoRequestBuilder {
     headers.forEach((key, value) {
       final name = key.trim();
       final headerValue = value.toString();
-      if (_isSafeHeaderName(name)) {
+      // 过去只校验了“名字”，从不校验“值”。一旦某个头的值里残留了未被执行的
+      // JS（例如 var headers = {...}，含换行/控制字符），HttpClient 会抛
+      // "Invalid HTTP header field value" 直接让请求崩溃（绿柠等源的真实报错）。
+      // 这里同时校验名与值，不安全的单个头丢弃而不崩溃。
+      if (_isSafeHeaderName(name) && _isSafeHeaderValue(headerValue)) {
         safe[name] = headerValue;
       }
     });
+    // 若原本配置了请求头，却因为残留 JS / 非法字符被全部剔除，
+    // 回退到安全的浏览器默认头，避免请求“裸奔”被站点拦截。
+    if (safe.isEmpty && headers.isNotEmpty) {
+      return Map<String, dynamic>.from(_defaultBrowserHeaders());
+    }
     return safe;
+  }
+
+  /// 校验 HTTP 头值是否可以安全发出。
+  /// 1）不能含 CR/LF 及其它控制字符（保留 TAB）——这是 HttpClient 报
+  ///    "Invalid HTTP header field value" 的直接原因；
+  /// 2）不能残留未执行的 JS 片段（解析兑底失败的产物），不要把脚本
+  ///    源码当作头值发出去。
+  static bool _isSafeHeaderValue(String value) {
+    if (value.isEmpty) return true;
+    for (var i = 0; i < value.length; i++) {
+      final code = value.codeUnitAt(i);
+      if (code == 0x0d || code == 0x0a) return false; // CR / LF
+      if (code < 0x20 && code != 0x09) return false; // 控制字符（保留 TAB）
+    }
+    if (value.contains('var headers') ||
+        value.contains('var heders') ||
+        value.contains('function(') ||
+        value.contains('function (') ||
+        value.contains('=>') ||
+        value.contains('JSON.stringify') ||
+        value.contains('java.') ||
+        value.contains('<js>') ||
+        value.contains('</js>') ||
+        value.contains('@js:')) {
+      return false;
+    }
+    return true;
   }
 
   static String _evaluateSimpleStringExpression(
