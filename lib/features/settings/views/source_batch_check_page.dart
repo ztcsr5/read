@@ -19,6 +19,9 @@ class SourceCheckResult {
   final int booksCount;
   final String? errorMessage;
   final String? failStep;
+  final String? failSample;
+  final List<String> failLogs;
+  final String? stageTrail;
   final int durationInMs;
 
   SourceCheckResult({
@@ -29,6 +32,9 @@ class SourceCheckResult {
     this.booksCount = 0,
     this.errorMessage,
     this.failStep,
+    this.failSample,
+    this.failLogs = const [],
+    this.stageTrail,
     required this.durationInMs,
   });
 
@@ -104,6 +110,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       var booksCount = 0;
       String? errorMessage;
       String? failStepTitle;
+      String? failSample;
+      List<String> failLogs = const [];
+      String? stageTrail;
       var blocked = false;
 
       try {
@@ -134,6 +143,16 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           );
           failStepTitle = failStep.title;
           errorMessage = '${failStep.title}：${failStep.message}';
+          failSample = failStep.sample;
+          failLogs = failStep.logs;
+          stageTrail = report.steps.map((s) {
+            final mark = s.status == LegadoStepStatus.ok
+                ? '✓'
+                : s.status == LegadoStepStatus.fail
+                ? '✗'
+                : '–';
+            return '$mark${s.title}';
+          }).join(' · ');
           blocked = sourceCheckFailureIsBlocked(
             source,
             failStep: failStepTitle,
@@ -163,6 +182,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
               booksCount: booksCount,
               errorMessage: errorMessage,
               failStep: failStepTitle,
+              failSample: failSample,
+              failLogs: failLogs,
+              stageTrail: stageTrail,
               durationInMs: watch.elapsedMilliseconds,
             ),
           );
@@ -226,6 +248,22 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         '${result.failStep == null ? "" : " ${result.failStep}"}'
         '${result.errorMessage == null ? "" : " - ${result.errorMessage}"}',
       );
+      if (!result.isSuccess && !result.isSkipped) {
+        if (result.stageTrail != null && result.stageTrail!.isNotEmpty) {
+          buffer.writeln('    阶段轨迹: ${result.stageTrail}');
+        }
+        if (result.failSample != null && result.failSample!.trim().isNotEmpty) {
+          final sample = result.failSample!.trim().replaceAll('\n', ' ');
+          final clipped =
+              sample.length > 200 ? '${sample.substring(0, 200)}…' : sample;
+          buffer.writeln('    抓到的内容样本: $clipped');
+        }
+        if (result.failLogs.isNotEmpty) {
+          for (final log in result.failLogs) {
+            buffer.writeln('    · ${log.replaceAll('\n', ' / ')}');
+          }
+        }
+      }
     }
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
     if (!mounted) return;
