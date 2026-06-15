@@ -135,8 +135,14 @@ class LegadoRequestBuilder {
     }
     final safeHeaders = _sanitizeHeaders(headers);
 
+    // 一次性修补:补 source 缺失 scheme 的兜底 (例如 m.123yuzhaiwu.com 没写 https://,相对路径 /s.php 解析不出 host)。
+    // resolveUrl 对绝对 URL 是 no-op,对没 host 的相对路径会自动用 baseUrl 补全。
+    final sourceUrl =
+        source == null ? '' : _ensureUrlScheme(_sourceValue(source, 'key'));
+    final resolvedUrl = resolveUrl(sourceUrl, embedded.url);
+
     return LegadoHttpRequest(
-      url: embedded.url,
+      url: resolvedUrl,
       method: method,
       headers: safeHeaders.isEmpty ? null : safeHeaders,
       body: body,
@@ -253,6 +259,15 @@ class LegadoRequestBuilder {
       RegExp(r'@get:\{([^}]+)\}', caseSensitive: false),
       (match) => LegadoJsEngine().getStoredString(match.group(1)?.trim() ?? ''),
     );
+  }
+
+  /// 一次性修补:源 URL 只写 m.xxx.com(没有 https://)时,相对路径 /s.php 解析不出 host。
+  /// 统一在源头补 https://(空 source URL 不动,留给上层报错)。
+  /// 修 御宅屋(host 缺失)与同类老源。
+  static String _ensureUrlScheme(String url) {
+    if (url.isEmpty) return url;
+    if (url.contains('://')) return url;
+    return 'https://$url';
   }
 
   static String _replaceBareWord(String text, String token, String value) {

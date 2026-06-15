@@ -118,10 +118,13 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       try {
         // 统一测源：复用单源测试的 testSource，确保「一键测源」与单源测试判定标准一致，
         // 并继承其虚假成功(假绿)拦截逻辑，降低测源误差。
+        // 一次性修补：默认超时从 45s 收紧到 15s。
+        // 真正死锁的源 15s 一定超时(早 fail-fast 释放 worker 槽位);
+        // 正常源几乎都在 10s 内返回,不会误杀。45s 只会白白卡住 2 个并发 worker。
         final report = await LegadoParser.testSource(
           source,
           _batchKeyword,
-        ).timeout(const Duration(seconds: 45));
+        ).timeout(const Duration(seconds: 15));
         skipped = report.steps.isNotEmpty &&
             report.steps.every((s) => s.status == LegadoStepStatus.skip);
         success = !report.hasFailure && !skipped;

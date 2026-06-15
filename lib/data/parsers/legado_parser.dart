@@ -166,6 +166,10 @@ class LegadoParser {
       }
       urlLogs.add('构建后的搜索 URL: $searchUrl');
       if (searchUrl.trim().isEmpty) {
+        urlLogs.add('—— JS 引擎诊断（排查真机为何返回空）——');
+        urlLogs.add('QuickJS 引擎可用(_runtime 已加载): ${LegadoJsEngine().isAvailable}');
+        urlLogs.add('是否落到 Node 兜底: ${LegadoJsEngine().isUsingNodeFallback}');
+        urlLogs.add('该 searchUrl 是否含 JS 规则: ${_containsJsRule(source.searchUrl)}');
         steps.add(
           LegadoTestStep.fail(
             '搜索 URL',
