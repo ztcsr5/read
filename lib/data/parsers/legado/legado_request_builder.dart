@@ -487,6 +487,13 @@ class LegadoRequestBuilder {
       RegExp(r',\s*([}\]])'),
       (match) => match.group(1) ?? '',
     );
+    // 一次性修补:给裸 value 加引号(对番薯小说等 {{key}} 替换后的 %E6%96%97... URL 编码 string,
+    // 以及其他裸 string / 数字),避免 jsonDecode 报 "Expecting value"。
+    // 匹配 `:value,` / `:value}` / `:value]`,value 不以 { [ " ' - 数字 字母 开头 时补双引号。
+    output = output.replaceAllMapped(
+      RegExp(r'''(:\s*)(?!["'{}\[\]\-0-9a-zA-Z])([^,}\]]+?)\s*(?=[,}\]])'''),
+      (match) => '${match.group(1)}"${match.group(2)?.trim()}"',
+    );
     return output;
   }
 
@@ -645,7 +652,10 @@ class LegadoRequestBuilder {
     if (configText == null) return (url: url, config: directiveConfig);
     final config = jsonConfig(configText);
     if (config.isEmpty && configText.trim() != '{}') {
-      return (url: url, config: directiveConfig);
+      // 一次性修补:解析失败时,主动按 , 拆,只返回 url 部分,否则 embedded.url 仍含
+      // JSON 末尾的 }} 等字符,后续 resolveUrl 的 contains('}}') 检查会误判为占位符未替换。
+      final urlOnly = url.substring(0, comma).trim();
+      return (url: urlOnly, config: directiveConfig);
     }
     _mergeConfigHeaders(config, legacyHeaders.headers);
     return (url: url.substring(0, comma).trimRight(), config: config);

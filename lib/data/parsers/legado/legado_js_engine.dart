@@ -19,6 +19,7 @@ class LegadoJsEngine {
   factory LegadoJsEngine() => _instance;
 
   JavascriptRuntime? _runtime;
+  String? _initErrorMessage; // 一次性修补:把 getJavascriptRuntime 失败原因记下来,让 report 能看到
   final Set<String> _loadedLibraryKeys = <String>{};
   final Set<String> _loadedNodeLibraryKeys = <String>{};
   final List<String> _loadedNodeLibraries = <String>[];
@@ -480,6 +481,7 @@ class LegadoJsEngine {
         }
       });
     } catch (e) {
+      _initErrorMessage = e.toString();
       debugPrint('JS Engine Initialization Error: $e');
     }
   }
@@ -489,6 +491,9 @@ class LegadoJsEngine {
   bool get canEvaluate => _runtime != null || _nodeFallbackAvailable;
 
   bool get isUsingNodeFallback => _runtime == null && _nodeFallbackAvailable;
+
+  /// 一次性修补:返回 QuickJS 初始化失败的异常信息(让 report 能看到根因)。
+  String? get initErrorMessage => _initErrorMessage;
 
   Future<Uint8List> _fetchAjaxBytes(String rawRequest) async {
     final handler = _currentAjaxBytesHandler;
