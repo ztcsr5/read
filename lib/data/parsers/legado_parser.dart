@@ -3635,6 +3635,10 @@ class LegadoParser {
       headers[HttpHeaders.refererHeader] = referer;
     }
 
+    // 一次性修补:_ajaxBytesForJs 内部 15s 太短,跟全局 20s / 外层 25s 不一致,
+    // 导致慢 font 站(老牌书站自定义字体)频繁 15001ms TimeoutException,
+    // 上层 25s wrapper 等不到这个 future 完成。
+    // 统一到 25s。
     final response = await _dio
         .request<dynamic>(
           req.url,
@@ -3644,13 +3648,13 @@ class LegadoParser {
             headers: headers.isEmpty ? null : headers,
             responseType: ResponseType.bytes,
             followRedirects: true,
-            receiveTimeout: const Duration(seconds: 15),
-            sendTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 25),
+            sendTimeout: const Duration(seconds: 25),
             validateStatus: (status) =>
                 status != null && status >= 200 && status < 400,
           ),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 25));
     LegadoSessionStore.rememberResponse(response.realUri, response.headers);
     final bytes = response.data is List<int>
         ? Uint8List.fromList(response.data as List<int>)

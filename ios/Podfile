@@ -44,6 +44,11 @@ post_install do |installer|
   # 现象:运行时 dlsym(RTLD_DEFAULT, jsNewRuntime) 返回 symbol not found,所有 @js/<js> 源超时。
   # 根因:libfastdev_quickjs_runtime.cpp 里的 jsNewRuntime/jsNewContext 等函数没有
   #       Swift/ObjC 引用,链接器 dead-code elimination 把符号砍掉。-Wl,-u,_xxx 强制保留。
+  #
+  # 必须同时加到:
+  #   1) pods project (quickjs_engine target 自身编译)
+  #   2) aggregate target (Runner.xcodeproj 静态链 quickjs_engine 的 .a 时)
+  # 缺一不可,否则 dlsym 仍报 symbol not found。
   quickjs_keep_symbols = %w[
     _jsNewRuntime
     _JS_NewRuntimeDartBridge
@@ -54,6 +59,8 @@ post_install do |installer|
     _jsEvalFunction
     _doReturnOne
   ]
+
+  # 1) 加到 quickjs_engine pod target 自己的 OTHER_LDFLAGS
   installer.pods_project.targets.each do |target|
     if target.name == 'quickjs_engine' || target.name == 'quickjs_engine_ios' || target.name.start_with?('quickjs_engine')
       target.build_configurations.each do |config|
@@ -69,5 +76,24 @@ post_install do |installer|
         config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
       end
     end
+  end
+
+  # 2) 加到 main app (Runner) target 的 OTHER_LDFLAGS
+  #    CocoaPods 的 aggregate_target.user_project 就是 Runner.xcodeproj
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.user_project.native_targets.each do |native_target|
+      native_target.build_configurations.each do |config|
+        ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        ldflags = [ldflags] unless ldflags.is_a?(Array)
+        quickjs_keep_symbols.each do |sym|
+          flag = "-Wl,-u,#{sym}"
+          ldflags << flag unless ldflags.include?(flag)
+        end
+        config.build_settings['OTHER_LDFLAGS'] = ldflags
+        config.build_settings['DEAD_CODE_STRIPPING'] = 'YES'
+        config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+      end
+    end
+    aggregate_target.user_project.save
   end
 end

@@ -33,7 +33,10 @@ class LegadoJsEngine {
       LinkedHashMap<String, QueryTTF>();
   static const int _maxTtfCacheEntries = 16;
   static const int _maxFontBytes = 5 * 1024 * 1024;
-  static const Duration _fontTimeout = Duration(seconds: 15);
+  // 一次性修补:JS 内部字体下载(用 java.ajaxBytes 拉远程 .ttf/.otf)15s 太短,
+  // 一些老牌书站自定义字体跨域慢,15s 后 fetch reject 上抛 TimeoutException。
+  // 提到 25s 与外层 testSource 25s wrapper 一致。
+  static const Duration _fontTimeout = Duration(seconds: 25);
   static const String _defaultUserAgent =
       'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
       'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 '
@@ -2876,7 +2879,11 @@ async function __fetchText(rawUrl, config) {
   }
   const method = __str(config.method || "GET").toUpperCase() || "GET";
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(config.timeout || config.timeoutMs || 15000));
+  // 一次性修补:JS 内部 __fetchText 的 abort 定时器默认 15s 太短,
+  // 真慢站(频控重试 + 编码探测 + 章节抓取)经常要 18-22s 才返回。
+  // 提到 25s,与外层 source_batch_check_page.dart 的 25s wrapper 对齐,
+  // 否则内层先抛 TimeoutException 后,外层 25s 永远等不到。
+  const timer = setTimeout(() => controller.abort(), Number(config.timeout || config.timeoutMs || 25000));
   try {
     const init = { method, headers, signal: controller.signal };
     if (method !== "GET" && method !== "HEAD" && config.body != null) {
