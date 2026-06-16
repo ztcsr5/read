@@ -199,19 +199,12 @@ class LegacyJsEvaluator {
     return null;
   }
 
-  /// 执行 for 循环
+  /// 执行 for 循环 — 支持 `for (init; cond; incr) { body }` 和 `for (var x in list) { body }` 两种
   static dynamic _executeForLoop(String s, Map<String, dynamic> variables) {
-    // 解析: for (init; cond; incr) { body }
     final parenStart = s.indexOf('(');
     final parenEnd = _findMatchingClose(s, parenStart, 0x28, 0x29);
     if (parenStart < 0 || parenEnd < 0) return null;
-    final parts = s.substring(parenStart + 1, parenEnd).split(';');
-    if (parts.length < 3) return null;
 
-    // init
-    final init = parts[0].trim();
-    if (init.isNotEmpty) _evaluateStatement(init, variables);
-    dynamic last;
     // 找 body
     final braceStart = s.indexOf('{', parenEnd);
     if (braceStart < 0) return null;
@@ -219,6 +212,52 @@ class LegacyJsEvaluator {
     if (braceEnd < braceStart) return null;
     final body = s.substring(braceStart + 1, braceEnd).trim();
 
+    // 先去掉 for ( 部分
+    final inside = s.substring(parenStart + 1, parenEnd).trim();
+
+    // 判断 for-in 形式: for (var x in list)
+    final forInMatch = RegExp(r'^\s*(?:var|let|const)?\s*([a-zA-Z_\$][\w\$]*)\s+in\s+(.+)$').firstMatch(inside);
+    if (forInMatch != null) {
+      final varName = forInMatch.group(1)!;
+      final listExpr = forInMatch.group(2)!;
+      final list = _evaluateExpressionPart(listExpr, variables);
+      dynamic last;
+      if (list is List) {
+        for (var i = 0; i < list.length; i++) {
+          variables[varName] = list[i];
+          for (final sub in _splitStatements(body)) {
+            last = _evaluateStatement(sub, variables);
+            if (last is _ReturnSignal) return last.value;
+          }
+        }
+      } else if (list is Map) {
+        for (final entry in list.entries) {
+          variables[varName] = entry.key;
+          for (final sub in _splitStatements(body)) {
+            last = _evaluateStatement(sub, variables);
+            if (last is _ReturnSignal) return last.value;
+          }
+        }
+      } else if (list is String) {
+        for (var i = 0; i < list.length; i++) {
+          variables[varName] = list[i];
+          for (final sub in _splitStatements(body)) {
+            last = _evaluateStatement(sub, variables);
+            if (last is _ReturnSignal) return last.value;
+          }
+        }
+      }
+      return last;
+    }
+
+    // C-style: for (init; cond; incr)
+    final parts = inside.split(';');
+    if (parts.length < 3) return null;
+
+    // init
+    final init = parts[0].trim();
+    if (init.isNotEmpty) _evaluateStatement(init, variables);
+    dynamic last;
     while (true) {
       // cond
       final cond = parts[1].trim();
@@ -233,7 +272,6 @@ class LegacyJsEvaluator {
       // incr
       final incr = parts[2].trim();
       if (incr.isNotEmpty) {
-        // incr 可能是 x++ / x-- / x = x+1
         _executeIncrement(incr, variables);
       }
     }
@@ -896,6 +934,13 @@ class LegacyJsEvaluator {
         return idx >= 0 && idx < str.length ? str.codeUnitAt(idx) : 0;
       case 'concat':
         return str + args.map((a) => a?.toString() ?? '').join();
+      case 'toArray':
+        // legado jsoup 兼容:string.toArray() 视为 [str]
+        return [str];
+      case 'toJSON':
+        return str;
+      case 'valueOf':
+        return str;
     }
     return null;
   }
