@@ -72,7 +72,9 @@ post_install do |installer|
         end
         config.build_settings['OTHER_LDFLAGS'] = ldflags
         # 同时让链接器不过度 strip
-        config.build_settings['DEAD_CODE_STRIPPING'] = 'YES'
+        # 关键:必须 NO。YES 让 iOS 链接器无视 __attribute__((used)) 把
+        # 没人直接调用的函数砍掉,导致 -Wl,-u,_xxx 找不到符号。
+        config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
         config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
       end
     end
@@ -90,7 +92,7 @@ post_install do |installer|
           ldflags << flag unless ldflags.include?(flag)
         end
         config.build_settings['OTHER_LDFLAGS'] = ldflags
-        config.build_settings['DEAD_CODE_STRIPPING'] = 'YES'
+        config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
         config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
       end
     end
