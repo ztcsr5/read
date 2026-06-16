@@ -17,7 +17,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto_pkg;
-import 'package:fast_gbk/fast_gbk.dart' as gbk;
+import 'package:fast_gbk/fast_gbk.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 class LegacyJsEvaluator {
@@ -754,7 +754,8 @@ class LegacyJsEvaluator {
         if (close == -1) return null;
         final argsStr = e.substring(i + 1, close);
         final args = _splitArgs(argsStr, variables);
-        current = _callMethod(current, args);
+        // 直接调用 current(args),无 method name,_callMethod 会用 __call__ 兜底
+        current = _callMethod(current, '', args);
         i = close + 1;
       } else {
         return null;
@@ -786,7 +787,7 @@ class LegacyJsEvaluator {
       return ((inner, null), i);
     } else if (c == '`' || c == '"' || c == "'") {
       // 字符串字面量(包括模板字符串) —— 读完整
-      final end = _findStringEnd(e, i, c);
+      final end = _findStringEnd(e, i, e.codeUnitAt(i));
       if (end == -1) return null;
       final text = e.substring(i, end + 1);
       return ((text, null), end + 1);
@@ -1000,7 +1001,7 @@ class LegacyJsEvaluator {
           sorted.sort();
           return sorted;
         }
-        return _sortArray(list, args[0], (a, b) => a);
+        return _sortArray(list, args[0], (dynamic a, dynamic b) => a);
       case 'reverse':
         return list.reversed.toList();
       case 'toString':
@@ -1417,7 +1418,13 @@ class LegacyJsEvaluator {
             ? args[1].toString().replaceAll(RegExp("[\"']"), '')
             : 'utf-8';
         if (charset.toLowerCase() == 'gbk' || charset.toLowerCase() == 'gb2312') {
-          final bytes = gbk.encode(str);
+          // fast_gbk 顶层暴露 gbk.encode,失败时回退 utf8.encode
+          List<int> bytes;
+          try {
+            bytes = gbk.encode(str);
+          } catch (_) {
+            bytes = utf8.encode(str);
+          }
           return bytes
               .map((b) =>
                   '%' + b.toRadixString(16).padLeft(2, '0').toUpperCase())
@@ -1534,27 +1541,40 @@ class LegacyJsEvaluator {
 
   // ============== AES 加解密(CryptoJS 兼容) ==============
 
+  /// CryptoJS padding 名字(任意大小写)→ pointycastle registry 名字(必须大写 PKCS7)
+  static String _normalizePadding(String p) {
+    final lower = p.toLowerCase();
+    if (lower == 'pkcs7' || lower == 'pkcs5') return 'PKCS7';
+    if (lower == 'nopadding' || lower == 'none') return 'NoPadding';
+    if (lower == 'zeropadding') return 'ZeroBytePadding';
+    return p;
+  }
+
   static String _cryptoAesEncrypt(String msg, String key, Map cfg) {
     try {
       final ivStr = (cfg['iv'] is String) ? cfg['iv'] : '';
       final mode = (cfg['mode'] is String) ? cfg['mode'].toString() : 'CBC';
-      final padding = (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7';
+      final padding = _normalizePadding(
+          (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7');
       Uint8List keyBytes = _toKeyBytes(key);
       Uint8List ivBytes = ivStr.isNotEmpty
           ? _toKeyBytes(ivStr).sublist(0, 16)
           : Uint8List(16);
-      final cipher = pc.AESEngine();
-      pc.PaddedBlockCipher? impl;
       if (mode == 'ECB') {
-        impl = pc.PaddedBlockCipher('AES/${padding}', cipher)
-          ..init(true, pc.KeyParameter(keyBytes));
+        // pointycastle 3.9.1: PaddedBlockCipher factory 用 algorithm name 注册创建
+        final impl = pc.PaddedBlockCipher('AES/ECB/${padding}');
+        if (impl == null) return '';
+        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+            pc.KeyParameter(keyBytes), null));
         final padded = _padPKCS7(utf8.encode(msg), 16);
         final out = impl.process(Uint8List.fromList(padded));
         return base64.encode(out);
       } else {
-        impl = pc.PaddedBlockCipher('AES/CBC/${padding}', cipher)
-          ..init(true, pc.CBCParameters(
-              pc.KeyParameter(keyBytes), ivBytes));
+        final impl = pc.PaddedBlockCipher('AES/CBC/${padding}');
+        if (impl == null) return '';
+        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+            pc.KeyParameter(keyBytes),
+            pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
         final out = impl.process(Uint8List.fromList(utf8.encode(msg)));
         return base64.encode(out);
       }
@@ -1567,13 +1587,12 @@ class LegacyJsEvaluator {
     try {
       final ivStr = (cfg['iv'] is String) ? cfg['iv'] : '';
       final mode = (cfg['mode'] is String) ? cfg['mode'].toString() : 'CBC';
-      final padding = (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7';
+      final padding = _normalizePadding(
+          (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7');
       Uint8List keyBytes = _toKeyBytes(key);
       Uint8List ivBytes = ivStr.isNotEmpty
           ? _toKeyBytes(ivStr).sublist(0, 16)
           : Uint8List(16);
-      final cipher = pc.AESEngine();
-      pc.PaddedBlockCipher? impl;
       Uint8List ctBytes;
       try {
         ctBytes = base64.decode(ct);
@@ -1581,14 +1600,18 @@ class LegacyJsEvaluator {
         return '';
       }
       if (mode == 'ECB') {
-        impl = pc.PaddedBlockCipher('AES/${padding}', cipher)
-          ..init(false, pc.KeyParameter(keyBytes));
+        final impl = pc.PaddedBlockCipher('AES/ECB/${padding}');
+        if (impl == null) return '';
+        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+            pc.KeyParameter(keyBytes), null));
         final out = impl.process(ctBytes);
         return utf8.decode(out, allowMalformed: true);
       } else {
-        impl = pc.PaddedBlockCipher('AES/CBC/${padding}', cipher)
-          ..init(false, pc.CBCParameters(
-              pc.KeyParameter(keyBytes), ivBytes));
+        final impl = pc.PaddedBlockCipher('AES/CBC/${padding}');
+        if (impl == null) return '';
+        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+            pc.KeyParameter(keyBytes),
+            pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
         final out = impl.process(ctBytes);
         return utf8.decode(out, allowMalformed: true);
       }
@@ -1603,10 +1626,11 @@ class LegacyJsEvaluator {
       final ivBytes = iv.isNotEmpty
           ? _toKeyBytes(iv).sublist(0, 16)
           : Uint8List(16);
-      final cipher = pc.AESEngine();
-      final impl = pc.PaddedBlockCipher('AES/CBC/Pkcs7', cipher)
-        ..init(false,
-            pc.CBCParameters(pc.KeyParameter(keyBytes), ivBytes));
+      final impl = pc.PaddedBlockCipher('AES/CBC/PKCS7');
+      if (impl == null) return '';
+      impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+          pc.KeyParameter(keyBytes),
+          pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
       return utf8.decode(
         impl.process(base64.decode(ct)),
         allowMalformed: true,
@@ -1622,10 +1646,11 @@ class LegacyJsEvaluator {
       final ivBytes = iv.isNotEmpty
           ? _toKeyBytes(iv).sublist(0, 16)
           : Uint8List(16);
-      final cipher = pc.AESEngine();
-      final impl = pc.PaddedBlockCipher('AES/CBC/Pkcs7', cipher)
-        ..init(true,
-            pc.CBCParameters(pc.KeyParameter(keyBytes), ivBytes));
+      final impl = pc.PaddedBlockCipher('AES/CBC/PKCS7');
+      if (impl == null) return '';
+      impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+          pc.KeyParameter(keyBytes),
+          pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
       return base64.encode(impl.process(Uint8List.fromList(utf8.encode(msg))));
     } catch (_) {
       return '';
