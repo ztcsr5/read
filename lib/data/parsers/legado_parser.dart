@@ -284,6 +284,31 @@ class LegadoParser {
       // 假红防护：搜索为空且书源未自带 checkKeyWord 时，改用通用关键字重试，
       // 避免“测试书恰好不在该源”被误判为坏源（能用却测成坏）。
       if (books.isEmpty && testKeyword == keyword) {
+        // 一次性修补:如果搜索页响应看起来是频控/反爬页(没解析到书 + 内容命中关键词),
+        // 主动延迟 1.2s 再重试一次,有些站(刺猬猫/茄子免费)频控窗口短,等一下就能进。
+        if (_isAntiBotResponse(searchResponse.data?.toString() ?? '')) {
+          searchResultLogs.add('搜索页疑似频控/反爬页,延迟 1.2s 重试一次。');
+          await Future<void>.delayed(const Duration(milliseconds: 1200));
+          try {
+            final retryResponse = await _request(
+              source,
+              searchUrl,
+              keyword: testKeyword,
+            );
+            final retryBooks = await searchBooks(
+              source,
+              testKeyword,
+              preFetchedResponse: retryResponse,
+            );
+            searchResultLogs.add('  频控重试解析到 ${retryBooks.length} 本。');
+            if (retryBooks.isNotEmpty) {
+              books.addAll(retryBooks);
+              searchResultLogs.add('  频控重试成功,继续后续测试。');
+            }
+          } catch (e) {
+            searchResultLogs.add('  频控重试异常: $e');
+          }
+        }
         for (final fallbackKeyword in _fallbackTestKeywords) {
           if (fallbackKeyword == testKeyword) continue;
           searchResultLogs.add('搜索结果为空，改用通用关键字重试: $fallbackKeyword');
@@ -4826,6 +4851,29 @@ class LegadoParser {
   static bool _isWholeJsRule(String text) {
     final value = text.trimLeft();
     return value.startsWith('@js:') || value.startsWith('<js>');
+  }
+
+  /// 一次性修补:识别搜索页响应是不是频控/反爬/验证页(典型如刺猬猫验证码、
+  /// 茄子免费 "Status":"Unauthorized"、米读 "Request error"、全本小说 "没有搜索到")。
+  /// 命中后 caller 会主动延迟 1.2s 再重试一次,绕过短窗口频控。
+  static bool _isAntiBotResponse(String body) {
+    if (body.isEmpty) return true;
+    final lower = body.toLowerCase();
+    return lower.contains('请勿频繁') ||
+        lower.contains('访问频繁') ||
+        lower.contains('操作过于频繁') ||
+        lower.contains('rate limit') ||
+        lower.contains('too many requests') ||
+        lower.contains('captcha') ||
+        lower.contains('verify you are human') ||
+        lower.contains('cloudflare') ||
+        lower.contains('unauthorized') ||
+        lower.contains('forbidden') ||
+        lower.contains('access denied') ||
+        lower.contains('出现错误！') ||
+        lower.contains('没有搜索到') ||
+        lower.contains('not found') ||
+        (body.length < 200 && lower.contains('404'));
   }
 
   static String? _evaluateCommonJsSearchUrlFallback(
