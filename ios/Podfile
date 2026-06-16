@@ -2,6 +2,92 @@ platform :ios, '13.0'
 
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+# ---------------------------------------------------------
+# Pre-install hook to copy quickjs_engine cxx files into its ios folder and update podspec
+# because CocoaPods cannot resolve source_files with '..' (outside the pod directory).
+# ---------------------------------------------------------
+require 'json'
+require 'fileutils'
+
+plugins_file = File.expand_path('../../.flutter-plugins-dependencies', __FILE__)
+if File.exist?(plugins_file)
+  begin
+    data = JSON.parse(File.read(plugins_file))
+    quickjs_plugin = data.dig('plugins', 'ios')&.find { |p| p['name'] == 'quickjs_engine' }
+    if quickjs_plugin
+      quickjs_engine_dir = quickjs_plugin['path']
+      puts "[Podfile] Found quickjs_engine plugin at: #{quickjs_engine_dir}"
+      
+      # 1. Copy native/cxx to ios/cxx
+      native_cxx = File.expand_path('native/cxx', quickjs_engine_dir)
+      ios_cxx = File.expand_path('ios/cxx', quickjs_engine_dir)
+      
+      if File.exist?(native_cxx)
+        puts "[Podfile] Copying native/cxx to ios/cxx..."
+        FileUtils.rm_rf(ios_cxx)
+        FileUtils.mkdir_p(ios_cxx)
+        FileUtils.cp_r(File.join(native_cxx, '.'), ios_cxx)
+      else
+        puts "[Podfile] Warning: native/cxx not found at #{native_cxx}"
+      end
+      
+      # 2. Overwrite quickjs_engine.podspec in ios folder to use local files
+      podspec_path = File.expand_path('ios/quickjs_engine.podspec', quickjs_engine_dir)
+      if File.exist?(podspec_path)
+        puts "[Podfile] Overwriting quickjs_engine.podspec to use local source paths..."
+        podspec_content = <<~'PODSPEC'
+          # Overwritten by Podfile to resolve CocoaPods sandbox and parent path issues.
+          Pod::Spec.new do |s|
+            s.name             = 'quickjs_engine'
+            s.version          = '0.1.0'
+            s.summary          = 'quickjs-ng bridge for full_svg_flutter.'
+            s.description      = 'Forked from flutter_js. Bundles quickjs-ng 0.14.0 directly.'
+            s.homepage         = 'https://github.com/denisnadey/flutter_full_svg_support'
+            s.license          = { :type => 'MIT' }
+            s.author           = { 'Denis Nadey' => 'denis.nadey@gmail.com' }
+            s.source           = { :path => '.' }
+
+            s.source_files = [
+              'Classes/**/*.{swift,h,m}',
+              'cxx/libfastdev_quickjs_runtime.cpp',
+              'cxx/quickjs/quickjs.c',
+              'cxx/quickjs/libregexp.c',
+              'cxx/quickjs/libunicode.c',
+              'cxx/quickjs/dtoa.c',
+              'cxx/quickjs/*.h'
+            ]
+            s.public_header_files = []
+
+            s.dependency 'Flutter'
+            s.platform = :ios, '11.0'
+            s.swift_version = '5.0'
+
+            s.pod_target_xcconfig = {
+              'DEFINES_MODULE' => 'YES',
+              'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+              'GCC_C_LANGUAGE_STANDARD' => 'c11',
+              'CLANG_ENABLE_MODULES' => 'YES',
+              'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/cxx" "$(PODS_TARGET_SRCROOT)/cxx/quickjs"',
+              'GCC_PREPROCESSOR_DEFINITIONS' => 'CONFIG_VERSION=\"ng-0.14.0\" $(inherited)',
+              'WARNING_CFLAGS' => '-Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -Wno-unused-but-set-variable',
+            }
+          end
+        PODSPEC
+        File.write(podspec_path, podspec_content)
+        puts "[Podfile] Overwrite of quickjs_engine.podspec successful."
+      else
+        puts "[Podfile] Warning: quickjs_engine.podspec not found at #{podspec_path}"
+      end
+    else
+      puts "[Podfile] quickjs_engine plugin not found in ios plugins list."
+    end
+  rescue => e
+    puts "[Podfile] Error during quickjs_engine pre-install patching: #{e}"
+  end
+else
+  puts "[Podfile] Warning: .flutter-plugins-dependencies not found at #{plugins_file}"
+end
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,
