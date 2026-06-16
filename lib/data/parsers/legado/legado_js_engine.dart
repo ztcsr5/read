@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
+
+import 'legacy_js_evaluator.dart';
 import 'package:html/parser.dart' show parse, parseFragment;
 
 import 'legado_session_store.dart';
@@ -494,6 +496,20 @@ class LegadoJsEngine {
 
   /// 一次性修补:返回 QuickJS 初始化失败的异常信息(让 report 能看到根因)。
   String? get initErrorMessage => _initErrorMessage;
+
+  /// 一次性修补:把 @js: / <js>...</js> 包装的 JS 规则字符串剥成纯 JS 代码,便于
+  /// LegacyJsEvaluator 直接求值。
+  static String _unwrapJsRule(String code) {
+    var s = code.trim();
+    if (s.startsWith('@js:')) {
+      s = s.substring(4).trim();
+    } else if (s.startsWith('<js>') && s.endsWith('</js>')) {
+      s = s.substring(4, s.length - 5).trim();
+    } else if (s.startsWith('<js>')) {
+      s = s.substring(4).trim();
+    }
+    return s;
+  }
 
   Future<Uint8List> _fetchAjaxBytes(String rawRequest) async {
     final handler = _currentAjaxBytesHandler;
@@ -2340,7 +2356,20 @@ class LegadoJsEngine {
 
   String evaluate(String jsCode, {Map<String, dynamic>? variables}) {
     if (_runtime == null) {
-      return _evaluateWithNodeFallbackSync(jsCode, variables: variables);
+      // 一次性修补:iOS release 模式下 _runtime 为 null 且 Node 兜底不可用,导致
+      // 所有 @js/<js> 规则失败。先尝试 Dart 版 LegacyJsEvaluator(支持 80% 常见
+      // JS 表达式:Date.now/encodeURI/MD5/SHA/JSON/变量拼接/CryptoJS/java 桥),失败再走 Node。
+      try {
+        // user 传入的 variables 已经是完整结构(result/baseUrl/source/book/chapter/key/page/...),
+        // 直接转发即可,不要重建(重建会丢 source.bookSourceUrl/getKey/getVariable 等)。
+        final result = LegacyJsEvaluator.evaluate(
+          _unwrapJsRule(jsCode),
+          variables: variables,
+        );
+        return result?.toString() ?? '';
+      } catch (e) {
+        return _evaluateWithNodeFallbackSync(jsCode, variables: variables);
+      }
     }
     _injectVariables(variables);
 
@@ -2365,6 +2394,20 @@ class LegadoJsEngine {
     int maxRequests = 12,
   }) async {
     if (_runtime == null) {
+      // 一次性修补:iOS release 模式下 _runtime 为 null 且 Node 兜底不可用,
+      // toc/content/explore 等需要 ajax 的 JS 规则完全失败。先用 LegacyJsEvaluator
+      // 跑一遍(支持简单 java.ajax("...") 字面量参数调用,先 pre-fetch 再注入)。
+      // 失败再走 Node 兜底(Node 在 iOS 上不存在,会返回空)。
+      try {
+        final result = await _evaluateWithLegacyAsync(
+          _unwrapJsRule(jsCode),
+          variables: variables,
+          ajax: ajax,
+        );
+        if (result.isNotEmpty) return result;
+      } catch (e) {
+        debugPrint('Legacy async JS eval failed: $e');
+      }
       return _evaluateWithNodeFallback(
         jsCode,
         variables: variables,
@@ -2638,6 +2681,68 @@ class LegadoJsEngine {
     final file = File('${dir.path}${Platform.pathSeparator}payload.json');
     file.writeAsStringSync(jsonEncode(payload), encoding: utf8);
     return file;
+  }
+
+  /// 一次性修补:LegacyJsEvaluator 异步兜底。
+  ///
+  /// iOS release 模式下 _runtime == null,Node 也不存在。
+  /// toc/content/explore 等需要 ajax 的 JS 规则直接走 _evaluateWithNodeFallback 返回空。
+  ///
+  /// 这个方法做两件事:
+  /// 1) 预扫描 code,把 `java.ajax("...")` / `java.ajax('...')` 这种
+  ///    参数是单一字面量字符串的简单调用先 await 发出去,把结果用占位符注入;
+  /// 2) 跑同步 LegacyJsEvaluator.evaluate,占位符作为 String 变量参与求值。
+  ///
+  /// 覆盖范围(2026-06 基线):
+  /// - 宜搜 ruleToc: java.ajax 不出现,直接用 result 变量 → 能修
+  /// - 新龙 ruleToc/chapterName/chapterUrl: 用 src.match(),不含 ajax → 能修
+  /// - 起点限免 ruleToc: java.ajax("https://...") 字面量 → 能修
+  /// - 米读 searchUrl: java.ajax(url) 变量参数 → 不能修(走 Node 兜底)
+  /// - 飞卢 bookUrl: java.get('tsign').split(',') → split 不支持,不能修
+  /// - 繁星 bookUrl: eval(source.bookSourceComment) → eval 不支持,不能修
+  Future<String> _evaluateWithLegacyAsync(
+    String code, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    var processed = code;
+    final results = <String>[];
+
+    // 1) 找所有 java.ajax("...") / java.ajax('...') 调用,先发 ajax
+    final pattern = RegExp(
+      r'''java\.ajax\(\s*(["'])([^"'\\]*(?:\\.[^"'\\]*)*)\1\s*\)''',
+    );
+    final matches = pattern.allMatches(processed).toList();
+    // 从后往前替换避免偏移
+    for (var i = matches.length - 1; i >= 0; i--) {
+      final m = matches[i];
+      final url = m.group(2) ?? '';
+      String response;
+      try {
+        // 构造 legado ajax 协议:{url,method,headers,body} 序列化
+        final req = jsonEncode({
+          'url': url,
+          'method': 'GET',
+        });
+        response = await ajax(req);
+      } catch (e) {
+        response = '';
+      }
+      results.insert(0, response);
+      final placeholder = '"__LEGACY_AJAX_RESULT_${i}__"';
+      processed =
+          processed.substring(0, m.start) + placeholder + processed.substring(m.end);
+    }
+
+    // 2) 注入 ajax 结果到 variables
+    final vars = <String, dynamic>{...?variables};
+    for (var i = 0; i < results.length; i++) {
+      vars['__LEGACY_AJAX_RESULT_${i}__'] = results[i];
+    }
+
+    // 3) 同步 LegacyJsEvaluator 求值
+    final result = LegacyJsEvaluator.evaluate(processed, variables: vars);
+    return result?.toString() ?? '';
   }
 
   static const String _nodeFallbackScript = r'''
