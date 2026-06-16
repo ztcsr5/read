@@ -234,7 +234,54 @@ class LegadoRequestBuilder {
     if (text.contains('@js:') || text.contains('<js>')) {
       return output;
     }
-    return _replaceBareLegacySearchTokens(output, encoded, page);
+    output = _replaceBareLegacySearchTokens(output, encoded, page);
+    // {{searchUrl(key)}} 模板兜底(笔趣阁等)
+    output = _resolveSearchUrlFunction(
+      output,
+      keyword: keyword,
+      page: page,
+      source: source,
+    );
+    return output;
+  }
+
+  /// 一次性修补:支持 {{searchUrl(key)}} / {{searchUrl key}} 模板。
+  /// 笔趣阁等源把 searchUrl 写成 {{searchUrl(key)}} 等价于"用当前关键字重算 searchUrl",
+  /// 我们直接把 source.searchUrl 再跑一次 replaceVariables 即可。
+  static String _resolveSearchUrlFunction(String text,
+      {required String keyword,
+      required int page,
+      required BookSource? source}) {
+    if (source == null) return text;
+    if (!text.contains('searchUrl')) return text;
+    final raw = source.searchUrl ?? '';
+    if (raw.isEmpty) return text;
+    // 自引用防递归:source.searchUrl 本身就是 {{searchUrl(...)}} 时,直接展开成
+    // source 的 bookSourceUrl 兜底(典型如笔趣阁)。
+    final isSelfRef = raw.trim() == text.trim() ||
+        RegExp(r'^\s*\{\{\s*searchUrl[^}]*\}\}\s*$').hasMatch(raw.trim());
+    final inner = isSelfRef
+        ? source.bookSourceUrl
+        : replaceVariables(
+            raw,
+            keyword: keyword,
+            page: page,
+            source: source,
+          );
+    if (inner.isEmpty) return text;
+    return text.replaceAllMapped(
+      RegExp(r'\{\{\s*searchUrl\s*\(([^)]*)\)\s*\}\}'),
+      (_) => inner,
+    ).replaceAllMapped(
+      RegExp(r'\{\s*searchUrl\s*\(([^)]*)\)\s*\}'),
+      (_) => inner,
+    ).replaceAllMapped(
+      RegExp(r'\{\{\s*searchUrl\s+([^}]+?)\s*\}\}'),
+      (_) => inner,
+    ).replaceAllMapped(
+      RegExp(r'\{\s*searchUrl\s+([^}]+?)\s*\}'),
+      (_) => inner,
+    );
   }
 
   static String _replaceBareLegacySearchTokens(

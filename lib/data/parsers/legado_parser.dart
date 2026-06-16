@@ -18,6 +18,7 @@ import 'package:xml/xml.dart' as xml;
 import '../../app/routes.dart';
 import '../models/book.dart';
 import '../models/book_source.dart';
+import 'legado_response_decoder.dart' as resp_dec;
 import '../models/chapter.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
@@ -68,8 +69,8 @@ class LegadoParser {
   static Dio _createDio() {
     final dio = Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 20),
         validateStatus: (status) => status != null && status < 600,
         headers: {
           'User-Agent':
@@ -81,10 +82,14 @@ class LegadoParser {
       createHttpClient: () {
         final client = HttpClient();
         client.badCertificateCallback = (_, _, _) => true;
+        // 单个请求允许最多 30s 慢响应（一些站 server 慢）
+        client.idleTimeout = const Duration(seconds: 30);
         return client;
       },
     );
     dio.interceptors.add(CloudflareInterceptor());
+    // 频控/反爬/404/empty 自动重试 1 次
+    dio.interceptors.add(RetryOnceInterceptor());
     return dio;
   }
 

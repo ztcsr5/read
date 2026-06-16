@@ -2399,12 +2399,15 @@ class LegadoJsEngine {
       // 跑一遍(支持简单 java.ajax("...") 字面量参数调用,先 pre-fetch 再注入)。
       // 失败再走 Node 兜底(Node 在 iOS 上不存在,会返回空)。
       try {
+        // JS 整体加 8s 超时,避免某个 timeoutException 源把 worker 挂死
         final result = await _evaluateWithLegacyAsync(
           _unwrapJsRule(jsCode),
           variables: variables,
           ajax: ajax,
-        );
+        ).timeout(const Duration(seconds: 8));
         if (result.isNotEmpty) return result;
+      } on TimeoutException {
+        debugPrint('Legacy async JS eval timed out after 8s');
       } catch (e) {
         debugPrint('Legacy async JS eval failed: $e');
       }
