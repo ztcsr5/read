@@ -49,14 +49,19 @@ post_install do |installer|
   #   1) pods project (quickjs_engine target 自身编译)
   #   2) aggregate target (Runner.xcodeproj 静态链 quickjs_engine 的 .a 时)
   # 缺一不可,否则 dlsym 仍报 symbol not found。
+  #
+  # 注意:符号名必须跟 C 端 extern "C" 函数名精确匹配!
+  # C 端 libfastdev_quickjs_runtime.cpp 里实际叫 jsCall / jsEval,不是
+  # jsCallFunction / jsEvalFunction(后者根本不存在,加进 -u 列表会
+  # 让链接器报 Undefined symbol)。
   quickjs_keep_symbols = %w[
     _jsNewRuntime
     _JS_NewRuntimeDartBridge
     _jsNewContext
     _jsFreeRuntime
     _jsFreeContext
-    _jsCallFunction
-    _jsEvalFunction
+    _jsCall
+    _jsEval
     _doReturnOne
   ]
 
