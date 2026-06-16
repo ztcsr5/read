@@ -39,4 +39,35 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
   end
+
+  # 一次性修补:让 quickjs_engine 的 C bridge 符号在 iOS 静态链接下不被 strip。
+  # 现象:运行时 dlsym(RTLD_DEFAULT, jsNewRuntime) 返回 symbol not found,所有 @js/<js> 源超时。
+  # 根因:libfastdev_quickjs_runtime.cpp 里的 jsNewRuntime/jsNewContext 等函数没有
+  #       Swift/ObjC 引用,链接器 dead-code elimination 把符号砍掉。-Wl,-u,_xxx 强制保留。
+  quickjs_keep_symbols = %w[
+    _jsNewRuntime
+    _JS_NewRuntimeDartBridge
+    _jsNewContext
+    _jsFreeRuntime
+    _jsFreeContext
+    _jsCallFunction
+    _jsEvalFunction
+    _doReturnOne
+  ]
+  installer.pods_project.targets.each do |target|
+    if target.name == 'quickjs_engine' || target.name == 'quickjs_engine_ios' || target.name.start_with?('quickjs_engine')
+      target.build_configurations.each do |config|
+        ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        ldflags = [ldflags] unless ldflags.is_a?(Array)
+        quickjs_keep_symbols.each do |sym|
+          flag = "-Wl,-u,#{sym}"
+          ldflags << flag unless ldflags.include?(flag)
+        end
+        config.build_settings['OTHER_LDFLAGS'] = ldflags
+        # 同时让链接器不过度 strip
+        config.build_settings['DEAD_CODE_STRIPPING'] = 'YES'
+        config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+      end
+    end
+  end
 end
