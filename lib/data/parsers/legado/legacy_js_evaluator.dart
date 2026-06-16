@@ -986,13 +986,13 @@ class LegacyJsEvaluator {
         return list.contains(args[0]);
       case 'map':
         if (args.isEmpty) return list;
-        return _mapArray(list, args[0], (item) => item);
+        return _mapArray(list, args[0]);
       case 'filter':
         if (args.isEmpty) return list;
-        return _filterArray(list, args[0], (item) => item);
+        return _filterArray(list, args[0]);
       case 'forEach':
         if (args.isEmpty) return null;
-        return _forEachArray(list, args[0], (item) => item);
+        return _forEachArray(list, args[0]);
       case 'reduce':
         return _reduceArray(list, args);
       case 'sort':
@@ -1001,7 +1001,7 @@ class LegacyJsEvaluator {
           sorted.sort();
           return sorted;
         }
-        return _sortArray(list, args[0], (dynamic a, dynamic b) => a);
+        return _sortArray(list, args[0]);
       case 'reverse':
         return list.reversed.toList();
       case 'toString':
@@ -1015,7 +1015,6 @@ class LegacyJsEvaluator {
   static List<dynamic> _mapArray(
     List<dynamic> list,
     dynamic fn,
-    dynamic Function(dynamic) unwrap,
   ) {
     if (fn is! Function) return list;
     final result = <dynamic>[];
@@ -1032,7 +1031,6 @@ class LegacyJsEvaluator {
   static List<dynamic> _filterArray(
     List<dynamic> list,
     dynamic fn,
-    dynamic Function(dynamic) unwrap,
   ) {
     if (fn is! Function) return list;
     final result = <dynamic>[];
@@ -1049,7 +1047,6 @@ class LegacyJsEvaluator {
   static dynamic _forEachArray(
     List<dynamic> list,
     dynamic fn,
-    dynamic Function(dynamic) unwrap,
   ) {
     if (fn is! Function) return null;
     for (var i = 0; i < list.length; i++) {
@@ -1079,7 +1076,6 @@ class LegacyJsEvaluator {
   static List<dynamic> _sortArray(
     List<dynamic> list,
     dynamic fn,
-    dynamic Function(dynamic) unwrap,
   ) {
     if (fn is! Function) return list;
     final sorted = [...list];
@@ -1564,7 +1560,7 @@ class LegacyJsEvaluator {
         // pointycastle 3.9.1: PaddedBlockCipher factory 用 algorithm name 注册创建
         final impl = pc.PaddedBlockCipher('AES/ECB/${padding}');
         if (impl == null) return '';
-        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.KeyParameter?>(
             pc.KeyParameter(keyBytes), null));
         final padded = _padPKCS7(utf8.encode(msg), 16);
         final out = impl.process(Uint8List.fromList(padded));
@@ -1572,7 +1568,7 @@ class LegacyJsEvaluator {
       } else {
         final impl = pc.PaddedBlockCipher('AES/CBC/${padding}');
         if (impl == null) return '';
-        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
             pc.KeyParameter(keyBytes),
             pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
         final out = impl.process(Uint8List.fromList(utf8.encode(msg)));
@@ -1602,14 +1598,14 @@ class LegacyJsEvaluator {
       if (mode == 'ECB') {
         final impl = pc.PaddedBlockCipher('AES/ECB/${padding}');
         if (impl == null) return '';
-        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.KeyParameter?>(
             pc.KeyParameter(keyBytes), null));
         final out = impl.process(ctBytes);
         return utf8.decode(out, allowMalformed: true);
       } else {
         final impl = pc.PaddedBlockCipher('AES/CBC/${padding}');
         if (impl == null) return '';
-        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
             pc.KeyParameter(keyBytes),
             pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
         final out = impl.process(ctBytes);
@@ -1628,7 +1624,7 @@ class LegacyJsEvaluator {
           : Uint8List(16);
       final impl = pc.PaddedBlockCipher('AES/CBC/PKCS7');
       if (impl == null) return '';
-      impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+      impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
           pc.KeyParameter(keyBytes),
           pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
       return utf8.decode(
@@ -1648,7 +1644,7 @@ class LegacyJsEvaluator {
           : Uint8List(16);
       final impl = pc.PaddedBlockCipher('AES/CBC/PKCS7');
       if (impl == null) return '';
-      impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, dynamic>(
+      impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
           pc.KeyParameter(keyBytes),
           pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
       return base64.encode(impl.process(Uint8List.fromList(utf8.encode(msg))));
