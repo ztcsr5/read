@@ -112,7 +112,7 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 flutter_ios_podfile_setup
 
 target 'Runner' do
-  use_frameworks! :linkage => :static
+  use_frameworks!
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
@@ -167,6 +167,10 @@ post_install do |installer|
         # 没人直接调用的函数砍掉,导致 -Wl,-u,_xxx 找不到符号。
         config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
         config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+        # 核心:强制把 quickjs_engine 编译为静态库，即使全局是 use_frameworks! 动态库模式。
+        # 这样既能让 Runner 静态链接 FFI 符号以支持 process() 查找，
+        # 又能避免全局静态链接导致的 Swift Package Manager 符号重复定义错误。
+        config.build_settings['MACH_O_TYPE'] = 'staticlib'
       end
     end
   end
