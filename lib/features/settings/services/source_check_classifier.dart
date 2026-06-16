@@ -28,6 +28,12 @@ bool sourceCheckFailureIsBlocked(
     return true;
   }
 
+  // 异常类(TimeoutException/网络异常/解析崩溃):直接归入"失效",不进入待复测。
+  // 因为这种源在当前规则下 100% 跑不通,等用户/作者改源才能复活,不是 runtime 临时问题。
+  if (failStep == '异常') {
+    return false;
+  }
+
   if (_looksLikeNetworkOrRuntimeBlock(text)) return true;
 
   if ((failStep == '搜索 URL' ||
