@@ -18,7 +18,7 @@ import 'package:xml/xml.dart' as xml;
 import '../../app/routes.dart';
 import '../models/book.dart';
 import '../models/book_source.dart';
-import 'legado_response_decoder.dart' as resp_dec;
+import 'legado_response_decoder.dart';
 import '../models/chapter.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
