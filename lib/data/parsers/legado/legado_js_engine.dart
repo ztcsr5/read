@@ -2630,7 +2630,7 @@ class LegadoJsEngine {
       );
       return _decodeNodeResult(result.exitCode, result.stdout, result.stderr);
     } catch (e) {
-      throw Exception('JS鎵ц寮傚父: $e');
+      throw Exception('JS执行异常: $e');
     } finally {
       try {
         if (payloadFile.existsSync()) await payloadFile.delete();
@@ -2736,7 +2736,7 @@ class LegadoJsEngine {
         response = '';
       }
       results.insert(0, response);
-      final placeholder = '"__LEGACY_AJAX_RESULT_${i}__"';
+      final placeholder = '__LEGACY_AJAX_RESULT_${i}__';
       processed =
           processed.substring(0, m.start) + placeholder + processed.substring(m.end);
     }
@@ -2873,6 +2873,19 @@ function __splitRequest(request) {
 
 async function __fetchText(rawUrl, config) {
   const url = __resolveUrl(rawUrl);
+  if (url.startsWith("data:")) {
+    const commaIdx = url.indexOf(",");
+    if (commaIdx >= 0) {
+      const meta = url.slice(0, commaIdx);
+      const rawData = decodeURIComponent(url.slice(commaIdx + 1));
+      const isBase64 = meta.toLowerCase().indexOf(";base64") >= 0;
+      if (isBase64) {
+        return Buffer.from(rawData, "base64").toString("utf8");
+      } else {
+        return rawData;
+      }
+    }
+  }
   config = config || {};
   const headers = Object.assign({ "User-Agent": __ua }, config.headers || {});
   if (globalThis.cookieHeader && !headers.Cookie && !headers.cookie) {

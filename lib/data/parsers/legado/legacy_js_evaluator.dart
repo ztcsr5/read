@@ -20,10 +20,118 @@ import 'package:crypto/crypto.dart' as crypto_pkg;
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:pointycastle/export.dart' as pc;
 
+import 'legado_rule_evaluator.dart';
+
 class LegacyJsEvaluator {
   /// 求值一个 JS 字符串(支持 var/let/const declaration, if, return, expression)。
   /// 失败抛 [LegacyJsEvalError]。
+  static String _stripCommentsAndStrings(String code) {
+    final sb = StringBuffer();
+    var i = 0;
+    var inSingleQuote = false;
+    var inDoubleQuote = false;
+    var inTemplateQuote = false;
+    var inLineComment = false;
+    var inBlockComment = false;
+
+    while (i < code.length) {
+      final c = code[i];
+      final next = i + 1 < code.length ? code[i + 1] : '';
+
+      if (inLineComment) {
+        if (c == '\n' || c == '\r') {
+          inLineComment = false;
+          sb.write(c);
+        }
+        i++;
+        continue;
+      }
+      if (inBlockComment) {
+        if (c == '*' && next == '/') {
+          inBlockComment = false;
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inSingleQuote) {
+        if (c == '\\') {
+          i += 2;
+        } else if (c == "'") {
+          inSingleQuote = false;
+          i++;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inDoubleQuote) {
+        if (c == '\\') {
+          i += 2;
+        } else if (c == '"') {
+          inDoubleQuote = false;
+          i++;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inTemplateQuote) {
+        if (c == '\\') {
+          i += 2;
+        } else if (c == '`') {
+          inTemplateQuote = false;
+          i++;
+        } else {
+          i++;
+        }
+        continue;
+      }
+
+      if (c == '/' && next == '//') {
+        // Wait, c == '/' && next == '/' is correct. Let's make sure it matches correctly:
+      }
+      if (c == '/' && next == '/') {
+        inLineComment = true;
+        i += 2;
+        continue;
+      }
+      if (c == '/' && next == '*') {
+        inBlockComment = true;
+        i += 2;
+        continue;
+      }
+
+      if (c == "'") {
+        inSingleQuote = true;
+        i++;
+        continue;
+      }
+      if (c == '"') {
+        inDoubleQuote = true;
+        i++;
+        continue;
+      }
+      if (c == '`') {
+        inTemplateQuote = true;
+        i++;
+        continue;
+      }
+
+      sb.write(c);
+      i++;
+    }
+    return sb.toString();
+  }
+
+  /// 求值一个 JS 字符串(支持 var/let/const declaration, if, return, expression)。
+  /// 失败抛 [LegacyJsEvalError]。
   static dynamic evaluate(String code, {Map<String, dynamic>? variables}) {
+    final stripped = _stripCommentsAndStrings(code);
+    if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
+      throw LegacyJsEvalError('Unsupported keyword in Legacy JS Evaluator');
+    }
     final vars = <String, dynamic>{...?variables};
     final statements = _splitStatements(code);
     dynamic last;
@@ -38,6 +146,10 @@ class LegacyJsEvaluator {
 
   /// 求值一个 JS 表达式(无 declaration/if)。
   static dynamic evaluateExpression(String expr, {Map<String, dynamic>? variables}) {
+    final stripped = _stripCommentsAndStrings(expr);
+    if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
+      throw LegacyJsEvalError('Unsupported keyword in Legacy JS Evaluator');
+    }
     final vars = <String, dynamic>{...?variables};
     return _evaluateExpressionPart(expr.trim(), vars);
   }
@@ -162,7 +274,7 @@ class LegacyJsEvaluator {
     }
 
     // for (init; cond; incr) { body }
-    if (s.startsWith('for ') && s.startsWith('for(')) {
+    if (s.startsWith('for ') || s.startsWith('for(')) {
       return _executeForLoop(s, variables);
     }
 
@@ -432,7 +544,7 @@ class LegacyJsEvaluator {
     if (e.isEmpty) return '';
 
     // function expression: function name(p) { body } 或匿名 function
-    if ((e.startsWith('function ') || e == 'function') && e.contains('(') && e.contains('{')) {
+    if (e.startsWith('function') && e.contains('(') && e.contains('{')) {
       final s = e;
       // 找到 function 后面
       final kwLen = e.startsWith('function ') ? 9 : 8;
@@ -463,6 +575,28 @@ class LegacyJsEvaluator {
           }
         }
       }
+    }
+
+    // arrow function expression: (params) => body or param => body
+    final arrowMatch = RegExp(
+      r'^\s*(?:\(([^)]*)\)|([a-zA-Z_\$][a-zA-Z0-9_\$]*))\s*=>\s*([\s\S]*)$',
+    ).firstMatch(e);
+    if (arrowMatch != null) {
+      final paramsList = <String>[];
+      final p1 = arrowMatch.group(1);
+      final p2 = arrowMatch.group(2);
+      if (p1 != null) {
+        paramsList.addAll(p1.split(',').map((p) => p.trim()).where((p) => p.isNotEmpty));
+      } else if (p2 != null && p2.isNotEmpty) {
+        paramsList.add(p2.trim());
+      }
+      var body = arrowMatch.group(3)!.trim();
+      if (body.startsWith('{') && body.endsWith('}')) {
+        body = body.substring(1, body.length - 1).trim();
+      } else {
+        body = 'return $body';
+      }
+      return _JsFunction(paramsList, body, Map.from(variables));
     }
 
     // 字面量
@@ -605,7 +739,7 @@ class LegacyJsEvaluator {
     dynamic current;
 
     // 第一段:可能是 literal / variable / (...) / 链式函数
-    final firstSegment = _readChainSegment(e, 0);
+    final firstSegment = _readChainSegment(e, 0, variables);
     if (firstSegment == null) return null;
     i = firstSegment.$2;
     final head = firstSegment.$1;
@@ -661,9 +795,12 @@ class LegacyJsEvaluator {
     } else {
       // 函数调用
       // 先看是不是 user-defined function
-      final userFn = variables[head.$1];
-      if (userFn is _JsFunction) {
-        current = _callJsFunction(userFn, head.$2!, variables);
+      var fn = variables[head.$1];
+      if (fn == null) {
+        fn = _evaluateExpressionPart(head.$1, variables);
+      }
+      if (fn is _JsFunction) {
+        current = _callJsFunction(fn, head.$2!, variables);
       } else {
         current = _callFunction(head.$1, head.$2!, variables);
       }
@@ -682,6 +819,15 @@ class LegacyJsEvaluator {
         final propName = e.substring(i + 1, j);
         if (propName.isEmpty) return null;
         if (current is Map) {
+          if (j < e.length && e[j] == '(') {
+            final close2 = _findMatchingClose(e, j, 0x28, 0x29);
+            if (close2 == -1) return null;
+            final argsStr = e.substring(j + 1, close2);
+            final args = _splitArgs(argsStr, variables);
+            current = _callMapMethod(current, propName, args, variables);
+            i = close2 + 1;
+            continue;
+          }
           current = current[propName];
           i = j;
         } else if (current is _JsObject) {
@@ -766,7 +912,11 @@ class LegacyJsEvaluator {
 
   /// 读取一个链段: literal/variable/(expr) 后跟 (args) 视为函数调用
   /// 返回 ((fullText, argsOrNull), endIndex)
-  static ((String, List<dynamic>?), int)? _readChainSegment(String e, int start) {
+  static ((String, List<dynamic>?), int)? _readChainSegment(
+    String e,
+    int start,
+    Map<String, dynamic> variables,
+  ) {
     var i = start;
     if (i >= e.length) return null;
     final c = e[i];
@@ -781,7 +931,7 @@ class LegacyJsEvaluator {
         final close2 = _findMatchingClose(e, i, 0x28, 0x29);
         if (close2 == -1) return null;
         final argsStr = e.substring(i + 1, close2);
-        final args = _splitArgs(argsStr, <String, dynamic>{});
+        final args = _splitArgs(argsStr, variables);
         return ((inner, args), close2 + 1);
       }
       return ((inner, null), i);
@@ -802,7 +952,7 @@ class LegacyJsEvaluator {
         final close = _findMatchingClose(e, j, 0x28, 0x29);
         if (close == -1) return null;
         final argsStr = e.substring(j + 1, close);
-        final args = _splitArgs(argsStr, <String, dynamic>{});
+        final args = _splitArgs(argsStr, variables);
         return ((name, args), close + 1);
       }
       return ((name, null), j);
@@ -1277,6 +1427,10 @@ class LegacyJsEvaluator {
         if (args.isEmpty) return null;
         try {
           final code = args[0]?.toString() ?? '';
+          final stripped = _stripCommentsAndStrings(code);
+          if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
+            throw LegacyJsEvalError('Unsupported keyword in eval: $code');
+          }
           // 关键:不复制 variables map,直接 splitStatements → evaluateStatement
           final statements = _splitStatements(code);
           dynamic last;
@@ -1286,6 +1440,8 @@ class LegacyJsEvaluator {
           }
           if (last is _ReturnSignal) return last.value ?? '';
           return last;
+        } on LegacyJsEvalError {
+          rethrow;
         } catch (_) {
           return null;
         }
@@ -1340,21 +1496,40 @@ class LegacyJsEvaluator {
   ) {
     switch (method) {
       case 'ajax':
-      case 'get':
       case 'post':
       case 'connect':
-        // 不支持真正的网络请求,返回空字符串
-        // (实际引擎里用 java.ajax 来抓取页面内容,fallback 时无法做到)
-        return '';
+        throw LegacyJsEvalError('Network request not supported in LegacyJsEvaluator');
+      case 'get':
+        if (args.isEmpty) return '';
+        final key = args[0].toString();
+        if (key.startsWith('http://') || key.startsWith('https://')) {
+          return '';
+        }
+        return variables[key]?.toString() ?? '';
       case 'put':
         if (args.length >= 2) {
           variables[args[0].toString()] = args[1];
         }
         return args.length >= 2 ? args[1] : '';
       case 'getString':
-        // 从 variables 取(模拟 legado java.getString)
         if (args.isEmpty) return '';
-        return variables[args[0].toString()]?.toString() ?? '';
+        final key = args[0].toString();
+        final stored = variables[key]?.toString() ?? '';
+        if (stored.isNotEmpty) return stored;
+        final resultVal = variables['result'];
+        if (resultVal != null &&
+            resultVal.toString().isNotEmpty &&
+            (key.contains('\$') || key.contains('.') || key.contains('['))) {
+          try {
+            final parsed = LegadoRuleEvaluator.extractJsonValue(
+              resultVal,
+              key,
+              variables: variables,
+            );
+            if (parsed.isNotEmpty) return parsed;
+          } catch (_) {}
+        }
+        return args.length > 1 ? args[1]?.toString() ?? '' : '';
       case 'md5Encode':
         if (args.isEmpty) return '';
         return crypto_pkg.md5.convert(utf8.encode(args[0].toString())).toString();
@@ -1427,9 +1602,69 @@ class LegacyJsEvaluator {
               .join();
         }
         return Uri.encodeComponent(str);
+      case 'hmacHex':
+      case 'HMacHex':
+        if (args.length < 3) return '';
+        return _hmacHex(args[0].toString(), args[1].toString(), args[2].toString());
+      case 'hmacBase64':
+      case 'HMacBase64':
+        if (args.length < 3) return '';
+        return _hmacBase64(args[0].toString(), args[1].toString(), args[2].toString());
       case 'decodeURI':
         if (args.isEmpty) return '';
         return Uri.decodeComponent(args[0].toString());
+      case 'digestHex':
+        if (args.length < 2) return '';
+        final val = args[0].toString();
+        final alg = args[1].toString().toLowerCase().replaceAll(RegExp(r'^sha-?'), 'sha');
+        if (alg == 'md5') {
+          return crypto_pkg.md5.convert(utf8.encode(val)).toString();
+        } else if (alg == 'sha1') {
+          return crypto_pkg.sha1.convert(utf8.encode(val)).toString();
+        } else if (alg == 'sha224') {
+          return crypto_pkg.sha224.convert(utf8.encode(val)).toString();
+        } else if (alg == 'sha256') {
+          return crypto_pkg.sha256.convert(utf8.encode(val)).toString();
+        } else if (alg == 'sha384' || alg == 'sha348') {
+          return crypto_pkg.sha384.convert(utf8.encode(val)).toString();
+        } else if (alg == 'sha512') {
+          return crypto_pkg.sha512.convert(utf8.encode(val)).toString();
+        }
+        return '';
+      case 'aesEncodeToBase64String':
+        if (args.length < 2) return '';
+        final valueAes = args[0].toString();
+        final keyAes = args[1].toString();
+        final thirdAes = args.length > 2 ? args[2] : null;
+        final fourthAes = args.length > 3 ? args[3] : null;
+        final normAes = _normalizeTransformation(thirdAes, fourthAes, 'AES/CBC/PKCS5Padding');
+        return _cipherBase64Encode(valueAes, keyAes, normAes.iv, normAes.transformation);
+      case 'desEncodeToBase64String':
+      case 'desEncodeToBase64':
+        if (args.length < 2) return '';
+        final valueDes = args[0].toString();
+        final keyDes = args[1].toString();
+        final thirdDes = args.length > 2 ? args[2] : null;
+        final fourthDes = args.length > 3 ? args[3] : null;
+        final normDes = _normalizeTransformation(thirdDes, fourthDes, 'DES/CBC/PKCS5Padding');
+        return _cipherBase64Encode(valueDes, keyDes, normDes.iv, normDes.transformation);
+      case 'tripleDESEncodeBase64Str':
+        if (args.length < 2) return '';
+        final valueTriple = args[0].toString();
+        final keyTriple = args[1].toString();
+        final modeTriple = args.length > 2 ? args[2]?.toString() ?? 'CBC' : 'CBC';
+        final paddingTriple = args.length > 3 ? args[3]?.toString() ?? 'PKCS5Padding' : 'PKCS5Padding';
+        final ivTriple = args.length > 4 ? args[4]?.toString() ?? '' : '';
+        final transformationTriple = 'DESede/$modeTriple/$paddingTriple';
+        return _cipherBase64Encode(valueTriple, keyTriple, ivTriple, transformationTriple);
+      case 'cipherEncodeToBase64String':
+        if (args.length < 2) return '';
+        final valueCipher = args[0].toString();
+        final keyCipher = args[1].toString();
+        final thirdCipher = args.length > 2 ? args[2] : null;
+        final fourthCipher = args.length > 3 ? args[3] : null;
+        final normCipher = _normalizeTransformation(thirdCipher, fourthCipher, 'AES/CBC/PKCS5Padding');
+        return _cipherBase64Encode(valueCipher, keyCipher, normCipher.iv, normCipher.transformation);
     }
     return '';
   }
@@ -2213,6 +2448,204 @@ class LegacyJsEvaluator {
         .replaceAll('HH', dt.hour.toString().padLeft(2, '0'))
         .replaceAll('mm', dt.minute.toString().padLeft(2, '0'))
         .replaceAll('ss', dt.second.toString().padLeft(2, '0'));
+  }
+
+  static String _hmacHex(String value, String algorithm, String key) {
+    final normAlg = algorithm.toLowerCase().replaceAll(RegExp(r'^hmac-?'), '');
+    crypto_pkg.Hash hasher;
+    switch (normAlg) {
+      case 'md5':
+        hasher = crypto_pkg.md5;
+        break;
+      case 'sha256':
+        hasher = crypto_pkg.sha256;
+        break;
+      case 'sha1':
+      default:
+        hasher = crypto_pkg.sha1;
+        break;
+    }
+    final hmac = crypto_pkg.Hmac(hasher, utf8.encode(key));
+    return hmac.convert(utf8.encode(value)).toString();
+  }
+
+  static String _hmacBase64(String value, String algorithm, String key) {
+    final normAlg = algorithm.toLowerCase().replaceAll(RegExp(r'^hmac-?'), '');
+    crypto_pkg.Hash hasher;
+    switch (normAlg) {
+      case 'md5':
+        hasher = crypto_pkg.md5;
+        break;
+      case 'sha256':
+        hasher = crypto_pkg.sha256;
+        break;
+      case 'sha1':
+      default:
+        hasher = crypto_pkg.sha1;
+        break;
+    }
+    final hmac = crypto_pkg.Hmac(hasher, utf8.encode(key));
+    return base64.encode(hmac.convert(utf8.encode(value)).bytes);
+  }
+
+  static dynamic _callMapMethod(
+    Map map,
+    String method,
+    List<dynamic> args,
+    Map<String, dynamic> variables,
+  ) {
+    final isSource = map.containsKey('bookSourceUrl') || map.containsKey('key');
+    final isBook = !isSource && (map.containsKey('name') || map.containsKey('title'));
+    final type = isSource ? 'source' : 'book';
+
+    switch (method) {
+      case 'getKey':
+        return map['key'] ?? map['bookSourceUrl'] ?? '';
+      case 'getVariable':
+        if (args.isNotEmpty) {
+          final key = args[0]?.toString() ?? '';
+          if (key.isNotEmpty) {
+            return variables['$type.variable.$key'] ?? '';
+          }
+        }
+        return variables['$type.variable'] ?? map['variable'] ?? '';
+      case 'setVariable':
+        if (args.length >= 2) {
+          final key = args[0]?.toString() ?? '';
+          final val = args[1];
+          if (key.isNotEmpty) {
+            variables['$type.variable.$key'] = val;
+          }
+          return val;
+        } else if (args.isNotEmpty) {
+          final val = args[0];
+          variables['$type.variable'] = val;
+          return val;
+        }
+        return '';
+      case 'getVariableMap':
+        final variableStr = variables['$type.variable'] ?? map['variable'] ?? '';
+        Map<String, dynamic> parsed = {};
+        try {
+          parsed = jsonDecode(variableStr.toString());
+        } catch (_) {}
+        return _JsObject({
+          'get': (List<dynamic> args2) {
+            if (args2.isEmpty) return '';
+            return parsed[args2[0]?.toString()] ?? '';
+          }
+        });
+      case 'getLoginInfoMap':
+        return _JsObject({
+          'get': (List<dynamic> args2) {
+            if (args2.isEmpty) return '';
+            return variables['source.login.${args2[0]?.toString()}'] ?? '';
+          }
+        });
+      case 'putLoginHeader':
+        if (args.length >= 2) {
+          variables['source.loginHeader.${args[0]?.toString() ?? ''}'] = args[1];
+          return args[1];
+        }
+        return '';
+      case 'getLoginHeader':
+        if (args.isNotEmpty) {
+          return variables['source.loginHeader.${args[0]?.toString() ?? ''}'] ?? '';
+        }
+        return '';
+    }
+    return null;
+  }
+
+  static ({String transformation, String iv}) _normalizeTransformation(
+    dynamic third,
+    dynamic fourth,
+    String fallback,
+  ) {
+    final t = third?.toString() ?? '';
+    if (t.contains('/') || RegExp(r'^(AES|DES|DESede|TripleDES)', caseSensitive: false).hasMatch(t)) {
+      return (transformation: t.isEmpty ? fallback : t, iv: fourth?.toString() ?? '');
+    }
+    return (transformation: fourth?.toString() ?? fallback, iv: t);
+  }
+
+  static String _cipherBase64Encode(
+    String value,
+    String key,
+    String iv,
+    String transformation,
+  ) {
+    try {
+      final upper = transformation.toUpperCase();
+      final isDes = upper.contains('DES');
+      final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
+      
+      final keyBytes = Uint8List.fromList(utf8.encode(key));
+      final ivBytes = Uint8List.fromList(utf8.encode(iv));
+      
+      final pc.BlockCipher engine = isDes ? pc.DESedeEngine() : pc.AESEngine();
+      final blockSize = engine.blockSize;
+      
+      Uint8List normalizedKeyBytes;
+      if (isDes) {
+        if (keyBytes.length == 24) {
+          normalizedKeyBytes = keyBytes;
+        } else if (keyBytes.length == 16) {
+          normalizedKeyBytes = Uint8List.fromList([...keyBytes, ...keyBytes.sublist(0, 8)]);
+        } else if (keyBytes.length == 8) {
+          normalizedKeyBytes = Uint8List.fromList([...keyBytes, ...keyBytes, ...keyBytes]);
+        } else {
+          normalizedKeyBytes = Uint8List(24);
+        }
+      } else {
+        if (keyBytes.length != 16 && keyBytes.length != 24 && keyBytes.length != 32) {
+          final list = Uint8List(16);
+          for (var i = 0; i < 16; i++) {
+            list[i] = i < keyBytes.length ? keyBytes[i] : 0;
+          }
+          normalizedKeyBytes = list;
+        } else {
+          normalizedKeyBytes = keyBytes;
+        }
+      }
+      
+      final keyParam = isDes
+          ? pc.DESedeParameters(normalizedKeyBytes)
+          : pc.KeyParameter(normalizedKeyBytes);
+          
+      final cipher = pc.PaddedBlockCipherImpl(
+        pc.PKCS7Padding(),
+        mode == 'ecb' ? pc.ECBBlockCipher(engine) : pc.CBCBlockCipher(engine),
+      );
+      
+      if (mode == 'ecb') {
+        cipher.init(
+          true,
+          pc.PaddedBlockCipherParameters<pc.CipherParameters, Null>(keyParam, null),
+        );
+      } else {
+        var normalizedIvBytes = ivBytes;
+        if (normalizedIvBytes.length != blockSize) {
+          final list = Uint8List(blockSize);
+          for (var i = 0; i < blockSize; i++) {
+            list[i] = i < ivBytes.length ? ivBytes[i] : 0;
+          }
+          normalizedIvBytes = list;
+        }
+        cipher.init(
+          true,
+          pc.PaddedBlockCipherParameters<pc.ParametersWithIV<pc.CipherParameters>, Null>(
+            pc.ParametersWithIV<pc.CipherParameters>(keyParam, normalizedIvBytes),
+            null,
+          ),
+        );
+      }
+      
+      final out = cipher.process(Uint8List.fromList(utf8.encode(value)));
+      return base64.encode(out);
+    } catch (_) {
+      return '';
+    }
   }
 }
 

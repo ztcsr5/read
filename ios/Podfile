@@ -193,4 +193,16 @@ post_install do |installer|
     end
     aggregate_target.user_project.save
   end
+
+  # 3) 排除 quickjs_engine.framework 被复制到 App Bundle 的 Frameworks 目录。
+  #    因为它是静态库且已链入 Runner 主程序，保留在 Frameworks 里会导致第三方签名工具（如 AltStore/Sideloadly）签名失败。
+  target_support_dir = File.join(installer.sandbox.root.to_s, 'Target Support Files')
+  if File.exist?(target_support_dir)
+    Dir.glob(File.join(target_support_dir, '**/Pods-Runner-frameworks*.sh')).each do |script_path|
+      puts "[Podfile] Patching #{script_path} to exclude quickjs_engine.framework..."
+      content = File.read(script_path)
+      patched = content.gsub(/install_framework\s+["'].*quickjs_engine\.framework["']/, '# \0 (Excluded by Podfile)')
+      File.write(script_path, patched)
+    end
+  end
 end
