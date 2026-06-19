@@ -1396,6 +1396,9 @@ class LegadoJsEngine {
         ajax: function(urlStr) {
           return sendMessage("java_ajax", String(urlStr || ""));
         },
+        androidId: function() {
+          return "legacy-evaluator-androidId";
+        },
         getWebViewUA: function() {
           return "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
         },
@@ -3183,6 +3186,7 @@ const java = {
   decodeURI: function(value) { return decodeURI(__str(value)); },
   decodeURIComponent: function(value) { return decodeURIComponent(__str(value)); },
   randomUUID: function() { return crypto.randomUUID(); },
+  androidId: function() { return "legacy-evaluator-androidId"; },
   uuid: function() { return crypto.randomUUID(); },
   currentTimeMillis: function() { return Date.now(); },
   now: function() { return Date.now(); },
@@ -4332,7 +4336,7 @@ class JsCompatibilityTransformer {
       },
     );
 
-    transformed = transformed.replaceAllMapped(RegExp(r'\(([^)]*)\)\s*=>'), (
+    transformed = transformed.replaceAllMapped(RegExp(r'\(([^()]*)\)\s*=>'), (
       match,
     ) {
       final params = match.group(1) ?? '';

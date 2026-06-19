@@ -25,6 +25,118 @@ import 'legado_rule_evaluator.dart';
 class LegacyJsEvaluator {
   /// 求值一个 JS 字符串(支持 var/let/const declaration, if, return, expression)。
   /// 失败抛 [LegacyJsEvalError]。
+  static String _stripComments(String code) {
+    final sb = StringBuffer();
+    var i = 0;
+    var inSingleQuote = false;
+    var inDoubleQuote = false;
+    var inTemplateQuote = false;
+    var inLineComment = false;
+    var inBlockComment = false;
+
+    while (i < code.length) {
+      final c = code[i];
+      final next = i + 1 < code.length ? code[i + 1] : '';
+
+      if (inLineComment) {
+        if (c == '\n' || c == '\r') {
+          inLineComment = false;
+          sb.write(c);
+        }
+        i++;
+        continue;
+      }
+      if (inBlockComment) {
+        if (c == '*' && next == '/') {
+          inBlockComment = false;
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inSingleQuote) {
+        sb.write(c);
+        if (c == '\\') {
+          if (i + 1 < code.length) {
+            sb.write(code[i + 1]);
+          }
+          i += 2;
+        } else if (c == "'") {
+          inSingleQuote = false;
+          i++;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inDoubleQuote) {
+        sb.write(c);
+        if (c == '\\') {
+          if (i + 1 < code.length) {
+            sb.write(code[i + 1]);
+          }
+          i += 2;
+        } else if (c == '"') {
+          inDoubleQuote = false;
+          i++;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inTemplateQuote) {
+        sb.write(c);
+        if (c == '\\') {
+          if (i + 1 < code.length) {
+            sb.write(code[i + 1]);
+          }
+          i += 2;
+        } else if (c == '`') {
+          inTemplateQuote = false;
+          i++;
+        } else {
+          i++;
+        }
+        continue;
+      }
+
+      if (c == '/' && next == '/') {
+        inLineComment = true;
+        i += 2;
+        continue;
+      }
+      if (c == '/' && next == '*') {
+        inBlockComment = true;
+        i += 2;
+        continue;
+      }
+
+      if (c == "'") {
+        inSingleQuote = true;
+        sb.write(c);
+        i++;
+        continue;
+      }
+      if (c == '"') {
+        inDoubleQuote = true;
+        sb.write(c);
+        i++;
+        continue;
+      }
+      if (c == '`') {
+        inTemplateQuote = true;
+        sb.write(c);
+        i++;
+        continue;
+      }
+
+      sb.write(c);
+      i++;
+    }
+    return sb.toString();
+  }
+
   static String _stripCommentsAndStrings(String code) {
     final sb = StringBuffer();
     var i = 0;
@@ -128,12 +240,13 @@ class LegacyJsEvaluator {
   /// 求值一个 JS 字符串(支持 var/let/const declaration, if, return, expression)。
   /// 失败抛 [LegacyJsEvalError]。
   static dynamic evaluate(String code, {Map<String, dynamic>? variables}) {
-    final stripped = _stripCommentsAndStrings(code);
+    final cleanCode = _stripComments(code);
+    final stripped = _stripCommentsAndStrings(cleanCode);
     if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
       throw LegacyJsEvalError('Unsupported keyword in Legacy JS Evaluator');
     }
     final vars = <String, dynamic>{...?variables};
-    final statements = _splitStatements(code);
+    final statements = _splitStatements(cleanCode);
     dynamic last;
     for (final stmt in statements) {
       last = _evaluateStatement(stmt, vars);
@@ -146,12 +259,13 @@ class LegacyJsEvaluator {
 
   /// 求值一个 JS 表达式(无 declaration/if)。
   static dynamic evaluateExpression(String expr, {Map<String, dynamic>? variables}) {
-    final stripped = _stripCommentsAndStrings(expr);
+    final cleanExpr = _stripComments(expr);
+    final stripped = _stripCommentsAndStrings(cleanExpr);
     if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
       throw LegacyJsEvalError('Unsupported keyword in Legacy JS Evaluator');
     }
     final vars = <String, dynamic>{...?variables};
-    return _evaluateExpressionPart(expr.trim(), vars);
+    return _evaluateExpressionPart(cleanExpr.trim(), vars);
   }
 
   // ============== 拆分 statements ==============
@@ -193,6 +307,10 @@ class LegacyJsEvaluator {
       if (c == 0x5b) bracketDepth++;
       if (c == 0x5d) bracketDepth--;
 
+      if (parenDepth < 0 || braceDepth < 0 || bracketDepth < 0) {
+        throw LegacyJsEvalError('Syntax depths mismatch (negative depth)');
+      }
+
       if (parenDepth == 0 && braceDepth == 0 && bracketDepth == 0) {
         if (c == 0x3b || c == 0x0a) {
           // ; or newline
@@ -203,6 +321,9 @@ class LegacyJsEvaluator {
         }
       }
       current.writeCharCode(c);
+    }
+    if (parenDepth != 0 || braceDepth != 0 || bracketDepth != 0 || quote != 0) {
+      throw LegacyJsEvalError('Syntax depths mismatch at the end of statement');
     }
     final tail = current.toString().trim();
     if (tail.isNotEmpty) statements.add(tail);
@@ -527,9 +648,20 @@ class LegacyJsEvaluator {
         }
         final left = stmt.substring(0, i).trim();
         final right = stmt.substring(i + 1).trim();
+        
+        var realLeft = left;
+        var op = '';
+        if (left.endsWith('+') || left.endsWith('-') || left.endsWith('*') || left.endsWith('/')) {
+          op = left.substring(left.length - 1);
+          realLeft = left.substring(0, left.length - 1).trim();
+        }
+        
         final leftClean =
-            left.replaceFirst(RegExp(r'^(var|let|const)\s+'), '').trim();
+            realLeft.replaceFirst(RegExp(r'^(var|let|const)\s+'), '').trim();
         if (RegExp(r'^[a-zA-Z_\$][a-zA-Z0-9_\$]*$').hasMatch(leftClean)) {
+          if (op.isNotEmpty) {
+            return (leftClean, '$leftClean $op ($right)');
+          }
           return (leftClean, right);
         }
         return null;
@@ -712,8 +844,13 @@ class LegacyJsEvaluator {
         }
       }
     }
+    if (e.startsWith('!')) {
+      final sub = e.substring(1).trim();
+      final val = _evaluateExpressionPart(sub, variables);
+      return !_isTruthy(val);
+    }
 
-    return e;
+    throw LegacyJsEvalError('Unsupported expression syntax: $e');
   }
 
   // ============== 模板字符串 ${...} ==============
@@ -759,6 +896,19 @@ class LegacyJsEvaluator {
 
     if (head.$2 == null) {
       // 单纯是字面量或变量
+      final isNamespace = head.$1 == 'CryptoJS' ||
+          head.$1 == 'java' ||
+          head.$1 == 'Math' ||
+          head.$1 == 'String' ||
+          head.$1 == 'RegExp' ||
+          head.$1 == 'Object' ||
+          head.$1 == 'Array' ||
+          head.$1 == 'console' ||
+          head.$1 == 'Date' ||
+          head.$1 == 'JSON';
+      if (!isChainSyntax && !isNamespace) {
+        return null;
+      }
       current = _evaluateExpressionPart(head.$1, variables);
       // 命名空间调用: NS.X.Y(args) → 整体当 _callFunction('NS.X.Y', args)
       if (current == null &&
@@ -770,7 +920,8 @@ class LegacyJsEvaluator {
               head.$1 == 'Object' ||
               head.$1 == 'Array' ||
               head.$1 == 'console' ||
-              head.$1 == 'Date')) {
+              head.$1 == 'Date' ||
+              head.$1 == 'JSON')) {
         isChainSyntax = true;
         // 收集 NS.X.Y
         final path = StringBuffer(head.$1);
@@ -860,7 +1011,7 @@ class LegacyJsEvaluator {
             if (close2 == -1) return null;
             final argsStr = e.substring(j + 1, close2);
             final args = _splitArgs(argsStr, variables);
-            current = _callArrayMethod(propName, current, args);
+            current = _callArrayMethod(propName, current, args, variables);
             i = close2 + 1;
             continue;
           }
@@ -1053,6 +1204,24 @@ class LegacyJsEvaluator {
         return str.toLowerCase();
       case 'trim':
         return str.trim();
+      case 'padStart':
+        if (args.isEmpty) return str;
+        final targetLength = _toInt(args[0]);
+        if (targetLength <= str.length) return str;
+        final padStr = args.length > 1 ? (args[1]?.toString() ?? ' ') : ' ';
+        if (padStr.isEmpty) return str;
+        final padLength = targetLength - str.length;
+        final repeatedPad = padStr * ((padLength / padStr.length).ceil());
+        return repeatedPad.substring(0, padLength) + str;
+      case 'padEnd':
+        if (args.isEmpty) return str;
+        final targetLength = _toInt(args[0]);
+        if (targetLength <= str.length) return str;
+        final padStr = args.length > 1 ? (args[1]?.toString() ?? ' ') : ' ';
+        if (padStr.isEmpty) return str;
+        final padLength = targetLength - str.length;
+        final repeatedPad = padStr * ((padLength / padStr.length).ceil());
+        return str + repeatedPad.substring(0, padLength);
       case 'indexOf':
         if (args.isEmpty) return -1;
         return str.indexOf(args[0]?.toString() ?? '');
@@ -1107,6 +1276,23 @@ class LegacyJsEvaluator {
       case 'valueOf':
         return str;
     }
+    throw LegacyJsEvalError('Unsupported string method: $method');
+  }
+
+  static bool _isCallable(dynamic fn) {
+    return fn is Function || fn is _JsFunction;
+  }
+
+  static dynamic _invokeCallback(
+    dynamic fn,
+    List<dynamic> args,
+    Map<String, dynamic> variables,
+  ) {
+    if (fn is _JsFunction) {
+      return _callJsFunction(fn, args, variables);
+    } else if (fn is Function) {
+      return Function.apply(fn, args);
+    }
     return null;
   }
 
@@ -1116,6 +1302,7 @@ class LegacyJsEvaluator {
     String method,
     List<dynamic> list,
     List<dynamic> args,
+    Map<String, dynamic> variables,
   ) {
     switch (method) {
       case 'length':
@@ -1150,22 +1337,22 @@ class LegacyJsEvaluator {
         return list.contains(args[0]);
       case 'map':
         if (args.isEmpty) return list;
-        return _mapArray(list, args[0]);
+        return _mapArray(list, args[0], variables);
       case 'filter':
         if (args.isEmpty) return list;
-        return _filterArray(list, args[0]);
+        return _filterArray(list, args[0], variables);
       case 'forEach':
         if (args.isEmpty) return null;
-        return _forEachArray(list, args[0]);
+        return _forEachArray(list, args[0], variables);
       case 'reduce':
-        return _reduceArray(list, args);
+        return _reduceArray(list, args, variables);
       case 'sort':
         if (args.isEmpty) {
           final sorted = [...list];
           sorted.sort();
           return sorted;
         }
-        return _sortArray(list, args[0]);
+        return _sortArray(list, args[0], variables);
       case 'reverse':
         return list.reversed.toList();
       case 'toString':
@@ -1173,18 +1360,21 @@ class LegacyJsEvaluator {
       case 'toArray':
         return list;
     }
-    return null;
+    throw LegacyJsEvalError('Unsupported array method: $method');
   }
 
   static List<dynamic> _mapArray(
     List<dynamic> list,
     dynamic fn,
+    Map<String, dynamic> variables,
   ) {
-    if (fn is! Function) return list;
+    if (!_isCallable(fn)) return list;
     final result = <dynamic>[];
     for (var i = 0; i < list.length; i++) {
       try {
-        result.add(fn(list[i], i, list));
+        result.add(_invokeCallback(fn, [list[i], i, list], variables));
+      } on LegacyJsEvalError {
+        rethrow;
       } catch (_) {
         result.add(null);
       }
@@ -1195,14 +1385,17 @@ class LegacyJsEvaluator {
   static List<dynamic> _filterArray(
     List<dynamic> list,
     dynamic fn,
+    Map<String, dynamic> variables,
   ) {
-    if (fn is! Function) return list;
+    if (!_isCallable(fn)) return list;
     final result = <dynamic>[];
     for (var i = 0; i < list.length; i++) {
       try {
-        if (_isTruthy(fn(list[i], i, list))) {
+        if (_isTruthy(_invokeCallback(fn, [list[i], i, list], variables))) {
           result.add(list[i]);
         }
+      } on LegacyJsEvalError {
+        rethrow;
       } catch (_) {}
     }
     return result;
@@ -1211,25 +1404,34 @@ class LegacyJsEvaluator {
   static dynamic _forEachArray(
     List<dynamic> list,
     dynamic fn,
+    Map<String, dynamic> variables,
   ) {
-    if (fn is! Function) return null;
+    if (!_isCallable(fn)) return null;
     for (var i = 0; i < list.length; i++) {
       try {
-        fn(list[i], i, list);
+        _invokeCallback(fn, [list[i], i, list], variables);
+      } on LegacyJsEvalError {
+        rethrow;
       } catch (_) {}
     }
     return null;
   }
 
-  static dynamic _reduceArray(List<dynamic> list, List<dynamic> args) {
+  static dynamic _reduceArray(
+    List<dynamic> list,
+    List<dynamic> args,
+    Map<String, dynamic> variables,
+  ) {
     if (args.isEmpty) return null;
     final fn = args[0];
-    if (fn is! Function) return null;
+    if (!_isCallable(fn)) return null;
     dynamic acc = args.length > 1 ? args[1] : (list.isNotEmpty ? list[0] : null);
     final startIdx = args.length > 1 ? 0 : 1;
     for (var i = startIdx; i < list.length; i++) {
       try {
-        acc = fn(acc, list[i], i, list);
+        acc = _invokeCallback(fn, [acc, list[i], i, list], variables);
+      } on LegacyJsEvalError {
+        rethrow;
       } catch (_) {
         return acc;
       }
@@ -1240,19 +1442,24 @@ class LegacyJsEvaluator {
   static List<dynamic> _sortArray(
     List<dynamic> list,
     dynamic fn,
+    Map<String, dynamic> variables,
   ) {
-    if (fn is! Function) return list;
+    if (!_isCallable(fn)) return list;
     final sorted = [...list];
     try {
       sorted.sort((a, b) {
         try {
-          final r = fn(a, b);
+          final r = _invokeCallback(fn, [a, b], variables);
           if (r is num) return r.toInt();
           return _toInt(r);
+        } on LegacyJsEvalError {
+          rethrow;
         } catch (_) {
           return 0;
         }
       });
+    } on LegacyJsEvalError {
+      rethrow;
     } catch (_) {}
     return sorted;
   }
@@ -1503,12 +1710,13 @@ class LegacyJsEvaluator {
         if (args.isEmpty) return null;
         try {
           final code = args[0]?.toString() ?? '';
-          final stripped = _stripCommentsAndStrings(code);
+          final cleanCode = _stripComments(code);
+          final stripped = _stripCommentsAndStrings(cleanCode);
           if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
             throw LegacyJsEvalError('Unsupported keyword in eval: $code');
           }
           // 关键:不复制 variables map,直接 splitStatements → evaluateStatement
-          final statements = _splitStatements(code);
+          final statements = _splitStatements(cleanCode);
           dynamic last;
           for (final stmt in statements) {
             last = _evaluateStatement(stmt, variables);
@@ -1560,7 +1768,7 @@ class LegacyJsEvaluator {
         if (args.isEmpty) return false;
         return args[0] is List;
     }
-    return null;
+    throw LegacyJsEvalError('Unsupported function call: $name');
   }
 
   // ============== java 桥接(stub) ==============
@@ -1768,7 +1976,7 @@ class LegacyJsEvaluator {
         final normCipher = _normalizeTransformation(thirdCipher, fourthCipher, 'AES/CBC/PKCS5Padding');
         return _cipherBase64Encode(valueCipher, keyCipher, normCipher.iv, normCipher.transformation);
     }
-    return '';
+    throw LegacyJsEvalError('Unsupported java method: $method');
   }
 
   // ============== CryptoJS 兼容 ==============
@@ -2267,7 +2475,7 @@ class LegacyJsEvaluator {
     final bv = _evaluateExpressionPart(b.toString(), variables);
     if (av is num && bv is num) return av == bv;
     if (av == null && bv == null) return true;
-    if (av == null || bv == null) return bv == null || av == null;
+    if (av == null || bv == null) return false;
     return av.toString() == bv.toString();
   }
 
@@ -2277,17 +2485,66 @@ class LegacyJsEvaluator {
     return _splitArgs(inner, variables);
   }
 
+  static List<String> _splitObjectEntries(String s) {
+    final entries = <String>[];
+    final current = StringBuffer();
+    var parenDepth = 0;
+    var braceDepth = 0;
+    var bracketDepth = 0;
+    var quote = 0;
+    var escaped = false;
+    for (var i = 0; i < s.length; i++) {
+      final c = s.codeUnitAt(i);
+      if (escaped) {
+        current.writeCharCode(c);
+        escaped = false;
+        continue;
+      }
+      if (c == 0x5c) {
+        current.writeCharCode(c);
+        escaped = true;
+        continue;
+      }
+      if (quote != 0) {
+        current.writeCharCode(c);
+        if (c == quote) quote = 0;
+        continue;
+      }
+      if (c == 0x22 || c == 0x27 || c == 0x60) {
+        quote = c;
+        current.writeCharCode(c);
+        continue;
+      }
+      if (c == 0x28) parenDepth++;
+      if (c == 0x29) parenDepth--;
+      if (c == 0x7b) braceDepth++;
+      if (c == 0x7d) braceDepth--;
+      if (c == 0x5b) bracketDepth++;
+      if (c == 0x5d) bracketDepth--;
+      if (c == 0x2c && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0) {
+        final a = current.toString().trim();
+        if (a.isNotEmpty) entries.add(a);
+        current.clear();
+        continue;
+      }
+      current.writeCharCode(c);
+    }
+    final a = current.toString().trim();
+    if (a.isNotEmpty) entries.add(a);
+    return entries;
+  }
+
   static dynamic _parseObjectLiteral(String e, Map<String, dynamic> variables) {
     final inner = e.substring(1, e.length - 1).trim();
     if (inner.isEmpty) return <String, dynamic>{};
-    final entries = _splitArgs(inner, variables);
+    final entries = _splitObjectEntries(inner);
     final result = <String, dynamic>{};
     for (final entry in entries) {
-      final colonIdx = _findTopLevelColon(entry.toString());
+      final colonIdx = _findTopLevelColon(entry);
       if (colonIdx < 0) continue;
-      final key = _unquote(entry.toString().substring(0, colonIdx).trim());
+      final key = _unquote(entry.substring(0, colonIdx).trim());
       final val = _evaluateExpressionPart(
-          entry.toString().substring(colonIdx + 1).trim(), variables);
+          entry.substring(colonIdx + 1).trim(), variables);
       result[key] = val;
     }
     return result;
