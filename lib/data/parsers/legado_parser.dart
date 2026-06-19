@@ -26,6 +26,7 @@ import 'legado/cloudflare_interceptor.dart';
 import 'legado/legado_js_engine.dart';
 import 'legado/legado_request_builder.dart';
 import 'legado/legado_rule_evaluator.dart';
+import 'legado/legado_rule_resolver.dart';
 import 'legado/legado_session_store.dart';
 
 class LegadoVerificationRequiredException implements Exception {
@@ -5660,7 +5661,7 @@ class LegadoParser {
   }
 
   static String _resolveUrl(String baseUrl, String url) {
-    return LegadoRequestBuilder.resolveUrl(baseUrl, url);
+    return const LegadoRuleResolver().resolveUrl(baseUrl, url);
   }
 
   static String resolveUrl(String baseUrl, String url) {
@@ -5678,7 +5679,8 @@ class LegadoParser {
   }
 
   static String _bestUrlCandidate(String value) {
-    final candidates = _splitUrlCandidates(value);
+    final resolverCandidate = const LegadoRuleResolver().bestUrlCandidate(value);
+    final candidates = _splitUrlCandidates(resolverCandidate.isEmpty ? value : resolverCandidate);
     if (candidates.isEmpty) return value.trim();
     if (candidates.length == 1) return candidates.first;
 

@@ -6,7 +6,9 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:pointycastle/export.dart';
+import 'package:pointycastle/asn1.dart';
 import 'package:quickjs_engine/quickjs_engine.dart';
 import 'package:html/dom.dart';
 
@@ -42,6 +44,9 @@ class LegadoJsEngine {
       'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
       'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 '
       'Mobile/15E148 Safari/604.1';
+  static const MethodChannel _nativeJSCoreChannel =
+      MethodChannel('read/legado_jscore');
+  static bool _nativeJSCoreUnavailable = false;
 
   bool? _nodeFallbackAvailableCache;
   String? _nodePathCache;
@@ -301,7 +306,10 @@ class LegadoJsEngine {
       });
 
       _runtime!.onMessage('java_rsa_decrypt', (dynamic args) {
-        return '';
+        return _handleNativeRsa(_decodeJsonMap(args));
+      });
+      _runtime!.onMessage('java_rsa', (dynamic args) {
+        return _handleNativeRsa(_decodeJsonMap(args));
       });
 
       _runtime!.onMessage('java_aes_base64_decode', (dynamic args) {
@@ -1514,7 +1522,10 @@ class LegadoJsEngine {
         sha256Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha256", value: String(str || "")})); },
         sha512Encode: function(str) { return sendMessage("java_hash", JSON.stringify({type: "sha512", value: String(str || "")})); },
         rsaDecrypt: function(value, key) {
-          return sendMessage("java_rsa_decrypt", JSON.stringify({value: String(value || ""), key: String(key || "")}));
+          return sendMessage("java_rsa", JSON.stringify({op: "decrypt", value: String(value || ""), key: String(key || "")}));
+        },
+        rsaEncrypt: function(value, key) {
+          return sendMessage("java_rsa", JSON.stringify({op: "encrypt", value: String(value || ""), key: String(key || "")}));
         },
         digestHex: function(value, algorithm) {
           return sendMessage("java_hash", JSON.stringify({
@@ -1764,10 +1775,10 @@ class LegadoJsEngine {
         AES_DecodeCBC: function(string, inkey, iniv) { return esoTools.AES_Decode(string, inkey, {mode: AESMode.cbc, iv: iniv}); },
         AES_EncodeECB: function(string, inkey) { return esoTools.AES_Encode(string, inkey, {mode: AESMode.ecb}); },
         AES_DecodeECB: function(string, inkey) { return esoTools.AES_Decode(string, inkey, {mode: AESMode.ecb}); },
-        RSA_encrypt: function() { return ""; },
-        RSA_decrypt: function() { return ""; },
-        RSA_encryptWithPrivate: function() { return ""; },
-        RSA_decryptWithPublic: function() { return ""; }
+        RSA_encrypt: function(value, key) { return sendMessage("java_rsa", JSON.stringify({op: "encrypt", value: String(value || ""), key: String(key || "")})); },
+        RSA_decrypt: function(value, key) { return sendMessage("java_rsa", JSON.stringify({op: "decrypt", value: String(value || ""), key: String(key || "")})); },
+        RSA_encryptWithPrivate: function(value, key) { return sendMessage("java_rsa", JSON.stringify({op: "encrypt", value: String(value || ""), key: String(key || "")})); },
+        RSA_decryptWithPublic: function(value, key) { return sendMessage("java_rsa", JSON.stringify({op: "decrypt", value: String(value || ""), key: String(key || "")})); }
       };
 
       var tools = typeof tools === "undefined" ? esoTools : tools;
@@ -2400,6 +2411,15 @@ class LegadoJsEngine {
     Future<Uint8List> Function(String request)? ajaxBytes,
     int maxRequests = 12,
   }) async {
+    final nativeResult = await _evaluateWithNativeJSCore(
+      jsCode,
+      variables: variables,
+      libraries: libraries,
+      ajax: ajax,
+      maxRequests: maxRequests,
+    );
+    if (nativeResult != null) return nativeResult;
+
     if (_runtime == null) {
       // 一次性修补:iOS release 模式下 _runtime 为 null 且 Node 兜底不可用,
       // toc/content/explore 等需要 ajax 的 JS 规则完全失败。先用 LegacyJsEvaluator
@@ -2481,6 +2501,265 @@ class LegadoJsEngine {
       _currentAjaxBytesHandler = null;
       _jsoupDocuments.clear();
     }
+  }
+
+  Future<String?> _evaluateWithNativeJSCore(
+    String jsCode, {
+    Map<String, dynamic>? variables,
+    Iterable<String> libraries = const [],
+    required Future<String> Function(String request) ajax,
+    int maxRequests = 12,
+  }) async {
+    if (kIsWeb || !Platform.isIOS || _nativeJSCoreUnavailable) return null;
+    if (Platform.environment['LEGADO_DISABLE_NATIVE_JSCORE'] == '1') return null;
+    final ajaxCache = <String, String>{};
+    final nativeCache = <String, String>{};
+    final nativeVariables = _jsonSafeMap(_normalizedVariables(variables));
+    final nativeLibraries = libraries
+        .map((library) => library.trim())
+        .where((library) => library.isNotEmpty)
+        .toList(growable: false);
+    for (var attempt = 0; attempt < maxRequests; attempt++) {
+      try {
+        final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
+          'evaluate',
+          <String, dynamic>{
+            'code': _unwrapJsRule(jsCode),
+            'variables': nativeVariables,
+            'libraries': nativeLibraries,
+            'ajaxCache': ajaxCache,
+            'nativeCache': nativeCache,
+            'wrapScript': true,
+          },
+        ).timeout(const Duration(seconds: 8));
+        if (response == null) return null;
+        if (response['ok'] == true) {
+          final cookieHeader = response['cookieHeader']?.toString().trim() ?? '';
+          final baseUrl = nativeVariables['baseUrl']?.toString() ??
+              nativeVariables['url']?.toString() ??
+              '';
+          final uri = Uri.tryParse(baseUrl);
+          if (uri != null && cookieHeader.isNotEmpty) {
+            LegadoSessionStore.setCookieString(uri, cookieHeader);
+            unawaited(LegadoSessionStore.persistHost(uri));
+          }
+          final storage = response['storage'];
+          if (storage is Map) {
+            storage.forEach((key, value) => putStoredValue(key.toString(), value));
+          }
+          return response['result']?.toString() ?? '';
+        }
+        final ajaxRequest = response['ajaxRequest']?.toString().trim() ?? '';
+        if (ajaxRequest.isNotEmpty) {
+          ajaxCache[ajaxRequest] = await ajax(ajaxRequest);
+          continue;
+        }
+        final loginRequest = response['loginRequest']?.toString().trim() ?? '';
+        if (loginRequest.isNotEmpty) {
+          final cookieHeader = await _openNativeLoginWebView(loginRequest);
+          final loginUri = Uri.tryParse(loginRequest);
+          if (loginUri != null && cookieHeader.isNotEmpty) {
+            LegadoSessionStore.setCookieString(loginUri, cookieHeader);
+            unawaited(LegadoSessionStore.persistHost(loginUri));
+            nativeVariables['cookieHeader'] = cookieHeader;
+          }
+          continue;
+        }
+        final nativeRequest = response['nativeRequest']?.toString().trim() ?? '';
+        if (nativeRequest.isNotEmpty) {
+          nativeCache[nativeRequest] = _handleNativeJSCoreRequest(nativeRequest);
+          continue;
+        }
+        debugPrint('Native JSCore eval failed: ${response['error'] ?? 'unknown'}');
+        return null;
+      } on MissingPluginException catch (e) {
+        _nativeJSCoreUnavailable = true;
+        debugPrint('Native JSCore channel unavailable: $e');
+        return null;
+      } on TimeoutException catch (e) {
+        debugPrint('Native JSCore eval timed out: $e');
+        return null;
+      } on PlatformException catch (e) {
+        debugPrint('Native JSCore platform error: ${e.message ?? e.code}');
+        return null;
+      } catch (e) {
+        debugPrint('Native JSCore eval error: $e');
+        return null;
+      }
+    }
+    debugPrint('Native JSCore evaluation exceeded max requests limit');
+    return null;
+  }
+
+  String _handleNativeJSCoreRequest(String request) {
+    final split = request.indexOf(':');
+    if (split <= 0) return '';
+    final kind = request.substring(0, split);
+    final rawPayload = request.substring(split + 1);
+    Map<String, dynamic> payload;
+    try {
+      final decoded = jsonDecode(rawPayload);
+      payload = decoded is Map<String, dynamic>
+          ? decoded
+          : decoded is Map
+              ? decoded.map((key, value) => MapEntry(key.toString(), value))
+              : <String, dynamic>{};
+    } catch (_) {
+      payload = <String, dynamic>{};
+    }
+    try {
+      switch (kind) {
+        case 'dom':
+          return _handleNativeDom(payload);
+        case 'crypto':
+          return _handleNativeCrypto(payload);
+        case 'pako':
+          return _handleNativePako(payload);
+        case 'rsa':
+          return _handleNativeRsa(payload);
+        default:
+          return '';
+      }
+    } catch (e) {
+      debugPrint('Native JSCore request failed [$kind]: $e');
+      return '';
+    }
+  }
+
+  String _handleNativeDom(Map<String, dynamic> payload) {
+    final action = payload['action']?.toString() ?? '';
+    final html = payload['html']?.toString() ?? '';
+    final document = parse(html);
+    switch (action) {
+      case 'select':
+        final selector = payload['selector']?.toString() ?? '';
+        if (selector.trim().isEmpty) return '[]';
+        return jsonEncode(
+          document.querySelectorAll(selector).map(_serializeJsoupElement).toList(),
+        );
+      case 'children':
+        final fragment = parseFragment(html);
+        return jsonEncode(
+          fragment.nodes.whereType<Element>().map(_serializeJsoupElement).toList(),
+        );
+      case 'body':
+        final body = document.body ?? document.documentElement;
+        return jsonEncode(body == null ? <String, dynamic>{} : _serializeJsoupElement(body));
+      case 'text':
+        return (document.body ?? document.documentElement)?.text.trim() ?? '';
+      default:
+        return '';
+    }
+  }
+
+  String _handleNativeCrypto(Map<String, dynamic> payload) {
+    final kind = (payload['kind']?.toString() ?? 'AES').toUpperCase();
+    final op = payload['op']?.toString().toLowerCase() ?? 'decrypt';
+    final value = payload['value']?.toString() ?? '';
+    final key = payload['key']?.toString() ?? '';
+    final iv = payload['iv']?.toString() ?? '';
+    var transformation = payload['transformation']?.toString() ?? '';
+    if (transformation.isEmpty) transformation = '$kind/CBC/PKCS5Padding';
+    if (op == 'encrypt') return _cipherBase64Encode(value, key, iv, transformation);
+    return _aesBase64Decode(value, key, iv, transformation);
+  }
+
+  String _handleNativePako(Map<String, dynamic> payload) {
+    final op = payload['op']?.toString().toLowerCase() ?? 'inflate';
+    final value = payload['value']?.toString() ?? '';
+    final bytes = _bestEffortBytes(value);
+    switch (op) {
+      case 'gzip':
+        return base64Encode(GZipCodec().encode(bytes));
+      case 'deflate':
+        return base64Encode(ZLibEncoder().convert(bytes));
+      case 'ungzip':
+        return utf8.decode(GZipCodec().decode(bytes), allowMalformed: true);
+      case 'inflate':
+      default:
+        return _inflateBytesToString(Uint8List.fromList(bytes));
+    }
+  }
+
+  String _handleNativeRsa(Map<String, dynamic> payload) {
+    return _rsaProcess(
+      value: payload['value']?.toString() ?? '',
+      keyText: payload['key']?.toString() ?? '',
+      op: payload['op']?.toString().toLowerCase() ?? 'decrypt',
+      padding: payload['padding']?.toString() ?? 'PKCS1',
+    );
+  }
+
+  Map<String, dynamic> _decodeJsonMap(dynamic args) {
+    try {
+      final decoded = jsonDecode(args?.toString() ?? '{}');
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return decoded.map((key, value) => MapEntry(key.toString(), value));
+    } catch (_) {}
+    return <String, dynamic>{};
+  }
+
+  List<int> _bestEffortBytes(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return const <int>[];
+    try {
+      return base64Decode(text);
+    } catch (_) {
+      return utf8.encode(value);
+    }
+  }
+
+  Future<String> _openNativeLoginWebView(String url) async {
+    if (kIsWeb || !Platform.isIOS || _nativeJSCoreUnavailable) return '';
+    try {
+      final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
+        'openLogin',
+        <String, dynamic>{'url': url},
+      );
+      final cookieHeader = response?['cookieHeader']?.toString().trim() ?? '';
+      final uri = Uri.tryParse(url);
+      if (uri != null && cookieHeader.isNotEmpty) {
+        LegadoSessionStore.setCookieString(uri, cookieHeader);
+        unawaited(LegadoSessionStore.persistHost(uri));
+      }
+      return cookieHeader;
+    } catch (e) {
+      debugPrint('Native login WebView failed: $e');
+      return '';
+    }
+  }
+
+  Future<String> nativeCookiesForUrl(String url) async {
+    if (kIsWeb || !Platform.isIOS || _nativeJSCoreUnavailable) return '';
+    try {
+      final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
+        'cookiesForUrl',
+        <String, dynamic>{'url': url},
+      );
+      final cookieHeader = response?['cookieHeader']?.toString().trim() ?? '';
+      final uri = Uri.tryParse(url);
+      if (uri != null && cookieHeader.isNotEmpty) {
+        LegadoSessionStore.setCookieString(uri, cookieHeader);
+        unawaited(LegadoSessionStore.persistHost(uri));
+      }
+      return cookieHeader;
+    } catch (e) {
+      debugPrint('Native cookiesForUrl failed: $e');
+      return '';
+    }
+  }
+
+  Map<String, dynamic> _jsonSafeMap(Map<String, dynamic> input) {
+    return input.map((key, value) => MapEntry(key, _jsonSafeValue(value)));
+  }
+
+  dynamic _jsonSafeValue(dynamic value) {
+    if (value == null || value is String || value is num || value is bool) return value;
+    if (value is Map) {
+      return value.map((key, child) => MapEntry(key.toString(), _jsonSafeValue(child)));
+    }
+    if (value is Iterable) return value.map(_jsonSafeValue).toList(growable: false);
+    return value.toString();
   }
 
   void loadLibraries(Iterable<String> libraries) {
@@ -4386,6 +4665,134 @@ async function __stringifyResult(value) {
       ),
     );
     return cipher;
+  }
+
+  String _rsaProcess({
+    required String value,
+    required String keyText,
+    required String op,
+    required String padding,
+  }) {
+    try {
+      final key = _parseRsaKey(keyText, privateKey: op == 'decrypt');
+      if (key == null) return '';
+      final engine = padding.toUpperCase().contains('OAEP')
+          ? OAEPEncoding(RSAEngine())
+          : PKCS1Encoding(RSAEngine());
+      final forEncryption = op == 'encrypt';
+      engine.init(forEncryption, key);
+      final input = forEncryption
+          ? Uint8List.fromList(utf8.encode(value))
+          : Uint8List.fromList(_bestEffortBytes(value));
+      final output = engine.process(input);
+      return forEncryption ? base64Encode(output) : utf8.decode(output, allowMalformed: true);
+    } catch (e) {
+      debugPrint('RSA $op failed: $e');
+      return '';
+    }
+  }
+
+  AsymmetricKeyParameter<AsymmetricKey>? _parseRsaKey(
+    String keyText, {
+    required bool privateKey,
+  }) {
+    final bytes = _pemOrDerBytes(keyText);
+    if (bytes.isEmpty) return null;
+    try {
+      final top = ASN1Parser(Uint8List.fromList(bytes)).nextObject();
+      if (top is! ASN1Sequence) return null;
+      if (privateKey) {
+        final direct = _parsePrivateRsaKey(top);
+        if (direct != null) return PrivateKeyParameter<RSAPrivateKey>(direct);
+        final nested = _nestedOctetSequence(top);
+        final nestedKey = nested == null ? null : _parsePrivateRsaKey(nested);
+        if (nestedKey != null) return PrivateKeyParameter<RSAPrivateKey>(nestedKey);
+      } else {
+        final direct = _parsePublicRsaKey(top);
+        if (direct != null) return PublicKeyParameter<RSAPublicKey>(direct);
+        final nested = _nestedBitSequence(top);
+        final nestedKey = nested == null ? null : _parsePublicRsaKey(nested);
+        if (nestedKey != null) return PublicKeyParameter<RSAPublicKey>(nestedKey);
+      }
+    } catch (e) {
+      debugPrint('RSA key parse failed: $e');
+    }
+    return null;
+  }
+
+  List<int> _pemOrDerBytes(String keyText) {
+    final trimmed = keyText.trim();
+    if (trimmed.isEmpty) return const <int>[];
+    if (trimmed.contains('-----BEGIN')) {
+      final body = trimmed
+          .replaceAll(RegExp(r'-----BEGIN [^-]+-----'), '')
+          .replaceAll(RegExp(r'-----END [^-]+-----'), '')
+          .replaceAll(RegExp(r'\s+'), '');
+      return base64Decode(body);
+    }
+    try {
+      return base64Decode(trimmed.replaceAll(RegExp(r'\s+'), ''));
+    } catch (_) {
+      return utf8.encode(trimmed);
+    }
+  }
+
+  RSAPrivateKey? _parsePrivateRsaKey(ASN1Sequence seq) {
+    final integers = <ASN1Integer>[];
+    final elements = seq.elements ?? const [];
+    for (final element in elements) {
+      if (element is ASN1Integer) integers.add(element);
+    }
+    if (integers.length < 9) return null;
+    final n = integers[1].integer;
+    final e = integers[2].integer;
+    final d = integers[3].integer;
+    final p = integers[4].integer;
+    final q = integers[5].integer;
+    if (n == null || d == null || p == null || q == null) return null;
+    return RSAPrivateKey(n, d, p, q, e);
+  }
+
+  RSAPublicKey? _parsePublicRsaKey(ASN1Sequence seq) {
+    final integers = <ASN1Integer>[];
+    final elements = seq.elements ?? const [];
+    for (final element in elements) {
+      if (element is ASN1Integer) integers.add(element);
+    }
+    if (integers.length < 2) return null;
+    final n = integers[0].integer;
+    final e = integers[1].integer;
+    if (n == null || e == null) return null;
+    return RSAPublicKey(n, e);
+  }
+
+  ASN1Sequence? _nestedOctetSequence(ASN1Sequence seq) {
+    final elements = seq.elements ?? const [];
+    for (final element in elements) {
+      if (element is ASN1OctetString) {
+        final dynamic octet = element;
+        final raw = (octet.octets ?? octet.valueBytes) as List<int>?;
+        if (raw == null || raw.isEmpty) continue;
+        final parsed = ASN1Parser(Uint8List.fromList(raw)).nextObject();
+        if (parsed is ASN1Sequence) return parsed;
+      }
+    }
+    return null;
+  }
+
+  ASN1Sequence? _nestedBitSequence(ASN1Sequence seq) {
+    final elements = seq.elements ?? const [];
+    for (final element in elements) {
+      if (element is ASN1BitString) {
+        final dynamic bit = element;
+        final raw = (bit.stringValues ?? bit.valueBytes) as List<int>?;
+        if (raw == null || raw.isEmpty) continue;
+        final bytes = raw.length > 1 && raw.first == 0 ? raw.sublist(1) : raw;
+        final parsed = ASN1Parser(Uint8List.fromList(bytes)).nextObject();
+        if (parsed is ASN1Sequence) return parsed;
+      }
+    }
+    return null;
   }
 
   String _hashHex(String type, String value) {
