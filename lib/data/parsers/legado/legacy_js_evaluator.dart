@@ -215,6 +215,10 @@ class LegacyJsEvaluator {
     var s = stmt.trim();
     if (s.isEmpty) return null;
 
+    if (s.startsWith('throw ')) {
+      throw LegacyJsEvalError(s.substring(6).trim());
+    }
+
     if (s.startsWith('return ')) {
       // return x  →  _ReturnSignal(x),让外层 function call 知道要跳出
       return _ReturnSignal(
@@ -543,6 +547,10 @@ class LegacyJsEvaluator {
     var e = expr.trim();
     if (e.isEmpty) return '';
 
+    if (_isRegExpLiteral(e)) {
+      return e;
+    }
+
     // function expression: function name(p) { body } 或匿名 function
     if (e.startsWith('function') && e.contains('(') && e.contains('{')) {
       final s = e;
@@ -600,13 +608,13 @@ class LegacyJsEvaluator {
     }
 
     // 字面量
-    if (e.startsWith('"') && e.endsWith('"') && e.length >= 2) {
+    if (_isSingleQuotedString(e, '"')) {
       return _decodeString(e.substring(1, e.length - 1));
     }
-    if (e.startsWith("'") && e.endsWith("'") && e.length >= 2) {
+    if (_isSingleQuotedString(e, "'")) {
       return _decodeString(e.substring(1, e.length - 1));
     }
-    if (e.startsWith('`') && e.endsWith('`') && e.length >= 2) {
+    if (_isSingleQuotedString(e, '`')) {
       return _evaluateTemplateString(e.substring(1, e.length - 1), variables);
     }
 
@@ -639,8 +647,8 @@ class LegacyJsEvaluator {
     if (ternary != null) return ternary;
 
     // 链式成员访问 + 函数调用: a.b.c(args).d
-    final chain = _tryParseChain(e, variables);
-    if (chain != null) return chain;
+    final chainResult = _tryParseChain(e, variables);
+    if (chainResult != null) return chainResult.value;
 
     // 数组字面量
     if (e.startsWith('[') && e.endsWith(']')) {
@@ -732,7 +740,7 @@ class LegacyJsEvaluator {
 
   /// 解析 a.b.c(args).d.e 链式表达式,从左到右。
   /// 返回最终结果。失败返回 null。
-  static dynamic _tryParseChain(String e, Map<String, dynamic> variables) {
+  static ({dynamic value})? _tryParseChain(String e, Map<String, dynamic> variables) {
     // 找到第一个 "(" 或 "[" 或 "." 分割的入口
     // 形式: BASE(.MEMBER | [INDEX] | (ARGS))*
     var i = 0;
@@ -743,11 +751,16 @@ class LegacyJsEvaluator {
     if (firstSegment == null) return null;
     i = firstSegment.$2;
     final head = firstSegment.$1;
+    var isChainSyntax = false;
+
+    if (i < e.length) {
+      isChainSyntax = true;
+    }
+
     if (head.$2 == null) {
       // 单纯是字面量或变量
       current = _evaluateExpressionPart(head.$1, variables);
       // 命名空间调用: NS.X.Y(args) → 整体当 _callFunction('NS.X.Y', args)
-      // 处理 CryptoJS.MD5(b).toString(...) / java.ajax(url) / Math.floor(1.5) 等
       if (current == null &&
           (head.$1 == 'CryptoJS' ||
               head.$1 == 'java' ||
@@ -758,6 +771,7 @@ class LegacyJsEvaluator {
               head.$1 == 'Array' ||
               head.$1 == 'console' ||
               head.$1 == 'Date')) {
+        isChainSyntax = true;
         // 收集 NS.X.Y
         final path = StringBuffer(head.$1);
         var k = i;
@@ -776,7 +790,6 @@ class LegacyJsEvaluator {
             final argsStr = e.substring(k + 1, close);
             final args = _splitArgs(argsStr, variables);
             final fnName = path.toString();
-            // 优先 user-defined
             final userFn = variables[fnName];
             if (userFn is _JsFunction) {
               current = _callJsFunction(userFn, args, variables);
@@ -786,15 +799,12 @@ class LegacyJsEvaluator {
             i = close + 1;
           }
         } else {
-          // NS.X.Y (没调用) — 当作 property 链
-          // 继续给下面 chain 处理
           current = null;
           return null;
         }
       }
     } else {
-      // 函数调用
-      // 先看是不是 user-defined function
+      isChainSyntax = true;
       var fn = variables[head.$1];
       if (fn == null) {
         fn = _evaluateExpressionPart(head.$1, variables);
@@ -805,13 +815,15 @@ class LegacyJsEvaluator {
         current = _callFunction(head.$1, head.$2!, variables);
       }
     }
-    if (current == null) return null;
+
+    if (!isChainSyntax && i >= e.length) {
+      return null;
+    }
 
     // 后续段:.prop / [key] / (args)
     while (i < e.length) {
       final c = e[i];
       if (c == '.') {
-        // .propName  —— 收集直到下一个非 identifier 字符
         var j = i + 1;
         while (j < e.length && _isIdentChar(e[j])) {
           j++;
@@ -831,7 +843,6 @@ class LegacyJsEvaluator {
           current = current[propName];
           i = j;
         } else if (current is _JsObject) {
-          // .method() — 合并调用
           if (j < e.length && e[j] == '(') {
             final close2 = _findMatchingClose(e, j, 0x28, 0x29);
             if (close2 == -1) return null;
@@ -871,12 +882,12 @@ class LegacyJsEvaluator {
           if (propName == 'length') {
             current = (current as String).length;
           } else {
-            return null;
+            current = null;
           }
           i = j;
         } else {
-          // CryptoJS 兼容对象等
-          return null;
+          current = null;
+          i = j;
         }
       } else if (c == '[') {
         final close = _findMatchingClose(e, i, 0x5b, 0x5d);
@@ -892,7 +903,7 @@ class LegacyJsEvaluator {
               ? current[key]
               : null;
         } else {
-          return null;
+          current = null;
         }
         i = close + 1;
       } else if (c == '(') {
@@ -900,14 +911,17 @@ class LegacyJsEvaluator {
         if (close == -1) return null;
         final argsStr = e.substring(i + 1, close);
         final args = _splitArgs(argsStr, variables);
-        // 直接调用 current(args),无 method name,_callMethod 会用 __call__ 兜底
-        current = _callMethod(current, '', args);
+        if (current is _JsFunction) {
+          current = _callJsFunction(current, args, variables);
+        } else {
+          current = null;
+        }
         i = close + 1;
       } else {
         return null;
       }
     }
-    return current;
+    return (value: current);
   }
 
   /// 读取一个链段: literal/variable/(expr) 后跟 (args) 视为函数调用
@@ -1291,10 +1305,24 @@ class LegacyJsEvaluator {
     final parsed = _parseJsRegex(pattern);
     if (parsed == null) return str;
     try {
-      if (parsed.global) {
-        return str.replaceAll(parsed.regex, replacement);
+      String replaceCallback(Match match) {
+        return replacement.replaceAllMapped(RegExp(r'\$\$|\$(\d+)'), (m) {
+          final matched = m.group(0);
+          if (matched == r'$$') {
+            return r'$';
+          }
+          final groupIdx = int.parse(m.group(1)!);
+          if (groupIdx <= match.groupCount) {
+            return match.group(groupIdx) ?? '';
+          }
+          return '';
+        });
       }
-      return str.replaceFirst(parsed.regex, replacement);
+
+      if (parsed.global) {
+        return str.replaceAllMapped(parsed.regex, replaceCallback);
+      }
+      return str.replaceFirstMapped(parsed.regex, replaceCallback);
     } catch (_) {
       return str;
     }
@@ -1345,11 +1373,59 @@ class LegacyJsEvaluator {
 
       case 'parseInt':
         if (args.isEmpty) return 0;
-        final base = args.length > 1 ? _toInt(args[1]) : 10;
-        return int.tryParse(args[0].toString(), radix: base) ?? 0;
+        final str = args[0].toString().trim();
+        var base = 10;
+        var sign = 1;
+        var s = str;
+        if (s.startsWith('+')) {
+          s = s.substring(1);
+        } else if (s.startsWith('-')) {
+          sign = -1;
+          s = s.substring(1);
+        }
+        
+        if (args.length > 1) {
+          base = _toInt(args[1]);
+        } else {
+          if (s.startsWith('0x') || s.startsWith('0X')) {
+            base = 16;
+          }
+        }
+        
+        if (base < 2 || base > 36) return 0;
+        
+        if (base == 16 && (s.startsWith('0x') || s.startsWith('0X'))) {
+          s = s.substring(2);
+        }
+        
+        final buffer = StringBuffer();
+        for (var i = 0; i < s.length; i++) {
+          final char = s[i].toLowerCase();
+          final code = char.codeUnitAt(0);
+          int val;
+          if (code >= 48 && code <= 57) {
+            val = code - 48;
+          } else if (code >= 97 && code <= 122) {
+            val = code - 97 + 10;
+          } else {
+            break;
+          }
+          if (val < base) {
+            buffer.write(s[i]);
+          } else {
+            break;
+          }
+        }
+        
+        if (buffer.isEmpty) return 0;
+        return (int.tryParse(buffer.toString(), radix: base) ?? 0) * sign;
+
       case 'parseFloat':
         if (args.isEmpty) return 0;
-        return double.tryParse(args[0].toString()) ?? 0;
+        final str = args[0].toString().trim();
+        final match = RegExp(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?').stringMatch(str);
+        if (match == null) return 0.0;
+        return double.tryParse(match) ?? 0.0;
       case 'isNaN':
         return args.isEmpty ? true : (args[0] is num && args[0].isNaN);
       case 'isFinite':
@@ -1569,8 +1645,34 @@ class LegacyJsEvaluator {
         return 'legacy-evaluator-androidId';
       case 'timeFormat':
         if (args.isEmpty) return DateTime.now().toIso8601String();
-        final fmt = args[0].toString();
-        return _formatTime(fmt, DateTime.now());
+        if (args.length == 1) {
+          final val = args[0];
+          final numVal = double.tryParse(val.toString().trim());
+          if (numVal != null) {
+            final dt = DateTime.fromMillisecondsSinceEpoch(numVal.toInt());
+            return _formatTime('yyyy-MM-dd HH:mm:ss', dt);
+          } else {
+            return _formatTime(val.toString(), DateTime.now());
+          }
+        } else {
+          var timestamp = DateTime.now().millisecondsSinceEpoch;
+          var pattern = 'yyyy-MM-dd HH:mm:ss';
+          final val1 = args[0];
+          final val2 = args[1];
+          final num1 = double.tryParse(val1.toString().trim());
+          final num2 = double.tryParse(val2.toString().trim());
+          if (num1 != null) {
+            timestamp = num1.toInt();
+            pattern = val2.toString();
+          } else if (num2 != null) {
+            timestamp = num2.toInt();
+            pattern = val1.toString();
+          } else {
+            pattern = val1.toString();
+          }
+          final dt = DateTime.fromMillisecondsSinceEpoch(timestamp);
+          return _formatTime(pattern, dt);
+        }
       case 'log':
         return args.isNotEmpty ? args[0].toString() : '';
       case 'cipher':
@@ -2294,6 +2396,47 @@ class LegacyJsEvaluator {
       }
     }
     return true;
+  }
+
+  static bool _isSingleQuotedString(String s, String quoteChar) {
+    if (s.length < 2 || !s.startsWith(quoteChar) || !s.endsWith(quoteChar)) {
+      return false;
+    }
+    var escaped = false;
+    for (var i = 1; i < s.length - 1; i++) {
+      final c = s[i];
+      if (escaped) {
+        escaped = false;
+      } else if (c == '\\') {
+        escaped = true;
+      } else if (c == quoteChar) {
+        return false;
+      }
+    }
+    return !escaped;
+  }
+
+  static bool _isRegExpLiteral(String s) {
+    if (s.length < 2 || !s.startsWith('/')) {
+      return false;
+    }
+    var escaped = false;
+    var lastSlashIdx = -1;
+    for (var i = 1; i < s.length; i++) {
+      final c = s[i];
+      if (escaped) {
+        escaped = false;
+      } else if (c == '\\') {
+        escaped = true;
+      } else if (c == '/') {
+        lastSlashIdx = i;
+        break;
+      }
+    }
+    if (lastSlashIdx == -1) return false;
+    final flags = s.substring(lastSlashIdx + 1);
+    final validFlags = RegExp(r'^[gimsuy]*$');
+    return validFlags.hasMatch(flags);
   }
 
   static bool _isIdentChar(String c) {

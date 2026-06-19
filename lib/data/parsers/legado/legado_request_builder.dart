@@ -538,7 +538,7 @@ class LegadoRequestBuilder {
     // 以及其他裸 string / 数字),避免 jsonDecode 报 "Expecting value"。
     // 匹配 `:value,` / `:value}` / `:value]`,value 不以 { [ " ' - 数字 字母 开头 时补双引号。
     output = output.replaceAllMapped(
-      RegExp(r'''(:\s*)(?!["'{}\[\]\-0-9a-zA-Z])([^,}\]]+?)\s*(?=[,}\]])'''),
+      RegExp(r'''(:\s*)(?!\s*["'{}\[\]\-0-9a-zA-Z])([^,}\]]+?)\s*(?=[,}\]])'''),
       (match) => '${match.group(1)}"${match.group(2)?.trim()}"',
     );
     return output;

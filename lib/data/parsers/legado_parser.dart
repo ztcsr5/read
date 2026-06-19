@@ -5070,6 +5070,10 @@ class LegadoParser {
     var s = stmt.trim();
     if (s.isEmpty) return null;
 
+    if (s.startsWith('throw ')) {
+      throw Exception(s.substring(6).trim());
+    }
+
     if (s.startsWith('return ')) {
       s = s.substring(7).trim();
     }

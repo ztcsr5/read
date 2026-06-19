@@ -2426,19 +2426,53 @@ class LegadoJsEngine {
     _currentAjaxBytesHandler = ajaxBytes;
     _injectVariables(variables);
     loadLibraries(libraries);
+
+    final cache = <String, String>{};
+    final prepared = _prepareCode(jsCode);
+
     try {
-      final prepared = _prepareCode(jsCode);
-      var result = _runtime!.evaluate(prepared);
-      if (result.isError) throw Exception(result.stringResult);
-      if (result.isPromise) {
-        _runtime!.executePendingJob();
-        result = await _runtime!.handlePromise(result);
-        if (result.isError) throw Exception(result.stringResult);
+      for (var attempt = 0; attempt < maxRequests; attempt++) {
+        _installAjaxTrap(cache);
+        try {
+          var result = _runtime!.evaluate(prepared);
+          if (result.isError) {
+            final errStr = result.stringResult;
+            final ajaxReq = _extractAjaxRequest(errStr);
+            if (ajaxReq != null) {
+              final resp = await ajax(ajaxReq);
+              cache[ajaxReq] = resp;
+              continue;
+            }
+            throw Exception(errStr);
+          }
+          if (result.isPromise) {
+            _runtime!.executePendingJob();
+            result = await _runtime!.handlePromise(result);
+            if (result.isError) {
+              final errStr = result.stringResult;
+              final ajaxReq = _extractAjaxRequest(errStr);
+              if (ajaxReq != null) {
+                final resp = await ajax(ajaxReq);
+                cache[ajaxReq] = resp;
+                continue;
+              }
+              throw Exception(errStr);
+            }
+          }
+          return _stringifyResult(result);
+        } catch (e) {
+          final errStr = e.toString();
+          final ajaxReq = _extractAjaxRequest(errStr);
+          if (ajaxReq != null) {
+            final resp = await ajax(ajaxReq);
+            cache[ajaxReq] = resp;
+            continue;
+          }
+          debugPrint('JS Eval with AJAX failed: $e');
+          rethrow;
+        }
       }
-      return _stringifyResult(result);
-    } catch (e) {
-      debugPrint('JS Eval with AJAX failed: $e');
-      rethrow;
+      throw Exception('JS AJAX evaluation exceeded max requests limit');
     } finally {
       _currentAjaxHandler = null;
       _currentAjaxBytesHandler = null;
@@ -3576,12 +3610,40 @@ async function __stringifyResult(value) {
         continue;
       }
       if (depth == 0 && (unit == 0x3b || unit == 0x0a || unit == 0x0d)) {
-        return (code.substring(0, i), code.substring(i + 1));
+        final prefix = code.substring(0, i);
+        final suffix = code.substring(i + 1);
+        if (_isContinuation(prefix, suffix)) {
+          continue;
+        }
+        return (prefix, suffix);
       }
     }
 
     if (_looksLikeReturnableExpression(code)) return ('', code);
     return null;
+  }
+
+  static bool _isContinuation(String prefix, String suffix) {
+    final trimmedPrefix = prefix.trimRight();
+    final trimmedSuffix = suffix.trimLeft();
+    if (trimmedPrefix.isEmpty || trimmedSuffix.isEmpty) return false;
+
+    // Suffix starts with continuation operator
+    final suffixStart = RegExp(r'^(\+|\-|\*|\/|\.|\?|\:|&&|\|\||\?\?|\,|===|==|!==|!=|<=|>=|>|<)');
+    if (suffixStart.hasMatch(trimmedSuffix)) {
+      if (trimmedSuffix.startsWith('++') || trimmedSuffix.startsWith('--')) {
+        return false;
+      }
+      return true;
+    }
+
+    // Prefix ends with continuation operator
+    final prefixEnd = RegExp(r'(\+|\-|\*|\/|\=|\?|\:|&&|\|\||\?\?|\,)$');
+    if (prefixEnd.hasMatch(trimmedPrefix)) {
+      return true;
+    }
+
+    return false;
   }
 
   bool _looksLikeReturnableExpression(String value) {
@@ -3833,6 +3895,8 @@ async function __stringifyResult(value) {
         transformation: transformation,
         encrypting: encrypting,
       );
+    } on ArgumentError catch (_) {
+      rethrow;
     } catch (_) {
       return Uint8List(0);
     }
@@ -4293,10 +4357,7 @@ class JsCompatibilityTransformer {
       },
     );
 
-    transformed = transformed.replaceAllMapped(
-      RegExp(r'(?<!await\s+)java\.(ajax|post|connect|startBrowser|get|fetch|postForm|ajax_bytes)\b'),
-      (match) => 'await java.${match.group(1)}',
-    );
+    transformed = _wrapAwaitJavaCalls(transformed);
 
     if (hasDynamicLoginEval) {
       transformed = _awaitKnownFunctionCalls(transformed, const ['login']);
@@ -4309,6 +4370,87 @@ class JsCompatibilityTransformer {
     }
 
     return '(async function() { ${_returnLastExpression(transformed)} })()';
+  }
+
+  /// Wraps `java.ajax(...)` (and similar async bridge calls) with balanced
+  /// parenthesis scanning so that chained member accesses like `.match(...)`
+  /// bind to the resolved value, not the unresolved Promise.
+  ///
+  /// Before: `java.ajax(url).match(/pattern/)`
+  /// After:  `(await java.ajax(url)).match(/pattern/)`
+  static String _wrapAwaitJavaCalls(String code) {
+    final pattern = RegExp(
+      r'(?<!await\s{0,8})java\.(ajax|post|connect|startBrowser|get|fetch|postForm|ajax_bytes)\s*\(',
+    );
+    final buf = StringBuffer();
+    var pos = 0;
+
+    while (pos < code.length) {
+      final match = pattern.firstMatch(code.substring(pos));
+      if (match == null) {
+        buf.write(code.substring(pos));
+        break;
+      }
+
+      // Write everything before the match
+      buf.write(code.substring(pos, pos + match.start));
+
+      // Find the balanced closing parenthesis starting from the open paren
+      final callStart = pos + match.start;
+      final openParen = pos + match.end - 1; // index of '('
+      var depth = 1;
+      var i = openParen + 1;
+      var quote = 0;
+      var escaped = false;
+
+      while (i < code.length && depth > 0) {
+        final c = code.codeUnitAt(i);
+        if (escaped) {
+          escaped = false;
+          i++;
+          continue;
+        }
+        if (c == 0x5c) {
+          // backslash
+          escaped = true;
+          i++;
+          continue;
+        }
+        if (quote != 0) {
+          if (c == quote) quote = 0;
+          i++;
+          continue;
+        }
+        if (c == 0x22 || c == 0x27 || c == 0x60) {
+          // " ' `
+          quote = c;
+          i++;
+          continue;
+        }
+        if (c == 0x28) {
+          // (
+          depth++;
+        } else if (c == 0x29) {
+          // )
+          depth--;
+        }
+        i++;
+      }
+
+      if (depth == 0) {
+        // i is now one past the closing paren
+        final fullCall = code.substring(callStart, i);
+        buf.write('(await $fullCall)');
+      } else {
+        // Unbalanced — just prepend await without wrapping
+        final fullCall = code.substring(callStart, i);
+        buf.write('await $fullCall');
+      }
+
+      pos = i;
+    }
+
+    return buf.toString();
   }
 
   static String _awaitKnownFunctionCalls(String code, Iterable<String> names) {
@@ -4393,7 +4535,12 @@ class JsCompatibilityTransformer {
         continue;
       }
       if (depth == 0 && (unit == 0x3b || unit == 0x0a || unit == 0x0d)) {
-        return (code.substring(0, i), code.substring(i + 1));
+        final prefix = code.substring(0, i);
+        final suffix = code.substring(i + 1);
+        if (LegadoJsEngine._isContinuation(prefix, suffix)) {
+          continue;
+        }
+        return (prefix, suffix);
       }
     }
 
