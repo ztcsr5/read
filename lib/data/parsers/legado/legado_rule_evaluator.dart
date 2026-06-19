@@ -112,6 +112,153 @@ class LegadoRuleEvaluator {
     return _extractJsonValueInternal(json, rule, variables: variables);
   }
 
+  static Future<String> extractJsonValueAsync(
+    dynamic json,
+    String rule, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    return _extractJsonValueInternalAsync(json, rule, variables: variables, ajax: ajax);
+  }
+
+  static Future<String> _extractJsonValueInternalAsync(
+    dynamic json,
+    String rule, {
+    bool applyPut = true,
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    if (rule.isEmpty) return '';
+    if (json is String && looksLikeJsonData(json, rule)) {
+      try {
+        return _extractJsonValueInternalAsync(
+          jsonDecode(json),
+          rule,
+          applyPut: applyPut,
+          variables: variables,
+          ajax: ajax,
+        );
+      } catch (_) {
+        // Keep string handling for non-JSON payloads that merely look similar.
+      }
+    }
+    if (applyPut) {
+      rule = _applyJsonPutDirectives(json, rule);
+    }
+    rule = _replaceGetDirectives(rule);
+    if (isJsOnlyRule(rule) && !_containsJsonTemplate(rule)) {
+      try {
+        final jsonStr = json is String ? json : jsonEncode(json);
+        final value = await LegadoJsEngine().evaluateWithAjax(
+          rule,
+          variables: _postProcessorVariables(jsonStr, variables),
+          ajax: ajax,
+        );
+        if (value.trim().isNotEmpty) return value.trim();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    // Handle || (fallback)
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
+        final val = await _extractJsonValueInternalAsync(
+          json,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
+        if (val.isNotEmpty) return val;
+      }
+      return '';
+    }
+
+    // Handle && (splicing)
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
+      final results = <String>[];
+      for (final part in spliceParts) {
+        final val = await _extractJsonValueInternalAsync(
+          json,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
+    // Handle %% (cross merge)
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
+      final results = <String>[];
+      for (final part in mergeParts) {
+        final val = await _extractJsonValueInternalAsync(
+          json,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
+    var ruleText = rule;
+    if (json is Map || json is List) {
+      if (_containsJsonTemplate(ruleText)) {
+        final templateRule = _stripJsonRulePrefix(ruleText);
+        final rawBase = _literalBeforePostProcessors(templateRule);
+        final interpolated = _interpolateJsonTemplate(json, templateRule);
+        if (_containsEmbeddedRequestConfig(interpolated)) {
+          return interpolated.trim();
+        }
+        final interpolatedBase = _literalBeforePostProcessors(interpolated);
+        final baseContainsTemplate = _containsJsonTemplate(rawBase);
+        final base = baseContainsTemplate
+            ? interpolatedBase
+            : _extractSingleJsonValue(json, rawBase);
+        if (!baseContainsTemplate &&
+            rawBase.trim().isNotEmpty &&
+            base.trim().isEmpty &&
+            !_shouldUseJsonLiteralFallback(rawBase)) {
+          return '';
+        }
+        return applyPostProcessorsAsync(
+          base,
+          interpolated,
+          originalJson: json,
+          variables: variables,
+          ajax: ajax,
+        );
+      }
+      final rawBase = _literalBeforePostProcessors(ruleText);
+      final base = _extractSingleJsonValue(json, rawBase);
+      if (rawBase.trim().isNotEmpty &&
+          base.trim().isEmpty &&
+          !_shouldUseJsonLiteralFallback(rawBase)) {
+        return '';
+      }
+      return applyPostProcessorsAsync(
+        base,
+        ruleText,
+        originalJson: json,
+        variables: variables,
+        ajax: ajax,
+      );
+    }
+    return applyPostProcessorsAsync(
+      json.toString(),
+      ruleText,
+      originalJson: json,
+      variables: variables,
+      ajax: ajax,
+    );
+  }
+
   static String _extractJsonValueInternal(
     dynamic json,
     String rule, {
@@ -316,6 +463,231 @@ class LegadoRuleEvaluator {
     nodes.addAll(_extractNodesByJsonPath(json, cleaned));
     if (nodes.isEmpty) nodes.addAll(_extractNodesManually(json, cleaned));
     return nodes;
+  }
+
+  static Future<String> extractHtmlValueAsync(
+    Element node,
+    String rule, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    if (rule.isEmpty) return '';
+    rule = _applyHtmlPutDirectives(node, rule);
+    final materializedRule = _replaceGetDirectives(rule);
+    if (_isHtmlLiteralWithGet(rule, materializedRule) ||
+        _isHtmlLiteralRule(materializedRule)) {
+      final base = _literalBeforePostProcessors(materializedRule);
+      return applyPostProcessorsAsync(base, materializedRule, variables: variables, ajax: ajax);
+    }
+    rule = materializedRule;
+
+    // Handle || (fallback)
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
+        final val = await extractHtmlValueAsync(node, part.trim(), variables: variables, ajax: ajax);
+        if (val.isNotEmpty) return val;
+      }
+      return '';
+    }
+
+    // Handle && (splicing)
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
+      final results = <String>[];
+      for (final part in spliceParts) {
+        final val = await extractHtmlValueAsync(node, part.trim(), variables: variables, ajax: ajax);
+        if (val.isNotEmpty) results.add(val);
+      }
+      return results.join('\n');
+    }
+
+    // Handle %% (cross merge)
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
+      final lists = <List<String>>[];
+      for (final part in mergeParts) {
+        final list = await _extractHtmlValueListAsync(node, part.trim(), variables: variables, ajax: ajax);
+        if (list.isNotEmpty) {
+          lists.add(list);
+        }
+      }
+      return _interleaveLists(lists).join('\n');
+    }
+
+    return _extractSingleHtmlValueAsync(node, rule, variables: variables, ajax: ajax);
+  }
+
+  static Future<List<String>> _extractHtmlValueListAsync(
+    Element node,
+    String rule, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    if (rule.isEmpty) return const [];
+    rule = _applyHtmlPutDirectives(node, rule);
+    final materializedRule = _replaceGetDirectives(rule);
+    if (_isHtmlLiteralWithGet(rule, materializedRule) ||
+        _isHtmlLiteralRule(materializedRule)) {
+      final value = await applyPostProcessorsAsync(
+        _literalBeforePostProcessors(materializedRule),
+        materializedRule,
+        variables: variables,
+        ajax: ajax,
+      );
+      return value.trim().isEmpty ? const [] : [value];
+    }
+    rule = materializedRule;
+    final fallbackParts = _splitTopLevelOperator(rule, '||');
+    if (fallbackParts != null) {
+      for (final part in fallbackParts) {
+        final values = await _extractHtmlValueListAsync(
+          node,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
+        if (values.isNotEmpty) return values;
+      }
+      return const [];
+    }
+    final spliceParts = _splitTopLevelOperator(rule, '&&');
+    if (spliceParts != null) {
+      final results = <String>[];
+      for (final part in spliceParts) {
+        results.addAll(await _extractHtmlValueListAsync(node, part.trim(), variables: variables, ajax: ajax));
+      }
+      return results;
+    }
+    final mergeParts = _splitTopLevelOperator(rule, '%%');
+    if (mergeParts != null) {
+      final lists = <List<String>>[];
+      for (final part in mergeParts) {
+        final list = await _extractHtmlValueListAsync(node, part.trim(), variables: variables, ajax: ajax);
+        if (list.isNotEmpty) {
+          lists.add(list);
+        }
+      }
+      return _interleaveLists(lists);
+    }
+    if (_containsHtmlTemplate(rule)) {
+      final interpolated = _interpolateHtmlTemplate(node, rule);
+      final value = await applyPostProcessorsAsync(
+        _literalBeforePostProcessors(interpolated),
+        interpolated,
+        variables: variables,
+        ajax: ajax,
+      );
+      return value.isEmpty ? const [] : [value];
+    }
+    if (rule.contains('@@')) {
+      final value = await _extractSingleHtmlValueAsync(node, rule, variables: variables, ajax: ajax);
+      return value.isEmpty ? const [] : [value];
+    }
+    if (isXPathRule(rule)) {
+      final values = _extractXPathValueList(node, rule);
+      final processed = <String>[];
+      for (final value in values) {
+        final val = await applyPostProcessorsAsync(value, rule, variables: variables, ajax: ajax);
+        if (val.trim().isNotEmpty) {
+          processed.add(val);
+        }
+      }
+      return processed;
+    }
+
+    final parsed = _parseHtmlRule(rule);
+    final targets = _queryChain(node, parsed.selectors);
+    if (targets.isEmpty) return const [];
+    final processed = <String>[];
+    for (final target in targets) {
+      final val = await applyPostProcessorsAsync(
+        _htmlValue(target, parsed.attr),
+        rule,
+        variables: variables,
+        ajax: ajax,
+      );
+      if (val.trim().isNotEmpty) {
+        processed.add(val);
+      }
+    }
+    return processed;
+  }
+
+  static Future<String> _extractSingleHtmlValueAsync(
+    Element node,
+    String rule, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    rule = _applyHtmlPutDirectives(node, rule);
+    final materializedRule = _replaceGetDirectives(rule);
+    if (_isHtmlLiteralWithGet(rule, materializedRule) ||
+        _isHtmlLiteralRule(materializedRule)) {
+      return applyPostProcessorsAsync(
+        _literalBeforePostProcessors(materializedRule),
+        materializedRule,
+        variables: variables,
+        ajax: ajax,
+      );
+    }
+    rule = materializedRule;
+    if (rule.trimLeft().startsWith('@@')) {
+      return _extractSingleHtmlValueAsync(
+        node,
+        rule.trimLeft().substring(2).trimLeft(),
+        variables: variables,
+        ajax: ajax,
+      );
+    }
+    if (_containsHtmlTemplate(rule)) {
+      final interpolated = _interpolateHtmlTemplate(node, rule);
+      return applyPostProcessorsAsync(
+        _literalBeforePostProcessors(interpolated),
+        interpolated,
+        variables: variables,
+        ajax: ajax,
+      );
+    }
+    if (rule.contains('@@')) {
+      final parts = rule.split('@@');
+      final rawValue = await _extractSingleHtmlValueAsync(
+        node,
+        parts[0].trim(),
+        variables: variables,
+        ajax: ajax,
+      );
+      if (rawValue.isEmpty) return '';
+      final doc = Document.html(rawValue);
+      final root = doc.body ?? doc.documentElement;
+      if (root == null) return '';
+      final remainingRule = parts.skip(1).join('@@');
+      return _extractSingleHtmlValueAsync(root, remainingRule, variables: variables, ajax: ajax);
+    }
+
+    if (isXPathRule(rule)) {
+      try {
+        final values = _extractXPathValueList(node, rule);
+        return applyPostProcessorsAsync(
+          values.join('\n'),
+          rule,
+          variables: variables,
+          ajax: ajax,
+        );
+      } catch (_) {
+        return '';
+      }
+    }
+
+    final parsed = _parseHtmlRule(rule);
+    final targets = _queryChain(node, parsed.selectors);
+    if (targets.isEmpty) return '';
+    final values = targets
+        .map((target) => _htmlValue(target, parsed.attr))
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
+    final value = values.join('\n');
+    return applyPostProcessorsAsync(value, rule, variables: variables, ajax: ajax);
   }
 
   static String extractHtmlValue(
@@ -1212,6 +1584,208 @@ class LegadoRuleEvaluator {
     final jsTagBody = _jsTagBody(rule);
     return jsTagBody != null &&
         (jsTagBody.contains('\n') || jsTagBody.contains('\r'));
+  }
+
+  static Future<String> applyPostProcessorsAsync(
+    String value,
+    String rule, {
+    dynamic originalJson,
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    var output = value;
+    rule = _replaceGetDirectives(rule);
+    final lines = rule
+        .split(RegExp(r'[\r\n]+'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return output.trim();
+
+    if (lines.length == 1 || _hasMultilineInlineJsPostProcessor(rule)) {
+      return _applySingleLinePostProcessorsAsync(
+        output,
+        rule,
+        originalJson: originalJson,
+        variables: variables,
+        ajax: ajax,
+      );
+    }
+
+    for (var i = 1; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.isEmpty) continue;
+      final lowerLine = line.toLowerCase();
+
+      if (lowerLine.contains('@get:')) {
+        final key = _directiveTail(
+          line,
+          '@get:',
+        ).split(RegExp(r'[@#]')).first.trim();
+        try {
+          final cached = LegadoJsEngine().evaluate('java.get("$key")');
+          if (cached.trim().isNotEmpty) output = cached;
+        } catch (_) {}
+      }
+
+      if (lowerLine.startsWith('<js>') ||
+          lowerLine.contains('</js>') ||
+          lowerLine.startsWith('@js:')) {
+        try {
+          final jsPart = lowerLine.startsWith('@js:')
+              ? line
+              : '<js>${_jsTagBody(line) ?? ''}</js>';
+          final evaluated = await LegadoJsEngine().evaluateWithAjax(
+            jsPart,
+            variables: _postProcessorVariables(output, variables),
+            ajax: ajax,
+          );
+          if (evaluated.trim().isNotEmpty) output = evaluated;
+        } catch (_) {}
+      } else if (lowerLine.contains('@put:')) {
+        final key = _directiveTail(
+          line,
+          '@put:',
+        ).split(RegExp(r'[@#]')).first.trim();
+        try {
+          await LegadoJsEngine().evaluateWithAjax(
+            'java.put("$key", result)',
+            variables: _postProcessorVariables(output, variables),
+            ajax: ajax,
+          );
+        } catch (_) {}
+      } else if (line.toLowerCase().contains('@match->')) {
+        output = _applyMatchPostProcessor(output, line);
+      } else if (line.startsWith('##')) {
+        for (final processor in _regexPostProcessors(line)) {
+          final pattern = processor.pattern;
+          if (pattern.isEmpty) continue;
+          output = _applyRegexPostProcessor(
+            output,
+            pattern,
+            processor.replacement,
+            onlyFirst: processor.onlyFirst,
+          );
+        }
+      } else {
+        if (line.contains('{result}') ||
+            line.contains(
+              '{'
+              '{result}'
+              '}',
+            )) {
+          output = line
+              .replaceAll('{result}', output)
+              .replaceAll(
+                '{'
+                '{result}'
+                '}',
+                output,
+              );
+        } else if (line.contains('{}') || line.contains('{{}}')) {
+          output = line.replaceAll('{}', output).replaceAll('{{}}', output);
+        } else if (line.contains('{') && originalJson != null) {
+          final mappedLine = line.replaceAll('result', output);
+          output = _interpolateJsonTemplate(
+            originalJson is Map ? originalJson : {},
+            mappedLine,
+          );
+        } else if (line.startsWith('http') ||
+            line.startsWith('/') ||
+            line.contains('/') ||
+            line.contains('=')) {
+          if (line.endsWith('=')) {
+            output = '$line$output';
+          } else if (line.contains('?')) {
+            if (line.endsWith('?') || line.endsWith('&')) {
+              output = '$line$output';
+            } else {
+              output = '$line&$output';
+            }
+          } else {
+            output = '$line$output';
+          }
+        } else {
+          output = '$line$output';
+        }
+      }
+
+      output = _applyJsPostProcessors(output, line, variables: variables);
+    }
+
+    return output.trim();
+  }
+
+  static Future<String> _applySingleLinePostProcessorsAsync(
+    String value,
+    String rule, {
+    dynamic originalJson,
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    var output = value;
+    final lowerRule = rule.toLowerCase();
+    var appliedRawAtJs = false;
+    if (lowerRule.contains('@get:')) {
+      final key = _directiveTail(
+        rule,
+        '@get:',
+      ).split(RegExp(r'[@#]')).first.trim();
+      try {
+        final cached = LegadoJsEngine().evaluate('java.get("$key")');
+        if (cached.trim().isNotEmpty) output = cached;
+      } catch (_) {}
+    }
+
+    if (lowerRule.contains('@js:') || lowerRule.contains('<js>')) {
+      if (lowerRule.contains('<js>')) {
+        try {
+          final evaluated = await LegadoJsEngine().evaluateWithAjax(
+            '<js>${_jsTagBody(rule) ?? ''}</js>',
+            variables: _postProcessorVariables(output, variables),
+            ajax: ajax,
+          );
+          if (evaluated.trim().isNotEmpty) output = evaluated;
+        } catch (_) {}
+      }
+      if (lowerRule.contains('@js:')) {
+        try {
+          final atJs = lowerRule.indexOf('@js:');
+          final hasPriorJsBlock =
+              lowerRule.contains('<js>') && lowerRule.indexOf('<js>') < atJs;
+          final jsCode = rule.substring(atJs + 4).split('##').first.trim();
+          final evaluated = await LegadoJsEngine().evaluateWithAjax(
+            '@js:$jsCode',
+            variables: _postProcessorVariables(output, variables),
+            ajax: ajax,
+          );
+          if (evaluated.trim().isNotEmpty || hasPriorJsBlock) {
+            output = evaluated;
+            appliedRawAtJs = !hasPriorJsBlock;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!appliedRawAtJs) {
+      output = _applyJsPostProcessors(output, rule, variables: variables);
+    }
+
+    if (lowerRule.contains('@put:')) {
+      final key = _directiveTail(
+        rule,
+        '@put:',
+      ).split(RegExp(r'[@#]')).first.trim();
+      try {
+        await LegadoJsEngine().evaluateWithAjax(
+          'java.put("$key", result)',
+          variables: _postProcessorVariables(output, variables),
+          ajax: ajax,
+        );
+      } catch (_) {}
+    }
+
+    return output.trim();
   }
 
   static String _applySingleLinePostProcessors(

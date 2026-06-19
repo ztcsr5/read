@@ -1352,10 +1352,11 @@ class LegadoParser {
                 ]) ??
                 '';
             if (titleRule.trim().isEmpty) titleRule = 'title';
-            final title = _extractJsonValue(
+            final title = await _extractJsonValueAsync(
               item,
               _sourceScopedRule(titleRule, source),
               variables: variables,
+              ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
             );
 
             var urlRule =
@@ -1370,18 +1371,20 @@ class LegadoParser {
                 ]) ??
                 '';
             if (urlRule.trim().isEmpty) urlRule = 'url';
-            final url = _extractJsonValue(
+            final url = await _extractJsonValueAsync(
               item,
               _sourceScopedRule(urlRule, source),
               variables: variables,
+              ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
             );
 
             bool isVolume = false;
             if (isVolumeRule != null && isVolumeRule.isNotEmpty) {
-              final val = _extractJsonValue(
+              final val = await _extractJsonValueAsync(
                 item,
                 _sourceScopedRule(isVolumeRule, source),
                 variables: variables,
+                ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
               );
               isVolume = _isLegadoTrue(val);
             }
@@ -1477,9 +1480,10 @@ class LegadoParser {
               ]) ??
               '';
           if (titleRule.trim().isEmpty) titleRule = 'text'; // 默认脑补 'text'
-          final title = _extractHtmlValue(
+          final title = await _extractHtmlValueAsync(
             node,
             _sourceScopedRule(titleRule, source),
+            ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
           );
 
           var urlRule =
@@ -1492,16 +1496,18 @@ class LegadoParser {
               ]) ??
               '';
           if (urlRule.trim().isEmpty) urlRule = 'href'; // 默认脑补 'href'
-          final url = _extractHtmlValue(
+          final url = await _extractHtmlValueAsync(
             node,
             _sourceScopedRule(urlRule, source),
+            ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
           );
 
           bool isVolume = false;
           if (isVolumeRule != null && isVolumeRule.isNotEmpty) {
-            final val = _extractHtmlValue(
+            final val = await _extractHtmlValueAsync(
               node,
               _sourceScopedRule(isVolumeRule, source),
+              ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
             );
             isVolume = _isLegadoTrue(val);
           }
@@ -1960,16 +1966,40 @@ class LegadoParser {
     Book? book,
     Chapter? chapter,
   }) async {
-    if (!contentRule.contains('java.ajax')) {
-      return _extractContentFromResponse(
-        data,
+    final variables = _jsVariables(
+      source,
+      result: data is String ? data : jsonEncode(data),
+      baseUrl: baseUrl,
+      book: book,
+      chapter: chapter,
+    );
+
+    if (_isJsonRule(contentRule) && _looksLikeJsonData(data, contentRule)) {
+      final jsonData = data is String ? jsonDecode(data) : data;
+      return await _extractJsonValueAsync(
+        jsonData,
         contentRule,
-        source: source,
-        baseUrl: baseUrl,
-        book: book,
-        chapter: chapter,
+        variables: variables,
+        ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
       );
     }
+
+    if (data is String && !contentRule.contains('java.ajax')) {
+      final document = parse(data);
+      final root = document.documentElement ?? document.body;
+      if (root != null) {
+        final evaluated = await _extractHtmlValueAsync(
+          root,
+          contentRule,
+          variables: variables,
+          ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
+        );
+        if (evaluated.trim().isNotEmpty) {
+          return _contentHtmlToText(evaluated);
+        }
+      }
+    }
+
     final block = _inlineJsPostProcessor(contentRule);
     if (block == null || block.prefix.trim().isEmpty) {
       return _extractContentFromResponse(
@@ -2466,7 +2496,13 @@ class LegadoParser {
     final block = _inlineJsPostProcessor(rule);
     if (block == null || block.prefix.trim().isEmpty) return null;
 
-    final input = _cleanRuleOutput(_extractJsonValue(item, block.prefix));
+    final input = _cleanRuleOutput(
+      await _extractJsonValueAsync(
+        item,
+        block.prefix,
+        ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+      ),
+    );
     if (input.trim().isEmpty) return null;
 
     final output = await LegadoJsEngine().evaluateWithAjax(
@@ -3819,6 +3855,20 @@ class LegadoParser {
     );
   }
 
+  static Future<String> _extractJsonValueAsync(
+    dynamic json,
+    String jsonPath, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) {
+    return LegadoRuleEvaluator.extractJsonValueAsync(
+      json,
+      jsonPath,
+      variables: variables,
+      ajax: ajax,
+    );
+  }
+
   static List<dynamic> _extractJsonNodes(
     dynamic json,
     String jsonPath, {
@@ -3840,6 +3890,20 @@ class LegadoParser {
       node,
       ruleStr,
       variables: variables,
+    );
+  }
+
+  static Future<String> _extractHtmlValueAsync(
+    Element node,
+    String ruleStr, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) {
+    return LegadoRuleEvaluator.extractHtmlValueAsync(
+      node,
+      ruleStr,
+      variables: variables,
+      ajax: ajax,
     );
   }
 
@@ -6165,22 +6229,25 @@ class LegadoParser {
         if (limit != null && chapters.length >= limit) break;
         if (node is! Map) continue;
         final item = node.map((key, value) => MapEntry(key.toString(), value));
-        final title = _extractJsonValue(
+        final title = await _extractJsonValueAsync(
           item,
           _sourceScopedRule(titleRule, source),
           variables: variables,
+          ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
         );
-        final url = _extractJsonValue(
+        final url = await _extractJsonValueAsync(
           item,
           _sourceScopedRule(urlRule, source),
           variables: variables,
+          ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
         );
         bool isVolume = false;
         if (isVolumeRule != null && isVolumeRule.isNotEmpty) {
-          final val = _extractJsonValue(
+          final val = await _extractJsonValueAsync(
             item,
             _sourceScopedRule(isVolumeRule, source),
             variables: variables,
+            ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
           );
           isVolume = _isLegadoTrue(val);
         }

@@ -2805,6 +2805,217 @@ console.log = function() {};
 console.warn = function() {};
 console.error = function() {};
 
+// Pure JS Jsoup Mock Implementation
+function parseHTML(html) {
+  const tagRegex = /<(\/?)([\w:\-]+)([^>]*?)(\/?)>/g;
+  let match;
+  let lastIndex = 0;
+  const root = { tagName: "root", attrs: {}, children: [], text: "" };
+  let current = root;
+
+  while ((match = tagRegex.exec(html)) !== null) {
+    const textBetween = html.substring(lastIndex, match.index);
+    if (textBetween.trim()) {
+      current.children.push({
+        tagName: "#text",
+        text: textBetween,
+        children: [],
+        attrs: {},
+        parent: current
+      });
+    }
+
+    const isClose = match[1] === "/";
+    const tagName = match[2].toLowerCase();
+    const attrsStr = match[3];
+    const isSelfClose = match[4] === "/";
+
+    if (isClose) {
+      if (current.parent) {
+        current = current.parent;
+      }
+    } else {
+      const attrs = {};
+      const attrRegex = /([\w:\-]+)(?:\s*=\s*(?:(?:"([^"]*)")|(?:'([^']*)')|([^\s>]+)))?/g;
+      let attrMatch;
+      while ((attrMatch = attrRegex.exec(attrsStr)) !== null) {
+        const name = attrMatch[1].toLowerCase();
+        const value = attrMatch[2] || attrMatch[3] || attrMatch[4] || "";
+        attrs[name] = value;
+      }
+
+      const newNode = {
+        tagName,
+        attrs,
+        children: [],
+        parent: current,
+        text: ""
+      };
+      current.children.push(newNode);
+      if (!isSelfClose && !["img", "br", "hr", "input", "meta", "link"].includes(tagName)) {
+        current = newNode;
+      }
+    }
+    lastIndex = tagRegex.lastIndex;
+  }
+  const trailingText = html.substring(lastIndex);
+  if (trailingText.trim()) {
+    root.children.push({
+      tagName: "#text",
+      text: trailingText,
+      children: [],
+      attrs: {},
+      parent: root
+    });
+  }
+  return root;
+}
+
+function matchNode(node, part) {
+  if (node.tagName === "#text") return false;
+  if (!part) return false;
+  
+  const attrMatch = /([^\[]+)?\[([^=]+)=(?:['"]?)([^\]'"]*)(?:['"]?)\]/.exec(part);
+  if (attrMatch) {
+    const tagName = attrMatch[1];
+    const attrName = attrMatch[2].toLowerCase();
+    const attrVal = attrMatch[3];
+    if (tagName && node.tagName !== tagName.toLowerCase()) return false;
+    return node.attrs[attrName] === attrVal;
+  }
+  
+  if (part.indexOf("#") >= 0) {
+    const idx = part.indexOf("#");
+    const tagName = part.slice(0, idx);
+    const id = part.slice(idx + 1);
+    if (tagName && node.tagName !== tagName.toLowerCase()) return false;
+    return node.attrs.id === id;
+  }
+  
+  if (part.indexOf(".") >= 0) {
+    const idx = part.indexOf(".");
+    const tagName = part.slice(0, idx);
+    const className = part.slice(idx + 1);
+    if (tagName && node.tagName !== tagName.toLowerCase()) return false;
+    const classes = (node.attrs["class"] || "").split(/\s+/);
+    return classes.indexOf(className) >= 0;
+  }
+  
+  return node.tagName === part.toLowerCase();
+}
+
+function querySelectorAll(node, selector) {
+  const parts = selector.trim().split(/\s+/);
+  let currentNodes = [node];
+  for (const part of parts) {
+    let nextNodes = [];
+    for (const cur of currentNodes) {
+      const matched = [];
+      function traverse(n) {
+        if (n !== cur && matchNode(n, part)) {
+          matched.push(n);
+        }
+        for (const child of n.children) {
+          traverse(child);
+        }
+      }
+      traverse(cur);
+      nextNodes.push(...matched);
+    }
+    const unique = [];
+    for (const n of nextNodes) {
+      if (!unique.includes(n)) unique.push(n);
+    }
+    currentNodes = unique;
+    if (currentNodes.length === 0) break;
+  }
+  return currentNodes;
+}
+
+function __nodeJsoupWrap(node) {
+  function nodeHtml(n) {
+    if (n.tagName === "#text") return n.text;
+    const attrsStr = Object.entries(n.attrs).map(([k, v]) => ` ${k}="${v}"`).join("");
+    if (["img", "br", "hr", "input", "meta", "link"].includes(n.tagName)) {
+      return `<${n.tagName}${attrsStr}/>`;
+    }
+    const inner = n.children.map(nodeHtml).join("");
+    return `<${n.tagName}${attrsStr}>${inner}</${n.tagName}>`;
+  }
+  
+  function nodeInnerHtml(n) {
+    if (n.tagName === "#text") return n.text;
+    return n.children.map(nodeHtml).join("");
+  }
+
+  function nodeText(n) {
+    if (n.tagName === "#text") return n.text;
+    return n.children.map(nodeText).join(" ");
+  }
+
+  return {
+    select: function(selector) {
+      const nodes = querySelectorAll(node, selector);
+      return __nodeJsoupNodesWrap(nodes);
+    },
+    html: function() {
+      return nodeInnerHtml(node);
+    },
+    outerHtml: function() {
+      return nodeHtml(node);
+    },
+    text: function() {
+      return nodeText(node);
+    },
+    attr: function(name) {
+      return node.attrs[String(name).toLowerCase()] || "";
+    }
+  };
+}
+
+function __nodeJsoupNodesWrap(nodes) {
+  const arr = nodes.map(__nodeJsoupWrap);
+  arr.select = function(selector) {
+    const result = [];
+    for (const n of nodes) {
+      const matched = querySelectorAll(n, selector);
+      result.push(...matched);
+    }
+    const unique = [];
+    for (const n of result) {
+      if (!unique.includes(n)) unique.push(n);
+    }
+    return __nodeJsoupNodesWrap(unique);
+  };
+  arr.html = function() {
+    return arr.map(item => item.html()).join("\n");
+  };
+  arr.outerHtml = function() {
+    return arr.map(item => item.outerHtml()).join("\n");
+  };
+  arr.text = function() {
+    return arr.map(item => item.text()).join("\n");
+  };
+  arr.attr = function(name) {
+    return arr.length > 0 ? arr[0].attr(name) : "";
+  };
+  arr.first = function() {
+    return arr.length > 0 ? arr[0] : __nodeJsoupWrap({ tagName: "empty", attrs: {}, children: [] });
+  };
+  arr.toArray = function() {
+    return arr;
+  };
+  return arr;
+}
+
+const __nodeJsoup = {
+  parse: function(html) {
+    const root = parseHTML(html);
+    return __nodeJsoupWrap(root);
+  }
+};
+
+
 Object.assign(globalThis, __vars);
 try {
   if (globalThis.result != null && globalThis.$ == null) {
@@ -3254,6 +3465,11 @@ function __installSourceAndBook() {
     java.put("book.variable", book.variable);
     return book.variable;
   };
+  if (globalThis.chapter == null || typeof globalThis.chapter !== "object") globalThis.chapter = {};
+  chapter.isVip = function() {
+    const title = String(chapter.title || chapter.name || "").toLowerCase();
+    return title.indexOf("vip") >= 0 || title.indexOf("订阅") >= 0 || title.indexOf("付费") >= 0;
+  };
 }
 
 globalThis.java = java;
@@ -3289,6 +3505,11 @@ const __nodeBase64 = {
   encodeToString: function(v) { return Buffer.from(__nodeBytes(v)).toString("base64"); },
   decode: function(v) { return Array.from(Buffer.from(__str(v), "base64")); }
 };
+globalThis.org = {
+  jsoup: {
+    Jsoup: __nodeJsoup
+  }
+};
 globalThis.Packages = globalThis.Packages || {
   java: {
     lang: {
@@ -3314,6 +3535,7 @@ globalThis.Packages = globalThis.Packages || {
     util: { Base64: __nodeBase64 }
   }
 };
+globalThis.Packages.org = globalThis.org;
 globalThis.Packages.util = globalThis.Packages.java.util;
 globalThis.java.lang = globalThis.Packages.java.lang;
 globalThis.java.util = globalThis.Packages.java.util;
@@ -3323,7 +3545,8 @@ globalThis.JavaImporter = function() {
     importClass: function() {},
     Mac: __nodeMac,
     SecretKeySpec: __nodeSecretKeySpec,
-    String: globalThis.Packages.java.lang.String
+    String: globalThis.Packages.java.lang.String,
+    Jsoup: __nodeJsoup
   };
 };
 globalThis.importClass = function(value) { return value; };
@@ -3452,7 +3675,14 @@ async function __stringifyResult(value) {
           book.variable = key == null ? "" : String(key);
           java.put("book.variable", book.variable);
           return book.variable;
+        };
+        if (typeof chapter === 'undefined' || chapter === null) {
+          var chapter = {};
         }
+        chapter.isVip = function() {
+          var title = String(chapter.title || chapter.name || "").toLowerCase();
+          return title.indexOf("vip") >= 0 || title.indexOf("订阅") >= 0 || title.indexOf("付费") >= 0;
+        };
       ''');
     } catch (e) {
       debugPrint('JS variables injection failed: $e');
