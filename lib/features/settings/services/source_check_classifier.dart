@@ -28,13 +28,13 @@ bool sourceCheckFailureIsBlocked(
     return true;
   }
 
-  // 异常类(TimeoutException/网络异常/解析崩溃):直接归入"失效",不进入待复测。
-  // 因为这种源在当前规则下 100% 跑不通,等用户/作者改源才能复活,不是 runtime 临时问题。
+  // 优先识别网络超时、连接重置等临时性或环境阻断异常为 blocked，避免误判为失效源
+  if (_looksLikeNetworkOrRuntimeBlock(text)) return true;
+
+  // 其余真正的运行期崩溃、空指针等未知异常归入"失效"
   if (failStep == '异常') {
     return false;
   }
-
-  if (_looksLikeNetworkOrRuntimeBlock(text)) return true;
 
   if ((failStep == '搜索 URL' ||
           failStep == '搜索结果' ||
@@ -114,6 +114,8 @@ bool _looksLikeNetworkOrRuntimeBlock(String text) {
       text.contains('failed host lookup') ||
       text.contains('connection refused') ||
       text.contains('connection') ||
+      text.contains('future not completed') ||
+      text.contains('future not complete') ||
       text.contains('desencodetobase64string') ||
       text.contains('aesbase64') ||
       text.contains('is not a function') && text.contains('java.');
