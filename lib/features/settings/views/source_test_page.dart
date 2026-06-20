@@ -254,6 +254,8 @@ class _SourceTestPageState extends State<SourceTestPage> {
             LegadoStepStatus.ok => CupertinoColors.activeGreen,
             LegadoStepStatus.fail => CupertinoColors.destructiveRed,
             LegadoStepStatus.skip => CupertinoColors.systemGrey,
+            LegadoStepStatus.needsLogin => CupertinoColors.systemBlue,
+            LegadoStepStatus.needsVerify => CupertinoColors.systemOrange,
           };
     final icon = blocked
         ? CupertinoIcons.exclamationmark_triangle_fill
@@ -261,6 +263,8 @@ class _SourceTestPageState extends State<SourceTestPage> {
             LegadoStepStatus.ok => CupertinoIcons.check_mark_circled_solid,
             LegadoStepStatus.fail => CupertinoIcons.xmark_circle_fill,
             LegadoStepStatus.skip => CupertinoIcons.minus_circle_fill,
+            LegadoStepStatus.needsLogin => CupertinoIcons.person_crop_circle_badge_exclamationmark,
+            LegadoStepStatus.needsVerify => CupertinoIcons.shield_lefthalf_fill,
           };
 
     return Padding(
