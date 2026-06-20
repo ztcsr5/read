@@ -111,9 +111,33 @@ class LegadoRequestBuilder {
     } else if (rawHeaders is String) {
       headers.addAll(parseHeaderString(rawHeaders));
     }
-    final cookie = config['cookie'] ?? config['Cookie'];
+    final cookie = config['cookie'] ??
+        config['Cookie'] ??
+        config['cookies'] ??
+        config['loginCookie'] ??
+        config['loginCookies'];
     if (cookie != null && cookie.toString().isNotEmpty) {
       headers['Cookie'] = cookie.toString();
+    }
+
+    // User-Agent 别名: userAgent / ua(不覆盖书源 headers 里已配置的)
+    final ua = config['userAgent'] ?? config['ua'];
+    if (ua != null &&
+        ua.toString().isNotEmpty &&
+        !headers.containsKey('User-Agent')) {
+      headers['User-Agent'] = ua.toString();
+    }
+
+    // 自动构建 Referer(很多反爬站点要求 Referer,书源没显式配置时从 bookSourceUrl 提取)
+    if (!headers.containsKey('Referer') && !headers.containsKey('referer')) {
+      final referer = _originFromBaseUrl(source);
+      if (referer != null) headers['Referer'] = '$referer/';
+    }
+
+    // 自动构建 Origin(同上)
+    if (!headers.containsKey('Origin') && !headers.containsKey('origin')) {
+      final origin = _originFromBaseUrl(source);
+      if (origin != null) headers['Origin'] = origin;
     }
 
     final method = (config['method'] ?? config['type'] ?? 'GET')
@@ -315,6 +339,20 @@ class LegadoRequestBuilder {
     if (url.isEmpty) return url;
     if (url.contains('://')) return url;
     return 'https://$url';
+  }
+
+  /// 从 source.bookSourceUrl 提取 origin (scheme://host),用于自动构建 Referer/Origin。
+  static String? _originFromBaseUrl(BookSource? source) {
+    if (source == null) return null;
+    final baseUrl = source.bookSourceUrl;
+    if (baseUrl.isEmpty) return null;
+    try {
+      final uri = Uri.parse(_ensureUrlScheme(baseUrl));
+      if (uri.hasScheme && uri.host.isNotEmpty) {
+        return '${uri.scheme}://${uri.host}';
+      }
+    } catch (_) {}
+    return null;
   }
 
   static String _replaceBareWord(String text, String token, String value) {

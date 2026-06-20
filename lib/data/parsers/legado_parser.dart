@@ -49,6 +49,24 @@ class LegadoVerificationRequiredException implements Exception {
   }
 }
 
+/// 书源需要登录时抛出。携带 loginUrl 供 UI 跳转登录页。
+class LegadoLoginRequiredException implements Exception {
+  final String sourceName;
+  final String loginUrl;
+  final String message;
+
+  const LegadoLoginRequiredException({
+    required this.sourceName,
+    required this.loginUrl,
+    required this.message,
+  });
+
+  @override
+  String toString() {
+    return '需要登录: $sourceName $loginUrl $message';
+  }
+}
+
 /// 基础的开源阅读 (Legado) 规则解析器。
 class LegadoParser {
   static final Dio _dio = _createDio();
@@ -119,6 +137,7 @@ class LegadoParser {
     String keyword,
   ) async {
     final steps = <LegadoTestStep>[];
+    JsEngineDiag().reset();
     final testKeyword = _testKeywordForSource(source, keyword);
 
     // 非小说源（bookSourceType != 0，例如有声书=1、漫画/图片源=2）当前应用仅支持小说，
@@ -176,6 +195,8 @@ class LegadoParser {
         urlLogs.add('QuickJS 引擎可用(_runtime 已加载): ${LegadoJsEngine().isAvailable}');
         urlLogs.add('是否落到 Node 兜底: ${LegadoJsEngine().isUsingNodeFallback}');
         urlLogs.add('该 searchUrl 是否含 JS 规则: ${_containsJsRule(source.searchUrl)}');
+        urlLogs.add('—— Native JSCore 诊断 ——');
+        urlLogs.add(JsEngineDiag().summary());
         final initErr = LegadoJsEngine().initErrorMessage;
         if (initErr != null && initErr.isNotEmpty) {
           urlLogs.add('QuickJS 初始化异常: $initErr');
@@ -204,6 +225,8 @@ class LegadoParser {
           '  ruleBookInfo 包含 JS: ${_containsJsRule(source.ruleBookInfo)}',
           '  ruleToc 包含 JS: ${_containsJsRule(source.ruleToc)}',
           '  ruleContent 包含 JS: ${_containsJsRule(source.ruleContent)}',
+          '—— Native JSCore 诊断 ——',
+          JsEngineDiag().summary(),
           '将开启 QuickJS 沙盒并在执行规则时自动注入上下文变量 (result, baseUrl, keyword, page 等)。',
         ];
         steps.add(
@@ -345,6 +368,36 @@ class LegadoParser {
         searchResultLogs.add(
           '警告：书籍列表解析为空！可能是 bookList 规则未匹配，或者服务器返回了错误页面/频控保护页面。',
         );
+        // 检测是否是登录页/验证页
+        final lowerSample = sampleText.toLowerCase();
+        if (_looksLikeLoginPage(lowerSample)) {
+          searchResultLogs.add('—— 检测到登录页特征 ——');
+          searchResultLogs.add('响应内容疑似登录/鉴权页面，建议在书源设置中完成登录后重试。');
+          searchResultLogs.add(JsEngineDiag().summary());
+          steps.add(
+            LegadoTestStep.needsLogin(
+              '搜索结果',
+              '响应内容疑似登录页，需登录后重试',
+              sample: sampleText,
+              logs: searchResultLogs,
+            ),
+          );
+          return LegadoTestReport(steps: steps);
+        }
+        if (_looksLikeVerifyPage(lowerSample)) {
+          searchResultLogs.add('—— 检测到验证页特征 ——');
+          searchResultLogs.add('响应内容疑似 Cloudflare/安全验证页面，建议跳验证后重试。');
+          searchResultLogs.add(JsEngineDiag().summary());
+          steps.add(
+            LegadoTestStep.needsVerify(
+              '搜索结果',
+              '响应内容疑似验证页，需验证后重试',
+              sample: sampleText,
+              logs: searchResultLogs,
+            ),
+          );
+          return LegadoTestReport(steps: steps);
+        }
         steps.add(
           LegadoTestStep.fail(
             '搜索结果',
@@ -841,18 +894,33 @@ class LegadoParser {
     if (source.searchUrl == null || source.ruleSearch == null) return [];
     final searchUrl = await _buildSearchUrlAsync(source, keyword, page: page);
     if (searchUrl.trim().isEmpty) {
+      debugPrint(
+        '🔍 [搜索诊断] ${source.bookSourceName}: searchUrl构建为空 | ${JsEngineDiag().summary()}',
+      );
       throw Exception(
         '搜索 URL 构建结果为空：${source.bookSourceName}。请单源测试查看 searchUrl/@js 规则。',
       );
     }
 
-    final response = await _request(
-      source,
-      searchUrl,
-      keyword: keyword,
-      cancelToken: cancelToken,
-    );
-    return _parseBooksFromResponse(source, keyword, response, page: page);
+    try {
+      final response = await _request(
+        source,
+        searchUrl,
+        keyword: keyword,
+        cancelToken: cancelToken,
+      );
+      return _parseBooksFromResponse(source, keyword, response, page: page);
+    } catch (e) {
+      if (e is LegadoLoginRequiredException ||
+          e is LegadoVerificationRequiredException ||
+          (e is DioException && e.type == DioExceptionType.cancel)) {
+        rethrow;
+      }
+      debugPrint(
+        '🔍 [搜索诊断] ${source.bookSourceName}: 搜索请求失败=$e | ${JsEngineDiag().summary()}',
+      );
+      rethrow;
+    }
   }
 
   static Future<List<Book>> _parseBooksFromResponse(
@@ -1055,6 +1123,43 @@ class LegadoParser {
           filtered.add(parsedBook);
         }
       } catch (_) {}
+    }
+
+    // 真实搜索路径(非 testSource)的登录/验证页检测 + 诊断
+    if (filtered.isEmpty) {
+      final sampleText = _sample(response.data);
+      final lowerSample = sampleText.toLowerCase();
+      if (_looksLikeLoginPage(lowerSample)) {
+        final config = LegadoRequestBuilder.jsonConfig(source.customConfig);
+        final loginUrl = config['loginUrl']?.toString().trim() ?? '';
+        debugPrint(
+          '🔍 [搜索诊断] ${source.bookSourceName}: 响应疑似登录页 | ${JsEngineDiag().summary()}',
+        );
+        if (loginUrl.isNotEmpty && loginUrl.startsWith('http')) {
+          throw LegadoLoginRequiredException(
+            sourceName: source.bookSourceName,
+            loginUrl: loginUrl,
+            message: '搜索响应疑似登录页，需登录后重试',
+          );
+        }
+        throw Exception(
+          '🔍 ${source.bookSourceName}: 搜索响应疑似登录页(未配置loginUrl)，请手动验证该书源',
+        );
+      }
+      if (_looksLikeVerifyPage(lowerSample)) {
+        debugPrint(
+          '🔍 [搜索诊断] ${source.bookSourceName}: 响应疑似验证页 | ${JsEngineDiag().summary()}',
+        );
+        throw LegadoVerificationRequiredException(
+          sourceName: source.bookSourceName,
+          url: response.realUri.toString(),
+          statusCode: response.statusCode,
+          message: '搜索响应疑似 Cloudflare/安全验证页面',
+        );
+      }
+      debugPrint(
+        '🔍 [搜索诊断] ${source.bookSourceName}: 搜索结果为空(非登录/验证页) | 响应采样=$sampleText | ${JsEngineDiag().summary()}',
+      );
     }
 
     return filtered;
@@ -4632,6 +4737,40 @@ class LegadoParser {
     return false;
   }
 
+  /// 检测响应内容是否疑似登录/鉴权页面
+  static bool _looksLikeLoginPage(String lowerText) {
+    return lowerText.contains('请先登录') ||
+        lowerText.contains('未登录') ||
+        lowerText.contains('请登录') ||
+        lowerText.contains('登录后查看') ||
+        lowerText.contains('账号登录') ||
+        lowerText.contains('用户登录') ||
+        lowerText.contains('sign in') ||
+        lowerText.contains('please log in') ||
+        lowerText.contains('please sign in') ||
+        lowerText.contains('login required') ||
+        lowerText.contains('unauthorized') ||
+        lowerText.contains('请选择理由') ||
+        lowerText.contains('加载中,请稍候') ||
+        lowerText.contains('加载中，请稍候');
+  }
+
+  /// 检测响应内容是否疑似验证页(Cloudflare/安全验证/人机验证)
+  static bool _looksLikeVerifyPage(String lowerText) {
+    return lowerText.contains('/cdn-cgi/challenge-platform') ||
+        lowerText.contains('just a moment') ||
+        lowerText.contains('cf-browser-verification') ||
+        lowerText.contains('challenge-form') ||
+        lowerText.contains('enable javascript and cookies') ||
+        lowerText.contains('checking your browser') ||
+        lowerText.contains('安全验证') ||
+        lowerText.contains('人机验证') ||
+        lowerText.contains('验证码') ||
+        lowerText.contains('百度安全验证') ||
+        lowerText.contains('ddos protection') ||
+        lowerText.contains('cloudflare');
+  }
+
   static bool _shouldTryWebViewAfterDio(dynamic data) {
     final text = data?.toString().trim() ?? '';
     if (text.isEmpty) return true;
@@ -7399,6 +7538,10 @@ class LegadoTestReport {
 
   bool get hasFailure =>
       steps.any((step) => step.status == LegadoStepStatus.fail);
+  bool get hasNeedsLogin =>
+      steps.any((step) => step.status == LegadoStepStatus.needsLogin);
+  bool get hasNeedsVerify =>
+      steps.any((step) => step.status == LegadoStepStatus.needsVerify);
 }
 
 class LegadoTestStep {
@@ -7454,6 +7597,32 @@ class LegadoTestStep {
          status: LegadoStepStatus.skip,
          logs: logs,
        );
+
+  const LegadoTestStep.needsLogin(
+    String title,
+    String message, {
+    String? sample,
+    List<String> logs = const [],
+  }) : this(
+         title: title,
+         message: message,
+         sample: sample,
+         status: LegadoStepStatus.needsLogin,
+         logs: logs,
+       );
+
+  const LegadoTestStep.needsVerify(
+    String title,
+    String message, {
+    String? sample,
+    List<String> logs = const [],
+  }) : this(
+         title: title,
+         message: message,
+         sample: sample,
+         status: LegadoStepStatus.needsVerify,
+         logs: logs,
+       );
 }
 
-enum LegadoStepStatus { ok, fail, skip }
+enum LegadoStepStatus { ok, fail, skip, needsLogin, needsVerify }

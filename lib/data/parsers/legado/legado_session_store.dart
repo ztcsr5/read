@@ -60,18 +60,39 @@ class LegadoSessionStore {
     _userAgentsByHost[_hostKey(uri)] = value;
   }
 
-  static String? userAgentFor(Uri uri) => _userAgentsByHost[_hostKey(uri)];
+  static String? userAgentFor(Uri uri) {
+    final host = _hostKey(uri);
+    for (final domain in _parentDomains(host)) {
+      final ua = _userAgentsByHost[domain];
+      if (ua != null && ua.isNotEmpty) return ua;
+    }
+    return null;
+  }
 
   static String? cookieHeaderFor(Uri uri) {
-    final jar = _cookiesByHost[_hostKey(uri)];
-    if (jar == null || jar.isEmpty) return null;
-    return jar.entries.map((entry) => '${entry.key}=${entry.value}').join('; ');
+    final host = _hostKey(uri);
+    final merged = <String, String>{};
+    for (final domain in _parentDomains(host)) {
+      final jar = _cookiesByHost[domain];
+      if (jar != null) {
+        jar.forEach((name, value) => merged[name] = value);
+      }
+    }
+    if (merged.isEmpty) return null;
+    return merged.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('; ');
   }
 
   static bool hasSessionFor(Uri uri) {
-    final key = _hostKey(uri);
-    return (_cookiesByHost[key]?.isNotEmpty ?? false) ||
-        (_userAgentsByHost[key]?.isNotEmpty ?? false);
+    final host = _hostKey(uri);
+    for (final domain in _parentDomains(host)) {
+      if ((_cookiesByHost[domain]?.isNotEmpty ?? false) ||
+          (_userAgentsByHost[domain]?.isNotEmpty ?? false)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static void clearHost(Uri uri) {
@@ -145,6 +166,21 @@ class LegadoSessionStore {
   }
 
   static String _hostKey(Uri uri) => uri.host.toLowerCase();
+
+  /// 返回 host 本身 + 所有父域名,用于 Cookie/UA 父域名匹配。
+  /// 例如 www.example.com → [www.example.com, example.com]
+  ///      m.example.com → [m.example.com, example.com]
+  ///      example.com → [example.com]
+  /// 单部分域名(如 localhost)只返回自身。
+  static List<String> _parentDomains(String host) {
+    final parts = host.split('.');
+    if (parts.length <= 2) return [host];
+    final domains = <String>[];
+    for (var i = 0; i < parts.length - 1; i++) {
+      domains.add(parts.sublist(i).join('.'));
+    }
+    return domains;
+  }
 
   static String _mergeCookieHeaders(String existing, String incoming) {
     final merged = <String, String>{};

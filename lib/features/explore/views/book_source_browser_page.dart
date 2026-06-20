@@ -166,6 +166,10 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
           _needsVerification = true;
           _verificationUrl = e.url;
           _message = '当前书源返回验证页，请先完成站点验证。';
+        } else if (e is LegadoLoginRequiredException) {
+          _needsVerification = true;
+          _verificationUrl = e.loginUrl;
+          _message = '当前书源需要登录，请先完成登录。';
         } else {
           _message = '搜索失败：$e';
         }

@@ -18,6 +18,80 @@ import 'package:html/parser.dart' show parse, parseFragment;
 import 'legado_session_store.dart';
 import 'query_ttf.dart';
 
+/// JS 引擎诊断信息,用于搜索/测源日志输出。
+/// 每次 search/testSource 开始时 reset(),结束后 summary() 输出到日志。
+class JsEngineDiag {
+  static final JsEngineDiag _instance = JsEngineDiag._();
+  factory JsEngineDiag() => _instance;
+  JsEngineDiag._();
+
+  /// 当前请求中使用的引擎名称: native_jscore / quickjs / legacy / node / 无
+  String lastEngine = '';
+  /// Native JSCore 是否可用(channel 是否注册)
+  bool nativeJSCoreAvailable = true;
+  /// Native JSCore 是否在本轮中被调用过
+  bool nativeJSCoreEverCalled = false;
+  /// Native JSCore 最后一次失败原因
+  String lastNativeJSCoreError = '';
+  /// 是否 fallback 到 QuickJS
+  bool lastFallbackToQuickJS = false;
+  /// 是否 fallback 到 Legacy
+  bool lastFallbackToLegacy = false;
+  /// 是否命中 __LEGADO_AJAX__
+  bool lastHitAjaxTrap = false;
+  /// 是否命中 __LEGADO_NATIVE__
+  bool lastHitNativeRequest = false;
+  /// 最近一次 JS 代码片段(前 200 字符)
+  String lastJsSnippet = '';
+  /// 诊断时间戳
+  String lastTimestamp = '';
+  /// 同步 evaluate() 是否被调用过(同步路径无法走 Native JSCore)
+  bool syncEvaluateUsed = false;
+  /// Native JSCore 连续失败计数(超过阈值才禁用)
+  int _nativeJSCoreFailCount = 0;
+  static const int _maxFailCount = 3;
+
+  /// 重置诊断状态(每次搜索/测源开始时调用)
+  void reset() {
+    lastEngine = '';
+    nativeJSCoreEverCalled = false;
+    lastNativeJSCoreError = '';
+    lastFallbackToQuickJS = false;
+    lastFallbackToLegacy = false;
+    lastHitAjaxTrap = false;
+    lastHitNativeRequest = false;
+    lastJsSnippet = '';
+    syncEvaluateUsed = false;
+    lastTimestamp = DateTime.now().toIso8601String();
+  }
+
+  /// 记录 Native JSCore 失败,超过阈值才标记不可用
+  void recordNativeJSCoreFailure(String reason) {
+    lastNativeJSCoreError = reason;
+    _nativeJSCoreFailCount++;
+    if (_nativeJSCoreFailCount >= _maxFailCount) {
+      nativeJSCoreAvailable = false;
+    }
+  }
+
+  /// 生成诊断摘要字符串
+  String summary() {
+    final parts = <String>[];
+    parts.add('引擎=${lastEngine.isEmpty ? "未执行JS" : lastEngine}');
+    parts.add('NativeJSCore可用=$nativeJSCoreAvailable');
+    parts.add('NativeJSCore调用过=$nativeJSCoreEverCalled');
+    if (lastNativeJSCoreError.isNotEmpty) {
+      parts.add('NativeJSCore失败=$lastNativeJSCoreError');
+    }
+    if (lastFallbackToQuickJS) parts.add('fallback=QuickJS');
+    if (lastFallbackToLegacy) parts.add('fallback=Legacy');
+    if (lastHitAjaxTrap) parts.add('命中__LEGADO_AJAX__');
+    if (lastHitNativeRequest) parts.add('命中__LEGADO_NATIVE__');
+    if (syncEvaluateUsed) parts.add('注意:同步evaluate无法走NativeJSCore');
+    return parts.join(' | ');
+  }
+}
+
 class LegadoJsEngine {
   static final LegadoJsEngine _instance = LegadoJsEngine._internal();
 
@@ -2373,10 +2447,15 @@ class LegadoJsEngine {
   }
 
   String evaluate(String jsCode, {Map<String, dynamic>? variables}) {
+    JsEngineDiag().syncEvaluateUsed = true;
+    JsEngineDiag().lastJsSnippet =
+        jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
     if (_runtime == null) {
       // 一次性修补:iOS release 模式下 _runtime 为 null 且 Node 兜底不可用,导致
       // 所有 @js/<js> 规则失败。先尝试 Dart 版 LegacyJsEvaluator(支持 80% 常见
       // JS 表达式:Date.now/encodeURI/MD5/SHA/JSON/变量拼接/CryptoJS/java 桥),失败再走 Node。
+      JsEngineDiag().lastEngine = 'legacy';
+      JsEngineDiag().lastFallbackToLegacy = true;
       try {
         // user 传入的 variables 已经是完整结构(result/baseUrl/source/book/chapter/key/page/...),
         // 直接转发即可,不要重建(重建会丢 source.bookSourceUrl/getKey/getVariable 等)。
@@ -2389,6 +2468,7 @@ class LegadoJsEngine {
         return _evaluateWithNodeFallbackSync(jsCode, variables: variables);
       }
     }
+    JsEngineDiag().lastEngine = 'quickjs';
     _injectVariables(variables);
 
     try {
@@ -2411,6 +2491,8 @@ class LegadoJsEngine {
     Future<Uint8List> Function(String request)? ajaxBytes,
     int maxRequests = 12,
   }) async {
+    JsEngineDiag().lastJsSnippet =
+        jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
     final nativeResult = await _evaluateWithNativeJSCore(
       jsCode,
       variables: variables,
@@ -2418,13 +2500,18 @@ class LegadoJsEngine {
       ajax: ajax,
       maxRequests: maxRequests,
     );
-    if (nativeResult != null) return nativeResult;
+    if (nativeResult != null) {
+      JsEngineDiag().lastEngine = 'native_jscore';
+      return nativeResult;
+    }
 
     if (_runtime == null) {
       // 一次性修补:iOS release 模式下 _runtime 为 null 且 Node 兜底不可用,
       // toc/content/explore 等需要 ajax 的 JS 规则完全失败。先用 LegacyJsEvaluator
       // 跑一遍(支持简单 java.ajax("...") 字面量参数调用,先 pre-fetch 再注入)。
       // 失败再走 Node 兜底(Node 在 iOS 上不存在,会返回空)。
+      JsEngineDiag().lastEngine = 'legacy';
+      JsEngineDiag().lastFallbackToLegacy = true;
       try {
         // JS 整体加 8s 超时,避免某个 timeoutException 源把 worker 挂死
         final result = await _evaluateWithLegacyAsync(
@@ -2445,6 +2532,8 @@ class LegadoJsEngine {
       );
     }
 
+    JsEngineDiag().lastEngine = 'quickjs';
+    JsEngineDiag().lastFallbackToQuickJS = true;
     _currentAjaxHandler = ajax;
     _currentAjaxBytesHandler = ajaxBytes;
     _injectVariables(variables);
@@ -2462,6 +2551,7 @@ class LegadoJsEngine {
             final errStr = result.stringResult;
             final ajaxReq = _extractAjaxRequest(errStr);
             if (ajaxReq != null) {
+              JsEngineDiag().lastHitAjaxTrap = true;
               final resp = await ajax(ajaxReq);
               cache[ajaxReq] = resp;
               continue;
@@ -2475,6 +2565,7 @@ class LegadoJsEngine {
               final errStr = result.stringResult;
               final ajaxReq = _extractAjaxRequest(errStr);
               if (ajaxReq != null) {
+                JsEngineDiag().lastHitAjaxTrap = true;
                 final resp = await ajax(ajaxReq);
                 cache[ajaxReq] = resp;
                 continue;
@@ -2487,6 +2578,7 @@ class LegadoJsEngine {
           final errStr = e.toString();
           final ajaxReq = _extractAjaxRequest(errStr);
           if (ajaxReq != null) {
+            JsEngineDiag().lastHitAjaxTrap = true;
             final resp = await ajax(ajaxReq);
             cache[ajaxReq] = resp;
             continue;
@@ -2510,7 +2602,7 @@ class LegadoJsEngine {
     required Future<String> Function(String request) ajax,
     int maxRequests = 12,
   }) async {
-    if (kIsWeb || !Platform.isIOS || _nativeJSCoreUnavailable) return null;
+    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable) return null;
     if (Platform.environment['LEGADO_DISABLE_NATIVE_JSCORE'] == '1') return null;
     final ajaxCache = <String, String>{};
     final nativeCache = <String, String>{};
@@ -2534,6 +2626,7 @@ class LegadoJsEngine {
         ).timeout(const Duration(seconds: 8));
         if (response == null) return null;
         if (response['ok'] == true) {
+          JsEngineDiag().nativeJSCoreEverCalled = true;
           final cookieHeader = response['cookieHeader']?.toString().trim() ?? '';
           final baseUrl = nativeVariables['baseUrl']?.toString() ??
               nativeVariables['url']?.toString() ??
@@ -2551,11 +2644,14 @@ class LegadoJsEngine {
         }
         final ajaxRequest = response['ajaxRequest']?.toString().trim() ?? '';
         if (ajaxRequest.isNotEmpty) {
+          JsEngineDiag().lastHitAjaxTrap = true;
+          JsEngineDiag().nativeJSCoreEverCalled = true;
           ajaxCache[ajaxRequest] = await ajax(ajaxRequest);
           continue;
         }
         final loginRequest = response['loginRequest']?.toString().trim() ?? '';
         if (loginRequest.isNotEmpty) {
+          JsEngineDiag().nativeJSCoreEverCalled = true;
           final cookieHeader = await _openNativeLoginWebView(loginRequest);
           final loginUri = Uri.tryParse(loginRequest);
           if (loginUri != null && cookieHeader.isNotEmpty) {
@@ -2567,22 +2663,28 @@ class LegadoJsEngine {
         }
         final nativeRequest = response['nativeRequest']?.toString().trim() ?? '';
         if (nativeRequest.isNotEmpty) {
+          JsEngineDiag().lastHitNativeRequest = true;
+          JsEngineDiag().nativeJSCoreEverCalled = true;
           nativeCache[nativeRequest] = _handleNativeJSCoreRequest(nativeRequest);
           continue;
         }
         debugPrint('Native JSCore eval failed: ${response['error'] ?? 'unknown'}');
+        JsEngineDiag().recordNativeJSCoreFailure(response['error']?.toString() ?? 'unknown');
         return null;
       } on MissingPluginException catch (e) {
-        _nativeJSCoreUnavailable = true;
+        JsEngineDiag().recordNativeJSCoreFailure('MissingPluginException: channel 未注册');
         debugPrint('Native JSCore channel unavailable: $e');
         return null;
       } on TimeoutException catch (e) {
+        JsEngineDiag().recordNativeJSCoreFailure('TimeoutException: 8s 超时');
         debugPrint('Native JSCore eval timed out: $e');
         return null;
       } on PlatformException catch (e) {
+        JsEngineDiag().recordNativeJSCoreFailure('PlatformException: ${e.message ?? e.code}');
         debugPrint('Native JSCore platform error: ${e.message ?? e.code}');
         return null;
       } catch (e) {
+        JsEngineDiag().recordNativeJSCoreFailure('Exception: $e');
         debugPrint('Native JSCore eval error: $e');
         return null;
       }
@@ -2710,7 +2812,7 @@ class LegadoJsEngine {
   }
 
   Future<String> _openNativeLoginWebView(String url) async {
-    if (kIsWeb || !Platform.isIOS || _nativeJSCoreUnavailable) return '';
+    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable) return '';
     try {
       final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
         'openLogin',
@@ -2730,7 +2832,7 @@ class LegadoJsEngine {
   }
 
   Future<String> nativeCookiesForUrl(String url) async {
-    if (kIsWeb || !Platform.isIOS || _nativeJSCoreUnavailable) return '';
+    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable) return '';
     try {
       final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
         'cookiesForUrl',

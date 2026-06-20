@@ -276,7 +276,9 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                 verificationSource = source;
                 verificationUrl = e is LegadoVerificationRequiredException
                     ? e.url
-                    : _sourceDefaultUrl(source);
+                    : (e is LegadoLoginRequiredException
+                        ? e.loginUrl
+                        : _sourceDefaultUrl(source));
               }
               _appendFailureSample(failureSamples, source, _compactError(e));
               debugPrint('Search Error from ${source.bookSourceName}: $e');
@@ -399,7 +401,8 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
   }
 
   bool _shouldOfferVerification(Object error) =>
-      error is LegadoVerificationRequiredException;
+      error is LegadoVerificationRequiredException ||
+      error is LegadoLoginRequiredException;
 
   String _sourceDefaultUrl(BookSource source) {
     final base = LegadoRequestBuilder.cleanBaseUrl(source.bookSourceUrl);

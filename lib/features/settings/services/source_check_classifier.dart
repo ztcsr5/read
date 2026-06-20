@@ -1,12 +1,23 @@
 import '../../../data/models/book_source.dart';
 
-enum SourceCheckFailureClass { failed, blocked }
+enum SourceCheckFailureClass { failed, blocked, needsLogin, needsVerify }
 
 SourceCheckFailureClass classifySourceCheckFailure(
   BookSource source, {
   required String? failStep,
   required String? message,
 }) {
+  final text = '${failStep ?? ''} ${message ?? ''} ${source.customConfig ?? ''}'
+      .toLowerCase();
+
+  // 优先识别"需登录"和"需验证"状态,避免被误判为 blocked 或 failed
+  if (_looksLikeNeedsLogin(text)) {
+    return SourceCheckFailureClass.needsLogin;
+  }
+  if (_looksLikeNeedsVerify(text)) {
+    return SourceCheckFailureClass.needsVerify;
+  }
+
   return sourceCheckFailureIsBlocked(
         source,
         failStep: failStep,
@@ -14,6 +25,25 @@ SourceCheckFailureClass classifySourceCheckFailure(
       )
       ? SourceCheckFailureClass.blocked
       : SourceCheckFailureClass.failed;
+}
+
+bool _looksLikeNeedsLogin(String text) {
+  return text.contains('登录页') ||
+      text.contains('需登录') ||
+      text.contains('login') ||
+      text.contains('unauthorized') ||
+      text.contains('请先登录') ||
+      text.contains('未登录');
+}
+
+bool _looksLikeNeedsVerify(String text) {
+  return text.contains('验证页') ||
+      text.contains('需验证') ||
+      text.contains('cloudflare') ||
+      text.contains('challenge') ||
+      text.contains('安全验证') ||
+      text.contains('人机验证') ||
+      text.contains('验证码');
 }
 
 bool sourceCheckFailureIsBlocked(

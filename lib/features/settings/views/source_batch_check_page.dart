@@ -16,6 +16,8 @@ class SourceCheckResult {
   final bool isSuccess;
   final bool isBlocked;
   final bool isSkipped;
+  final bool isNeedsLogin;
+  final bool isNeedsVerify;
   final int booksCount;
   final String? errorMessage;
   final String? failStep;
@@ -29,6 +31,8 @@ class SourceCheckResult {
     required this.isSuccess,
     this.isBlocked = false,
     this.isSkipped = false,
+    this.isNeedsLogin = false,
+    this.isNeedsVerify = false,
     this.booksCount = 0,
     this.errorMessage,
     this.failStep,
@@ -38,10 +42,20 @@ class SourceCheckResult {
     required this.durationInMs,
   });
 
-  bool get canDisable => !isSuccess && !isBlocked && !isSkipped;
+  bool get canDisable =>
+      !isSuccess && !isBlocked && !isSkipped &&
+      !isNeedsLogin && !isNeedsVerify;
 }
 
-enum SourceCheckFilter { all, success, failed, blocked, skipped }
+enum SourceCheckFilter {
+  all,
+  success,
+  failed,
+  blocked,
+  skipped,
+  needsLogin,
+  needsVerify,
+}
 
 class SourceBatchCheckPage extends ConsumerStatefulWidget {
   final List<BookSource> sources;
@@ -61,6 +75,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   int _failCount = 0;
   int _blockedCount = 0;
   int _skippedCount = 0;
+  int _needsLoginCount = 0;
+  int _needsVerifyCount = 0;
   bool _isChecking = true;
   bool _isDisabling = false;
   final List<SourceCheckResult> _results = [];
@@ -114,6 +130,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       List<String> failLogs = const [];
       String? stageTrail;
       var blocked = false;
+      var needsLogin = false;
+      var needsVerify = false;
 
       try {
         // 统一测源：复用单源测试的 testSource，确保「一键测源」与单源测试判定标准一致，
@@ -125,9 +143,12 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           source,
           _batchKeyword,
         ).timeout(const Duration(seconds: 25));
+        // 优先识别"需登录"和"需验证"状态,避免被计入成功或普通失败
+        needsLogin = report.hasNeedsLogin;
+        needsVerify = report.hasNeedsVerify;
         skipped = report.steps.isNotEmpty &&
             report.steps.every((s) => s.status == LegadoStepStatus.skip);
-        success = !report.hasFailure && !skipped;
+        success = !report.hasFailure && !skipped && !needsLogin && !needsVerify;
         if (success) {
           // 从「搜索结果」步骤提取书籍数量用于展示
           for (final step in report.steps) {
@@ -182,6 +203,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
               isSuccess: success,
               isBlocked: blocked,
               isSkipped: skipped,
+              isNeedsLogin: needsLogin,
+              isNeedsVerify: needsVerify,
               booksCount: booksCount,
               errorMessage: errorMessage,
               failStep: failStepTitle,
@@ -191,7 +214,11 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
               durationInMs: watch.elapsedMilliseconds,
             ),
           );
-          if (skipped) {
+          if (needsLogin) {
+            _needsLoginCount++;
+          } else if (needsVerify) {
+            _needsVerifyCount++;
+          } else if (skipped) {
             _skippedCount++;
           } else if (success) {
             _successCount++;
@@ -222,6 +249,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       ..writeln('- 成功: $_successCount')
       ..writeln('- 失败: $_failCount')
       ..writeln('- 待复测/需处理: $_blockedCount')
+      ..writeln('- 需登录: $_needsLoginCount')
+      ..writeln('- 需验证: $_needsVerifyCount')
       ..writeln('- 跳过(非小说源): $_skippedCount')
       ..writeln('- 默认关键词: $_batchKeyword')
       ..writeln('- 说明: 单源规则配置了 checkKeyWord 时会自动覆盖默认关键词')
@@ -241,6 +270,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           ? 'OK'
           : result.isSkipped
           ? 'SKIP'
+          : result.isNeedsLogin
+          ? 'NEEDS_LOGIN'
+          : result.isNeedsVerify
+          ? 'NEEDS_VERIFY'
           : result.isBlocked
           ? 'BLOCKED'
           : 'FAIL';
@@ -288,7 +321,12 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Map<String, int> _failureStepCounts() {
     final counts = <String, int>{};
     for (final result in _results) {
-      if (result.isSuccess || result.isSkipped) continue;
+      if (result.isSuccess ||
+          result.isSkipped ||
+          result.isNeedsLogin ||
+          result.isNeedsVerify) {
+        continue;
+      }
       final key = result.failStep ?? '未知';
       counts[key] = (counts[key] ?? 0) + 1;
     }
@@ -346,9 +384,15 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Widget build(BuildContext context) {
     final bgColor = CupertinoTheme.of(context).scaffoldBackgroundColor;
     final total = widget.sources.length;
-    final checked = _successCount + _failCount + _blockedCount + _skippedCount;
+    final checked = _successCount +
+        _failCount +
+        _blockedCount +
+        _skippedCount +
+        _needsLoginCount +
+        _needsVerifyCount;
     final progress = total == 0 ? 0.0 : checked / total;
-    final nonSuccessCount = _failCount + _blockedCount;
+    final nonSuccessCount =
+        _failCount + _blockedCount + _needsLoginCount + _needsVerifyCount;
     final visibleResults = _filteredResults();
 
     return CupertinoPageScaffold(
@@ -425,6 +469,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       SourceCheckFilter.failed => _results.where((r) => r.canDisable).toList(),
       SourceCheckFilter.blocked => _results.where((r) => r.isBlocked).toList(),
       SourceCheckFilter.skipped => _results.where((r) => r.isSkipped).toList(),
+      SourceCheckFilter.needsLogin =>
+        _results.where((r) => r.isNeedsLogin).toList(),
+      SourceCheckFilter.needsVerify =>
+        _results.where((r) => r.isNeedsVerify).toList(),
     };
   }
 
@@ -435,6 +483,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       SourceCheckFilter.failed => '当前没有确定失效的书源',
       SourceCheckFilter.blocked => '当前没有待复测书源',
       SourceCheckFilter.skipped => '当前没有跳过的非小说源',
+      SourceCheckFilter.needsLogin => '当前没有需登录的书源',
+      SourceCheckFilter.needsVerify => '当前没有需验证的书源',
     };
   }
 
@@ -463,6 +513,14 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           SourceCheckFilter.skipped: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text('跳过 $_skippedCount'),
+          ),
+          SourceCheckFilter.needsLogin: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('需登录 $_needsLoginCount'),
+          ),
+          SourceCheckFilter.needsVerify: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('需验证 $_needsVerifyCount'),
           ),
         },
         onValueChanged: (value) {
@@ -526,9 +584,21 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
                 CupertinoColors.systemOrange,
               ),
               _buildStatCard('跳过', _skippedCount, CupertinoColors.systemGrey),
+              _buildStatCard(
+                '需登录',
+                _needsLoginCount,
+                CupertinoColors.activeBlue,
+              ),
+              _buildStatCard(
+                '需验证',
+                _needsVerifyCount,
+                CupertinoColors.systemPurple,
+              ),
             ],
           ),
-          if (!_isChecking && (_failCount + _blockedCount) > 0) ...[
+          if (!_isChecking &&
+              (_failCount + _blockedCount + _needsLoginCount + _needsVerifyCount) >
+                  0) ...[
             const SizedBox(height: 12),
             _buildFailureStepSummary(),
           ],
@@ -590,6 +660,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         ? CupertinoColors.activeGreen
         : result.isSkipped
         ? CupertinoColors.systemGrey
+        : result.isNeedsLogin
+        ? CupertinoColors.activeBlue
+        : result.isNeedsVerify
+        ? CupertinoColors.systemPurple
         : result.isBlocked
         ? CupertinoColors.systemOrange
         : CupertinoColors.destructiveRed;
@@ -597,6 +671,10 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         ? CupertinoIcons.check_mark_circled_solid
         : result.isSkipped
         ? CupertinoIcons.minus_circle_fill
+        : result.isNeedsLogin
+        ? CupertinoIcons.lock_circle_fill
+        : result.isNeedsVerify
+        ? CupertinoIcons.shield_lefthalf_fill
         : result.isBlocked
         ? CupertinoIcons.exclamationmark_triangle_fill
         : CupertinoIcons.clear_circled_solid;
