@@ -27,9 +27,11 @@ protocol SourceNetworkClient: Sendable {
 
 final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Sendable {
     private let session: URLSession
+    private let cookieStore: SourceCookieStore
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, cookieStore: SourceCookieStore = SourceCookieStore()) {
         self.session = session
+        self.cookieStore = cookieStore
     }
 
     func load(_ request: SourceRequest) async -> Result<SourceResponse, SourceEngineError> {
@@ -38,6 +40,9 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
         urlRequest.httpBody = request.body
         for (key, value) in request.headers {
             urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+        if request.headers["Cookie"] == nil, let cookieHeader = await cookieStore.cookieHeader(for: request.url) {
+            urlRequest.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         }
 
         do {
@@ -50,6 +55,10 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
                 ?? ""
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key)] = String(describing: item.value)
+            }
+            let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: http.url ?? request.url)
+            if !responseCookies.isEmpty {
+                await cookieStore.store(responseCookies, for: http.url ?? request.url)
             }
             if (400...599).contains(http.statusCode) {
                 return .failure(.network("HTTP \(http.statusCode)"))
