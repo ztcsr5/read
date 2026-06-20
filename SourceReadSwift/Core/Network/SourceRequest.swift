@@ -50,12 +50,10 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
             guard let http = response as? HTTPURLResponse else {
                 return .failure(.network("响应不是 HTTPURLResponse"))
             }
-            let text = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .isoLatin1)
-                ?? ""
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key)] = String(describing: item.value)
             }
+            let text = ResponseTextDecoder().decode(data: data, headers: headers)
             let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: http.url ?? request.url)
             if !responseCookies.isEmpty {
                 await cookieStore.store(responseCookies, for: http.url ?? request.url)
