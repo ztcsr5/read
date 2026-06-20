@@ -2450,6 +2450,23 @@ class LegadoJsEngine {
     JsEngineDiag().syncEvaluateUsed = true;
     JsEngineDiag().lastJsSnippet =
         jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
+
+    // 优先尝试 Native JSCore 同步求值(iOS)。
+    // SwiftSoup 已注入 JSContext,org.jsoup.Jsoup.parse().select() 可同步执行,
+    // 不再需要回调 Dart。失败则 fallback 到 QuickJS/Legacy。
+    if (JsEngineDiag().nativeJSCoreAvailable && !kIsWeb && Platform.isIOS) {
+      try {
+        final result = _evaluateWithNativeJSCoreSync(jsCode, variables: variables);
+        if (result != null) {
+          JsEngineDiag().lastEngine = 'native_jscore';
+          return result;
+        }
+      } catch (e) {
+        debugPrint('Native JSCore sync evaluate failed, fallback: $e');
+        JsEngineDiag().recordNativeJSCoreFailure(e.toString());
+      }
+    }
+
     if (_runtime == null) {
       // 一次性修补:iOS release 模式下 _runtime 为 null 且 Node 兜底不可用,导致
       // 所有 @js/<js> 规则失败。先尝试 Dart 版 LegacyJsEvaluator(支持 80% 常见
@@ -2480,6 +2497,45 @@ class LegadoJsEngine {
       throw Exception('JS执行异常: $e');
     } finally {
       _jsoupDocuments.clear();
+    }
+  }
+
+  /// 同步调用 Native JSCore(iOS)。返回 null 表示不可用,抛异常表示执行失败。
+  String? _evaluateWithNativeJSCoreSync(
+    String jsCode, {
+    Map<String, dynamic>? variables,
+  }) {
+    if (!JsEngineDiag().nativeJSCoreAvailable) return null;
+    const channel = MethodChannel('read/legado_jscore');
+    try {
+      final args = <String, dynamic>{
+        'code': jsCode,
+        'variables': variables ?? {},
+        'libraries': <String>[],
+        'ajaxCache': <String, String>{},
+        'nativeCache': <String, String>{},
+        'wrapScript': true,
+      };
+      final raw = channel.invokeMethodSync<Map>('syncEvaluate', args);
+      if (raw == null) return null;
+      final ok = raw['ok'] as bool? ?? false;
+      if (!ok) {
+        final err = raw['error'] as String? ?? 'unknown';
+        // ajax/login/native 请求在同步路径无法处理,返回 null 让 fallback 处理
+        if (raw['ajaxRequest'] != null ||
+            raw['loginRequest'] != null ||
+            raw['nativeRequest'] != null) {
+          return null;
+        }
+        throw Exception(err);
+      }
+      return raw['result'] as String? ?? '';
+    } catch (e) {
+      if (e is MissingPluginException) {
+        JsEngineDiag().recordNativeJSCoreFailure('syncEvaluate MissingPluginException');
+        return null;
+      }
+      rethrow;
     }
   }
 

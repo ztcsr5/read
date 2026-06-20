@@ -116,6 +116,12 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # SwiftSoup: 用于在 JSContext 内同步执行 Jsoup CSS 选择器解析,
+  # 避免 org.jsoup.Jsoup.parse().select() 通过 MethodChannel 回调 Dart 的性能瓶颈。
+  # 与源阅(SourceRead)的 SwiftSoup 注入方案一致。
+  pod 'SwiftSoup', '~> 2.7'
+
   target 'RunnerTests' do
     inherit! :search_paths
   end
