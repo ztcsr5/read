@@ -11,6 +11,7 @@ final class LegadoSourceEngine: SourceEngine {
     private let network: SourceNetworkClient
     private let diagnostics: DiagnosticSink
     private let requestBuilder = SourceRequestBuilder()
+    private let searchURLResolver = SearchURLResolver()
 
     init(
         network: SourceNetworkClient = URLSessionSourceNetworkClient(),
@@ -21,10 +22,6 @@ final class LegadoSourceEngine: SourceEngine {
     }
 
     func searchBooks(source: BookSource, keyword: String, page: Int) async -> Result<[SearchBook], SourceEngineError> {
-        guard let searchUrl = source.searchUrl, !searchUrl.isEmpty else {
-            return .failure(.invalidSource("searchUrl 为空"))
-        }
-
         await diagnostics.emit(.init(
             level: .info,
             stage: "search.prepare",
@@ -32,6 +29,14 @@ final class LegadoSourceEngine: SourceEngine {
             message: "准备搜索",
             details: ["keyword": keyword, "page": String(page)]
         ))
+
+        let searchUrl: String
+        switch searchURLResolver.resolve(source: source, keyword: keyword, page: page) {
+        case .success(let value):
+            searchUrl = value
+        case .failure(let error):
+            return .failure(error)
+        }
 
         let request = requestBuilder.buildSearchRequest(source: source, searchUrl: searchUrl, keyword: keyword, page: page)
 
