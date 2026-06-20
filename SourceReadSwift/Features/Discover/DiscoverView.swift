@@ -13,6 +13,7 @@ struct DiscoverView: View {
                         subtitle: "原生 Swift 核心 · iOS Podcasts 风格"
                     )
 
+                    matchModePicker
                     searchHeader
 
                     if viewModel.isSearching {
@@ -83,6 +84,18 @@ struct DiscoverView: View {
         .podcastCard()
     }
 
+    private var matchModePicker: some View {
+        Picker("搜索模式", selection: $viewModel.matchMode) {
+            ForEach(SearchMatchMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(6)
+        .background(AppTheme.elevatedCard)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.capsuleRadius, style: .continuous))
+    }
+
     private var resultsList: some View {
         LazyVStack(spacing: 14) {
             HStack {
@@ -110,6 +123,7 @@ struct DiscoverView: View {
 @MainActor
 final class DiscoverViewModel: ObservableObject {
     @Published var keyword = "斗破苍穹"
+    @Published var matchMode: SearchMatchMode = .fuzzy
     @Published var results: [SearchBook] = []
     @Published var isSearching = false
     @Published var errorMessage: String?
@@ -160,10 +174,31 @@ final class DiscoverViewModel: ObservableObject {
             }
         }
 
-        results = allBooks
+        if matchMode == .exact {
+            results = allBooks.filter {
+                $0.name.localizedCaseInsensitiveContains(keyword)
+                    || ($0.author?.localizedCaseInsensitiveContains(keyword) ?? false)
+            }
+        } else {
+            results = allBooks
+        }
         hitSourceCount = hitSources.count
-        if allBooks.isEmpty {
+        if results.isEmpty {
             errorMessage = failures.prefix(5).joined(separator: "\n")
+        }
+    }
+}
+
+enum SearchMatchMode: String, CaseIterable, Identifiable {
+    case fuzzy
+    case exact
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fuzzy: return "模糊"
+        case .exact: return "精准"
         }
     }
 }
