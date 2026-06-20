@@ -118,7 +118,12 @@ class LegadoRuleEvaluator {
     Map<String, dynamic>? variables,
     required Future<String> Function(String request) ajax,
   }) async {
-    return _extractJsonValueInternalAsync(json, rule, variables: variables, ajax: ajax);
+    return _extractJsonValueInternalAsync(
+      json,
+      rule,
+      variables: variables,
+      ajax: ajax,
+    );
   }
 
   static Future<String> _extractJsonValueInternalAsync(
@@ -477,7 +482,12 @@ class LegadoRuleEvaluator {
     if (_isHtmlLiteralWithGet(rule, materializedRule) ||
         _isHtmlLiteralRule(materializedRule)) {
       final base = _literalBeforePostProcessors(materializedRule);
-      return applyPostProcessorsAsync(base, materializedRule, variables: variables, ajax: ajax);
+      return applyPostProcessorsAsync(
+        base,
+        materializedRule,
+        variables: variables,
+        ajax: ajax,
+      );
     }
     rule = materializedRule;
 
@@ -485,7 +495,12 @@ class LegadoRuleEvaluator {
     final fallbackParts = _splitTopLevelOperator(rule, '||');
     if (fallbackParts != null) {
       for (final part in fallbackParts) {
-        final val = await extractHtmlValueAsync(node, part.trim(), variables: variables, ajax: ajax);
+        final val = await extractHtmlValueAsync(
+          node,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
         if (val.isNotEmpty) return val;
       }
       return '';
@@ -496,7 +511,12 @@ class LegadoRuleEvaluator {
     if (spliceParts != null) {
       final results = <String>[];
       for (final part in spliceParts) {
-        final val = await extractHtmlValueAsync(node, part.trim(), variables: variables, ajax: ajax);
+        final val = await extractHtmlValueAsync(
+          node,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
         if (val.isNotEmpty) results.add(val);
       }
       return results.join('\n');
@@ -507,7 +527,12 @@ class LegadoRuleEvaluator {
     if (mergeParts != null) {
       final lists = <List<String>>[];
       for (final part in mergeParts) {
-        final list = await _extractHtmlValueListAsync(node, part.trim(), variables: variables, ajax: ajax);
+        final list = await _extractHtmlValueListAsync(
+          node,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
         if (list.isNotEmpty) {
           lists.add(list);
         }
@@ -515,7 +540,12 @@ class LegadoRuleEvaluator {
       return _interleaveLists(lists).join('\n');
     }
 
-    return _extractSingleHtmlValueAsync(node, rule, variables: variables, ajax: ajax);
+    return _extractSingleHtmlValueAsync(
+      node,
+      rule,
+      variables: variables,
+      ajax: ajax,
+    );
   }
 
   static Future<List<String>> _extractHtmlValueListAsync(
@@ -555,7 +585,14 @@ class LegadoRuleEvaluator {
     if (spliceParts != null) {
       final results = <String>[];
       for (final part in spliceParts) {
-        results.addAll(await _extractHtmlValueListAsync(node, part.trim(), variables: variables, ajax: ajax));
+        results.addAll(
+          await _extractHtmlValueListAsync(
+            node,
+            part.trim(),
+            variables: variables,
+            ajax: ajax,
+          ),
+        );
       }
       return results;
     }
@@ -563,7 +600,12 @@ class LegadoRuleEvaluator {
     if (mergeParts != null) {
       final lists = <List<String>>[];
       for (final part in mergeParts) {
-        final list = await _extractHtmlValueListAsync(node, part.trim(), variables: variables, ajax: ajax);
+        final list = await _extractHtmlValueListAsync(
+          node,
+          part.trim(),
+          variables: variables,
+          ajax: ajax,
+        );
         if (list.isNotEmpty) {
           lists.add(list);
         }
@@ -581,14 +623,24 @@ class LegadoRuleEvaluator {
       return value.isEmpty ? const [] : [value];
     }
     if (rule.contains('@@')) {
-      final value = await _extractSingleHtmlValueAsync(node, rule, variables: variables, ajax: ajax);
+      final value = await _extractSingleHtmlValueAsync(
+        node,
+        rule,
+        variables: variables,
+        ajax: ajax,
+      );
       return value.isEmpty ? const [] : [value];
     }
     if (isXPathRule(rule)) {
       final values = _extractXPathValueList(node, rule);
       final processed = <String>[];
       for (final value in values) {
-        final val = await applyPostProcessorsAsync(value, rule, variables: variables, ajax: ajax);
+        final val = await applyPostProcessorsAsync(
+          value,
+          rule,
+          variables: variables,
+          ajax: ajax,
+        );
         if (val.trim().isNotEmpty) {
           processed.add(val);
         }
@@ -662,7 +714,12 @@ class LegadoRuleEvaluator {
       final root = doc.body ?? doc.documentElement;
       if (root == null) return '';
       final remainingRule = parts.skip(1).join('@@');
-      return _extractSingleHtmlValueAsync(root, remainingRule, variables: variables, ajax: ajax);
+      return _extractSingleHtmlValueAsync(
+        root,
+        remainingRule,
+        variables: variables,
+        ajax: ajax,
+      );
     }
 
     if (isXPathRule(rule)) {
@@ -687,7 +744,12 @@ class LegadoRuleEvaluator {
         .where((value) => value.trim().isNotEmpty)
         .toList();
     final value = values.join('\n');
-    return applyPostProcessorsAsync(value, rule, variables: variables, ajax: ajax);
+    return applyPostProcessorsAsync(
+      value,
+      rule,
+      variables: variables,
+      ajax: ajax,
+    );
   }
 
   static String extractHtmlValue(
@@ -1616,6 +1678,7 @@ class LegadoRuleEvaluator {
       final line = lines[i];
       if (line.isEmpty) continue;
       final lowerLine = line.toLowerCase();
+      var executedJs = false;
 
       if (lowerLine.contains('@get:')) {
         final key = _directiveTail(
@@ -1623,7 +1686,11 @@ class LegadoRuleEvaluator {
           '@get:',
         ).split(RegExp(r'[@#]')).first.trim();
         try {
-          final cached = LegadoJsEngine().evaluate('java.get("$key")');
+          final cached = await LegadoJsEngine().evaluateWithAjax(
+            'java.get("$key")',
+            variables: _postProcessorVariables(output, variables),
+            ajax: ajax,
+          );
           if (cached.trim().isNotEmpty) output = cached;
         } catch (_) {}
       }
@@ -1641,6 +1708,7 @@ class LegadoRuleEvaluator {
             ajax: ajax,
           );
           if (evaluated.trim().isNotEmpty) output = evaluated;
+          executedJs = true;
         } catch (_) {}
       } else if (lowerLine.contains('@put:')) {
         final key = _directiveTail(
@@ -1710,7 +1778,21 @@ class LegadoRuleEvaluator {
         }
       }
 
-      output = _applyJsPostProcessors(output, line, variables: variables);
+      if (!executedJs) {
+        output = await _applyJsPostProcessorsAsync(
+          output,
+          line,
+          variables: variables,
+          ajax: ajax,
+        );
+      } else {
+        final cleaned = _evaluateChapterTitleCleanup(
+          output,
+          _extractJsPostProcessorScript(line),
+          variables,
+        );
+        if (cleaned != null) output = cleaned;
+      }
     }
 
     return output.trim();
@@ -1726,13 +1808,18 @@ class LegadoRuleEvaluator {
     var output = value;
     final lowerRule = rule.toLowerCase();
     var appliedRawAtJs = false;
+    var executedJs = false;
     if (lowerRule.contains('@get:')) {
       final key = _directiveTail(
         rule,
         '@get:',
       ).split(RegExp(r'[@#]')).first.trim();
       try {
-        final cached = LegadoJsEngine().evaluate('java.get("$key")');
+        final cached = await LegadoJsEngine().evaluateWithAjax(
+          'java.get("$key")',
+          variables: _postProcessorVariables(output, variables),
+          ajax: ajax,
+        );
         if (cached.trim().isNotEmpty) output = cached;
       } catch (_) {}
     }
@@ -1746,6 +1833,7 @@ class LegadoRuleEvaluator {
             ajax: ajax,
           );
           if (evaluated.trim().isNotEmpty) output = evaluated;
+          executedJs = true;
         } catch (_) {}
       }
       if (lowerRule.contains('@js:')) {
@@ -1762,13 +1850,26 @@ class LegadoRuleEvaluator {
           if (evaluated.trim().isNotEmpty || hasPriorJsBlock) {
             output = evaluated;
             appliedRawAtJs = !hasPriorJsBlock;
+            executedJs = true;
           }
         } catch (_) {}
       }
     }
 
-    if (!appliedRawAtJs) {
-      output = _applyJsPostProcessors(output, rule, variables: variables);
+    if (!appliedRawAtJs && !executedJs) {
+      output = await _applyJsPostProcessorsAsync(
+        output,
+        rule,
+        variables: variables,
+        ajax: ajax,
+      );
+    } else if (executedJs) {
+      final cleaned = _evaluateChapterTitleCleanup(
+        output,
+        _extractJsPostProcessorScript(rule),
+        variables,
+      );
+      if (cleaned != null) output = cleaned;
     }
 
     if (lowerRule.contains('@put:')) {
@@ -3991,6 +4092,37 @@ class LegadoRuleEvaluator {
       } catch (_) {
         // Unsupported JS regex syntax; leave the original value untouched.
       }
+    }
+
+    return output;
+  }
+
+  static Future<String> _applyJsPostProcessorsAsync(
+    String value,
+    String rule, {
+    Map<String, dynamic>? variables,
+    required Future<String> Function(String request) ajax,
+  }) async {
+    final lowerRule = rule.toLowerCase();
+    if (!lowerRule.contains('@js:') && !lowerRule.contains('<js>')) {
+      return value;
+    }
+
+    var output = value;
+    final script = _extractJsPostProcessorScript(rule);
+    if (script.trim().isNotEmpty) {
+      try {
+        final evaluated = await LegadoJsEngine().evaluateWithAjax(
+          script.trim().startsWith('@js:') ? script.trim() : '@js:$script',
+          variables: _postProcessorVariables(output, variables),
+          ajax: ajax,
+        );
+        if (evaluated.trim().isNotEmpty) return evaluated.trim();
+      } catch (_) {
+        return _applyJsPostProcessors(output, rule, variables: variables);
+      }
+    } else {
+      return _applyJsPostProcessors(output, rule, variables: variables);
     }
 
     return output;

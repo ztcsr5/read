@@ -222,7 +222,7 @@ final class LegadoNativeJSCoreBridge {
     let id = el.id()
     let className = (try? el.className()) ?? ""
     // 获取常用属性: href/src/title/alt/data-* 等,避免访问 internal 的 attributes 集合
-    var attrDict: [String: String] = [:]
+    var attrDict = Self.extractAttributes(from: outerHtml)
     let commonAttrs = ["href", "src", "title", "alt", "name", "value", "data-src", "data-url", "data-id", "data-book"]
     for key in commonAttrs {
       let val = (try? el.attr(key)) ?? ""
@@ -236,6 +236,34 @@ final class LegadoNativeJSCoreBridge {
   }
 
   /// 转义字符串为 JSON 字符串字面量(带双引号)
+  private static func extractAttributes(from outerHtml: String) -> [String: String] {
+    guard let open = outerHtml.firstIndex(of: "<"),
+          let close = outerHtml[open...].firstIndex(of: ">") else {
+      return [:]
+    }
+    let tag = String(outerHtml[open...close])
+    let pattern = #"([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+      return [:]
+    }
+    let nsRange = NSRange(tag.startIndex..<tag.endIndex, in: tag)
+    var output: [String: String] = [:]
+    for match in regex.matches(in: tag, range: nsRange) {
+      guard let keyRange = Range(match.range(at: 1), in: tag) else { continue }
+      let key = String(tag[keyRange])
+      var value = ""
+      for index in 2...4 {
+        let range = match.range(at: index)
+        if range.location != NSNotFound, let valueRange = Range(range, in: tag) {
+          value = String(tag[valueRange])
+          break
+        }
+      }
+      output[key] = value
+    }
+    return output
+  }
+
   private static func jsString(_ s: String) -> String {
     var escaped = ""
     for ch in s {
