@@ -24,6 +24,35 @@ void main() {
 
       expect(text, '\u201cA&B\u201d \u2014 AB');
     });
+
+    test('applies legado style purify replacement rules', () {
+      final text = applyReaderPurifyRules('第一句。第二句？广告', [
+        r'([。？])##$1\n',
+        '广告',
+      ]);
+
+      expect(text, '第一句。\n第二句？\n');
+    });
+
+    test('splits dense source text at sentence boundaries', () {
+      final dense = List.filled(
+        8,
+        '这是一段没有原始换行的正文内容，用来模拟部分书源把整章压成一整行。这里应该在标点后自动拆段。',
+      ).join();
+      final text = normalizeReaderChapterContent('第一章\n$dense', '第一章');
+      final paragraphs = text
+          .split('\n')
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .toList();
+
+      expect(paragraphs.length, greaterThan(1));
+      expect(paragraphs.first, isNot(startsWith('第一章')));
+    });
+
+    test('defaults to non-justified Chinese reader layout', () {
+      expect(const ReaderState().isJustify, isFalse);
+    });
   });
 
   group('readerNeedsOnlineContentRefresh', () {

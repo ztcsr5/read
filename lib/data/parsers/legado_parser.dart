@@ -112,8 +112,11 @@ class LegadoParser {
     return dio;
   }
 
-  static Future<String> buildSearchUrl(BookSource source, String keyword, {int page = 1}) =>
-      _buildSearchUrlAsync(source, keyword, page: page);
+  static Future<String> buildSearchUrl(
+    BookSource source,
+    String keyword, {
+    int page = 1,
+  }) => _buildSearchUrlAsync(source, keyword, page: page);
 
   static Future<String> buildExploreUrl(BookSource source, {int page = 1}) =>
       _buildExploreUrlAsync(source, page: page);
@@ -192,9 +195,13 @@ class LegadoParser {
       urlLogs.add('构建后的搜索 URL: $searchUrl');
       if (searchUrl.trim().isEmpty) {
         urlLogs.add('—— JS 引擎诊断（排查真机为何返回空）——');
-        urlLogs.add('QuickJS 引擎可用(_runtime 已加载): ${LegadoJsEngine().isAvailable}');
+        urlLogs.add(
+          'QuickJS 引擎可用(_runtime 已加载): ${LegadoJsEngine().isAvailable}',
+        );
         urlLogs.add('是否落到 Node 兜底: ${LegadoJsEngine().isUsingNodeFallback}');
-        urlLogs.add('该 searchUrl 是否含 JS 规则: ${_containsJsRule(source.searchUrl)}');
+        urlLogs.add(
+          '该 searchUrl 是否含 JS 规则: ${_containsJsRule(source.searchUrl)}',
+        );
         urlLogs.add('—— Native JSCore 诊断 ——');
         urlLogs.add(JsEngineDiag().summary());
         final initErr = LegadoJsEngine().initErrorMessage;
@@ -337,7 +344,10 @@ class LegadoParser {
           if (fallbackKeyword == testKeyword) continue;
           searchResultLogs.add('搜索结果为空，改用通用关键字重试: $fallbackKeyword');
           try {
-            final retryUrl = await _buildSearchUrlAsync(source, fallbackKeyword);
+            final retryUrl = await _buildSearchUrlAsync(
+              source,
+              fallbackKeyword,
+            );
             if (retryUrl.trim().isEmpty) {
               searchResultLogs.add('  关键字「$fallbackKeyword」构建搜索 URL 为空，跳过。');
               continue;
@@ -352,7 +362,9 @@ class LegadoParser {
               fallbackKeyword,
               preFetchedResponse: retryResponse,
             );
-            searchResultLogs.add('  关键字「$fallbackKeyword」解析到 ${retryBooks.length} 本。');
+            searchResultLogs.add(
+              '  关键字「$fallbackKeyword」解析到 ${retryBooks.length} 本。',
+            );
             if (retryBooks.isNotEmpty) {
               books.addAll(retryBooks);
               searchResultLogs.add('  重试成功，使用关键字「$fallbackKeyword」的结果继续后续测试。');
@@ -613,7 +625,9 @@ class LegadoParser {
           continue;
         }
         if (_looksLikeInvalidContent(content)) {
-          contentLogs.add('候选失败：正文长度达标但质量校验未通过（疑似验证页/反爬页/未清洗整页HTML/JS残片），继续尝试后续章节。');
+          contentLogs.add(
+            '候选失败：正文长度达标但质量校验未通过（疑似验证页/反爬页/未清洗整页HTML/JS残片），继续尝试后续章节。',
+          );
           continue;
         }
         passedChapter = candidate;
@@ -1334,10 +1348,7 @@ class LegadoParser {
       );
     }
 
-    var currentUrlStr = _responseUrl(
-      currentResponse,
-      fallback: book.filePath,
-    );
+    var currentUrlStr = _responseUrl(currentResponse, fallback: book.filePath);
     currentUrlStr = currentUrlStr
         .replaceAll('\n', '')
         .replaceAll('\r', '')
@@ -1462,7 +1473,8 @@ class LegadoParser {
               item,
               _sourceScopedRule(titleRule, source),
               variables: variables,
-              ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
+              ajax: (request) =>
+                  _ajaxForJs(source, request, baseUrl: currentBaseUrl),
             );
 
             var urlRule =
@@ -1481,7 +1493,8 @@ class LegadoParser {
               item,
               _sourceScopedRule(urlRule, source),
               variables: variables,
-              ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
+              ajax: (request) =>
+                  _ajaxForJs(source, request, baseUrl: currentBaseUrl),
             );
 
             bool isVolume = false;
@@ -1490,7 +1503,8 @@ class LegadoParser {
                 item,
                 _sourceScopedRule(isVolumeRule, source),
                 variables: variables,
-                ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
+                ajax: (request) =>
+                    _ajaxForJs(source, request, baseUrl: currentBaseUrl),
               );
               isVolume = _isLegadoTrue(val);
             }
@@ -1589,7 +1603,8 @@ class LegadoParser {
           final title = await _extractHtmlValueAsync(
             node,
             _sourceScopedRule(titleRule, source),
-            ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
+            ajax: (request) =>
+                _ajaxForJs(source, request, baseUrl: currentBaseUrl),
           );
 
           var urlRule =
@@ -1605,7 +1620,8 @@ class LegadoParser {
           final url = await _extractHtmlValueAsync(
             node,
             _sourceScopedRule(urlRule, source),
-            ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
+            ajax: (request) =>
+                _ajaxForJs(source, request, baseUrl: currentBaseUrl),
           );
 
           bool isVolume = false;
@@ -1613,7 +1629,8 @@ class LegadoParser {
             final val = await _extractHtmlValueAsync(
               node,
               _sourceScopedRule(isVolumeRule, source),
-              ajax: (request) => _ajaxForJs(source, request, baseUrl: currentBaseUrl),
+              ajax: (request) =>
+                  _ajaxForJs(source, request, baseUrl: currentBaseUrl),
             );
             isVolume = _isLegadoTrue(val);
           }
@@ -2606,7 +2623,8 @@ class LegadoParser {
       await _extractJsonValueAsync(
         item,
         block.prefix,
-        ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+        ajax: (request) =>
+            _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
       ),
     );
     if (input.trim().isEmpty) return null;
@@ -2927,8 +2945,7 @@ class LegadoParser {
     String dataPath,
   ) {
     final lower = dataPath.trimLeft().toLowerCase();
-    if (!lower.startsWith('data:bookid') &&
-        !lower.startsWith('data:book_id')) {
+    if (!lower.startsWith('data:bookid') && !lower.startsWith('data:book_id')) {
       return null;
     }
     var id = _extractRequestBodyBookId(originPath);
@@ -3013,13 +3030,20 @@ class LegadoParser {
   }
 
   static String _responseUrl(Response<dynamic> response, {String? fallback}) {
+    final path = response.requestOptions.path;
     try {
-      return response.realUri.toString();
+      final realUri = response.realUri;
+      if (realUri.hasScheme ||
+          realUri.host.isNotEmpty ||
+          realUri.path.isNotEmpty) {
+        return realUri.toString();
+      }
     } catch (_) {
-      final path = response.requestOptions.path;
-      if (path.isNotEmpty) return path;
-      return fallback ?? '';
+      // Fall through to the request path. Test-created Dio responses can have
+      // an empty realUri rendered as "?#".
     }
+    if (path.isNotEmpty) return path;
+    return fallback ?? '';
   }
 
   static String _responseBaseUrl(BookSource source, String responseUrl) {
@@ -5227,14 +5251,17 @@ class LegadoParser {
         final nextChar = code.codeUnitAt(i + 1);
         if (nextChar == 0x2f) {
           // Skip until newline or end of code
-          while (i < code.length && code.codeUnitAt(i) != 0x0a && code.codeUnitAt(i) != 0x0d) {
+          while (i < code.length &&
+              code.codeUnitAt(i) != 0x0a &&
+              code.codeUnitAt(i) != 0x0d) {
             i++;
           }
           continue;
         } else if (nextChar == 0x2a) {
           // Skip until */
           i += 2;
-          while (i < code.length - 1 && !(code.codeUnitAt(i) == 0x2a && code.codeUnitAt(i + 1) == 0x2f)) {
+          while (i < code.length - 1 &&
+              !(code.codeUnitAt(i) == 0x2a && code.codeUnitAt(i + 1) == 0x2f)) {
             i++;
           }
           i++; // Skip the '/' of */
@@ -5305,7 +5332,8 @@ class LegadoParser {
         }
 
         final condVal = _evaluateSimpleJsExpressionPart(condStr, variables);
-        final isTrue = condVal == true ||
+        final isTrue =
+            condVal == true ||
             condVal == 'true' ||
             (condVal is num && condVal != 0) ||
             (condVal is String && condVal.isNotEmpty && condVal != 'false');
@@ -5818,8 +5846,16 @@ class LegadoParser {
   }
 
   static String _bestUrlCandidate(String value) {
-    final resolverCandidate = const LegadoRuleResolver().bestUrlCandidate(value);
-    final candidates = _splitUrlCandidates(resolverCandidate.isEmpty ? value : resolverCandidate);
+    final trimmed = value.trim();
+    if (LegadoRequestBuilder.splitEmbeddedConfig(trimmed).config.isNotEmpty) {
+      return trimmed;
+    }
+    final resolverCandidate = const LegadoRuleResolver().bestUrlCandidate(
+      value,
+    );
+    final candidates = _splitUrlCandidates(
+      resolverCandidate.isEmpty ? value : resolverCandidate,
+    );
     if (candidates.isEmpty) return value.trim();
     if (candidates.length == 1) return candidates.first;
 

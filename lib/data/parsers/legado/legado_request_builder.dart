@@ -111,7 +111,8 @@ class LegadoRequestBuilder {
     } else if (rawHeaders is String) {
       headers.addAll(parseHeaderString(rawHeaders));
     }
-    final cookie = config['cookie'] ??
+    final cookie =
+        config['cookie'] ??
         config['Cookie'] ??
         config['cookies'] ??
         config['loginCookie'] ??
@@ -161,8 +162,7 @@ class LegadoRequestBuilder {
 
     // 一次性修补:补 source 缺失 scheme 的兜底 (例如 m.123yuzhaiwu.com 没写 https://,相对路径 /s.php 解析不出 host)。
     // resolveUrl 对绝对 URL 是 no-op,对没 host 的相对路径会自动用 baseUrl 补全。
-    final sourceUrl =
-        source == null ? '' : _ensureUrlScheme(_sourceValue(source, 'key'));
+    final sourceUrl = _ensureUrlScheme(_sourceValue(source, 'key'));
     final resolvedUrl = resolveUrl(sourceUrl, embedded.url);
 
     return LegadoHttpRequest(
@@ -272,40 +272,42 @@ class LegadoRequestBuilder {
   /// 一次性修补:支持 {{searchUrl(key)}} / {{searchUrl key}} 模板。
   /// 笔趣阁等源把 searchUrl 写成 {{searchUrl(key)}} 等价于"用当前关键字重算 searchUrl",
   /// 我们直接把 source.searchUrl 再跑一次 replaceVariables 即可。
-  static String _resolveSearchUrlFunction(String text,
-      {required String keyword,
-      required int page,
-      required BookSource? source}) {
+  static String _resolveSearchUrlFunction(
+    String text, {
+    required String keyword,
+    required int page,
+    required BookSource? source,
+  }) {
     if (source == null) return text;
     if (!text.contains('searchUrl')) return text;
     final raw = source.searchUrl ?? '';
     if (raw.isEmpty) return text;
     // 自引用防递归:source.searchUrl 本身就是 {{searchUrl(...)}} 时,直接展开成
     // source 的 bookSourceUrl 兜底(典型如笔趣阁)。
-    final isSelfRef = raw.trim() == text.trim() ||
+    final isSelfRef =
+        raw.trim() == text.trim() ||
         RegExp(r'^\s*\{\{\s*searchUrl[^}]*\}\}\s*$').hasMatch(raw.trim());
     final inner = isSelfRef
         ? source.bookSourceUrl
-        : replaceVariables(
-            raw,
-            keyword: keyword,
-            page: page,
-            source: source,
-          );
+        : replaceVariables(raw, keyword: keyword, page: page, source: source);
     if (inner.isEmpty) return text;
-    return text.replaceAllMapped(
-      RegExp(r'\{\{\s*searchUrl\s*\(([^)]*)\)\s*\}\}'),
-      (_) => inner,
-    ).replaceAllMapped(
-      RegExp(r'\{\s*searchUrl\s*\(([^)]*)\)\s*\}'),
-      (_) => inner,
-    ).replaceAllMapped(
-      RegExp(r'\{\{\s*searchUrl\s+([^}]+?)\s*\}\}'),
-      (_) => inner,
-    ).replaceAllMapped(
-      RegExp(r'\{\s*searchUrl\s+([^}]+?)\s*\}'),
-      (_) => inner,
-    );
+    return text
+        .replaceAllMapped(
+          RegExp(r'\{\{\s*searchUrl\s*\(([^)]*)\)\s*\}\}'),
+          (_) => inner,
+        )
+        .replaceAllMapped(
+          RegExp(r'\{\s*searchUrl\s*\(([^)]*)\)\s*\}'),
+          (_) => inner,
+        )
+        .replaceAllMapped(
+          RegExp(r'\{\{\s*searchUrl\s+([^}]+?)\s*\}\}'),
+          (_) => inner,
+        )
+        .replaceAllMapped(
+          RegExp(r'\{\s*searchUrl\s+([^}]+?)\s*\}'),
+          (_) => inner,
+        );
   }
 
   static String _replaceBareLegacySearchTokens(
@@ -415,14 +417,16 @@ class LegadoRequestBuilder {
   }
 
   static String resolveUrl(String baseUrl, String url) {
-    baseUrl = baseUrl
-        .replaceAll('\n', '')
-        .replaceAll('\r', '')
-        .replaceAll('%0A', '')
-        .replaceAll('%0D', '')
-        .replaceAll('%0a', '')
-        .replaceAll('%0d', '')
-        .trim();
+    baseUrl = _stripEmptyQueryFragment(
+      baseUrl
+          .replaceAll('\n', '')
+          .replaceAll('\r', '')
+          .replaceAll('%0A', '')
+          .replaceAll('%0D', '')
+          .replaceAll('%0a', '')
+          .replaceAll('%0d', '')
+          .trim(),
+    );
     url = url
         .replaceAll('\n', '')
         .replaceAll('\r', '')
@@ -442,7 +446,7 @@ class LegadoRequestBuilder {
 
     // 1. Separate Legado config
     final embedded = splitEmbeddedConfig(url);
-    var cleanUrl = embedded.url.trim();
+    var cleanUrl = _stripEmptyQueryFragment(embedded.url.trim());
     final configMap = embedded.config;
 
     // Check if cleanUrl contains obvious rule syntax like rule markers
@@ -476,7 +480,7 @@ class LegadoRequestBuilder {
       }
     } catch (_) {
       try {
-        final encodedUrl = Uri.encodeFull(cleanUrl);
+        final encodedUrl = _encodeUrlPreservingDelimiters(cleanUrl);
         final baseUri = Uri.parse(cleanBaseUrl(baseUrl).trim());
         final cleanUri = Uri.parse(encodedUrl);
         if (cleanUri.hasScheme) {
@@ -514,6 +518,8 @@ class LegadoRequestBuilder {
       }
     }
 
+    resolvedUrl = _stripEmptyQueryFragment(resolvedUrl);
+
     // 3. Re-append config
     if (configMap.isEmpty) {
       return resolvedUrl;
@@ -523,10 +529,31 @@ class LegadoRequestBuilder {
   }
 
   static String cleanBaseUrl(String baseUrl) {
-    final withoutProcessor = baseUrl.split('##').first;
+    final withoutProcessor = _stripEmptyQueryFragment(
+      baseUrl.split('##').first,
+    );
     final fragment = withoutProcessor.indexOf('#');
     if (fragment > 0) return withoutProcessor.substring(0, fragment);
-    return withoutProcessor;
+    return _stripEmptyQueryFragment(withoutProcessor);
+  }
+
+  static String _stripEmptyQueryFragment(String value) {
+    var text = value;
+    while (text.endsWith('?#') || text.endsWith('?') || text.endsWith('#')) {
+      if (text.endsWith('?#')) {
+        text = text.substring(0, text.length - 2);
+      } else {
+        text = text.substring(0, text.length - 1);
+      }
+    }
+    return text;
+  }
+
+  static String _encodeUrlPreservingDelimiters(String value) {
+    return value
+        .replaceAll(' ', '%20')
+        .replaceAll('[', '%5B')
+        .replaceAll(']', '%5D');
   }
 
   static Map<String, dynamic> jsonConfig(String? customConfig) {

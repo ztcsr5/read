@@ -1057,6 +1057,7 @@ let tab = "base";
 let loadTimer = 0;
 let sourceOffset = 0;
 let loadSeq = 0;
+let activeTestController = null;
 const sourcePageSize = 160;
 const tabs = [
   ["base","基础"],["search","搜索"],["detail","详情"],["toc","目录"],["content","正文"],["explore","发现"],["raw","完整 JSON"]
@@ -1073,8 +1074,15 @@ function api(path, opt={}) {
   const timeoutMs = opt.timeoutMs || 25000;
   delete opt.timeoutMs;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  opt.signal = opt.signal || controller.signal;
+  const externalSignal = opt.signal;
+  let timedOut = false;
+  const abortFromExternal = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", abortFromExternal, {once:true});
+  }
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  opt.signal = controller.signal;
   opt.headers = Object.assign({"Content-Type":"application/json","X-Read-Token":TOKEN}, opt.headers || {});
   return fetch(path, opt).then(async r => {
     const text = await r.text();
@@ -1088,11 +1096,13 @@ function api(path, opt={}) {
     return data;
   }).catch(e => {
     if (e && e.name === "AbortError") {
+      if (!timedOut) throw new Error("请求已取消");
       throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）。请确认手机未锁屏、App 仍在前台、PC 与 iPhone 在同一 Wi-Fi。`);
     }
     throw e;
   }).finally(() => {
     clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener("abort", abortFromExternal);
   });
 }
 function scheduleLoadSources() {
@@ -1237,19 +1247,34 @@ async function deleteSource() {
 }
 async function testSource() {
   if (!current || !current.id) { toast("请先保存书源", true); return; }
-  const keyword = prompt("测试关键词", "斗破苍穹") || "斗破苍穹";
+  const keywordInput = prompt("测试关键词", "斗破苍穹");
+  if (keywordInput === null) return;
+  const keyword = keywordInput.trim() || "斗破苍穹";
+  if (activeTestController) activeTestController.abort();
+  activeTestController = new AbortController();
   const panel = document.getElementById("testPanel");
   panel.style.display = "block";
-  panel.innerHTML = `<div class="section-title"><h3>书源测试</h3><span>正在运行 ${escapeHtml(keyword)}</span></div><p class="hint">测试中...</p>`;
+  panel.innerHTML = `<div class="section-title"><div><h3>书源测试</h3><span>正在运行 ${escapeHtml(keyword)}</span></div><button class="secondary" onclick="cancelSourceTest()">取消测试</button></div><p class="hint">测试中... 如果 PC 端超时，请保持 iPhone 不锁屏且 App 在前台。</p>`;
   try {
-    const res = await api(`/api/sources/${current.id}/test`, {method:"POST", body:JSON.stringify({keyword}), timeoutMs: 90000});
+    const res = await api(`/api/sources/${current.id}/test`, {method:"POST", body:JSON.stringify({keyword}), timeoutMs: 90000, signal: activeTestController.signal});
     const steps = res.data.steps || [];
     const blocked = res.data.failureClass === "blocked";
     const pillClass = res.data.hasFailure ? (blocked ? "status-skip" : "status-fail") : "status-ok";
     const pillText = res.data.hasFailure ? (blocked ? "待复测" : "FAIL") : "OK";
     const subtitle = res.data.hasFailure ? (blocked ? "待复测/需处理，不建议直接禁用" : "存在失败步骤") : "全部通过";
     panel.innerHTML = `<div class="section-title"><div><h3>测试结果</h3><span>${subtitle}</span></div><span class="pill ${pillClass}">${pillText}</span></div><div class="steps">${steps.map(stepHtml).join("")}</div>`;
-  } catch(e) { panel.innerHTML = `<span class="pill status-fail">测试失败</span><p>${escapeHtml(e.message)}</p>`; }
+  } catch(e) {
+    const canceled = e && String(e.message || "").includes("取消");
+    panel.innerHTML = `<span class="pill ${canceled ? "status-skip" : "status-fail"}">${canceled ? "已取消" : "测试失败"}</span><p>${escapeHtml(e.message || "已取消测试")}</p>`;
+  } finally {
+    activeTestController = null;
+  }
+}
+function cancelSourceTest() {
+  if (activeTestController) {
+    activeTestController.abort();
+    toast("已取消测试");
+  }
 }
 function stepHtml(s) {
   const blocked = s.failureClass === "blocked";

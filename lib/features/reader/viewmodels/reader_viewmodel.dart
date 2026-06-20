@@ -10,6 +10,7 @@ import '../../../data/models/bookmark.dart';
 import '../../../data/repositories/book_repository.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
+import '../../../data/parsers/legado/legado_rule_evaluator.dart';
 import '../services/tts_service.dart';
 import '../../settings/providers/purify_rules_provider.dart';
 
@@ -75,6 +76,150 @@ String readerChapterContentToPlainText(String content) {
       );
 
   return _decodeReaderHtmlEntities(text);
+}
+
+String applyReaderPurifyRules(String content, Iterable<String> rules) {
+  var output = content;
+  for (final rawRule in rules) {
+    final rule = rawRule.trim();
+    if (rule.isEmpty) continue;
+    try {
+      if (rule.contains('##')) {
+        output = LegadoRuleEvaluator.applyPostProcessors(
+          output,
+          rule.startsWith('##') ? rule : '##$rule',
+        ).replaceAll(r'\r', '\r').replaceAll(r'\n', '\n');
+      } else {
+        output = output.replaceAll(RegExp(rule), '');
+      }
+    } catch (_) {
+      output = output.replaceAll(rule, '');
+    }
+  }
+  return output;
+}
+
+String normalizeReaderChapterContent(String content, String title) {
+  final lines = readerChapterContentToPlainText(
+    content,
+  ).split('\n').map((line) => line.trim()).toList();
+
+  while (lines.isNotEmpty && lines.first.isEmpty) {
+    lines.removeAt(0);
+  }
+
+  while (lines.isNotEmpty && _sameReaderChapterTitle(lines.first, title)) {
+    lines.removeAt(0);
+    while (lines.isNotEmpty && lines.first.isEmpty) {
+      lines.removeAt(0);
+    }
+  }
+
+  final normalized = <String>[];
+  var sawBlank = false;
+  for (final line in lines) {
+    if (line.isEmpty) {
+      sawBlank = normalized.isNotEmpty;
+      continue;
+    }
+    if (sawBlank && normalized.isNotEmpty) {
+      normalized.add('');
+    }
+    normalized.addAll(_splitDenseReaderLine(line));
+    sawBlank = false;
+  }
+  while (normalized.isNotEmpty && normalized.last.isEmpty) {
+    normalized.removeLast();
+  }
+  return normalized.join('\n');
+}
+
+List<String> _splitDenseReaderLine(String line) {
+  const minChunkLength = 48;
+  const targetChunkLength = 180;
+  const forceChunkLength = 260;
+
+  final value = line.trim();
+  if (value.length <= targetChunkLength) return [value];
+
+  final chunks = <String>[];
+  var start = 0;
+  for (var i = 0; i < value.length; i++) {
+    final currentLength = i - start + 1;
+    final shouldBreak =
+        currentLength >= minChunkLength && _isReaderSentenceEnd(value, i);
+    final mustBreak = currentLength >= forceChunkLength;
+    if (!shouldBreak && !mustBreak) continue;
+
+    final chunk = value.substring(start, i + 1).trim();
+    if (chunk.isNotEmpty) chunks.add(chunk);
+    start = i + 1;
+    while (start < value.length &&
+        (value.codeUnitAt(start) == 0x20 ||
+            value.codeUnitAt(start) == 0x3000)) {
+      start++;
+    }
+  }
+
+  if (start < value.length) {
+    final rest = value.substring(start).trim();
+    if (rest.isNotEmpty) chunks.add(rest);
+  }
+
+  return chunks.isEmpty ? [value] : chunks;
+}
+
+bool _isReaderSentenceEnd(String value, int index) {
+  final unit = value.codeUnitAt(index);
+  if (_isReaderSentencePunctuation(unit)) {
+    if (index + 1 < value.length &&
+        _isReaderClosingQuote(value.codeUnitAt(index + 1))) {
+      return false;
+    }
+    return true;
+  }
+  return _isReaderClosingQuote(unit) &&
+      index > 0 &&
+      _isReaderSentencePunctuation(value.codeUnitAt(index - 1));
+}
+
+bool _isReaderSentencePunctuation(int unit) {
+  return unit == 0x3002 ||
+      unit == 0xff01 ||
+      unit == 0xff1f ||
+      unit == 0xff1b ||
+      unit == 0x2026 ||
+      unit == 0x003b ||
+      unit == 0x002e ||
+      unit == 0x0021 ||
+      unit == 0x003f;
+}
+
+bool _isReaderClosingQuote(int unit) {
+  return unit == 0x201d ||
+      unit == 0x2019 ||
+      unit == 0x300d ||
+      unit == 0x300f ||
+      unit == 0xff09 ||
+      unit == 0x0029 ||
+      unit == 0x005d ||
+      unit == 0x007d;
+}
+
+bool _sameReaderChapterTitle(String line, String title) {
+  final normalizedLine = _normalizeReaderTitleText(line);
+  final normalizedTitle = _normalizeReaderTitleText(title);
+  if (normalizedLine.isEmpty || normalizedTitle.isEmpty) return false;
+  if (normalizedLine == normalizedTitle) return true;
+  return normalizedLine.startsWith(normalizedTitle) &&
+      normalizedLine.length <= normalizedTitle.length + 8;
+}
+
+String _normalizeReaderTitleText(String value) {
+  return value.toLowerCase().replaceAll(
+    RegExp(r'[\s\u3000:：，,。.!！?？、\-—_\[\]【】（）()]+'),
+    '',
+  );
 }
 
 String _decodeReaderHtmlEntities(String text) {
@@ -232,7 +377,7 @@ class ReaderState {
     this.fontFamily = 'system',
     this.fontWeightIndex = -1,
     this.pagePadding = 24.0,
-    this.isJustify = true,
+    this.isJustify = false,
     this.keepScreenOn = true,
     this.volumeKeyTurn = false,
     this.tapZoneActions = ReaderTapAction.defaultZones,
@@ -1336,15 +1481,10 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
 
       if (textContent != null && textContent.isNotEmpty) {
         // 应用净化规则
-        String filteredContent = textContent;
-        for (var rule in _purifyRules) {
-          try {
-            filteredContent = filteredContent.replaceAll(RegExp(rule), '');
-          } catch (e) {
-            filteredContent = filteredContent.replaceAll(rule, '');
-          }
-        }
-
+        String filteredContent = applyReaderPurifyRules(
+          textContent,
+          _purifyRules,
+        );
         filteredContent = _normalizeChapterContent(
           filteredContent,
           chapter.title,
@@ -1395,38 +1535,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
   }
 
   String _normalizeChapterContent(String content, String title) {
-    final lines = readerChapterContentToPlainText(
-      content,
-    ).split('\n').map((line) => line.trim()).toList();
-
-    while (lines.isNotEmpty && lines.first.isEmpty) {
-      lines.removeAt(0);
-    }
-
-    while (lines.isNotEmpty && _sameChapterTitle(lines.first, title)) {
-      lines.removeAt(0);
-      while (lines.isNotEmpty && lines.first.isEmpty) {
-        lines.removeAt(0);
-      }
-    }
-
-    final normalized = <String>[];
-    var sawBlank = false;
-    for (final line in lines) {
-      if (line.isEmpty) {
-        sawBlank = normalized.isNotEmpty;
-        continue;
-      }
-      if (sawBlank && normalized.isNotEmpty) {
-        normalized.add('');
-      }
-      normalized.add(line);
-      sawBlank = false;
-    }
-    while (normalized.isNotEmpty && normalized.last.isEmpty) {
-      normalized.removeLast();
-    }
-    return normalized.join('\n');
+    return normalizeReaderChapterContent(content, title);
   }
 
   // ignore: unused_element
@@ -1482,15 +1591,6 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         unit == 0x003f || // ?
         unit == 0x3000 || // full-width space
         unit == 0x0020; // space
-  }
-
-  bool _sameChapterTitle(String line, String title) {
-    final normalizedLine = _normalizeTitleText(line);
-    final normalizedTitle = _normalizeTitleText(title);
-    if (normalizedLine.isEmpty || normalizedTitle.isEmpty) return false;
-    if (normalizedLine == normalizedTitle) return true;
-    return normalizedLine.startsWith(normalizedTitle) &&
-        normalizedLine.length <= normalizedTitle.length + 8;
   }
 
   String _normalizeTitleText(String value) {

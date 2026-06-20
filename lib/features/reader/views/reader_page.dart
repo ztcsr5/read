@@ -1088,7 +1088,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ),
       ),
       textDirection: TextDirection.ltr,
-      textAlign: state.isJustify ? TextAlign.justify : TextAlign.left,
+      textAlign: _readerTextAlign(text, state),
     )..layout(maxWidth: width);
     return painter.height;
   }
@@ -1168,7 +1168,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         ),
       ),
       textDirection: TextDirection.ltr,
-      textAlign: state.isJustify ? TextAlign.justify : TextAlign.left,
+      textAlign: _readerTextAlign(displayText, state),
     )..layout(maxWidth: width);
     final isFirstParagraph = item.paragraphIndex == 0;
     final isShortLine = item.text.length <= 22;
@@ -1454,7 +1454,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       ),
       child: Text(
         displayText,
-        textAlign: state.isJustify ? TextAlign.justify : TextAlign.left,
+        textAlign: _readerTextAlign(displayText, state),
         textHeightBehavior: const TextHeightBehavior(
           applyHeightToFirstAscent: false,
           applyHeightToLastDescent: true,
@@ -1487,6 +1487,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return '${List.filled(paragraphIndent, "\u3000").join()}$cleaned';
     }
     return cleaned;
+  }
+
+  TextAlign _readerTextAlign(String text, ReaderState state) {
+    if (!state.isJustify) return TextAlign.left;
+    return _containsCjkText(text) ? TextAlign.left : TextAlign.justify;
+  }
+
+  bool _containsCjkText(String text) {
+    for (var i = 0; i < text.length; i++) {
+      final unit = text.codeUnitAt(i);
+      if ((unit >= 0x4e00 && unit <= 0x9fff) ||
+          (unit >= 0x3400 && unit <= 0x4dbf) ||
+          (unit >= 0xf900 && unit <= 0xfaff)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   Widget _buildSkeletonScreen(

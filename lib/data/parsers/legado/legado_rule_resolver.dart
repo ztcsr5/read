@@ -16,18 +16,26 @@ class LegadoRuleAnalyzer {
         .toList(growable: false);
     return LegadoRulePlan(
       raw: rule,
-      parts: parts.isEmpty ? (text.isEmpty ? const <String>[] : <String>[text]) : parts,
-      hasJs: text.contains('@js:') || text.contains('<js>') || text.startsWith('{{'),
+      parts: parts.isEmpty
+          ? (text.isEmpty ? const <String>[] : <String>[text])
+          : parts,
+      hasJs:
+          text.contains('@js:') ||
+          text.contains('<js>') ||
+          text.startsWith('{{'),
       isJsonPath: text.startsWith(r'$.') || text.startsWith(r'$['),
       isXPath: text.startsWith('//') || text.startsWith('./'),
-      isRegex: text.startsWith(':') || text.contains('##') || text.contains('%%'),
+      isRegex:
+          text.startsWith(':') || text.contains('##') || text.contains('%%'),
       isCssLike: _looksCssLike(text),
     );
   }
 
   static bool _looksCssLike(String text) {
     if (text.isEmpty) return false;
-    if (text.startsWith('@') || text.startsWith(r'$.') || text.startsWith('//')) {
+    if (text.startsWith('@') ||
+        text.startsWith(r'$.') ||
+        text.startsWith('//')) {
       return false;
     }
     return RegExp(r'[#.>\[\]\w-]').hasMatch(text);
@@ -61,20 +69,19 @@ class LegadoURLResolver {
     final text = value.trim();
     if (text.isEmpty) return baseUrl;
     if (text.startsWith('javascript:') || text == '#') return '';
+    final cleanBaseUrl = LegadoRequestBuilder.cleanBaseUrl(baseUrl);
     if (text.startsWith('//')) {
-      final scheme = Uri.tryParse(baseUrl)?.scheme;
+      final scheme = Uri.tryParse(cleanBaseUrl)?.scheme;
       return '${scheme == null || scheme.isEmpty ? 'https' : scheme}:$text';
     }
-    if (text.startsWith('/')) {
-      final base = Uri.tryParse(baseUrl);
-      if (base != null && base.hasScheme && base.host.isNotEmpty) {
-        return base.replace(path: text, query: '', fragment: '').toString();
-      }
-    }
-    return LegadoRequestBuilder.resolveUrl(baseUrl, text);
+    return LegadoRequestBuilder.resolveUrl(cleanBaseUrl, text);
   }
 
   String bestCandidate(String value) {
+    final trimmed = value.trim();
+    if (LegadoRequestBuilder.splitEmbeddedConfig(trimmed).config.isNotEmpty) {
+      return trimmed;
+    }
     final candidates = value
         .split(RegExp(r'[\r\n\t]+|(?=https?://)'))
         .map((part) => part.trim())
@@ -90,11 +97,15 @@ class LegadoURLResolver {
     final lower = value.toLowerCase();
     var score = 0;
     if (lower.startsWith('http')) score += 10;
-    if (RegExp(r'/(book|novel|info|detail|article|shu|xiaoshuo|txt)/').hasMatch(lower)) {
+    if (RegExp(
+      r'/(book|novel|info|detail|article|shu|xiaoshuo|txt)/',
+    ).hasMatch(lower)) {
       score += 20;
     }
     if (RegExp(r'\d{2,}').hasMatch(lower)) score += 3;
-    if (lower.contains('/search') || lower.contains('/tag/') || lower.contains('/rank')) {
+    if (lower.contains('/search') ||
+        lower.contains('/tag/') ||
+        lower.contains('/rank')) {
       score -= 20;
     }
     return score - '/'.allMatches(lower).length;
@@ -120,7 +131,11 @@ class LegadoRegexResolver {
     try {
       return RegExp(pattern, dotAll: true)
           .allMatches(input)
-          .map((match) => match.groupCount > 0 ? match.group(1) ?? '' : match.group(0) ?? '')
+          .map(
+            (match) => match.groupCount > 0
+                ? match.group(1) ?? ''
+                : match.group(0) ?? '',
+          )
           .where((value) => value.isNotEmpty)
           .toList(growable: false);
     } catch (_) {
@@ -142,7 +157,10 @@ class LegadoJSoupResolver {
   }
 
   String text(String html, String selector) {
-    return select(html, selector).map((element) => element.text.trim()).join('\n');
+    return select(
+      html,
+      selector,
+    ).map((element) => element.text.trim()).join('\n');
   }
 }
 
@@ -168,13 +186,17 @@ class LegadoRuleResolver {
 
   LegadoRulePlan analyze(String rule) => analyzer.analyze(rule);
 
-  String resolveUrl(String baseUrl, String value) => url.resolve(baseUrl, value);
+  String resolveUrl(String baseUrl, String value) =>
+      url.resolve(baseUrl, value);
 
   String bestUrlCandidate(String value) => url.bestCandidate(value);
 
-  List<dynamic> resolveJson(dynamic json, String rule) => jsonPath.resolve(json, rule);
+  List<dynamic> resolveJson(dynamic json, String rule) =>
+      jsonPath.resolve(json, rule);
 
-  List<Element> select(String html, String selector) => jsoup.select(html, selector);
+  List<Element> select(String html, String selector) =>
+      jsoup.select(html, selector);
 
-  List<String> resolveRegex(String input, String pattern) => regex.resolve(input, pattern);
+  List<String> resolveRegex(String input, String pattern) =>
+      regex.resolve(input, pattern);
 }
