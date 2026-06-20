@@ -49,25 +49,49 @@ struct SearchResultParser {
               let object = try? JSONSerialization.jsonObject(with: data) else {
             return .failure(.rule("JSON 解析失败"))
         }
-        let candidates = collectDictionaries(object).prefix(80)
+        let extractor = JSONRuleExtractor()
+        let rule = source.ruleSearch
+        let listRule = firstRule(rule, keys: ["bookList", "list", "books"])
+        let candidates = extractor.list(from: object, rule: listRule).prefix(120)
         let books = candidates.compactMap { item -> SearchBook? in
-            let name = pick(item, ["name", "bookName", "title", "book_name"])
-            let url = pick(item, ["bookUrl", "url", "link", "book_url", "id"])
+            let name = extractor.string(
+                from: item,
+                rule: firstRule(rule, keys: ["name", "bookName"]),
+                fallbackKeys: ["name", "bookName", "title", "book_name"]
+            )
+            let url = extractor.string(
+                from: item,
+                rule: firstRule(rule, keys: ["bookUrl", "url"]),
+                fallbackKeys: ["bookUrl", "url", "link", "book_url", "id"]
+            )
             guard let name, let url else { return nil }
             return SearchBook(
                 name: name,
-                author: pick(item, ["author", "writer"]),
-                coverUrl: pick(item, ["cover", "coverUrl", "img", "image"]),
+                author: extractor.string(
+                    from: item,
+                    rule: firstRule(rule, keys: ["author"]),
+                    fallbackKeys: ["author", "writer"]
+                ),
+                coverUrl: extractor.string(
+                    from: item,
+                    rule: firstRule(rule, keys: ["coverUrl", "cover"]),
+                    fallbackKeys: ["cover", "coverUrl", "img", "image"]
+                ),
                 bookUrl: absolutize(url, base: response.url),
                 sourceName: source.bookSourceName,
                 sourceUrl: source.bookSourceUrl,
-                intro: pick(item, ["intro", "desc", "description"])
+                intro: extractor.string(
+                    from: item,
+                    rule: firstRule(rule, keys: ["intro"]),
+                    fallbackKeys: ["intro", "desc", "description"]
+                )
             )
         }
         return books.isEmpty ? .failure(.empty("JSON 搜索解析结果为空")) : .success(Array(books))
     }
 
-    private func firstRule(_ rule: SourceRule, keys: [String]) -> String? {
+    private func firstRule(_ rule: SourceRule?, keys: [String]) -> String? {
+        guard let rule else { return nil }
         for key in keys {
             if let value = rule.fields[key], !value.isEmpty {
                 return value
@@ -98,32 +122,6 @@ struct SearchResultParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func collectDictionaries(_ object: Any) -> [[String: Any]] {
-        if let dict = object as? [String: Any] {
-            var result = [dict]
-            for value in dict.values {
-                result.append(contentsOf: collectDictionaries(value))
-            }
-            return result
-        }
-        if let array = object as? [Any] {
-            return array.flatMap { collectDictionaries($0) }
-        }
-        return []
-    }
-
-    private func pick(_ item: [String: Any], _ keys: [String]) -> String? {
-        for key in keys {
-            if let value = item[key] {
-                let text = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty, text != "<null>" {
-                    return text
-                }
-            }
-        }
-        return nil
-    }
-
     private func absolutize(_ text: String, base: URL) -> String {
         if let url = URL(string: text), url.scheme != nil {
             return url.absoluteString
@@ -131,4 +129,3 @@ struct SearchResultParser {
         return URL(string: text, relativeTo: base)?.absoluteURL.absoluteString ?? text
     }
 }
-

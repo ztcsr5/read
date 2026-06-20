@@ -1,12 +1,10 @@
 import Foundation
 
 struct SourceRequestBuilder {
+    private let directiveParser = SourceURLDirectiveParser()
+
     func buildPageRequest(source: BookSource, urlText: String) -> SourceRequest {
-        let url = URL(string: urlText) ?? URL(string: source.bookSourceUrl) ?? URL(string: "https://invalid.local")!
-        var headers = parseHeaders(source.header)
-        headers["User-Agent", default: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"]
-        headers["Accept", default: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"]
-        return SourceRequest(url: url, method: .get, headers: headers, body: nil, timeout: 20)
+        buildRequest(source: source, resolvedText: urlText)
     }
 
     func buildSearchRequest(source: BookSource, searchUrl: String, keyword: String, page: Int) -> SourceRequest {
@@ -15,19 +13,23 @@ struct SourceRequestBuilder {
             .replacingOccurrences(of: "{{keyword}}", with: keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)
             .replacingOccurrences(of: "{{page}}", with: String(page))
 
-        let parts = resolved.components(separatedBy: ",")
-        let urlText = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? resolved
-        let url = URL(string: urlText) ?? URL(string: source.bookSourceUrl) ?? URL(string: "https://invalid.local")!
+        return buildRequest(source: source, resolvedText: resolved)
+    }
+
+    private func buildRequest(source: BookSource, resolvedText: String) -> SourceRequest {
+        let directive = directiveParser.parse(resolvedText)
+        let url = URL(string: directive.urlText) ?? URL(string: source.bookSourceUrl) ?? URL(string: "https://invalid.local")!
 
         var headers = parseHeaders(source.header)
+        headers.merge(directive.headers, uniquingKeysWith: { _, new in new })
         headers["User-Agent", default: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"]
         headers["Accept", default: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"]
 
         return SourceRequest(
             url: url,
-            method: .get,
+            method: directive.method,
             headers: headers,
-            body: nil,
+            body: directive.body,
             timeout: 20
         )
     }
