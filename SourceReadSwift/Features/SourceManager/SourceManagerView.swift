@@ -41,6 +41,16 @@ struct SourceManagerView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                    .onDelete { offsets in
+                        for index in offsets {
+                            appState.sourceStore.remove(appState.sourceStore.sources[index])
+                        }
+                    }
+                    if let lastError = appState.sourceStore.lastError {
+                        Text(lastError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
             .navigationTitle("书源")
@@ -60,4 +70,3 @@ struct SourceManagerView: View {
         }
     }
 }
-

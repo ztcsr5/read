@@ -3,16 +3,29 @@ import Foundation
 @MainActor
 final class SourceStore: ObservableObject {
     @Published private(set) var sources: [BookSource] = []
+    @Published private(set) var lastError: String?
+    private let persistence: SourcePersistence
+
+    init(persistence: SourcePersistence = SourcePersistence()) {
+        self.persistence = persistence
+        do {
+            sources = try persistence.load()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
 
     func importJSON(_ text: String) throws {
         let data = Data(text.utf8)
         let decoder = JSONDecoder()
         if let list = try? decoder.decode([BookSource].self, from: data) {
             sources = merge(existing: sources, incoming: list)
+            try persistence.save(sources)
             return
         }
         let source = try decoder.decode(BookSource.self, from: data)
         sources = merge(existing: sources, incoming: [source])
+        try persistence.save(sources)
     }
 
     func seedForDevelopment() {
@@ -35,6 +48,16 @@ final class SourceStore: ObservableObject {
 
     func source(for sourceUrl: String) -> BookSource? {
         sources.first { $0.bookSourceUrl == sourceUrl }
+    }
+
+    func remove(_ source: BookSource) {
+        sources.removeAll { $0.bookSourceUrl == source.bookSourceUrl }
+        do {
+            try persistence.save(sources)
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     private func merge(existing: [BookSource], incoming: [BookSource]) -> [BookSource] {
