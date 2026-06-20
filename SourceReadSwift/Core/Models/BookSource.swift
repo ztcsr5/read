@@ -108,6 +108,22 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             raw: raw
         )
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bookSourceName, forKey: .bookSourceName)
+        try container.encode(bookSourceUrl, forKey: .bookSourceUrl)
+        try container.encodeIfPresent(bookSourceGroup, forKey: .bookSourceGroup)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encodeIfPresent(searchUrl, forKey: .searchUrl)
+        try container.encodeIfPresent(ruleSearch, forKey: .ruleSearch)
+        try container.encodeIfPresent(ruleBookInfo, forKey: .ruleBookInfo)
+        try container.encodeIfPresent(ruleToc, forKey: .ruleToc)
+        try container.encodeIfPresent(ruleContent, forKey: .ruleContent)
+        try container.encodeIfPresent(header, forKey: .header)
+        try container.encodeIfPresent(loginUrl, forKey: .loginUrl)
+        try container.encodeIfPresent(loginCheckJs, forKey: .loginCheckJs)
+    }
 }
 
 struct SourceRule: Codable, Hashable, Sendable {
