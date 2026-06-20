@@ -221,10 +221,16 @@ final class LegadoNativeJSCoreBridge {
     let tagName = (try? el.tagName()) ?? ""
     let id = el.id()
     let className = (try? el.className()) ?? ""
+    // 获取常用属性: href/src/title/alt/data-* 等,避免访问 internal 的 attributes 集合
     var attrDict: [String: String] = [:]
-    if let attrs = try? el.attributes() {
-      for attr in attrs { attrDict[attr.getKey()] = attr.getValue() }
+    let commonAttrs = ["href", "src", "title", "alt", "name", "value", "data-src", "data-url", "data-id", "data-book"]
+    for key in commonAttrs {
+      let val = (try? el.attr(key)) ?? ""
+      if !val.isEmpty { attrDict[key] = val }
     }
+    // class 单独处理(已获取)
+    if !className.isEmpty { attrDict["class"] = className }
+    if !id.isEmpty { attrDict["id"] = id }
     let attrJson = attrDict.map { "\(Self.jsString($0.key)):\(Self.jsString($0.value))" }.joined(separator: ",")
     return "{\"text\":\(Self.jsString(text)),\"ownText\":\(Self.jsString(ownText)),\"html\":\(Self.jsString(html)),\"outerHtml\":\(Self.jsString(outerHtml)),\"tagName\":\(Self.jsString(tagName)),\"nodeName\":\(Self.jsString(tagName)),\"id\":\(Self.jsString(id)),\"className\":\(Self.jsString(className)),\"attr\":{\(attrJson)}}"
   }
