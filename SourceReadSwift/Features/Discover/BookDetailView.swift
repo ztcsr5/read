@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct BookDetailView: View {
+    @EnvironmentObject private var appState: AppState
     let book: SearchBook
+    @State private var detail: BookDetail?
+    @State private var chapters: [BookChapter] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
         ScrollView {
@@ -9,16 +14,153 @@ struct BookDetailView: View {
                 SearchBookRow(book: book)
                     .podcastCard()
 
-                EmptyStateCard(
-                    systemImage: "wrench.and.screwdriver",
-                    title: "详情链路正在迁移",
-                    message: "下一阶段由 Swift LegadoCore 接管详情、目录和正文，不再让页面无限 skeleton。"
-                )
+                if isLoading {
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("正在加载详情")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .podcastCard()
+                } else if let errorMessage {
+                    EmptyStateCard(
+                        systemImage: "exclamationmark.triangle",
+                        title: "详情加载失败",
+                        message: errorMessage
+                    )
+                } else if let detail {
+                    detailCard(detail)
+                    chapterList
+                }
             }
             .padding(AppTheme.pagePadding)
         }
         .pageBackground()
         .navigationTitle(book.name)
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await load()
+        }
+    }
+
+    private func detailCard(_ detail: BookDetail) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(detail.name)
+                .font(.title.bold())
+            Text(detail.author ?? "作者未知")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            if let intro = detail.intro, !intro.isEmpty {
+                Text(intro)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(5)
+            }
+            if let latest = detail.latestChapter {
+                Text("最新：\(latest)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .podcastCard()
+    }
+
+    private var chapterList: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("目录")
+                    .font(.title2.bold())
+                Spacer()
+                Text("\(chapters.count) 章")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(chapters.prefix(80)) { chapter in
+                NavigationLink {
+                    ChapterLoadingView(sourceUrl: book.sourceUrl, chapter: chapter)
+                } label: {
+                    HStack {
+                        Text(chapter.title)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .podcastCard()
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func load() async {
+        guard detail == nil, !isLoading else { return }
+        guard let source = appState.sourceStore.source(for: book.sourceUrl) else {
+            errorMessage = "找不到书源：\(book.sourceName)"
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        switch await appState.engine.getBookDetail(source: source, book: book) {
+        case .success(let loadedDetail):
+            detail = loadedDetail
+            switch await appState.engine.getChapterList(source: source, book: loadedDetail) {
+            case .success(let loadedChapters):
+                chapters = loadedChapters
+            case .failure(let error):
+                errorMessage = "目录失败：\(error.displayMessage)"
+            }
+        case .failure(let error):
+            errorMessage = error.displayMessage
+        }
+    }
+}
+
+struct ChapterLoadingView: View {
+    @EnvironmentObject private var appState: AppState
+    let sourceUrl: String
+    let chapter: BookChapter
+    @State private var content: ChapterContent?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let content {
+                ReaderView(content: content)
+            } else if let errorMessage {
+                EmptyStateCard(systemImage: "xmark.octagon", title: "正文加载失败", message: errorMessage)
+                    .padding(AppTheme.pagePadding)
+                    .pageBackground()
+            } else {
+                ProgressView("正在加载正文")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .pageBackground()
+            }
+        }
+        .task {
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard content == nil, errorMessage == nil else { return }
+        guard let source = appState.sourceStore.source(for: sourceUrl) else {
+            errorMessage = "找不到书源"
+            return
+        }
+        switch await appState.engine.getContent(source: source, chapter: chapter) {
+        case .success(let loaded):
+            content = loaded
+        case .failure(let error):
+            errorMessage = error.displayMessage
+        }
     }
 }

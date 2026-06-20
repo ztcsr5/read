@@ -10,6 +10,7 @@ protocol SourceEngine: Sendable {
 final class LegadoSourceEngine: SourceEngine {
     private let network: SourceNetworkClient
     private let diagnostics: DiagnosticSink
+    private let requestBuilder = SourceRequestBuilder()
 
     init(
         network: SourceNetworkClient = URLSessionSourceNetworkClient(),
@@ -32,7 +33,6 @@ final class LegadoSourceEngine: SourceEngine {
             details: ["keyword": keyword, "page": String(page)]
         ))
 
-        let requestBuilder = SourceRequestBuilder()
         let request = requestBuilder.buildSearchRequest(source: source, searchUrl: searchUrl, keyword: keyword, page: page)
 
         switch await network.load(request) {
@@ -48,15 +48,29 @@ final class LegadoSourceEngine: SourceEngine {
     }
 
     func getBookDetail(source: BookSource, book: SearchBook) async -> Result<BookDetail, SourceEngineError> {
-        .failure(.unsupported("Book detail parser not implemented yet"))
+        switch await network.load(requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)) {
+        case .success(let response):
+            return BookDetailParser().parse(source: source, book: book, response: response)
+        case .failure(let error):
+            return .failure(error)
+        }
     }
 
     func getChapterList(source: BookSource, book: BookDetail) async -> Result<[BookChapter], SourceEngineError> {
-        .failure(.unsupported("Chapter parser not implemented yet"))
+        switch await network.load(requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)) {
+        case .success(let response):
+            return ChapterListParser().parse(source: source, book: book, response: response)
+        case .failure(let error):
+            return .failure(error)
+        }
     }
 
     func getContent(source: BookSource, chapter: BookChapter) async -> Result<ChapterContent, SourceEngineError> {
-        .failure(.unsupported("Content parser not implemented yet"))
+        switch await network.load(requestBuilder.buildPageRequest(source: source, urlText: chapter.url)) {
+        case .success(let response):
+            return ContentParser().parse(source: source, chapter: chapter, response: response)
+        case .failure(let error):
+            return .failure(error)
+        }
     }
 }
-

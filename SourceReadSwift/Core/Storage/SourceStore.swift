@@ -33,6 +33,10 @@ final class SourceStore: ObservableObject {
         ]
     }
 
+    func source(for sourceUrl: String) -> BookSource? {
+        sources.first { $0.bookSourceUrl == sourceUrl }
+    }
+
     private func merge(existing: [BookSource], incoming: [BookSource]) -> [BookSource] {
         var map = Dictionary(uniqueKeysWithValues: existing.map { ($0.bookSourceUrl, $0) })
         for item in incoming {
@@ -41,4 +45,3 @@ final class SourceStore: ObservableObject {
         return map.values.sorted { $0.bookSourceName < $1.bookSourceName }
     }
 }
-
