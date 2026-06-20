@@ -20,6 +20,8 @@ xcodegen generate
 open SourceReadSwift.xcodeproj
 ```
 
+Windows 侧不能直接编译 iOS 工程，详见 `docs/BUILD.md`。
+
 ## 阶段目标
 
 1. SwiftUI App 骨架。
@@ -27,4 +29,3 @@ open SourceReadSwift.xcodeproj
 3. 搜索 -> 详情 -> 目录 -> 正文 MVP。
 4. JSCore / SwiftSoup / Cookie / WebView 过盾闭环。
 5. 原生阅读 UI 打磨。
-
