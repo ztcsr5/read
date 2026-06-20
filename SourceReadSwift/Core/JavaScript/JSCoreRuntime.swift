@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import SwiftSoup
 
 final class JSCoreRuntime {
     private let context: JSContext
@@ -51,11 +52,30 @@ final class JSCoreRuntime {
                 .replacingOccurrences(of: "ss", with: "ss")
             return formatter.string(from: date)
         }
+        let getString: @convention(block) (String, String, String) -> String = { html, rule, baseUrl in
+            do {
+                let document = try SwiftSoup.parse(html, baseUrl)
+                return try Self.extractString(from: document, rule: rule)
+            } catch {
+                return ""
+            }
+        }
+        let getStringList: @convention(block) (String, String, String) -> NSArray = { html, rule, baseUrl in
+            do {
+                let document = try SwiftSoup.parse(html, baseUrl)
+                let values = try Self.extractStringList(from: document, rule: rule)
+                return values as NSArray
+            } catch {
+                return [] as NSArray
+            }
+        }
 
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
         context.setObject(base64Encode, forKeyedSubscript: "__native_base64Encode" as NSString)
         context.setObject(base64Decode, forKeyedSubscript: "__native_base64Decode" as NSString)
         context.setObject(timeFormat, forKeyedSubscript: "__native_timeFormat" as NSString)
+        context.setObject(getString, forKeyedSubscript: "__native_getString" as NSString)
+        context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
     }
 
     private func installBaseBridge() {
@@ -70,6 +90,13 @@ final class JSCoreRuntime {
         java.base64Decode = function(value) { return __native_base64Decode(String(value)); };
         java.timeFormat = function(timestamp, format) { return __native_timeFormat(Number(timestamp), String(format)); };
         java.getTime = function() { return Date.now(); };
+        java.getString = function(html, rule) { return __native_getString(String(html), String(rule), String(typeof baseUrl === 'undefined' ? '' : baseUrl)); };
+        java.getStringList = function(html, rule) {
+          var list = __native_getStringList(String(html), String(rule), String(typeof baseUrl === 'undefined' ? '' : baseUrl));
+          var out = [];
+          for (var i = 0; i < list.length; i++) out.push(String(list[i]));
+          return out;
+        };
         java.log = function(value) { return String(value); };
         var Packages = Packages || {};
         Packages.org = Packages.org || {};
@@ -77,5 +104,37 @@ final class JSCoreRuntime {
         function importClass(_) { return undefined; }
         """
         context.evaluateScript(prelude)
+    }
+
+    private static func extractString(from document: Document, rule: String) throws -> String {
+        let parts = rule.components(separatedBy: "@")
+        let selector = normalizeSelector(parts.first ?? "")
+        let attr = parts.dropFirst().first ?? "text"
+        let element = selector.isEmpty ? document : try document.select(selector).first() ?? document
+        return try extractValue(from: element, attr: attr)
+    }
+
+    private static func extractStringList(from document: Document, rule: String) throws -> [String] {
+        let parts = rule.components(separatedBy: "@")
+        let selector = normalizeSelector(parts.first ?? "")
+        let attr = parts.dropFirst().first ?? "text"
+        let elements: [Element] = selector.isEmpty ? [document] : try document.select(selector).array()
+        return try elements.map { try extractValue(from: $0, attr: attr) }.filter { !$0.isEmpty }
+    }
+
+    private static func extractValue(from element: Element, attr: String) throws -> String {
+        if attr == "text" {
+            return try element.text().trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if attr == "html" {
+            return try element.html().trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return try element.attr(attr).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func normalizeSelector(_ selector: String) -> String {
+        selector
+            .replacingOccurrences(of: "&&", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

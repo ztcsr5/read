@@ -17,4 +17,14 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "abc")
     }
+
+    func testNativeGetStringBridge() throws {
+        let html = "<html><body><div class='book'><a href='/b/1'>斗破苍穹</a></div></body></html>"
+        let script = "java.getString(html, '.book a@text')"
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html, "baseUrl": "https://example.com"])
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "斗破苍穹")
+    }
 }
