@@ -89,7 +89,7 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             return nil
         }
 
-        let name = string("bookSourceName") ?? string("sourceName") ?? "未命名书源"
+        let name = string("bookSourceName") ?? string("sourceName") ?? "\u{672a}\u{547d}\u{540d}\u{4e66}\u{6e90}"
         let url = string("bookSourceUrl") ?? string("sourceUrl") ?? UUID().uuidString
 
         self.init(
@@ -153,4 +153,3 @@ struct DynamicCodingKey: CodingKey {
         self.intValue = intValue
     }
 }
-
