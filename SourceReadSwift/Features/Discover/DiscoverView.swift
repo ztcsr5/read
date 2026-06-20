@@ -15,31 +15,7 @@ struct DiscoverView: View {
 
                     matchModePicker
                     searchHeader
-
-                    if viewModel.isSearching {
-                        VStack(spacing: 14) {
-                            ProgressView()
-                                .controlSize(.large)
-                            Text("正在搜索")
-                                .font(.headline)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 260)
-                        .podcastCard()
-                    } else if let error = viewModel.errorMessage {
-                        EmptyStateCard(
-                            systemImage: "exclamationmark.triangle",
-                            title: "搜索失败",
-                            message: error
-                        )
-                    } else if viewModel.results.isEmpty {
-                        EmptyStateCard(
-                            systemImage: "magnifyingglass",
-                            title: "搜索书名",
-                            message: "Swift 原生核心会逐步接管搜索、目录和正文解析。"
-                        )
-                    } else {
-                        resultsList
-                    }
+                    content
                 }
                 .padding(AppTheme.pagePadding)
             }
@@ -50,6 +26,37 @@ struct DiscoverView: View {
                 appState.sourceStore.seedForDevelopment()
                 viewModel.bind(appState: appState)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if viewModel.isSearching && viewModel.results.isEmpty {
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("正在搜索")
+                    .font(.headline)
+                Text("已检测 \(viewModel.checkedSourceCount) 个源")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 260)
+            .podcastCard()
+        } else if let error = viewModel.errorMessage, viewModel.results.isEmpty {
+            EmptyStateCard(
+                systemImage: "exclamationmark.triangle",
+                title: "搜索失败",
+                message: error
+            )
+        } else if viewModel.results.isEmpty {
+            EmptyStateCard(
+                systemImage: "magnifyingglass",
+                title: "搜索书名",
+                message: "Swift 原生核心会逐步接管搜索、目录和正文解析。"
+            )
+        } else {
+            resultsList
         }
     }
 
@@ -76,7 +83,7 @@ struct DiscoverView: View {
             HStack {
                 Text("已导入 \(appState.sourceStore.sources.count) 个源")
                 Spacer()
-                Text("命中 \(viewModel.hitSourceCount) 个源 · \(viewModel.results.count) 条")
+                Text("已检 \(viewModel.checkedSourceCount) · 命中 \(viewModel.hitSourceCount) · \(viewModel.results.count) 条")
             }
             .font(.footnote.weight(.medium))
             .foregroundStyle(.secondary)
@@ -102,6 +109,10 @@ struct DiscoverView: View {
                 Text("搜索结果")
                     .font(.title2.bold())
                 Spacer()
+                if viewModel.isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Text("\(viewModel.results.count) 条")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -128,6 +139,7 @@ final class DiscoverViewModel: ObservableObject {
     @Published var isSearching = false
     @Published var errorMessage: String?
     @Published var hitSourceCount = 0
+    @Published var checkedSourceCount = 0
 
     private weak var appState: AppState?
 
@@ -144,6 +156,7 @@ final class DiscoverViewModel: ObservableObject {
         errorMessage = nil
         results = []
         hitSourceCount = 0
+        checkedSourceCount = 0
         defer { isSearching = false }
 
         let sources = appState.sourceStore.sources.filter(\.enabled)
@@ -152,39 +165,55 @@ final class DiscoverViewModel: ObservableObject {
             return
         }
 
+        let engine = appState.engine
         var allBooks: [SearchBook] = []
         var hitSources = Set<String>()
         var failures: [String] = []
 
-        for source in sources {
-            switch await appState.engine.searchBooks(source: source, keyword: keyword, page: 1) {
-            case .success(let books):
-                if !books.isEmpty {
-                    hitSources.insert(source.bookSourceUrl)
-                    allBooks.append(contentsOf: books)
+        for batch in sources.chunked(into: 12) {
+            await withTaskGroup(of: (BookSource, Result<[SearchBook], SourceEngineError>).self) { group in
+                for source in batch {
+                    group.addTask {
+                        let result = await engine.searchBooks(source: source, keyword: keyword, page: 1)
+                        return (source, result)
+                    }
                 }
-            case .failure(let error):
-                failures.append("\(source.bookSourceName): \(error.displayMessage)")
-                appState.record(.init(
-                    level: .warning,
-                    stage: "search",
-                    sourceName: source.bookSourceName,
-                    message: error.displayMessage
-                ))
+
+                for await (source, result) in group {
+                    checkedSourceCount += 1
+                    switch result {
+                    case .success(let books):
+                        if !books.isEmpty {
+                            hitSources.insert(source.bookSourceUrl)
+                            allBooks.append(contentsOf: books)
+                            results = filtered(allBooks, keyword: keyword)
+                            hitSourceCount = hitSources.count
+                        }
+                    case .failure(let error):
+                        failures.append("\(source.bookSourceName): \(error.displayMessage)")
+                        appState.record(.init(
+                            level: .warning,
+                            stage: "search",
+                            sourceName: source.bookSourceName,
+                            message: error.displayMessage
+                        ))
+                    }
+                }
             }
         }
 
-        if matchMode == .exact {
-            results = allBooks.filter {
-                $0.name.localizedCaseInsensitiveContains(keyword)
-                    || ($0.author?.localizedCaseInsensitiveContains(keyword) ?? false)
-            }
-        } else {
-            results = allBooks
-        }
+        results = filtered(allBooks, keyword: keyword)
         hitSourceCount = hitSources.count
         if results.isEmpty {
             errorMessage = failures.prefix(5).joined(separator: "\n")
+        }
+    }
+
+    private func filtered(_ books: [SearchBook], keyword: String) -> [SearchBook] {
+        guard matchMode == .exact else { return books }
+        return books.filter {
+            $0.name.localizedCaseInsensitiveContains(keyword)
+                || ($0.author?.localizedCaseInsensitiveContains(keyword) ?? false)
         }
     }
 }
@@ -199,6 +228,15 @@ enum SearchMatchMode: String, CaseIterable, Identifiable {
         switch self {
         case .fuzzy: return "模糊"
         case .exact: return "精准"
+        }
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }
