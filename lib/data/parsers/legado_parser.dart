@@ -3521,7 +3521,13 @@ class LegadoParser {
           keyword: keyword,
         ),
       );
-      final resolvedRule = _resolvePreparedRuleSuffix(block.suffix, variables);
+      final resolvedRule = await _resolvePreparedRuleSuffixAsync(
+        source,
+        block.suffix,
+        variables,
+        baseUrl: baseUrl,
+        keyword: keyword,
+      );
       if (resolvedRule.trim().isEmpty && _looksLikeJsonData(output, '')) {
         try {
           final decoded = jsonDecode(output);
@@ -3556,14 +3562,29 @@ class LegadoParser {
     return null;
   }
 
-  static String _resolvePreparedRuleSuffix(
+  static Future<String> _resolvePreparedRuleSuffixAsync(
+    BookSource source,
     String suffix,
-    Map<String, dynamic> variables,
-  ) {
+    Map<String, dynamic> variables, {
+    String? baseUrl,
+    String? keyword,
+  }) async {
     final text = suffix.trim();
     if (!_looksLikeJsRuleReference(text)) return suffix;
     try {
-      final evaluated = LegadoJsEngine().evaluate(text, variables: variables);
+      final evaluated = await LegadoJsEngine().evaluateWithAjax(
+        text,
+        variables: variables,
+        libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
+        ajax: (request) =>
+            _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+        ajaxBytes: (request) => _ajaxBytesForJs(
+          source,
+          request,
+          baseUrl: baseUrl,
+          keyword: keyword,
+        ),
+      );
       final resolved = evaluated.trim();
       return resolved.isEmpty ? suffix : resolved;
     } catch (_) {
