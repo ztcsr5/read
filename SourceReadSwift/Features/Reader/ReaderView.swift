@@ -22,6 +22,7 @@ struct ReaderView: View {
     @State private var autoScrollEnabled = false
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
+    @State private var positionPersistTask: Task<Void, Never>?
     @State private var sessionStartedAt = Date()
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
@@ -128,6 +129,8 @@ struct ReaderView: View {
             persistReadingPosition()
         }
         .onDisappear {
+            positionPersistTask?.cancel()
+            persistReadingPosition(paragraphIndexOverride: visibleParagraphIndex)
             stopAutoScroll()
             speechController.stop()
             restoreIdleTimerPreference()
@@ -870,7 +873,7 @@ struct ReaderView: View {
               index != visibleParagraphIndex,
               content.paragraphs.indices.contains(index) else { return }
         visibleParagraphIndex = index
-        persistReadingPosition(paragraphIndexOverride: index)
+        scheduleReadingPositionPersistence(paragraphIndex: index)
     }
 
     private func initialAutoScrollTarget() -> Int {
@@ -908,6 +911,16 @@ struct ReaderView: View {
             totalChapters: totalChapters ?? 0,
             paragraphIndex: paragraphIndex
         )
+    }
+
+    private func scheduleReadingPositionPersistence(paragraphIndex: Int) {
+        positionPersistTask?.cancel()
+        positionPersistTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            persistReadingPosition(paragraphIndexOverride: paragraphIndex)
+            positionPersistTask = nil
+        }
     }
 }
 

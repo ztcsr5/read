@@ -853,6 +853,7 @@ Completed since the initial audit:
   - Reader restores the stored paragraph when reopening the same chapter.
   - Page/cover mode selection, auto-scroll, tap page navigation, and speech-driven paragraph movement update the stored paragraph position.
   - Scroll mode tracks the top visible paragraph with a Geometry preference and persists it when the visible paragraph changes.
+  - Manual scroll progress writes are debounced and flushed when the reader closes, reducing persistence work during fast scrolling.
 
 Still not complete:
 
