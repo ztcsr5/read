@@ -33,4 +33,3 @@ struct SynchronousSourceLoader {
         return ResponseTextDecoder().decode(data: data, headers: loadedHeaders)
     }
 }
-

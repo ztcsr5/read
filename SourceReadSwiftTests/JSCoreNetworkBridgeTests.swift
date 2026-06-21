@@ -28,4 +28,3 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         XCTAssertEqual(value, "https://example.com/a@Body:q=1")
     }
 }
-
