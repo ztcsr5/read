@@ -815,7 +815,12 @@ Completed since the initial audit:
 - Improved search URL compatibility:
   - `{{source.xxx}}` placeholders now resolve from imported raw source fields and normalized source metadata.
   - Search URL JavaScript can read `source.bookSourceUrl`, `source.bookSourceName`, aliases, and raw custom fields.
+  - Single-brace `{key}/{keyword}/{page}/{baseUrl}` placeholders and safe `{{(page - 1) * 10}}`-style page arithmetic are supported.
   - Source-variable search URL behavior is covered by unit tests.
+- Audited `legado-for-mac-pub` as a reference:
+  - See `docs/superpowers/specs/2026-06-21-legado-for-mac-reference-audit.md`.
+  - Adopted source URL arithmetic/placeholder behavior.
+  - Identified chapter cache/preload, richer bookmarks, scoped purify rules, and connector semantics as future clean-room implementation targets.
 
 Still not complete:
 

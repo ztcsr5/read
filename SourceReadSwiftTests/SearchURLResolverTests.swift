@@ -16,6 +16,21 @@ final class SearchURLResolverTests: XCTestCase {
         XCTAssertTrue(url.contains("page=3"))
     }
 
+    func testResolveSingleBraceKeywordAndPageArithmetic() throws {
+        let source = BookSource(
+            bookSourceName: "Test",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/search?q={key}&offset={{(page - 1) * 10}}"
+        )
+
+        let result = SearchURLResolver().resolve(source: source, keyword: "abc def", page: 3)
+
+        guard case .success(let url) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(url, "https://example.com/search?q=abc%20def&offset=20")
+    }
+
     func testResolveJavaScriptSearchUrl() throws {
         let source = BookSource(
             bookSourceName: "测试源",
