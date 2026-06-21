@@ -150,6 +150,18 @@ struct SourceRule: Codable, Hashable, Sendable {
         }
         self.init(fields: fields)
     }
+
+    func encode(to encoder: Encoder) throws {
+        if let raw, fields.isEmpty {
+            var container = encoder.singleValueContainer()
+            try container.encode(raw)
+            return
+        }
+        var container = encoder.container(keyedBy: DynamicCodingKey.self)
+        for item in fields.sorted(by: { $0.key < $1.key }) {
+            try container.encode(item.value, forKey: DynamicCodingKey(item.key))
+        }
+    }
 }
 
 struct DynamicCodingKey: CodingKey {
