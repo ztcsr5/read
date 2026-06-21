@@ -105,4 +105,36 @@ final class ChapterContentCacheStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.entries.map(\.title), ["New"])
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testCanReadStaleContentWhenPurifySignatureChanged() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = ChapterContentCachePersistence(fileManager: .default, rootURL: root)
+        let store = ChapterContentCacheStore(persistence: persistence)
+        let chapter = BookChapter(
+            title: "Chapter 1",
+            url: "https://example.com/chapter/1",
+            bookUrl: "https://example.com/book",
+            index: 0,
+            isVip: false
+        )
+        store.save(
+            ChapterContent(chapter: chapter, title: "Chapter 1", paragraphs: ["cached"], nextContentUrl: nil),
+            sourceURL: "https://source.example.com",
+            purifyRules: ["old"]
+        )
+
+        XCTAssertNil(
+            store.content(
+                sourceURL: "https://source.example.com",
+                chapter: chapter,
+                purifyRules: ["new"]
+            )
+        )
+        XCTAssertEqual(
+            store.staleContent(sourceURL: "https://source.example.com", chapter: chapter)?.paragraphs,
+            ["cached"]
+        )
+        try? FileManager.default.removeItem(at: root)
+    }
 }

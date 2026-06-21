@@ -220,7 +220,14 @@ struct ChapterLoadingView: View {
             content = loaded
             preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
         case .failure(let error):
-            errorMessage = error.displayMessage
+            if let cached = appState.chapterContentCacheStore.staleContent(
+                sourceURL: source.bookSourceUrl,
+                chapter: effectiveChapter
+            ) {
+                content = cached
+            } else {
+                errorMessage = error.displayMessage
+            }
         }
     }
 

@@ -59,6 +59,19 @@ final class ChapterContentCacheStore: ObservableObject {
         )
     }
 
+    func staleContent(sourceURL: String, chapter: BookChapter) -> ChapterContent? {
+        let key = cacheKey(sourceURL: sourceURL, chapterURL: chapter.url)
+        guard let entry = entries.first(where: { $0.key == key }) else {
+            return nil
+        }
+        return ChapterContent(
+            chapter: chapter,
+            title: entry.title,
+            paragraphs: entry.paragraphs,
+            nextContentUrl: entry.nextContentUrl
+        )
+    }
+
     func isCached(sourceURL: String, chapter: BookChapter, purifyRules: [String]) -> Bool {
         content(sourceURL: sourceURL, chapter: chapter, purifyRules: purifyRules) != nil
     }
