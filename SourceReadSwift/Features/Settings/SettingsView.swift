@@ -162,6 +162,12 @@ struct ReadingHistoryView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                            HStack(spacing: 10) {
+                                Label("\(book.readingSessionCount ?? 0) 次", systemImage: "book")
+                                Label(readingDurationText(book.totalReadingSeconds ?? 0), systemImage: "timer")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             if let lastReadAt = book.lastReadAt {
                                 Text(lastReadAt.formatted(date: .abbreviated, time: .shortened))
                                     .font(.caption)
@@ -178,6 +184,13 @@ struct ReadingHistoryView: View {
             }
         }
         .navigationTitle("阅读历史")
+    }
+
+    private func readingDurationText(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds / 60)
+        if minutes < 1 { return "少于 1 分钟" }
+        if minutes < 60 { return "\(minutes) 分钟" }
+        return String(format: "%.1f 小时", Double(minutes) / 60.0)
     }
 }
 

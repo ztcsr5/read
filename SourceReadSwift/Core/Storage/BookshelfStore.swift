@@ -105,6 +105,24 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    func markReaderOpened(bookID: String) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].lastOpenedAt = Date()
+        books[index].lastReadAt = Date()
+        moveToFront(index: index)
+        persist()
+    }
+
+    func recordReadingSession(bookID: String, duration: TimeInterval) {
+        guard duration > 1,
+              let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].readingSessionCount = (books[index].readingSessionCount ?? 0) + 1
+        books[index].totalReadingSeconds = (books[index].totalReadingSeconds ?? 0) + duration
+        books[index].lastReadAt = Date()
+        moveToFront(index: index)
+        persist()
+    }
+
     func remove(bookID: String) {
         books.removeAll { $0.id == bookID }
         persist()

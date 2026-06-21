@@ -69,6 +69,32 @@ final class BookshelfStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testRecordsReadingSessionStats() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = BookshelfStore(persistence: BookshelfPersistence(fileManager: .default, rootURL: root))
+        store.addLocalTextBook(
+            LocalTextBook(
+                title: "Local",
+                author: "Local",
+                chapters: [
+                    LocalTextChapter(title: "Chapter 1", paragraphs: ["A"], index: 0)
+                ]
+            )
+        )
+        let id = try XCTUnwrap(store.books.first?.id)
+
+        store.markReaderOpened(bookID: id)
+        store.recordReadingSession(bookID: id, duration: 125)
+
+        let book = try XCTUnwrap(store.book(id: id))
+        XCTAssertNotNil(book.lastOpenedAt)
+        XCTAssertEqual(book.readingSessionCount, 1)
+        XCTAssertEqual(book.totalReadingSeconds, 125)
+        XCTAssertNotNil(book.lastReadAt)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testSwitchSourceKeepsBookshelfIdentityAndResetsProgress() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

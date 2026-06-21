@@ -17,6 +17,9 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     var currentChapterTitle: String?
     var bookmarks: [ReaderBookmark]?
     var lastReadAt: Date?
+    var lastOpenedAt: Date?
+    var readingSessionCount: Int?
+    var totalReadingSeconds: TimeInterval?
     var addedAt: Date
 
     var readingProgress: Double {
@@ -45,6 +48,9 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         currentChapterTitle: String? = nil,
         bookmarks: [ReaderBookmark]? = nil,
         lastReadAt: Date? = nil,
+        lastOpenedAt: Date? = nil,
+        readingSessionCount: Int? = nil,
+        totalReadingSeconds: TimeInterval? = nil,
         addedAt: Date = Date()
     ) {
         self.id = id
@@ -63,6 +69,9 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         self.currentChapterTitle = currentChapterTitle
         self.bookmarks = bookmarks
         self.lastReadAt = lastReadAt
+        self.lastOpenedAt = lastOpenedAt
+        self.readingSessionCount = readingSessionCount
+        self.totalReadingSeconds = totalReadingSeconds
         self.addedAt = addedAt
     }
 

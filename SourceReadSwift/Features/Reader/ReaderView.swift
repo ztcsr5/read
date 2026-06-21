@@ -20,6 +20,7 @@ struct ReaderView: View {
     @State private var autoScrollEnabled = false
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
+    @State private var sessionStartedAt = Date()
     @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 20
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
@@ -121,6 +122,8 @@ struct ReaderView: View {
             bookmarkSheet
         }
         .onAppear {
+            sessionStartedAt = Date()
+            appState.bookshelfStore.markReaderOpened(bookID: bookID)
             appState.bookshelfStore.updateReadingProgress(
                 bookID: bookID,
                 chapterIndex: chapterIndex,
@@ -131,6 +134,10 @@ struct ReaderView: View {
         .onDisappear {
             stopAutoScroll()
             speechController.stop()
+            appState.bookshelfStore.recordReadingSession(
+                bookID: bookID,
+                duration: Date().timeIntervalSince(sessionStartedAt)
+            )
         }
     }
 
