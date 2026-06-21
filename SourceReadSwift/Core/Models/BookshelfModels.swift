@@ -10,10 +10,12 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     var bookURL: String
     var intro: String?
     var localContent: [String]?
+    var localChapters: [LocalTextChapter]?
     var latestChapterTitle: String?
     var totalChapters: Int
     var currentChapterIndex: Int
     var currentChapterTitle: String?
+    var bookmarks: [ReaderBookmark]?
     var lastReadAt: Date?
     var addedAt: Date
 
@@ -36,10 +38,12 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         bookURL: String,
         intro: String?,
         localContent: [String]? = nil,
+        localChapters: [LocalTextChapter]? = nil,
         latestChapterTitle: String? = nil,
         totalChapters: Int = 0,
         currentChapterIndex: Int = 0,
         currentChapterTitle: String? = nil,
+        bookmarks: [ReaderBookmark]? = nil,
         lastReadAt: Date? = nil,
         addedAt: Date = Date()
     ) {
@@ -52,10 +56,12 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         self.bookURL = bookURL
         self.intro = intro
         self.localContent = localContent
+        self.localChapters = localChapters
         self.latestChapterTitle = latestChapterTitle
         self.totalChapters = totalChapters
         self.currentChapterIndex = currentChapterIndex
         self.currentChapterTitle = currentChapterTitle
+        self.bookmarks = bookmarks
         self.lastReadAt = lastReadAt
         self.addedAt = addedAt
     }
@@ -84,11 +90,12 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             sourceURL: "local://text",
             bookURL: id,
             intro: nil,
-            localContent: localTextBook.paragraphs,
-            latestChapterTitle: "全文",
-            totalChapters: 1,
+            localContent: nil,
+            localChapters: localTextBook.chapters,
+            latestChapterTitle: localTextBook.chapters.last?.title ?? "全文",
+            totalChapters: max(localTextBook.chapters.count, 1),
             currentChapterIndex: 0,
-            currentChapterTitle: "全文"
+            currentChapterTitle: localTextBook.chapters.first?.title ?? "全文"
         )
     }
 }

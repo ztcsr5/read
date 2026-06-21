@@ -6,13 +6,30 @@ struct ReaderView: View {
     let content: ChapterContent
     let chapterIndex: Int
     let totalChapters: Int?
+    var chapters: [BookChapter] = []
+    var onSelectChapter: ((BookChapter) -> Void)?
+
     @Environment(\.dismiss) private var dismiss
     @State private var showOverlay = false
     @State private var showSettings = false
-    @State private var fontSize: Double = 20
-    @State private var lineSpacing: Double = 8
-    @State private var pagePadding: Double = 24
-    @State private var background: ReaderBackground = .paper
+    @State private var showChapterList = false
+    @State private var showBookmarks = false
+    @AppStorage("reader.fontSize") private var fontSize: Double = 20
+    @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
+    @AppStorage("reader.pagePadding") private var pagePadding: Double = 24
+    @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
+
+    private var background: ReaderBackground {
+        ReaderBackground(rawValue: backgroundRawValue) ?? .paper
+    }
+
+    private var bookmarks: [ReaderBookmark] {
+        appState.bookshelfStore.book(id: bookID)?.bookmarks ?? []
+    }
+
+    private var isCurrentChapterBookmarked: Bool {
+        appState.bookshelfStore.isBookmarked(bookID: bookID, chapterIndex: chapterIndex)
+    }
 
     var body: some View {
         ZStack {
@@ -57,6 +74,12 @@ struct ReaderView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .sheet(isPresented: $showChapterList) {
+            chapterListSheet
+        }
+        .sheet(isPresented: $showBookmarks) {
+            bookmarkSheet
+        }
         .onAppear {
             appState.bookshelfStore.updateReadingProgress(
                 bookID: bookID,
@@ -105,9 +128,11 @@ struct ReaderView: View {
 
                 HStack {
                     toolButton(icon: "list.bullet", title: "目录") {
+                        showChapterList = true
                         showSettings = false
                     }
-                    toolButton(icon: "globe", title: "换源") {
+                    toolButton(icon: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark", title: "书签") {
+                        toggleCurrentBookmark()
                         showSettings = false
                     }
                     toolButton(icon: "speaker.wave.2", title: "朗读") {
@@ -185,7 +210,7 @@ struct ReaderView: View {
                     HStack(spacing: 12) {
                         ForEach(ReaderBackground.allCases) { item in
                             Button {
-                                background = item
+                                backgroundRawValue = item.rawValue
                             } label: {
                                 Circle()
                                     .fill(item.color)
@@ -210,6 +235,110 @@ struct ReaderView: View {
             .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: -5)
         }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var chapterListSheet: some View {
+        NavigationStack {
+            List {
+                if chapters.isEmpty {
+                    Text("当前入口暂未带入完整目录")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(chapters) { chapter in
+                        Button {
+                            showChapterList = false
+                            showOverlay = false
+                            onSelectChapter?(chapter)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(chapter.title)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Text("第 \(chapter.index + 1) 章")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if chapter.index == chapterIndex {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                            }
+                        }
+                        .disabled(onSelectChapter == nil || chapter.index == chapterIndex)
+                    }
+                }
+            }
+            .navigationTitle("目录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        showChapterList = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var bookmarkSheet: some View {
+        NavigationStack {
+            List {
+                Button {
+                    toggleCurrentBookmark()
+                } label: {
+                    Label(
+                        isCurrentChapterBookmarked ? "取消当前章节书签" : "加入当前章节书签",
+                        systemImage: isCurrentChapterBookmarked ? "bookmark.slash" : "bookmark"
+                    )
+                }
+
+                if bookmarks.isEmpty {
+                    Text("暂无书签")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Section("我的书签") {
+                        ForEach(bookmarks) { bookmark in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(bookmark.chapterTitle)
+                                    .font(.headline)
+                                Text(bookmark.snippet)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .swipeActions {
+                                Button("删除", role: .destructive) {
+                                    appState.bookshelfStore.removeBookmark(bookID: bookID, bookmarkID: bookmark.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("书签")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        showBookmarks = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func toggleCurrentBookmark() {
+        appState.bookshelfStore.toggleBookmark(
+            bookID: bookID,
+            chapterIndex: chapterIndex,
+            chapterTitle: content.title,
+            snippet: content.paragraphs.first ?? content.title
+        )
+        showBookmarks = true
     }
 }
 

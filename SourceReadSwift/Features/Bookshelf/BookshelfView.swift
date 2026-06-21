@@ -141,7 +141,7 @@ struct BookshelfView: View {
             let data = try Data(contentsOf: url)
             let parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
             appState.bookshelfStore.addLocalTextBook(parsed)
-            importMessage = "已导入《\(parsed.title)》，共 \(parsed.paragraphs.count) 段。"
+            importMessage = "已导入《\(parsed.title)》，共 \(parsed.chapters.count) 章、\(parsed.paragraphs.count) 段。"
         } catch {
             importMessage = "导入失败：\(error.localizedDescription)"
         }

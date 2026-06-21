@@ -1,10 +1,12 @@
 import Foundation
+import Combine
 
 @MainActor
 final class AppState: ObservableObject {
     let sourceStore: SourceStore
     let bookshelfStore: BookshelfStore
     private let injectedEngine: SourceEngine?
+    private var cancellables: Set<AnyCancellable> = []
     lazy var engine: SourceEngine = {
         if let injectedEngine {
             return injectedEngine
@@ -26,6 +28,7 @@ final class AppState: ObservableObject {
         self.sourceStore = sourceStore ?? SourceStore()
         self.bookshelfStore = bookshelfStore ?? BookshelfStore()
         self.injectedEngine = engine
+        bindChildStores()
     }
 
     func record(_ event: DiagnosticEvent) {
@@ -33,5 +36,23 @@ final class AppState: ObservableObject {
         if diagnostics.count > 200 {
             diagnostics.removeLast(diagnostics.count - 200)
         }
+    }
+
+    private func bindChildStores() {
+        sourceStore.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
+
+        bookshelfStore.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
     }
 }

@@ -7,11 +7,14 @@ struct BookshelfReaderGatewayView: View {
     @State private var detail: BookDetail?
     @State private var chapters: [BookChapter] = []
     @State private var selectedChapter: BookChapter?
+    @State private var selectedLocalChapterIndex: Int?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
-            if let localContent = book.localContent {
+            if !localBookChapters.isEmpty {
+                localReader
+            } else if let localContent = book.localContent {
                 ReaderView(
                     bookID: book.id,
                     content: ChapterContent(
@@ -24,7 +27,12 @@ struct BookshelfReaderGatewayView: View {
                     totalChapters: 1
                 )
             } else if let selectedChapter {
-                ChapterLoadingView(sourceUrl: book.sourceURL, chapter: selectedChapter, totalChapters: chapters.count)
+                ChapterLoadingView(
+                    sourceUrl: book.sourceURL,
+                    chapter: selectedChapter,
+                    totalChapters: chapters.count,
+                    chapters: chapters
+                )
             } else if let errorMessage {
                 EmptyStateCard(systemImage: "xmark.octagon", title: "阅读恢复失败", message: errorMessage)
                     .padding(AppTheme.pagePadding)
@@ -40,7 +48,49 @@ struct BookshelfReaderGatewayView: View {
         }
     }
 
+    private var localBookChapters: [LocalTextChapter] {
+        book.localChapters ?? []
+    }
+
+    private var localReader: some View {
+        let chapters = localBookChapters
+        let requestedIndex = selectedLocalChapterIndex ?? book.currentChapterIndex
+        let safeIndex = min(max(requestedIndex, 0), max(chapters.count - 1, 0))
+        let localChapter = chapters[safeIndex]
+        let bookChapters = chapters.map {
+            BookChapter(
+                title: $0.title,
+                url: "\(book.bookURL)#\($0.index)",
+                bookUrl: book.bookURL,
+                index: $0.index,
+                isVip: false
+            )
+        }
+        return ReaderView(
+            bookID: book.id,
+            content: ChapterContent(
+                chapter: bookChapters[safeIndex],
+                title: localChapter.title,
+                paragraphs: localChapter.paragraphs,
+                nextContentUrl: nil
+            ),
+            chapterIndex: safeIndex,
+            totalChapters: chapters.count,
+            chapters: bookChapters,
+            onSelectChapter: { chapter in
+                selectedLocalChapterIndex = chapter.index
+                appState.bookshelfStore.updateReadingProgress(
+                    bookID: book.id,
+                    chapterIndex: chapter.index,
+                    chapterTitle: chapter.title,
+                    totalChapters: chapters.count
+                )
+            }
+        )
+    }
+
     private func resumeReading() async {
+        guard book.localChapters == nil, book.localContent == nil else { return }
         guard selectedChapter == nil, errorMessage == nil else { return }
         guard let source = appState.sourceStore.source(for: book.sourceURL) else {
             errorMessage = "找不到书源：\(book.sourceName)"

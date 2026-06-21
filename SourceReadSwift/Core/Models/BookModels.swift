@@ -39,3 +39,24 @@ struct ChapterContent: Codable, Hashable, Sendable {
     let nextContentUrl: String?
 }
 
+struct ReaderBookmark: Identifiable, Codable, Hashable, Sendable {
+    let id: String
+    let chapterIndex: Int
+    let chapterTitle: String
+    let snippet: String
+    let createdAt: Date
+
+    init(
+        id: String = UUID().uuidString,
+        chapterIndex: Int,
+        chapterTitle: String,
+        snippet: String,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.chapterIndex = chapterIndex
+        self.chapterTitle = chapterTitle
+        self.snippet = snippet
+        self.createdAt = createdAt
+    }
+}

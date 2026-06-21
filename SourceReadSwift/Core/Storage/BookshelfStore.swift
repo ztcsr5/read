@@ -42,6 +42,10 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    func book(id: String) -> BookshelfBook? {
+        books.first { $0.id == id }
+    }
+
     func updateDetails(
         bookID: String,
         latestChapterTitle: String?,
@@ -72,6 +76,40 @@ final class BookshelfStore: ObservableObject {
 
     func remove(bookID: String) {
         books.removeAll { $0.id == bookID }
+        persist()
+    }
+
+    func isBookmarked(bookID: String, chapterIndex: Int) -> Bool {
+        book(id: bookID)?.bookmarks?.contains { $0.chapterIndex == chapterIndex } ?? false
+    }
+
+    func toggleBookmark(
+        bookID: String,
+        chapterIndex: Int,
+        chapterTitle: String,
+        snippet: String
+    ) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        var bookmarks = books[index].bookmarks ?? []
+        if let existingIndex = bookmarks.firstIndex(where: { $0.chapterIndex == chapterIndex }) {
+            bookmarks.remove(at: existingIndex)
+        } else {
+            bookmarks.insert(
+                ReaderBookmark(
+                    chapterIndex: chapterIndex,
+                    chapterTitle: chapterTitle,
+                    snippet: snippet
+                ),
+                at: 0
+            )
+        }
+        books[index].bookmarks = bookmarks
+        persist()
+    }
+
+    func removeBookmark(bookID: String, bookmarkID: String) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].bookmarks?.removeAll { $0.id == bookmarkID }
         persist()
     }
 

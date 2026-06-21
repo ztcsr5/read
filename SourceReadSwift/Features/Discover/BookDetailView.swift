@@ -86,7 +86,12 @@ struct BookDetailView: View {
 
             ForEach(Array(chapters.prefix(80))) { chapter in
                 NavigationLink {
-                    ChapterLoadingView(sourceUrl: book.sourceUrl, chapter: chapter, totalChapters: chapters.count)
+                    ChapterLoadingView(
+                        sourceUrl: book.sourceUrl,
+                        chapter: chapter,
+                        totalChapters: chapters.count,
+                        chapters: chapters
+                    )
                 } label: {
                     HStack {
                         Text(chapter.title)
@@ -142,8 +147,14 @@ struct ChapterLoadingView: View {
     let sourceUrl: String
     let chapter: BookChapter
     var totalChapters: Int? = nil
+    var chapters: [BookChapter] = []
     @State private var content: ChapterContent?
+    @State private var currentChapter: BookChapter?
     @State private var errorMessage: String?
+
+    private var effectiveChapter: BookChapter {
+        currentChapter ?? chapter
+    }
 
     var body: some View {
         Group {
@@ -151,8 +162,14 @@ struct ChapterLoadingView: View {
                 ReaderView(
                     bookID: "\(sourceUrl)|\(chapter.bookUrl)",
                     content: content,
-                    chapterIndex: chapter.index,
-                    totalChapters: totalChapters
+                    chapterIndex: effectiveChapter.index,
+                    totalChapters: totalChapters,
+                    chapters: chapters,
+                    onSelectChapter: { selected in
+                        currentChapter = selected
+                        content = nil
+                        errorMessage = nil
+                    }
                 )
             } else if let errorMessage {
                 EmptyStateCard(systemImage: "xmark.octagon", title: "正文加载失败", message: errorMessage)
@@ -167,15 +184,24 @@ struct ChapterLoadingView: View {
         .task {
             await load()
         }
+        .onChange(of: currentChapter) { _ in
+            Task {
+                await load(force: true)
+            }
+        }
     }
 
-    private func load() async {
+    private func load(force: Bool = false) async {
+        if force {
+            content = nil
+            errorMessage = nil
+        }
         guard content == nil, errorMessage == nil else { return }
         guard let source = appState.sourceStore.source(for: sourceUrl) else {
             errorMessage = "找不到书源"
             return
         }
-        switch await appState.engine.getContent(source: source, chapter: chapter) {
+        switch await appState.engine.getContent(source: source, chapter: effectiveChapter) {
         case .success(let loaded):
             content = loaded
         case .failure(let error):
