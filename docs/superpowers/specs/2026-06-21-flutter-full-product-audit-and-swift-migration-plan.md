@@ -858,6 +858,7 @@ Completed since the initial audit:
   - Scroll mode tracks the top visible paragraph with a Geometry preference and persists it when the visible paragraph changes.
   - Manual scroll progress writes are debounced and flushed when the reader closes, reducing persistence work during fast scrolling.
   - Long chapters use sampled paragraph geometry tracking and direct index iteration to reduce layout measurement and temporary allocation during fast scrolling.
+  - Tap-zone page movement updates the visible paragraph state immediately and persists it through the same debounced path.
 - Improved reader bookmarks:
   - Bookmarks now store an optional paragraph index and snippet from the current visible/page paragraph.
   - Same-chapter bookmarks jump directly to the bookmarked paragraph; cross-chapter jumps pre-save the target paragraph so the next chapter restores near the bookmark.

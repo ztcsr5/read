@@ -840,9 +840,9 @@ struct ReaderView: View {
     private func runTapAction(_ action: ReaderTapAction) {
         switch action {
         case .previousPage:
-            autoScrollTarget = max(0, autoScrollTarget - 1)
+            moveReaderTarget(to: autoScrollTarget - 1)
         case .nextPage:
-            autoScrollTarget = min(maximumReaderTarget, autoScrollTarget + 1)
+            moveReaderTarget(to: autoScrollTarget + 1)
         case .previousChapter:
             selectRelativeChapter(offset: -1)
         case .nextChapter:
@@ -852,6 +852,20 @@ struct ReaderView: View {
         case .disabled:
             break
         }
+    }
+
+    private func moveReaderTarget(to rawTarget: Int) {
+        let target = min(max(rawTarget, 0), maximumReaderTarget)
+        autoScrollTarget = target
+        let paragraphIndex: Int
+        switch readerMode {
+        case .scroll:
+            paragraphIndex = min(target, max(content.paragraphs.count - 1, 0))
+        case .pageTurn, .cover:
+            paragraphIndex = min(max(target - 1, 0), max(content.paragraphs.count - 1, 0))
+        }
+        visibleParagraphIndex = paragraphIndex
+        scheduleReadingPositionPersistence(paragraphIndex: paragraphIndex)
     }
 
     private func toggleOverlay() {
