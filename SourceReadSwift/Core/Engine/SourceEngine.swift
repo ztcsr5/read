@@ -38,6 +38,7 @@ final class LegadoSourceEngine: SourceEngine {
         case .success(let value):
             searchUrl = value
         case .failure(let error):
+            await emitFailure(error, stage: "search.url", source: source)
             return .failure(error)
         }
 
@@ -45,10 +46,17 @@ final class LegadoSourceEngine: SourceEngine {
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "search.load") {
         case .success(let response):
             guard !response.body.isEmpty else {
-                return .failure(.empty("\u{641c}\u{7d22}\u{54cd}\u{5e94}\u{4e3a}\u{7a7a}"))
+                let error = SourceEngineError.empty("\u{641c}\u{7d22}\u{54cd}\u{5e94}\u{4e3a}\u{7a7a}")
+                await emitFailure(error, stage: "search.empty", source: source, details: ["url": response.url.absoluteString])
+                return .failure(error)
             }
-            return SearchResultParser().parse(source: source, response: response)
+            let parsed = SearchResultParser().parse(source: source, response: response)
+            if case .failure(let error) = parsed {
+                await emitFailure(error, stage: "search.parse", source: source, details: ["url": response.url.absoluteString])
+            }
+            return parsed
         case .failure(let error):
+            await emitFailure(error, stage: "search.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
         }
     }
@@ -57,8 +65,13 @@ final class LegadoSourceEngine: SourceEngine {
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
-            return BookDetailParser().parse(source: source, book: book, response: response)
+            let parsed = BookDetailParser().parse(source: source, book: book, response: response)
+            if case .failure(let error) = parsed {
+                await emitFailure(error, stage: "detail.parse", source: source, details: ["url": response.url.absoluteString])
+            }
+            return parsed
         case .failure(let error):
+            await emitFailure(error, stage: "detail.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
         }
     }
@@ -67,8 +80,13 @@ final class LegadoSourceEngine: SourceEngine {
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
-            return ChapterListParser().parse(source: source, book: book, response: response)
+            let parsed = ChapterListParser().parse(source: source, book: book, response: response)
+            if case .failure(let error) = parsed {
+                await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
+            }
+            return parsed
         case .failure(let error):
+            await emitFailure(error, stage: "toc.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
         }
     }
@@ -77,8 +95,13 @@ final class LegadoSourceEngine: SourceEngine {
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
-            return ContentParser().parse(source: source, chapter: chapter, response: response)
+            let parsed = ContentParser().parse(source: source, chapter: chapter, response: response)
+            if case .failure(let error) = parsed {
+                await emitFailure(error, stage: "content.parse", source: source, details: ["url": response.url.absoluteString])
+            }
+            return parsed
         case .failure(let error):
+            await emitFailure(error, stage: "content.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
         }
     }
@@ -143,5 +166,20 @@ final class LegadoSourceEngine: SourceEngine {
             return max(0.5, min(value / 1000, 20))
         }
         return 3
+    }
+
+    private func emitFailure(
+        _ error: SourceEngineError,
+        stage: String,
+        source: BookSource,
+        details: [String: String] = [:]
+    ) async {
+        await diagnostics.emit(.init(
+            level: .warning,
+            stage: stage,
+            sourceName: source.bookSourceName,
+            message: error.displayMessage,
+            details: details
+        ))
     }
 }
