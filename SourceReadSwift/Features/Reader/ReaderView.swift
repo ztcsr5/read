@@ -167,10 +167,14 @@ struct ReaderView: View {
                         .padding(.bottom, CGFloat(titleSpacing))
                         .id(-1)
 
-                    ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                        paragraphText(paragraph, index: index)
+                    ForEach(content.paragraphs.indices, id: \.self) { index in
+                        paragraphText(content.paragraphs[index], index: index)
                             .id(index)
-                            .background(paragraphPositionReader(index: index))
+                            .background {
+                                if shouldTrackParagraphPosition(index) {
+                                    paragraphPositionReader(index: index)
+                                }
+                            }
                     }
                 }
                 .padding(CGFloat(pagePadding))
@@ -217,9 +221,9 @@ struct ReaderView: View {
             .padding(CGFloat(pagePadding))
             .tag(0)
 
-            ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
+            ForEach(content.paragraphs.indices, id: \.self) { index in
                 ScrollView {
-                    paragraphText(paragraph, index: index)
+                    paragraphText(content.paragraphs[index], index: index)
                         .padding(CGFloat(pagePadding))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -257,6 +261,26 @@ struct ReaderView: View {
                 key: ParagraphPositionPreferenceKey.self,
                 value: [ParagraphPosition(index: index, minY: proxy.frame(in: .named("readerScroll")).minY)]
             )
+        }
+    }
+
+    private func shouldTrackParagraphPosition(_ index: Int) -> Bool {
+        index == 0
+            || index == visibleParagraphIndex
+            || index == speechController.currentParagraphIndex
+            || index % paragraphTrackingStride == 0
+    }
+
+    private var paragraphTrackingStride: Int {
+        switch content.paragraphs.count {
+        case 0...180:
+            return 1
+        case 181...600:
+            return 3
+        case 601...1_500:
+            return 5
+        default:
+            return 8
         }
     }
 
