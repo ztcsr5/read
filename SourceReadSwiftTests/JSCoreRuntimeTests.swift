@@ -224,4 +224,24 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "A\nB|A,B")
     }
+
+    func testNativeGetStringIgnoresBooleanFlagWhenUsingDefaultHtml() throws {
+        let html = """
+        <html><body>
+          <h2>Title</h2>
+          <a href="/1">One</a>
+          <a href="/2">Two</a>
+        </body></html>
+        """
+        let script = """
+        java.getString('h2@text', true) + '|' + java.getStringList('a@text', false).join(',')
+        """
+
+        let result = JSCoreRuntime().evaluate(script, variables: ["result": html, "baseUrl": "https://example.com"])
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "Title|One,Two")
+    }
 }

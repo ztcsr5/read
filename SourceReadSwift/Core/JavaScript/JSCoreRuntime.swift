@@ -186,14 +186,15 @@ final class JSCoreRuntime {
           return String(typeof baseUrl === 'undefined' ? '' : baseUrl);
         }
         java.getString = function(input, rule) {
-          if (arguments.length <= 1) {
+          if (arguments.length <= 1 || typeof rule === 'boolean') {
             return __native_getString(__defaultHtml(), String(input), __defaultBaseUrl());
           }
           return __native_getString(String(input), String(rule), __defaultBaseUrl());
         };
         java.getStringList = function(input, rule) {
-          var pageHtml = arguments.length <= 1 ? __defaultHtml() : String(input);
-          var actualRule = arguments.length <= 1 ? String(input) : String(rule);
+          var useDefaultHtml = arguments.length <= 1 || typeof rule === 'boolean';
+          var pageHtml = useDefaultHtml ? __defaultHtml() : String(input);
+          var actualRule = useDefaultHtml ? String(input) : String(rule);
           var list = __native_getStringList(pageHtml, actualRule, __defaultBaseUrl());
           var out = [];
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));

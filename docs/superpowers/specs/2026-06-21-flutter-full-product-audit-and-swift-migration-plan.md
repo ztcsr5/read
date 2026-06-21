@@ -818,6 +818,7 @@ Completed since the initial audit:
   - Added URI/base64/hash aliases: `java.encodeURI`, `java.encodeURIComponent`, `java.decodeURI`, `java.decodeURIComponent`, `java.md5Encode`, `java.base64DecodeToString`, `java.base64Decoder`, `java.unbase64`, and global `unbase64`.
   - Added `java.sha1`, `CryptoJS.SHA1`, `CryptoJS.HmacSHA256`, and minimal `CryptoJS.enc.Utf8/Hex/Base64` parse/stringify support for common signing snippets.
   - `java.getString(rule)`, `java.getStringList(rule)`, and `java.getElements(rule)` can now read from the current global `html` / `result` content, matching common one-argument Legado JS snippets.
+  - `java.getString(rule, true/false)` and `java.getStringList(rule, true/false)` treat the boolean as a Legado-style extraction flag instead of accidentally using it as the rule string.
 - Improved search URL compatibility:
   - `{{source.xxx}}` placeholders now resolve from imported raw source fields and normalized source metadata.
   - Search URL JavaScript can read `source.bookSourceUrl`, `source.bookSourceName`, aliases, and raw custom fields.
