@@ -57,7 +57,7 @@ final class JSCoreRuntime {
         let getString: @convention(block) (String, String, String) -> String = { html, rule, baseUrl in
             do {
                 let document = try SwiftSoup.parse(html, baseUrl)
-                return try Self.extractString(from: document, rule: rule)
+                return try Self.extractString(from: document, rule: rule, baseUrl: URL(string: baseUrl))
             } catch {
                 return ""
             }
@@ -65,7 +65,7 @@ final class JSCoreRuntime {
         let getStringList: @convention(block) (String, String, String) -> NSArray = { html, rule, baseUrl in
             do {
                 let document = try SwiftSoup.parse(html, baseUrl)
-                let values = try Self.extractStringList(from: document, rule: rule)
+                let values = try Self.extractStringList(from: document, rule: rule, baseUrl: URL(string: baseUrl))
                 return values as NSArray
             } catch {
                 return [] as NSArray
@@ -147,35 +147,26 @@ final class JSCoreRuntime {
         context.evaluateScript(prelude)
     }
 
-    private static func extractString(from document: Document, rule: String) throws -> String {
-        let parts = rule.components(separatedBy: "@")
-        let selector = normalizeSelector(parts.first ?? "")
-        let attr = parts.dropFirst().first ?? "text"
-        let element = selector.isEmpty ? document : try document.select(selector).first() ?? document
-        return try extractValue(from: element, attr: attr)
+    private static func extractString(from document: Document, rule: String, baseUrl: URL?) throws -> String {
+        try HtmlRuleExtractor().value(from: document, rule: rule, baseUrl: baseUrl)
     }
 
-    private static func extractStringList(from document: Document, rule: String) throws -> [String] {
-        let parts = rule.components(separatedBy: "@")
-        let selector = normalizeSelector(parts.first ?? "")
-        let attr = parts.dropFirst().first ?? "text"
-        let elements: [Element] = selector.isEmpty ? [document] : try document.select(selector).array()
-        return try elements.map { try extractValue(from: $0, attr: attr) }.filter { !$0.isEmpty }
-    }
-
-    private static func extractValue(from element: Element, attr: String) throws -> String {
-        if attr == "text" {
-            return try element.text().trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if attr == "html" {
-            return try element.html().trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return try element.attr(attr).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func normalizeSelector(_ selector: String) -> String {
-        selector
+    private static func extractStringList(from document: Document, rule: String, baseUrl: URL?) throws -> [String] {
+        let split = splitSelectorAndAttribute(rule)
+        let css = split.selector
             .replacingOccurrences(of: "&&", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let elements: [Element] = css.isEmpty ? [document] : try document.select(css).array()
+        return try elements.map {
+            try HtmlRuleExtractor().value(from: $0, rule: "@\(split.attribute)", baseUrl: baseUrl)
+        }.filter { !$0.isEmpty }
+    }
+
+    private static func splitSelectorAndAttribute(_ rule: String) -> (selector: String, attribute: String) {
+        let parts = rule.components(separatedBy: "@")
+        guard parts.count > 1 else {
+            return (rule, "text")
+        }
+        return (parts.dropLast().joined(separator: "@"), parts.last ?? "text")
     }
 }

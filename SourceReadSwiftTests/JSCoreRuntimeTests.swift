@@ -39,4 +39,30 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "/b/1|\(title)")
     }
+
+    func testNativeGetStringSupportsEnhancedHtmlRules() throws {
+        let html = """
+        <html><body>
+          <a class='chapter' href='/c/1'>One</a>
+          <a class='chapter' href='/c/2'>Two</a>
+          <div class='intro'>Outer <span>Inner</span> Tail</div>
+        </body></html>
+        """
+
+        let indexed = JSCoreRuntime().evaluate(
+            "java.getString(html, '.chapter@1@href')",
+            variables: ["html": html, "baseUrl": "https://example.com"]
+        )
+        let ownText = JSCoreRuntime().evaluate(
+            "java.getString(html, '.intro@ownText')",
+            variables: ["html": html, "baseUrl": "https://example.com"]
+        )
+
+        guard case .success(let indexedValue) = indexed,
+              case .success(let ownTextValue) = ownText else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(indexedValue, "https://example.com/c/2")
+        XCTAssertEqual(ownTextValue, "Outer Tail")
+    }
 }
