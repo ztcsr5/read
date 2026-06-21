@@ -48,10 +48,7 @@ struct JSONRuleExtractor {
 
     private func valueForSinglePath(from object: Any, path: String) -> Any? {
         var current: Any? = object
-        let parts = path
-            .components(separatedBy: ".")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let parts = tokenize(path)
 
         for part in parts {
             guard let existing = current else { return nil }
@@ -59,11 +56,30 @@ struct JSONRuleExtractor {
                 current = dict[part] ?? dict[part.lowercased()] ?? dict[part.uppercased()]
             } else if let array = existing as? [Any], let index = Int(part), array.indices.contains(index) {
                 current = array[index]
+            } else if let array = existing as? [Any], part == "*" {
+                current = array
+            } else if let array = existing as? [Any] {
+                current = array.compactMap { element -> Any? in
+                    guard let dict = element as? [String: Any] else { return nil }
+                    return dict[part] ?? dict[part.lowercased()] ?? dict[part.uppercased()]
+                }
             } else {
                 return nil
             }
         }
         return current
+    }
+
+    private func tokenize(_ path: String) -> [String] {
+        path
+            .components(separatedBy: ".")
+            .flatMap { part in
+                part
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .components(separatedBy: "/")
+            }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private func normalize(_ rule: String) -> String {
@@ -85,7 +101,8 @@ struct JSONRuleExtractor {
                 .joined(separator: ".")
         }
         output = output.replacingOccurrences(of: #"\[['"]?([^'"\]]+)['"]?\]"#, with: ".$1", options: .regularExpression)
-        output = output.replacingOccurrences(of: #"\[\*\]"#, with: "", options: .regularExpression)
+        output = output.replacingOccurrences(of: #"\[(\d+)\]"#, with: ".$1", options: .regularExpression)
+        output = output.replacingOccurrences(of: #"\[\*\]"#, with: ".*", options: .regularExpression)
         return output.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
     }
 

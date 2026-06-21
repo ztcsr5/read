@@ -63,4 +63,34 @@ final class JSONRuleExtractorTests: XCTestCase {
 
         XCTAssertEqual(value, title)
     }
+
+    func testExtractArrayIndexPath() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "items": [
+                    ["title": "First"],
+                    ["title": "Second"]
+                ]
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$.data.items[1].title") as? String
+        XCTAssertEqual(value, "Second")
+    }
+
+    func testExtractWildcardPathReturnsFieldArray() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "items": [
+                    ["title": "First"],
+                    ["title": "Second"]
+                ]
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$.data.items[*].title") as? [Any]
+        XCTAssertEqual(value as? [String], ["First", "Second"])
+    }
 }
