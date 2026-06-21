@@ -36,6 +36,9 @@ final class WebViewFallback: NSObject, WKNavigationDelegate {
                 continuation.resume(returning: cookies)
             }
         }
+        for cookie in cookies {
+            HTTPCookieStorage.shared.setCookie(cookie)
+        }
         await cookieStore.storeWebViewCookies(cookies)
     }
 
