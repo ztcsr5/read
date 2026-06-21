@@ -385,12 +385,18 @@ struct SourceManagerView: View {
     }
 
     private func catalogRow(_ catalog: SourceCatalog) -> some View {
+        let badges = catalog.importedCount > 0 ? ["仓库", "已导入 \(catalog.importedCount)"] : ["仓库"]
+        let statusLine = [
+            catalog.group,
+            catalog.lastImportedAt.map { "最近导入 \($0.formatted(date: .abbreviated, time: .shortened))" }
+        ].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+
         sourceCard(
             title: catalog.name,
             subtitle: catalog.importUrl ?? catalog.url,
-            group: catalog.group,
+            group: statusLine,
             enabled: catalog.enabled,
-            badges: ["仓库"],
+            badges: badges,
             actions: {
                 Button(catalog.enabled ? "停用" : "启用") {
                     appState.sourceStore.setCatalogsEnabled(!catalog.enabled, for: [catalog.url])
@@ -1006,7 +1012,7 @@ struct SourceManagerView: View {
 
     private func importCatalog(_ catalog: SourceCatalog) async {
         importURL = catalog.importUrl ?? catalog.url
-        await importFromURL()
+        await importFromURL(catalogURL: catalog.url)
     }
 
     private func pasteFromClipboard() {
@@ -1015,7 +1021,7 @@ struct SourceManagerView: View {
         importError = importText.isEmpty ? "剪贴板没有文本" : nil
     }
 
-    private func importFromURL() async {
+    private func importFromURL(catalogURL: String? = nil) async {
         do {
             let text = importURL.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let url = URL(string: normalizeImportURL(text)) else {
@@ -1031,6 +1037,9 @@ struct SourceManagerView: View {
                 throw SourceImportError.challengePage
             }
             let report = try appState.sourceStore.importJSON(decoded)
+            if let catalogURL {
+                appState.sourceStore.recordCatalogImport(url: catalogURL, report: report)
+            }
             importURL = ""
             importError = nil
             importMessage = "URL \(report.userMessage)"

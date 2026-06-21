@@ -192,6 +192,14 @@ final class SourceStore: ObservableObject {
         saveAfterMutation()
     }
 
+    func recordCatalogImport(url: String, report: SourceImportReport) {
+        guard let index = catalogs.firstIndex(where: { $0.url == url }) else { return }
+        catalogs[index].importedCount = report.totalAdded + report.totalUpdated
+        catalogs[index].lastStatus = report.userMessage
+        catalogs[index].lastImportedAt = Date()
+        saveAfterMutation()
+    }
+
     private func saveAfterMutation() {
         do {
             try persist()

@@ -204,7 +204,7 @@ struct SourceCatalog: Identifiable, Codable, Hashable, Sendable {
             enabled: (try? container.decode(Bool.self, forKey: DynamicCodingKey("enabled"))) ?? true,
             importedCount: (try? container.decode(Int.self, forKey: DynamicCodingKey("importedCount"))) ?? 0,
             lastStatus: string("lastStatus"),
-            lastImportedAt: nil
+            lastImportedAt: try? container.decode(Date.self, forKey: DynamicCodingKey("lastImportedAt"))
         )
     }
 

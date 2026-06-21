@@ -513,7 +513,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Reading progress | Partial | Chapter, scroll, char offset, percentage, last read | Reopen restores exact state | P1 |
 | Source import links | Partial/unknown | Port yuedu/legado/shared-text parser | Port `source_import_link_parser_test.dart` | P1 |
 | JSON import wrappers | Partial | Support `data/list/items/bookSources/sources/bookSource` | Port `source_import_test.dart` | P1 |
-| Source catalogs | Missing/partial | Model, import, list, browse, import catalog | XCTest + UI smoke | P2 |
+| Source catalogs | Partial | Model/import/list/catalog import and import status exist; rich remote browsing/filtering still needed | XCTest + UI smoke | P2 |
 | RSS | Partial | RSS model/import/article list exists; in-app article reader and rule-based RSS content still needed | RSS fixture test | P2 |
 | Source manager batch ops | Partial | Batch delete/enable/disable exists; batch test still needed | Unit + UI smoke | P2 |
 | Source JSON editor | Partial | Book source JSON edit/save exists; RSS/catalog edit and lossless re-export still needed | Edit-save-import test | P2 |
@@ -804,6 +804,10 @@ Completed since the initial audit:
   - Source Manager management mode now supports selected-source batch search checks.
   - Batch results classify each source as PASS/WARN/FAIL and surface focused search-stage advice.
   - Single-source deep testing remains available for search -> detail -> TOC -> content verification.
+- Improved source catalogs:
+  - Catalog import now records imported count, last status, and last imported time.
+  - Catalog rows surface import count and recent import time instead of hiding status in JSON.
+  - Catalog status persistence is covered by unit tests.
 
 Still not complete:
 

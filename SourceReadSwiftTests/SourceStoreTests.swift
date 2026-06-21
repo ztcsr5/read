@@ -299,6 +299,37 @@ final class SourceStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testRecordsCatalogImportStatus() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        {
+          "name": "Catalog",
+          "url": "https://catalog.example.com/list.json",
+          "importUrl": "https://catalog.example.com/sources.json"
+        }
+        """)
+
+        store.recordCatalogImport(
+            url: "https://catalog.example.com/list.json",
+            report: SourceImportReport(addedBookSources: 2, updatedBookSources: 1)
+        )
+
+        let catalog = try XCTUnwrap(store.catalogs.first)
+        XCTAssertEqual(catalog.importedCount, 3)
+        XCTAssertTrue(catalog.lastStatus?.contains("新增 2") == true)
+        XCTAssertNotNil(catalog.lastImportedAt)
+
+        let reloaded = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+        let persisted = try XCTUnwrap(reloaded.catalogs.first)
+        XCTAssertEqual(persisted.importedCount, 3)
+        XCTAssertEqual(persisted.lastStatus, catalog.lastStatus)
+        XCTAssertNotNil(persisted.lastImportedAt)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testImportsMixedBookSourceRSSAndCatalog() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
