@@ -61,14 +61,17 @@ Useful ideas:
 Current SourceReadSwift status:
 
 - Reader can load online/local chapters, track progress/session stats, switch source, and expose controls.
-- True chapter content cache/preload is still incomplete.
+- Online chapter cache now exists and is used before network loads.
+- Successful online chapter parses are cached by source URL, chapter URL, and active purify-rule signature.
+- Reader loading preloads the next two chapters in the background.
+- If a network reload fails after purify rules changed, reader loading can fall back to stale cached content for the same source/chapter instead of failing the reading session outright.
+- Settings can show cache count/estimated size and clear/remove expired cache entries.
 
 Do next:
 
-- Add `ChapterContentCacheStore` as a Swift-native JSON or SQLite-backed store.
-- Cache successful online chapter parses by source URL + chapter URL + purify rule version.
-- Preload next 2-5 chapters after current chapter load.
-- Expose cache stats and clear-cache actions in Settings.
+- Surface a subtle "using cached copy" state in the reader when stale fallback is used.
+- Make preload count configurable after the reader settings model is split into a dedicated view model.
+- Add device QA for cache growth, low-storage behavior, airplane-mode reading, and cache cleanup.
 
 ### Data model
 
@@ -120,6 +123,7 @@ Implemented in `SourceReadSwift` after this audit:
 - Safe integer page arithmetic in `{{...}}`, e.g. `{{(page - 1) * 10}}`.
 - JS network helpers now return response-like objects with `body()`, `text()`, `toString()`, and `valueOf()` while preserving string coercion.
 - Unit coverage in `SourceReadSwiftTests/SearchURLResolverTests.swift`.
+- Chapter content cache/preload and stale-cache fallback are now implemented in clean Swift-native storage code.
 
 ## Not worth copying
 
