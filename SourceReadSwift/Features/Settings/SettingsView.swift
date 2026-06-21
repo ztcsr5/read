@@ -26,6 +26,12 @@ struct SettingsView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
+                                ForEach(event.details.sorted(by: { $0.key < $1.key }), id: \.key) { item in
+                                    Text("\(item.key): \(item.value)")
+                                        .font(.caption2)
+                                        .lineLimit(2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -35,4 +41,3 @@ struct SettingsView: View {
         }
     }
 }
-
