@@ -89,11 +89,11 @@ Useful ideas:
 Current SourceReadSwift status:
 
 - JSON persistence is acceptable for the current rewrite milestone but not final App Store-grade durability.
-- Bookmarks and purify rules exist but are simpler than the reference.
+- Bookmarks now support paragraph-level positions; purify rules exist but are simpler than the reference.
 
 Do next:
 
-- Extend bookmarks with paragraph/character offset.
+- Extend bookmarks with optional character offset if future text-selection notes need exact intra-paragraph positions.
 - Extend purify rules with name, group, order, regex flag, and scope.
 - Decide before release whether to stay on JSON stores or move durable app data to SQLite/GRDB.
 

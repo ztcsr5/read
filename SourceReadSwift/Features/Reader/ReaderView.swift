@@ -23,6 +23,7 @@ struct ReaderView: View {
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var positionPersistTask: Task<Void, Never>?
+    @State private var paragraphJumpRequest: ParagraphJumpRequest?
     @State private var sessionStartedAt = Date()
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
@@ -60,7 +61,20 @@ struct ReaderView: View {
     }
 
     private var isCurrentChapterBookmarked: Bool {
-        appState.bookshelfStore.isBookmarked(bookID: bookID, chapterIndex: chapterIndex)
+        appState.bookshelfStore.isBookmarked(
+            bookID: bookID,
+            chapterIndex: chapterIndex,
+            paragraphIndex: currentBookmarkParagraphIndex
+        )
+    }
+
+    private var currentBookmarkParagraphIndex: Int {
+        switch readerMode {
+        case .scroll:
+            return min(max(visibleParagraphIndex, 0), max(content.paragraphs.count - 1, 0))
+        case .pageTurn, .cover:
+            return min(max(autoScrollTarget - 1, 0), max(content.paragraphs.count - 1, 0))
+        }
     }
 
     private var progressTitle: String {
@@ -185,6 +199,12 @@ struct ReaderView: View {
                 guard content.paragraphs.indices.contains(target) else { return }
                 withAnimation(.easeInOut(duration: 0.45)) {
                     proxy.scrollTo(target, anchor: .top)
+                }
+            }
+            .onChange(of: paragraphJumpRequest) { target in
+                guard let target, content.paragraphs.indices.contains(target.index) else { return }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(target.index, anchor: .top)
                 }
             }
             .onChange(of: speechController.currentParagraphIndex) { target in
@@ -692,7 +712,7 @@ struct ReaderView: View {
                     toggleCurrentBookmark()
                 } label: {
                     Label(
-                        isCurrentChapterBookmarked ? "取消当前章节书签" : "加入当前章节书签",
+                        isCurrentChapterBookmarked ? "取消当前段落书签" : "加入当前段落书签",
                         systemImage: isCurrentChapterBookmarked ? "bookmark.slash" : "bookmark"
                     )
                 }
@@ -711,6 +731,11 @@ struct ReaderView: View {
                                         Text(bookmark.chapterTitle)
                                             .font(.headline)
                                             .foregroundStyle(.primary)
+                                        if let paragraphIndex = bookmark.paragraphIndex {
+                                            Text("第 \(paragraphIndex + 1) 段")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(AppTheme.accent)
+                                        }
                                         Text(bookmark.snippet)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -727,7 +752,7 @@ struct ReaderView: View {
                                     }
                                 }
                             }
-                            .disabled(bookmark.chapterIndex == chapterIndex || onSelectChapter == nil)
+                            .disabled(bookmark.chapterIndex != chapterIndex && onSelectChapter == nil)
                             .swipeActions {
                                 Button("删除", role: .destructive) {
                                     appState.bookshelfStore.removeBookmark(bookID: bookID, bookmarkID: bookmark.id)
@@ -751,10 +776,37 @@ struct ReaderView: View {
     }
 
     private func jumpToBookmark(_ bookmark: ReaderBookmark) {
-        guard let target = chapters.first(where: { $0.index == bookmark.chapterIndex }) else { return }
         showBookmarks = false
         showOverlay = false
-        onSelectChapter?(target)
+        if bookmark.chapterIndex == chapterIndex {
+            jumpToParagraph(bookmark.paragraphIndex)
+        } else {
+            guard let target = chapters.first(where: { $0.index == bookmark.chapterIndex }) else { return }
+            if let paragraphIndex = bookmark.paragraphIndex {
+                appState.bookshelfStore.updateReadingProgress(
+                    bookID: bookID,
+                    chapterIndex: bookmark.chapterIndex,
+                    chapterTitle: bookmark.chapterTitle,
+                    totalChapters: totalChapters ?? 0,
+                    paragraphIndex: paragraphIndex
+                )
+            }
+            onSelectChapter?(target)
+        }
+    }
+
+    private func jumpToParagraph(_ paragraphIndex: Int?) {
+        guard let paragraphIndex else { return }
+        let safeIndex = min(max(paragraphIndex, 0), max(content.paragraphs.count - 1, 0))
+        visibleParagraphIndex = safeIndex
+        switch readerMode {
+        case .scroll:
+            autoScrollTarget = safeIndex
+            paragraphJumpRequest = ParagraphJumpRequest(index: safeIndex)
+        case .pageTurn, .cover:
+            autoScrollTarget = min(safeIndex + 1, maximumReaderTarget)
+        }
+        persistReadingPosition(paragraphIndexOverride: safeIndex)
     }
 
     private func canSelectRelativeChapter(offset: Int) -> Bool {
@@ -822,11 +874,16 @@ struct ReaderView: View {
     }
 
     private func toggleCurrentBookmark() {
+        let paragraphIndex = currentBookmarkParagraphIndex
+        let snippet = content.paragraphs.indices.contains(paragraphIndex)
+            ? content.paragraphs[paragraphIndex]
+            : content.title
         appState.bookshelfStore.toggleBookmark(
             bookID: bookID,
             chapterIndex: chapterIndex,
             chapterTitle: content.title,
-            snippet: content.paragraphs.first ?? content.title
+            paragraphIndex: paragraphIndex,
+            snippet: snippet
         )
         showBookmarks = true
     }
@@ -959,6 +1016,11 @@ private struct ParagraphPositionPreferenceKey: PreferenceKey {
     static func reduce(value: inout [ParagraphPosition], nextValue: () -> [ParagraphPosition]) {
         value.append(contentsOf: nextValue())
     }
+}
+
+private struct ParagraphJumpRequest: Equatable {
+    let id = UUID()
+    let index: Int
 }
 
 final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {

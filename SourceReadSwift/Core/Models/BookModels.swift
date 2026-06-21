@@ -43,6 +43,7 @@ struct ReaderBookmark: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let chapterIndex: Int
     let chapterTitle: String
+    let paragraphIndex: Int?
     let snippet: String
     let createdAt: Date
 
@@ -50,12 +51,14 @@ struct ReaderBookmark: Identifiable, Codable, Hashable, Sendable {
         id: String = UUID().uuidString,
         chapterIndex: Int,
         chapterTitle: String,
+        paragraphIndex: Int? = nil,
         snippet: String,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.chapterIndex = chapterIndex
         self.chapterTitle = chapterTitle
+        self.paragraphIndex = paragraphIndex
         self.snippet = snippet
         self.createdAt = createdAt
     }

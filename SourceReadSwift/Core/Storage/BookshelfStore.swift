@@ -131,25 +131,31 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
-    func isBookmarked(bookID: String, chapterIndex: Int) -> Bool {
-        book(id: bookID)?.bookmarks?.contains { $0.chapterIndex == chapterIndex } ?? false
+    func isBookmarked(bookID: String, chapterIndex: Int, paragraphIndex: Int? = nil) -> Bool {
+        book(id: bookID)?.bookmarks?.contains {
+            $0.chapterIndex == chapterIndex && $0.paragraphIndex == paragraphIndex
+        } ?? false
     }
 
     func toggleBookmark(
         bookID: String,
         chapterIndex: Int,
         chapterTitle: String,
+        paragraphIndex: Int? = nil,
         snippet: String
     ) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
         var bookmarks = books[index].bookmarks ?? []
-        if let existingIndex = bookmarks.firstIndex(where: { $0.chapterIndex == chapterIndex }) {
+        if let existingIndex = bookmarks.firstIndex(where: {
+            $0.chapterIndex == chapterIndex && $0.paragraphIndex == paragraphIndex
+        }) {
             bookmarks.remove(at: existingIndex)
         } else {
             bookmarks.insert(
                 ReaderBookmark(
                     chapterIndex: chapterIndex,
                     chapterTitle: chapterTitle,
+                    paragraphIndex: paragraphIndex,
                     snippet: snippet
                 ),
                 at: 0

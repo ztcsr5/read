@@ -48,6 +48,35 @@ final class BookshelfStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testTogglesParagraphBookmarksIndependently() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = BookshelfStore(persistence: BookshelfPersistence(fileManager: .default, rootURL: root))
+        store.addLocalTextBook(
+            LocalTextBook(
+                title: "Local",
+                author: "Local",
+                chapters: [
+                    LocalTextChapter(title: "Chapter 1", paragraphs: ["A", "B"], index: 0)
+                ]
+            )
+        )
+        let id = try XCTUnwrap(store.books.first?.id)
+
+        store.toggleBookmark(bookID: id, chapterIndex: 0, chapterTitle: "Chapter 1", paragraphIndex: 0, snippet: "A")
+        store.toggleBookmark(bookID: id, chapterIndex: 0, chapterTitle: "Chapter 1", paragraphIndex: 1, snippet: "B")
+
+        XCTAssertTrue(store.isBookmarked(bookID: id, chapterIndex: 0, paragraphIndex: 0))
+        XCTAssertTrue(store.isBookmarked(bookID: id, chapterIndex: 0, paragraphIndex: 1))
+        XCTAssertEqual(store.book(id: id)?.bookmarks?.count, 2)
+
+        store.toggleBookmark(bookID: id, chapterIndex: 0, chapterTitle: "Chapter 1", paragraphIndex: 0, snippet: "A")
+
+        XCTAssertFalse(store.isBookmarked(bookID: id, chapterIndex: 0, paragraphIndex: 0))
+        XCTAssertTrue(store.isBookmarked(bookID: id, chapterIndex: 0, paragraphIndex: 1))
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testMarksRefreshFailureWithoutOverwritingIntro() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

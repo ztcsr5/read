@@ -531,7 +531,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Reader scroll mode | Partial | Infinite load, progress save, overlay | Manual + state tests | P6 |
 | Reader page/cover modes | Partial | Basic page/cover mode entry exists; true text pagination still needs refinement | UI smoke | P6 |
 | Reader settings | Partial | Typography/background/mode/tap-zone settings exist; full Flutter settings surface still needs completion | Settings persistence test | P6 |
-| Bookmarks | Partial | Add/remove/list/jump exists; needs richer paragraph-level position and UI polish | XCTest + UI smoke | P6 |
+| Bookmarks | Partial | Add/remove/list/jump exists with paragraph-level position; needs UI polish and device smoke | XCTest + UI smoke | P6 |
 | Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
 | TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
 | Chapter cache/preload | Partial | Online chapter content cache and next-chapter preload exist; cache count/size/expiry exist and need deeper device QA | Cache store tests + reader smoke | P6 |
@@ -855,6 +855,9 @@ Completed since the initial audit:
   - Scroll mode tracks the top visible paragraph with a Geometry preference and persists it when the visible paragraph changes.
   - Manual scroll progress writes are debounced and flushed when the reader closes, reducing persistence work during fast scrolling.
   - Long chapters use sampled paragraph geometry tracking and direct index iteration to reduce layout measurement and temporary allocation during fast scrolling.
+- Improved reader bookmarks:
+  - Bookmarks now store an optional paragraph index and snippet from the current visible/page paragraph.
+  - Same-chapter bookmarks jump directly to the bookmarked paragraph; cross-chapter jumps pre-save the target paragraph so the next chapter restores near the bookmark.
 
 Still not complete:
 
