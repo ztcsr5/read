@@ -26,6 +26,11 @@ struct ReaderView: View {
     @AppStorage("reader.fontSize") private var fontSize: Double = 20
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
     @AppStorage("reader.pagePadding") private var pagePadding: Double = 24
+    @AppStorage("reader.letterSpacing") private var letterSpacing: Double = 0
+    @AppStorage("reader.paragraphSpacing") private var paragraphSpacing: Double = 16
+    @AppStorage("reader.paragraphIndent") private var paragraphIndent: Double = 0
+    @AppStorage("reader.titleSpacing") private var titleSpacing: Double = 12
+    @AppStorage("reader.footerHeight") private var footerHeight: Double = 120
     @AppStorage("reader.ttsRate") private var ttsRate: Double = 0.52
     @AppStorage("reader.autoScrollDelay") private var autoScrollDelay: Double = 2.0
     @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
@@ -129,11 +134,11 @@ struct ReaderView: View {
     private var scrollReaderContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
                     Text(content.title)
                         .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
                         .foregroundStyle(background.textColor)
-                        .padding(.bottom, 12)
+                        .padding(.bottom, CGFloat(titleSpacing))
                         .id(-1)
 
                     ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
@@ -142,7 +147,7 @@ struct ReaderView: View {
                     }
                 }
                 .padding(CGFloat(pagePadding))
-                .padding(.bottom, 120)
+                .padding(.bottom, CGFloat(footerHeight))
             }
             .onChange(of: autoScrollTarget) { target in
                 withAnimation(.easeInOut(duration: 0.45)) {
@@ -193,8 +198,10 @@ struct ReaderView: View {
         Text(paragraph)
             .font(.system(size: fontSize, weight: .regular, design: .serif))
             .foregroundStyle(background.textColor)
+            .kerning(letterSpacing)
             .lineSpacing(lineSpacing)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, CGFloat(paragraphIndent))
             .padding(.vertical, speechController.currentParagraphIndex == index ? 6 : 0)
             .background {
                 if speechController.currentParagraphIndex == index {
@@ -320,17 +327,20 @@ struct ReaderView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    switch settingsTab {
-                    case 0:
-                        appearanceSettings
-                    case 1:
-                        layoutSettings
-                    default:
-                        advancedSettings
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        switch settingsTab {
+                        case 0:
+                            appearanceSettings
+                        case 1:
+                            layoutSettings
+                        default:
+                            advancedSettings
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
                 }
-                .padding(.horizontal)
 
                 Spacer(minLength: 0)
             }
@@ -373,7 +383,7 @@ struct ReaderView: View {
     }
 
     private var layoutSettings: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 14) {
             settingStepper(title: "字号", value: String(format: "%.0f", fontSize)) {
                 fontSize = max(14, fontSize - 1)
             } increase: {
@@ -385,15 +395,40 @@ struct ReaderView: View {
                 .foregroundStyle(.secondary)
             Slider(value: $lineSpacing, in: 2...18, step: 1)
 
+            Text("字距")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $letterSpacing, in: 0...4, step: 0.2)
+
+            Text("段距")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $paragraphSpacing, in: 8...32, step: 1)
+
+            Text("段首缩进")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $paragraphIndent, in: 0...40, step: 2)
+
+            Text("标题间距")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $titleSpacing, in: 0...36, step: 2)
+
             Text("左右间距")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             Slider(value: $pagePadding, in: 14...40, step: 1)
+
+            Text("底部留白")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $footerHeight, in: 80...180, step: 10)
         }
     }
 
     private var advancedSettings: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 14) {
             Text("阅读模式")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
