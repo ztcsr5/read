@@ -214,26 +214,35 @@ struct DiscoverView: View {
             } else {
                 LazyVStack(spacing: 12) {
                     ForEach(appState.sourceStore.rssSources) { source in
-                        HStack(spacing: 12) {
-                            Image(systemName: "newspaper")
-                                .font(.title3)
-                                .foregroundStyle(AppTheme.accent)
-                                .frame(width: 36, height: 36)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(source.sourceName)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Text(source.sourceUrl)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                        NavigationLink {
+                            RSSArticlesView(source: source)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "newspaper")
+                                    .font(.title3)
+                                    .foregroundStyle(AppTheme.accent)
+                                    .frame(width: 36, height: 36)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(source.sourceName)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text(source.sourceUrl)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text(source.enabled ? "启用" : "停用")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(source.enabled ? .green : .secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.tertiary)
                             }
-                            Spacer()
-                            Text(source.enabled ? "启用" : "停用")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(source.enabled ? .green : .secondary)
+                            .podcastCard()
                         }
-                        .podcastCard()
+                        .buttonStyle(.plain)
                     }
                 }
             }
