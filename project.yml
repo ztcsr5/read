@@ -42,3 +42,4 @@ targets:
       - SourceReadSwiftTests
     dependencies:
       - target: SourceReadSwift
+      - package: SwiftSoup
