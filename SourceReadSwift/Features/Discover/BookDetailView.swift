@@ -78,7 +78,7 @@ struct BookDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(chapters.prefix(80)) { chapter in
+            ForEach(Array(chapters.prefix(80))) { chapter in
                 NavigationLink {
                     ChapterLoadingView(sourceUrl: book.sourceUrl, chapter: chapter)
                 } label: {
@@ -116,7 +116,7 @@ struct BookDetailView: View {
             case .success(let loadedChapters):
                 chapters = loadedChapters
             case .failure(let error):
-                errorMessage = "目录失败：\(error.displayMessage)"
+                errorMessage = "目录加载失败：\(error.displayMessage)"
             }
         case .failure(let error):
             errorMessage = error.displayMessage
