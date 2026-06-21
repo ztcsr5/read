@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct ReaderView: View {
@@ -14,9 +15,16 @@ struct ReaderView: View {
     @State private var showSettings = false
     @State private var showChapterList = false
     @State private var showBookmarks = false
+    @State private var settingsTab = 0
+    @State private var autoScrollEnabled = false
+    @State private var autoScrollTarget = 0
+    @State private var autoScrollTask: Task<Void, Never>?
+    @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 20
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
     @AppStorage("reader.pagePadding") private var pagePadding: Double = 24
+    @AppStorage("reader.ttsRate") private var ttsRate: Double = 0.52
+    @AppStorage("reader.autoScrollDelay") private var autoScrollDelay: Double = 2.0
     @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
 
     private var background: ReaderBackground {
@@ -35,23 +43,46 @@ struct ReaderView: View {
         ZStack {
             background.color.ignoresSafeArea()
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    Text(content.title)
-                        .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
-                        .foregroundStyle(background.textColor)
-                        .padding(.bottom, 12)
-
-                    ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                        Text(paragraph)
-                            .font(.system(size: fontSize, weight: .regular, design: .serif))
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        Text(content.title)
+                            .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
                             .foregroundStyle(background.textColor)
-                            .lineSpacing(lineSpacing)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.bottom, 12)
+                            .id(-1)
+
+                        ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                            Text(paragraph)
+                                .font(.system(size: fontSize, weight: .regular, design: .serif))
+                                .foregroundStyle(background.textColor)
+                                .lineSpacing(lineSpacing)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, speechController.currentParagraphIndex == index ? 6 : 0)
+                                .background {
+                                    if speechController.currentParagraphIndex == index {
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(AppTheme.accent.opacity(background == .dark ? 0.22 : 0.12))
+                                    }
+                                }
+                                .id(index)
+                        }
+                    }
+                    .padding(CGFloat(pagePadding))
+                    .padding(.bottom, 120)
+                }
+                .onChange(of: autoScrollTarget) { target in
+                    guard autoScrollEnabled else { return }
+                    withAnimation(.easeInOut(duration: 0.45)) {
+                        proxy.scrollTo(target, anchor: .top)
                     }
                 }
-                .padding(CGFloat(pagePadding))
-                .padding(.bottom, 120)
+                .onChange(of: speechController.currentParagraphIndex) { target in
+                    guard target >= 0 else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -87,6 +118,10 @@ struct ReaderView: View {
                 chapterTitle: content.title,
                 totalChapters: totalChapters ?? 0
             )
+        }
+        .onDisappear {
+            stopAutoScroll()
+            speechController.stop()
         }
     }
 
@@ -135,10 +170,12 @@ struct ReaderView: View {
                         toggleCurrentBookmark()
                         showSettings = false
                     }
-                    toolButton(icon: "speaker.wave.2", title: "朗读") {
+                    toolButton(icon: speechController.isSpeaking ? "speaker.slash.fill" : "speaker.wave.2", title: speechController.isSpeaking ? "暂停" : "朗读") {
+                        toggleSpeech()
                         showSettings = false
                     }
-                    toolButton(icon: "play", title: "自动") {
+                    toolButton(icon: autoScrollEnabled ? "pause.fill" : "play.fill", title: autoScrollEnabled ? "暂停" : "自动") {
+                        toggleAutoScroll()
                         showSettings = false
                     }
                     toolButton(icon: "gearshape", title: "设置") {
@@ -180,7 +217,7 @@ struct ReaderView: View {
                     .frame(width: 38, height: 5)
                     .padding(.top, 10)
 
-                Picker("设置", selection: .constant(0)) {
+                Picker("设置", selection: $settingsTab) {
                     Text("外观").tag(0)
                     Text("排版").tag(1)
                     Text("高级").tag(2)
@@ -189,39 +226,13 @@ struct ReaderView: View {
                 .padding(.horizontal)
 
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("字号大小")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Slider(value: $fontSize, in: 14...32, step: 1)
-
-                    Text("行高")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Slider(value: $lineSpacing, in: 2...18, step: 1)
-
-                    Text("左右间距")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Slider(value: $pagePadding, in: 14...40, step: 1)
-
-                    Text("背景颜色")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
-                        ForEach(ReaderBackground.allCases) { item in
-                            Button {
-                                backgroundRawValue = item.rawValue
-                            } label: {
-                                Circle()
-                                    .fill(item.color)
-                                    .frame(width: 44, height: 44)
-                                    .overlay {
-                                        Circle()
-                                            .stroke(background == item ? AppTheme.accent : Color.secondary.opacity(0.25), lineWidth: background == item ? 3 : 1)
-                                    }
-                            }
-                            .accessibilityLabel(item.title)
-                        }
+                    switch settingsTab {
+                    case 0:
+                        appearanceSettings
+                    case 1:
+                        layoutSettings
+                    default:
+                        advancedSettings
                     }
                 }
                 .padding(.horizontal)
@@ -235,6 +246,104 @@ struct ReaderView: View {
             .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: -5)
         }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var appearanceSettings: some View {
+        Group {
+            Text("字号大小")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $fontSize, in: 14...32, step: 1)
+
+            Text("背景颜色")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                ForEach(ReaderBackground.allCases) { item in
+                    Button {
+                        backgroundRawValue = item.rawValue
+                    } label: {
+                        Circle()
+                            .fill(item.color)
+                            .frame(width: 44, height: 44)
+                            .overlay {
+                                Circle()
+                                    .stroke(background == item ? AppTheme.accent : Color.secondary.opacity(0.25), lineWidth: background == item ? 3 : 1)
+                            }
+                    }
+                    .accessibilityLabel(item.title)
+                }
+            }
+        }
+    }
+
+    private var layoutSettings: some View {
+        Group {
+            settingStepper(title: "字号", value: String(format: "%.0f", fontSize)) {
+                fontSize = max(14, fontSize - 1)
+            } increase: {
+                fontSize = min(32, fontSize + 1)
+            }
+
+            Text("行高")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $lineSpacing, in: 2...18, step: 1)
+
+            Text("左右间距")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $pagePadding, in: 14...40, step: 1)
+        }
+    }
+
+    private var advancedSettings: some View {
+        Group {
+            Text("朗读速度")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $ttsRate, in: 0.35...0.65, step: 0.01)
+
+            Text("自动滚动间隔")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $autoScrollDelay, in: 0.8...5.0, step: 0.2)
+
+            HStack(spacing: 12) {
+                Button(autoScrollEnabled ? "停止自动滚动" : "开始自动滚动") {
+                    toggleAutoScroll()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button(speechController.isSpeaking ? "停止朗读" : "开始朗读") {
+                    toggleSpeech()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func settingStepper(
+        title: String,
+        value: String,
+        decrease: @escaping () -> Void,
+        increase: @escaping () -> Void
+    ) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button(action: decrease) {
+                Image(systemName: "minus.circle.fill")
+            }
+            Text(value)
+                .font(.headline)
+                .frame(width: 44)
+            Button(action: increase) {
+                Image(systemName: "plus.circle.fill")
+            }
+        }
     }
 
     private var chapterListSheet: some View {
@@ -339,6 +448,106 @@ struct ReaderView: View {
             snippet: content.paragraphs.first ?? content.title
         )
         showBookmarks = true
+    }
+
+    private func toggleSpeech() {
+        if speechController.isSpeaking {
+            speechController.stop()
+        } else {
+            stopAutoScroll()
+            speechController.speak(title: content.title, paragraphs: content.paragraphs, rate: Float(ttsRate))
+        }
+    }
+
+    private func toggleAutoScroll() {
+        if autoScrollEnabled {
+            stopAutoScroll()
+        } else {
+            speechController.stop()
+            startAutoScroll()
+        }
+    }
+
+    private func startAutoScroll() {
+        stopAutoScroll()
+        autoScrollEnabled = true
+        autoScrollTarget = 0
+        let delay = autoScrollDelay
+        let maxIndex = max(content.paragraphs.count - 1, 0)
+        autoScrollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                await MainActor.run {
+                    guard autoScrollEnabled else { return }
+                    if autoScrollTarget >= maxIndex {
+                        stopAutoScroll()
+                    } else {
+                        autoScrollTarget += 1
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopAutoScroll() {
+        autoScrollEnabled = false
+        autoScrollTask?.cancel()
+        autoScrollTask = nil
+    }
+}
+
+final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    @Published var isSpeaking = false
+    @Published var currentParagraphIndex = -1
+
+    private let synthesizer = AVSpeechSynthesizer()
+    private var paragraphs: [String] = []
+    private var nextIndex = 0
+    private var rate: Float = 0.52
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func speak(title: String, paragraphs: [String], rate: Float) {
+        stop()
+        self.paragraphs = [title] + paragraphs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        self.nextIndex = 0
+        self.rate = rate
+        isSpeaking = true
+        speakNext()
+    }
+
+    func stop() {
+        synthesizer.stopSpeaking(at: .immediate)
+        isSpeaking = false
+        currentParagraphIndex = -1
+        paragraphs = []
+        nextIndex = 0
+    }
+
+    private func speakNext() {
+        guard nextIndex < paragraphs.count else {
+            stop()
+            return
+        }
+        currentParagraphIndex = nextIndex - 1
+        let utterance = AVSpeechUtterance(string: paragraphs[nextIndex])
+        utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
+        utterance.rate = rate
+        nextIndex += 1
+        synthesizer.speak(utterance)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        guard isSpeaking else { return }
+        speakNext()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        isSpeaking = false
+        currentParagraphIndex = -1
     }
 }
 
