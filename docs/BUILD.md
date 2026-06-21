@@ -1,12 +1,33 @@
 # Build Notes
 
-当前开发机是 Windows，未安装 `swift`、`xcodegen`、`xcodebuild`，因此本地不能直接编译 iOS App。
+Windows cannot build or run an iOS SwiftUI app locally because Xcode, the iOS SDK, `xcodebuild`, Simulator, code signing, and App Store upload tools only run on macOS.
 
-在 macOS / GitHub Actions 上执行：
+This project should use this workflow:
+
+1. Develop and commit on Windows.
+2. Push to GitHub.
+3. Let GitHub Actions run the macOS build.
+4. Use the CI log to fix Swift/Xcode errors from Windows.
+5. Use a real Mac only when you need Simulator debugging, device debugging, signing, TestFlight, or App Store upload.
+
+## Windows commands
+
+```powershell
+cd D:\Gemini反重力\SourceReadSwift
+git status -sb
+git push origin codex/native-swift-rewrite
+```
+
+Then open GitHub:
+
+- Repository -> Actions -> iOS
+- Open the latest run
+- If it fails, copy the first Swift/Xcode error block back into Codex
+
+## macOS / GitHub Actions commands
 
 ```bash
 brew install xcodegen
-cd SourceReadSwift
 xcodegen generate
 xcodebuild \
   -project SourceReadSwift.xcodeproj \
@@ -16,17 +37,34 @@ xcodebuild \
   build
 ```
 
-真机签名构建需要配置：
+For unit tests, CI picks the first available iPhone simulator:
 
-- Apple Developer Team
+```bash
+DEVICE_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {print $2; exit}')"
+xcodebuild \
+  -project SourceReadSwift.xcodeproj \
+  -scheme SourceReadSwift \
+  -destination "id=$DEVICE_ID" \
+  CODE_SIGNING_ALLOWED=NO \
+  test
+```
+
+## Signing and App Store
+
+CI build/test does not require signing. Real App Store delivery still needs:
+
+- Apple Developer Program account
 - Bundle Identifier
-- Signing Certificate
-- Provisioning Profile
+- Team ID
+- signing certificate
+- provisioning profile
+- App Store Connect app record
 
-## 当前质量门
+Those can be added later after the native core is stable.
 
-- 所有网络/解析 API 必须返回 `SourceEngineError`，不能让 UI 永久 loading。
-- 新增功能必须有可恢复 git commit。
-- SwiftUI 视觉方向保持 iOS Podcasts 风格。
-- LegadoCore 优先小说书源；漫画、视频、有声不进入 MVP。
+## Current quality rules
 
+- Every network/rule/JS failure must return `SourceEngineError`.
+- New work should be committed in small, recoverable commits.
+- UI direction stays native SwiftUI with iOS Podcasts-style structure.
+- MVP scope is novel book sources first; manga/video/audio are not in the first target.

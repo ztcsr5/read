@@ -1,18 +1,36 @@
 # SourceReadSwift
 
-纯 Swift/SwiftUI 原生阅读 App 重写项目。
+Native Swift/SwiftUI rewrite of the reading app.
 
-目标不是继续修补 Flutter 版，而是验证一条新的原生路线：
+The goal is not to keep patching the Flutter build. This repo is the native iOS route:
 
-- SwiftUI 原生动态 UI。
-- Swift 原生 LegadoCore。
-- JavaScriptCore + SwiftSoup 风格 Jsoup 桥。
-- URLSession + WKWebView + CookieStore 闭环。
-- 小说书源优先，漫画/视频/有声暂不进入 MVP。
+- SwiftUI native UI
+- Swift native LegadoCore
+- JavaScriptCore bridge
+- SwiftSoup-backed Jsoup compatibility
+- URLSession + WKWebView + CookieStore request loop
+- novel book sources first
 
-## 生成 Xcode 工程
+## Windows development
 
-本项目使用 XcodeGen 描述工程，避免手写 `.pbxproj`。
+Windows can edit, commit, and push this project, but it cannot compile iOS apps locally.
+
+Use GitHub Actions as the macOS build machine:
+
+```powershell
+cd D:\Gemini反重力\SourceReadSwift
+git push origin codex/native-swift-rewrite
+```
+
+Then check:
+
+```text
+GitHub repository -> Actions -> iOS
+```
+
+If the CI run fails, copy the first Xcode/Swift error block back into Codex.
+
+## Generate Xcode project on macOS
 
 ```bash
 brew install xcodegen
@@ -20,12 +38,23 @@ xcodegen generate
 open SourceReadSwift.xcodeproj
 ```
 
-Windows 侧不能直接编译 iOS 工程，详见 `docs/BUILD.md`。
+## Build on macOS
 
-## 阶段目标
+```bash
+xcodebuild \
+  -project SourceReadSwift.xcodeproj \
+  -scheme SourceReadSwift \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
 
-1. SwiftUI App 骨架。
-2. LegadoCore 模型、诊断、书源导入。
-3. 搜索 -> 详情 -> 目录 -> 正文 MVP。
-4. JSCore / SwiftSoup / Cookie / WebView 过盾闭环。
-5. 原生阅读 UI 打磨。
+See `docs/BUILD.md` for Windows + CI details.
+
+## Current stage goals
+
+1. SwiftUI app skeleton.
+2. Native LegadoCore models, diagnostics, and source import.
+3. Search -> detail -> TOC -> content MVP.
+4. JSCore / SwiftSoup / Cookie / WebView compatibility loop.
+5. Native reading UI polish.
