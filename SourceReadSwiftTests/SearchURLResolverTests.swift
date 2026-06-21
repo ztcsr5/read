@@ -43,4 +43,18 @@ final class SearchURLResolverTests: XCTestCase {
         }
         XCTAssertTrue(url.hasPrefix("https://example.com/search?q="))
     }
+
+    func testResolveEmbeddedJavaScriptSegment() throws {
+        let source = BookSource(
+            bookSourceName: "Test",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/search?q=<js>java.urlEncode(keyword)</js>&page={{page}}"
+        )
+
+        let result = SearchURLResolver().resolve(source: source, keyword: "abc def", page: 2)
+        guard case .success(let url) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(url, "https://example.com/search?q=abc%20def&page=2")
+    }
 }

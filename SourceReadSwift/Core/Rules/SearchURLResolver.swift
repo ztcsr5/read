@@ -38,7 +38,39 @@ struct SearchURLResolver {
             ])
         }
 
+        if trimmed.contains("<js>"), trimmed.contains("</js>") {
+            return resolveEmbeddedScripts(
+                trimmed,
+                source: source,
+                variables: [
+                    "keyword": keyword,
+                    "key": keyword,
+                    "page": page,
+                    "baseUrl": source.bookSourceUrl
+                ]
+            )
+        }
+
         return .success(interpolated)
+    }
+
+    private func resolveEmbeddedScripts(
+        _ text: String,
+        source: BookSource,
+        variables: [String: Any]
+    ) -> Result<String, SourceEngineError> {
+        var output = text
+        while let startRange = output.range(of: "<js>"),
+              let endRange = output.range(of: "</js>", range: startRange.upperBound..<output.endIndex) {
+            let script = String(output[startRange.upperBound..<endRange.lowerBound])
+            switch evaluateScript(script, source: source, variables: variables) {
+            case .success(let value):
+                output.replaceSubrange(startRange.lowerBound..<endRange.upperBound, with: value)
+            case .failure(let error):
+                return .failure(error)
+            }
+        }
+        return .success(output)
     }
 
     private func evaluateScript(
