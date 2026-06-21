@@ -35,12 +35,13 @@ struct JSONRuleExtractor {
     }
 
     func value(from object: Any, path rawPath: String) -> Any? {
-        let path = normalize(rawPath)
+        let transformed = splitTransform(rawPath)
+        let path = normalize(transformed.path)
         guard !path.isEmpty else { return object }
         let candidates = path.components(separatedBy: "||").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         for candidate in candidates {
             if let value = valueForSinglePath(from: object, path: candidate) {
-                return value
+                return applyTransform(transformed.transform, to: value)
             }
         }
         return nil
@@ -54,14 +55,23 @@ struct JSONRuleExtractor {
             guard let existing = current else { return nil }
             if let dict = existing as? [String: Any] {
                 current = dict[part] ?? dict[part.lowercased()] ?? dict[part.uppercased()]
-            } else if let array = existing as? [Any], let index = Int(part), array.indices.contains(index) {
-                current = array[index]
+            } else if let array = existing as? [Any], let index = Int(part) {
+                let resolvedIndex = index < 0 ? array.count + index : index
+                guard array.indices.contains(resolvedIndex) else { return nil }
+                current = array[resolvedIndex]
             } else if let array = existing as? [Any], part == "*" {
                 current = array
             } else if let array = existing as? [Any] {
-                current = array.compactMap { element -> Any? in
+                let mapped = array.compactMap { element -> Any? in
                     guard let dict = element as? [String: Any] else { return nil }
                     return dict[part] ?? dict[part.lowercased()] ?? dict[part.uppercased()]
+                }
+                current = mapped.reduce(into: [Any]()) { result, value in
+                    if let array = value as? [Any] {
+                        result.append(contentsOf: array)
+                    } else {
+                        result.append(value)
+                    }
                 }
             } else {
                 return nil
@@ -100,10 +110,40 @@ struct JSONRuleExtractor {
                 .filter { !$0.isEmpty && !$0.hasPrefix("@") }
                 .joined(separator: ".")
         }
+        if let atIndex = output.lastIndex(of: "@"), atIndex != output.startIndex {
+            output.replaceSubrange(atIndex...atIndex, with: ".")
+        }
         output = output.replacingOccurrences(of: #"\[['"]?([^'"\]]+)['"]?\]"#, with: ".$1", options: .regularExpression)
-        output = output.replacingOccurrences(of: #"\[(\d+)\]"#, with: ".$1", options: .regularExpression)
+        output = output.replacingOccurrences(of: #"\[(-?\d+)\]"#, with: ".$1", options: .regularExpression)
         output = output.replacingOccurrences(of: #"\[\*\]"#, with: ".*", options: .regularExpression)
         return output.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+    }
+
+    private func splitTransform(_ rawRule: String) -> (path: String, transform: (pattern: String, replacement: String)?) {
+        let parts = rawRule.components(separatedBy: "##")
+        guard parts.count >= 3 else {
+            return (rawRule, nil)
+        }
+        return (
+            parts[0],
+            (
+                pattern: parts[1],
+                replacement: parts.dropFirst(2).joined(separator: "##")
+            )
+        )
+    }
+
+    private func applyTransform(_ transform: (pattern: String, replacement: String)?, to value: Any) -> Any {
+        guard let transform else { return value }
+        if let array = value as? [Any] {
+            return array.map { applyTransform(transform, to: $0) }
+        }
+        let text = stringify(value)
+        return text.replacingOccurrences(
+            of: transform.pattern,
+            with: transform.replacement,
+            options: .regularExpression
+        )
     }
 
     private func collectDictionaries(_ object: Any) -> [[String: Any]] {

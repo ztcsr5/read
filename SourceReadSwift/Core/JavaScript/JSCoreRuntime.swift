@@ -5,6 +5,7 @@ import SwiftSoup
 final class JSCoreRuntime {
     private let context: JSContext
     private let ajaxHandler: ((String) -> String)?
+    private var bridgeStore: [String: String] = [:]
 
     init(ajaxHandler: ((String) -> String)? = nil) {
         self.context = JSContext()!
@@ -72,12 +73,21 @@ final class JSCoreRuntime {
             }
         }
         let ajaxHandler = self.ajaxHandler
-        let ajax: @convention(block) (String) -> String = { url in
-            ajaxHandler?(url) ?? ""
+        weak var weakSelf = self
+        let ajax: @convention(block) (String, String) -> String = { url, headers in
+            let requestText = weakSelf?.requestText(url: url, body: nil, headers: headers, includeStoredBody: false) ?? url
+            return ajaxHandler?(requestText) ?? ""
         }
-        let post: @convention(block) (String, String) -> String = { url, body in
-            let separator = url.contains("@Body:") ? "" : "@Body:"
-            return ajaxHandler?("\(url)\(separator)\(body)") ?? ""
+        let post: @convention(block) (String, String, String) -> String = { url, body, headers in
+            let requestText = weakSelf?.requestText(url: url, body: body, headers: headers, includeStoredBody: true) ?? "\(url)@Body:\(body)"
+            return ajaxHandler?(requestText) ?? ""
+        }
+        let put: @convention(block) (String, String) -> String = { key, value in
+            weakSelf?.bridgeStore[key] = value
+            return value
+        }
+        let getStore: @convention(block) (String) -> String = { key in
+            weakSelf?.bridgeStore[key] ?? ""
         }
 
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
@@ -88,6 +98,8 @@ final class JSCoreRuntime {
         context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
         context.setObject(ajax, forKeyedSubscript: "__native_ajax" as NSString)
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
+        context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
+        context.setObject(getStore, forKeyedSubscript: "__native_getStore" as NSString)
     }
 
     private func installBaseBridge() {
@@ -109,9 +121,24 @@ final class JSCoreRuntime {
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
           return out;
         };
-        java.ajax = function(url) { return __native_ajax(String(url)); };
-        java.get = function(url) { return __native_ajax(String(url)); };
-        java.post = function(url, body) { return __native_post(String(url), String(body || '')); };
+        function __bridgeString(value) {
+          if (value === undefined || value === null) return '';
+          if (typeof value === 'string') return value;
+          return JSON.stringify(value);
+        }
+        function __bridgeStored(name) {
+          return __native_getStore(String(name));
+        }
+        java.put = function(key, value) { return __native_put(String(key), __bridgeString(value)); };
+        java.getVar = function(key) { return __bridgeStored(key); };
+        java.ajax = function(url, headers) { return __native_ajax(String(url), __bridgeString(headers || '')); };
+        java.get = function(url, headers) {
+          var key = String(url);
+          var value = __bridgeStored(key);
+          if (value && key.indexOf('://') < 0 && key.charAt(0) !== '/') return value;
+          return __native_ajax(key, __bridgeString(headers || ''));
+        };
+        java.post = function(url, body, headers) { return __native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || '')); };
         java.log = function(value) { return String(value); };
         var Packages = Packages || {};
         Packages.org = Packages.org || {};
@@ -145,6 +172,97 @@ final class JSCoreRuntime {
         function importClass(_) { return undefined; }
         """
         context.evaluateScript(prelude)
+    }
+
+    private func requestText(url: String, body: String?, headers explicitHeaders: String, includeStoredBody: Bool) -> String {
+        var output = url
+        let headers = mergedHeaders(explicitHeaders)
+        if !headers.isEmpty, !output.localizedCaseInsensitiveContains("@Header:") {
+            output += "@Header:\(jsonString(headers))"
+        }
+
+        let bodyText = requestBody(explicitBody: body, includeStoredBody: includeStoredBody)
+        if let bodyText, !bodyText.isEmpty, !output.localizedCaseInsensitiveContains("@Body:") {
+            output += "@Body:\(bodyText)"
+        }
+        return output
+    }
+
+    private func mergedHeaders(_ explicitHeaders: String) -> [String: String] {
+        var headers: [String: String] = [:]
+        for key in ["headers", "header", "bookSourceHeader"] {
+            headers.merge(parseStringMap(bridgeStore[key] ?? ""), uniquingKeysWith: { _, new in new })
+        }
+        headers.merge(parseStringMap(explicitHeaders), uniquingKeysWith: { _, new in new })
+        return headers
+    }
+
+    private func requestBody(explicitBody: String?, includeStoredBody: Bool) -> String? {
+        if let explicitBody, !explicitBody.isEmpty {
+            return normalizedBody(explicitBody)
+        }
+        guard includeStoredBody else { return nil }
+        for key in ["body", "requestBody", "postBody", "params"] {
+            if let value = bridgeStore[key], !value.isEmpty {
+                return normalizedBody(value)
+            }
+        }
+        return nil
+    }
+
+    private func normalizedBody(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return value
+        }
+        return object
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                "\(urlEncode(key))=\(urlEncode(String(describing: value)))"
+            }
+            .joined(separator: "&")
+    }
+
+    private func parseStringMap(_ text: String) -> [String: String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [:] }
+        if let data = trimmed.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return object.reduce(into: [:]) { result, item in
+                result[item.key] = String(describing: item.value)
+            }
+        }
+        return trimmed
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" || $0 == ";" })
+            .reduce(into: [:]) { result, line in
+                let text = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+                let separator: Character = text.contains(":") ? ":" : "="
+                let parts = text.split(separator: separator, maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { return }
+                let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { return }
+                result[key] = value
+            }
+    }
+
+    private func jsonString(_ object: [String: String]) -> String {
+        let sorted = object.sorted { $0.key < $1.key }.reduce(into: [String: String]()) { result, item in
+            result[item.key] = item.value
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: sorted, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
+    }
+
+    private func urlEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._*")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private static func extractString(from document: Document, rule: String, baseUrl: URL?) throws -> String {

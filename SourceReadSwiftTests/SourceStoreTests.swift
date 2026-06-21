@@ -45,6 +45,27 @@ final class SourceStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testImportsSingleBookSourceFromWrapper() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+        let json = """
+        {
+          "bookSource": {
+            "bookSourceName": "Single wrapped source",
+            "bookSourceUrl": "https://single-wrapper.example.com",
+            "searchUrl": "/search?q={{key}}"
+          }
+        }
+        """
+
+        try store.importJSON(json)
+
+        XCTAssertEqual(store.sources.count, 1)
+        XCTAssertEqual(store.sources.first?.bookSourceName, "Single wrapped source")
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testImportsJSONExtractedFromBrowserText() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

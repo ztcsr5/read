@@ -402,6 +402,14 @@ private struct WrappedSourceImportItems: Decodable {
             items = values
         } else if let values = try? container.decode([AnySourceImportItem].self, forKey: .items) {
             items = values
+        } else if let value = try? container.decode(AnySourceImportItem.self, forKey: .bookSource) {
+            items = [value]
+        } else if let value = try? container.decode(AnySourceImportItem.self, forKey: .data) {
+            items = [value]
+        } else if let value = try? container.decode(AnySourceImportItem.self, forKey: .sources) {
+            items = [value]
+        } else if let value = try? container.decode(AnySourceImportItem.self, forKey: .bookSources) {
+            items = [value]
         } else {
             items = []
         }

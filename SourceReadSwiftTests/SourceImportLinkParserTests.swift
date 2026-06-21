@@ -84,4 +84,13 @@ final class SourceImportLinkParserTests: XCTestCase {
 
         XCTAssertEqual(input.kind, .unsupportedScheme)
     }
+
+    func testExtractsEmbeddedJSONFromImportLink() {
+        let payload = #"[{"bookSourceName":"A","bookSourceUrl":"https://a.example.com"}]"#
+        let encoded = payload.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let input = SourceImportLinkParser.parse("legado://import/bookSource?data=\(encoded)")
+
+        XCTAssertEqual(input.kind, .json)
+        XCTAssertEqual(input.value, payload)
+    }
 }

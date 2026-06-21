@@ -93,4 +93,60 @@ final class JSONRuleExtractorTests: XCTestCase {
         let value = extractor.value(from: object, path: "$.data.items[*].title") as? [Any]
         XCTAssertEqual(value as? [String], ["First", "Second"])
     }
+
+    func testExtractNegativeArrayIndex() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "items": [
+                    ["title": "First"],
+                    ["title": "Second"]
+                ]
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$.data.items[-1].title") as? String
+        XCTAssertEqual(value, "Second")
+    }
+
+    func testExtractAtSuffixAsPathSegment() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "book": [
+                    "name": "Title"
+                ]
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$.data.book@name") as? String
+        XCTAssertEqual(value, "Title")
+    }
+
+    func testRegexTransformCleansJSONValue() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "intro": "<p>Hello</p>"
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$.data.intro##<[^>]+>##") as? String
+        XCTAssertEqual(value, "Hello")
+    }
+
+    func testArrayFieldIsFlattenedWhenTraversing() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "groups": [
+                    ["books": [["title": "A"], ["title": "B"]]],
+                    ["books": [["title": "C"]]]
+                ]
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$.data.groups.books.title") as? [Any]
+        XCTAssertEqual(value as? [String], ["A", "B", "C"])
+    }
 }

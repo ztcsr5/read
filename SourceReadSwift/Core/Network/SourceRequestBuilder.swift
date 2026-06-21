@@ -114,22 +114,13 @@ struct SourceRequestBuilder {
             if let methodText = object["httpMethod"] as? String, methodText.uppercased() == "POST" {
                 method = .post
             }
-            if let bodyText = object["body"] as? String {
-                body = Data(interpolate(bodyText, keyword: keyword, page: page).utf8)
-                method = .post
-            }
-            if let bodyText = object["requestBody"] as? String {
-                body = Data(interpolate(bodyText, keyword: keyword, page: page).utf8)
-                method = .post
-            }
-            if let bodyText = object["postBody"] as? String {
-                body = Data(interpolate(bodyText, keyword: keyword, page: page).utf8)
-                method = .post
-            }
             if let nested = object["headers"] as? [String: Any] {
                 headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
             }
             if let nested = object["header"] as? [String: Any] {
+                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+            }
+            if let nested = object["bookSourceHeader"] as? [String: Any] {
                 headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
             }
             if let text = object["headers"] as? String {
@@ -137,6 +128,14 @@ struct SourceRequestBuilder {
             }
             if let text = object["header"] as? String {
                 headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+            }
+            if let text = object["bookSourceHeader"] as? String {
+                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+            }
+            if let bodyOption = firstValue(in: object, keys: ["body", "requestBody", "postBody"]),
+               let encoded = encodeBodyOption(bodyOption, headers: headers, keyword: keyword, page: page) {
+                body = encoded
+                method = .post
             }
         }
 
@@ -183,5 +182,48 @@ struct SourceRequestBuilder {
             output = output.replacingOccurrences(of: "{{page}}", with: String(page))
         }
         return output
+    }
+
+    private func firstValue(in options: [String: Any], keys: [String]) -> Any? {
+        for key in keys {
+            if let value = options[key] {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func encodeBodyOption(_ value: Any, headers: [String: String], keyword: String?, page: Int?) -> Data? {
+        if let text = value as? String {
+            return Data(interpolate(text, keyword: keyword, page: page).utf8)
+        }
+        if let object = value as? [String: Any] {
+            let interpolated = object.reduce(into: [String: String]()) { result, item in
+                result[item.key] = interpolate(String(describing: item.value), keyword: keyword, page: page)
+            }
+            let contentType = headers.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value ?? ""
+            if contentType.localizedCaseInsensitiveContains("application/json"),
+               let data = try? JSONSerialization.data(withJSONObject: interpolated, options: [.sortedKeys]) {
+                return data
+            }
+            let form = interpolated
+                .sorted { $0.key < $1.key }
+                .map { key, value in
+                    "\(urlEncode(key))=\(urlEncode(value))"
+                }
+                .joined(separator: "&")
+            return Data(form.utf8)
+        }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
+            return data
+        }
+        return Data(String(describing: value).utf8)
+    }
+
+    private func urlEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._*")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }

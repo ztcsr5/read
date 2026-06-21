@@ -126,6 +126,46 @@ final class BookSourceTests: XCTestCase {
         XCTAssertEqual(request.headers["Content-Type"], "application/x-www-form-urlencoded")
     }
 
+    func testRequestBuilderReadsBookSourceHeaderAndDictionaryBody() {
+        let source = BookSource(
+            bookSourceName: "Dictionary Post Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/api",
+            customConfig: #"{"requestBody":{"q":"{{keyword}}&x","page":"{{page}}"},"bookSourceHeader":{"X-Book":"1"}}"#
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 2
+        )
+
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(String(data: request.body ?? Data(), encoding: .utf8), "page=2&q=test%26x")
+        XCTAssertEqual(request.headers["X-Book"], "1")
+    }
+
+    func testRequestBuilderEncodesDictionaryBodyAsJSON() {
+        let source = BookSource(
+            bookSourceName: "JSON Post Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/api",
+            customConfig: #"{"headers":{"Content-Type":"application/json"},"body":{"q":"{{keyword}}","page":"{{page}}"}}"#
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 2
+        )
+
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(String(data: request.body ?? Data(), encoding: .utf8), #"{"page":"2","q":"test"}"#)
+        XCTAssertEqual(request.headers["Content-Type"], "application/json")
+    }
+
     func testDirectiveBodyOverridesRawBody() {
         let source = BookSource(
             bookSourceName: "Post Source",

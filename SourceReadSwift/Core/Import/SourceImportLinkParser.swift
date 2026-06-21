@@ -24,6 +24,10 @@ struct SourceImportLinkParser {
             return SourceImportInput(kind: .json, value: trimmed)
         }
 
+        if let importJSON = extractImportJSON(from: trimmed) {
+            return SourceImportInput(kind: .json, value: importJSON)
+        }
+
         if let importURL = extractImportURL(from: trimmed) {
             return SourceImportInput(kind: .url, value: importURL)
         }
@@ -59,6 +63,25 @@ struct SourceImportLinkParser {
             if let value = queryItems.first(where: { $0.name.lowercased() == key })?.value,
                let normalized = normalizeExtractedURL(value) {
                 return normalized
+            }
+        }
+        return nil
+    }
+
+    private static func extractImportJSON(from text: String) -> String? {
+        guard let schemeRange = findImportSchemeRange(in: text) else { return nil }
+        let tail = String(text[schemeRange.lowerBound...])
+        let token = trimURLToken(firstToken(in: tail))
+        guard let components = URLComponents(string: token) else { return nil }
+        let queryItems = components.queryItems ?? []
+        for key in ["data", "json", "content", "source", "sources", "bookSource", "bookSources"] {
+            guard let value = queryItems.first(where: { $0.name.lowercased() == key.lowercased() })?.value else {
+                continue
+            }
+            let decoded = (value.removingPercentEncoding ?? value)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if looksLikeJSON(decoded) {
+                return decoded
             }
         }
         return nil
