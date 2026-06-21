@@ -185,6 +185,18 @@ final class JSCoreRuntime {
         function __defaultBaseUrl() {
           return String(typeof baseUrl === 'undefined' ? '' : baseUrl);
         }
+        if (!String.prototype.contains) {
+          String.prototype.contains = function(value) { return this.indexOf(String(value)) >= 0; };
+        }
+        if (!String.prototype.startsWith) {
+          String.prototype.startsWith = function(value) { return this.indexOf(String(value)) === 0; };
+        }
+        if (!String.prototype.endsWith) {
+          String.prototype.endsWith = function(value) {
+            value = String(value);
+            return this.substring(this.length - value.length) === value;
+          };
+        }
         function __asJavaList(list) {
           list.get = function(index) { return list[Number(index)]; };
           list.size = function() { return list.length; };

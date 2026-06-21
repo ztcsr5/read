@@ -265,4 +265,17 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "Two|2|false|One")
     }
+
+    func testJavaStyleStringHelpersAreAvailable() throws {
+        let script = """
+        'abcdef'.contains('bcd') + '|' + 'abcdef'.startsWith('abc') + '|' + 'abcdef'.endsWith('def')
+        """
+
+        let result = JSCoreRuntime().evaluate(script)
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "true|true|true")
+    }
 }

@@ -820,6 +820,7 @@ Completed since the initial audit:
   - `java.getString(rule)`, `java.getStringList(rule)`, and `java.getElements(rule)` can now read from the current global `html` / `result` content, matching common one-argument Legado JS snippets.
   - `java.getString(rule, true/false)` and `java.getStringList(rule, true/false)` treat the boolean as a Legado-style extraction flag instead of accidentally using it as the rule string.
   - JS string lists now expose Java List-style `.get(index)`, `.size()`, and `.isEmpty()` aliases while still behaving like arrays.
+  - JS strings expose Java-style `.contains(...)`, `.startsWith(...)`, and `.endsWith(...)` aliases for common Legado snippets.
 - Improved search URL compatibility:
   - `{{source.xxx}}` placeholders now resolve from imported raw source fields and normalized source metadata.
   - Search URL JavaScript can read `source.bookSourceUrl`, `source.bookSourceName`, aliases, and raw custom fields.
