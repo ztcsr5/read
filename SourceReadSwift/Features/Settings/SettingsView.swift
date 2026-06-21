@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("settings.themeMode") private var themeModeRawValue = ThemeMode.system.rawValue
-    @State private var cacheSize = "0.00 MB"
+    @State private var cacheSize = "无缓存"
 
     private var themeMode: ThemeMode {
         get { ThemeMode(rawValue: themeModeRawValue) ?? .system }
@@ -53,10 +53,11 @@ struct SettingsView: View {
 
                 Section("通用") {
                     Button {
-                        cacheSize = "0.00 MB"
+                        appState.chapterContentCacheStore.removeAll()
+                        updateCacheSummary()
                     } label: {
                         HStack {
-                            Label("清理缓存", systemImage: "trash")
+                            Label("清理章节缓存", systemImage: "trash")
                             Spacer()
                             Text(cacheSize)
                                 .foregroundStyle(.secondary)
@@ -108,7 +109,26 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置")
+            .onAppear {
+                updateCacheSummary()
+                appState.chapterContentCacheStore.removeExpired()
+                updateCacheSummary()
+            }
         }
+    }
+
+    private func updateCacheSummary() {
+        let chapters = appState.chapterContentCacheStore.entries.count
+        cacheSize = chapters == 0
+            ? "无缓存"
+            : "\(chapters) 章 / \(byteCountText(appState.chapterContentCacheStore.estimatedByteCount))"
+    }
+
+    private func byteCountText(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 { return String(format: "%.1f KB", kb) }
+        return String(format: "%.1f MB", kb / 1024)
     }
 }
 

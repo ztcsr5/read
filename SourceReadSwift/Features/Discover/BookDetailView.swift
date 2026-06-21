@@ -204,11 +204,52 @@ struct ChapterLoadingView: View {
             errorMessage = "找不到书源"
             return
         }
+        let purifyRules = appState.purifyRuleStore.enabledPatterns
+        if let cached = appState.chapterContentCacheStore.content(
+            sourceURL: source.bookSourceUrl,
+            chapter: effectiveChapter,
+            purifyRules: purifyRules
+        ) {
+            content = cached
+            preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
+            return
+        }
         switch await appState.engine.getContent(source: source, chapter: effectiveChapter) {
         case .success(let loaded):
+            appState.chapterContentCacheStore.save(loaded, sourceURL: source.bookSourceUrl, purifyRules: purifyRules)
             content = loaded
+            preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
         case .failure(let error):
             errorMessage = error.displayMessage
+        }
+    }
+
+    private func preloadNextChapters(after chapter: BookChapter, source: BookSource, purifyRules: [String]) {
+        let nextChapters = chapters
+            .filter { $0.index > chapter.index }
+            .sorted { $0.index < $1.index }
+            .prefix(2)
+            .filter {
+                !appState.chapterContentCacheStore.isCached(
+                    sourceURL: source.bookSourceUrl,
+                    chapter: $0,
+                    purifyRules: purifyRules
+                )
+            }
+        guard !nextChapters.isEmpty else { return }
+        Task {
+            for next in nextChapters {
+                let result = await appState.engine.getContent(source: source, chapter: next)
+                if case .success(let loaded) = result {
+                    await MainActor.run {
+                        appState.chapterContentCacheStore.save(
+                            loaded,
+                            sourceURL: source.bookSourceUrl,
+                            purifyRules: purifyRules
+                        )
+                    }
+                }
+            }
         }
     }
     init(

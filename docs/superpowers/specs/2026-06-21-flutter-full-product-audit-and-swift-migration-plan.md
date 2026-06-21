@@ -534,6 +534,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Bookmarks | Partial | Add/remove/list/jump exists; needs richer paragraph-level position and UI polish | XCTest + UI smoke | P6 |
 | Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
 | TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
+| Chapter cache/preload | Partial | Online chapter content cache and next-chapter preload exist; cache count/size/expiry exist and need deeper device QA | Cache store tests + reader smoke | P6 |
 | Diagnostics | Partial | Single-source deep test and selected-source batch search check exist; persisted health history and full batch detail/TOC/content still needed | Diagnostic fixture test | P7 |
 | Auto repair | Missing | Rule suggestion after parser parity | Golden suggestions | P7 |
 | Local web editor | Missing | Explicit start/stop local server + token | Local API tests | P8 |
@@ -822,6 +823,12 @@ Completed since the initial audit:
   - See `docs/superpowers/specs/2026-06-21-legado-for-mac-reference-audit.md`.
   - Adopted source URL arithmetic/placeholder behavior.
   - Identified chapter cache/preload, richer bookmarks, scoped purify rules, and connector semantics as future clean-room implementation targets.
+- Improved chapter cache/preload:
+  - Online chapter content is cached by source URL, chapter URL, and active purify-rule signature.
+  - Reader loading checks cache before network and saves successful chapter parses.
+  - Reader preloads the next two chapters in the background when a chapter opens.
+  - Settings cache cleanup now clears real chapter cache instead of being a placeholder, and shows cached chapter count plus estimated size.
+  - Cache persistence, expiry, and purify-signature invalidation are covered by unit tests.
 
 Still not complete:
 

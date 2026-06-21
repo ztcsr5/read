@@ -6,6 +6,7 @@ final class AppState: ObservableObject {
     let sourceStore: SourceStore
     let bookshelfStore: BookshelfStore
     let purifyRuleStore: PurifyRuleStore
+    let chapterContentCacheStore: ChapterContentCacheStore
     private let injectedEngine: SourceEngine?
     private var cancellables: Set<AnyCancellable> = []
     lazy var engine: SourceEngine = {
@@ -32,11 +33,13 @@ final class AppState: ObservableObject {
         sourceStore: SourceStore? = nil,
         bookshelfStore: BookshelfStore? = nil,
         purifyRuleStore: PurifyRuleStore? = nil,
+        chapterContentCacheStore: ChapterContentCacheStore? = nil,
         engine: SourceEngine? = nil
     ) {
         self.sourceStore = sourceStore ?? SourceStore()
         self.bookshelfStore = bookshelfStore ?? BookshelfStore()
         self.purifyRuleStore = purifyRuleStore ?? PurifyRuleStore()
+        self.chapterContentCacheStore = chapterContentCacheStore ?? ChapterContentCacheStore()
         self.injectedEngine = engine
         bindChildStores()
     }
@@ -66,6 +69,14 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
 
         purifyRuleStore.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
+
+        chapterContentCacheStore.objectWillChange
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.objectWillChange.send()
