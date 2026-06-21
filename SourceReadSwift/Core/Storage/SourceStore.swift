@@ -19,24 +19,44 @@ final class SourceStore: ObservableObject {
         try importJSONData(Data(text.utf8))
     }
 
+    @discardableResult
+    func importSmartInput(_ input: String) throws -> SourceImportInput {
+        let parsed = SourceImportLinkParser.parse(input)
+        switch parsed.kind {
+        case .empty:
+            throw SourceImportError.empty
+        case .json:
+            try importJSON(parsed.value)
+        case .url:
+            throw SourceImportError.urlImportRequired(parsed.value)
+        case .unsupportedScheme:
+            throw SourceImportError.unsupportedScheme
+        case .unknown:
+            throw SourceImportError.unknownInput
+        }
+        return parsed
+    }
+
     func importJSONData(_ data: Data) throws {
-        let data = stripUTF8BOM(data)
+        let normalized = try normalizeImportData(stripUTF8BOM(data))
         let decoder = JSONDecoder()
-        if let list = try? decoder.decode([BookSource].self, from: data) {
+        if let list = try? decoder.decode([BookSource].self, from: normalized) {
             try importSources(list)
             return
         }
-        if let wrapped = try? decoder.decode(WrappedBookSources.self, from: data),
+        if let wrapped = try? decoder.decode(WrappedBookSources.self, from: normalized),
            let list = wrapped.sources, !list.isEmpty {
             try importSources(list)
             return
         }
-        let source = try decoder.decode(BookSource.self, from: data)
+        let source = try decoder.decode(BookSource.self, from: normalized)
         try importSources([source])
     }
 
     func importSources(_ imported: [BookSource]) throws {
-        let valid = imported.filter { !$0.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let valid = imported.filter {
+            !$0.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         guard !valid.isEmpty else {
             throw SourceImportError.empty
         }
@@ -49,7 +69,7 @@ final class SourceStore: ObservableObject {
         guard sources.isEmpty else { return }
         sources = [
             BookSource(
-                bookSourceName: "示例 HTML 源",
+                bookSourceName: "Example HTML Source",
                 bookSourceUrl: "https://example.com",
                 searchUrl: "https://example.com/search?q={{keyword}}",
                 ruleSearch: SourceRule(fields: [
@@ -69,28 +89,22 @@ final class SourceStore: ObservableObject {
 
     func remove(_ source: BookSource) {
         sources.removeAll { $0.bookSourceUrl == source.bookSourceUrl }
-        do {
-            try persistence.save(sources)
-            lastError = nil
-        } catch {
-            lastError = error.localizedDescription
-        }
+        saveAfterMutation()
     }
 
     func remove(sourceURLs: Set<String>) {
         sources.removeAll { sourceURLs.contains($0.bookSourceUrl) }
-        do {
-            try persistence.save(sources)
-            lastError = nil
-        } catch {
-            lastError = error.localizedDescription
-        }
+        saveAfterMutation()
     }
 
     func setEnabled(_ enabled: Bool, for sourceURLs: Set<String>) {
         sources = sources.map { source in
             sourceURLs.contains(source.bookSourceUrl) ? source.updatingEnabled(enabled) : source
         }
+        saveAfterMutation()
+    }
+
+    private func saveAfterMutation() {
         do {
             try persistence.save(sources)
             lastError = nil
@@ -112,6 +126,56 @@ final class SourceStore: ObservableObject {
         guard data.starts(with: bom) else { return data }
         return data.dropFirst(3)
     }
+
+    private func normalizeImportData(_ data: Data) throws -> Data {
+        guard var text = String(data: data, encoding: .utf8) else { return data }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let decoded = try? JSONDecoder().decode(String.self, from: Data(text.utf8)) {
+            text = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if text.hasPrefix("{") || text.hasPrefix("[") {
+            return Data(text.utf8)
+        }
+        if let extracted = extractFirstJSONValue(from: text) {
+            return Data(extracted.utf8)
+        }
+        return data
+    }
+
+    private func extractFirstJSONValue(from text: String) -> String? {
+        let chars = Array(text)
+        for start in chars.indices where chars[start] == "{" || chars[start] == "[" {
+            let open = chars[start]
+            let close: Character = open == "{" ? "}" : "]"
+            var depth = 0
+            var inString = false
+            var escaped = false
+            for index in start..<chars.count {
+                let char = chars[index]
+                if inString {
+                    if escaped {
+                        escaped = false
+                    } else if char == "\\" {
+                        escaped = true
+                    } else if char == "\"" {
+                        inString = false
+                    }
+                    continue
+                }
+                if char == "\"" {
+                    inString = true
+                } else if char == open {
+                    depth += 1
+                } else if char == close {
+                    depth -= 1
+                    if depth == 0 {
+                        return String(chars[start...index])
+                    }
+                }
+            }
+        }
+        return nil
+    }
 }
 
 private struct WrappedBookSources: Decodable {
@@ -122,6 +186,8 @@ private struct WrappedBookSources: Decodable {
         case bookSources
         case bookSource
         case data
+        case list
+        case items
     }
 
     init(from decoder: Decoder) throws {
@@ -130,13 +196,27 @@ private struct WrappedBookSources: Decodable {
             ?? (try? container.decode([BookSource].self, forKey: .bookSources))
             ?? (try? container.decode([BookSource].self, forKey: .bookSource))
             ?? (try? container.decode([BookSource].self, forKey: .data))
+            ?? (try? container.decode([BookSource].self, forKey: .list))
+            ?? (try? container.decode([BookSource].self, forKey: .items))
     }
 }
 
 enum SourceImportError: LocalizedError {
     case empty
+    case urlImportRequired(String)
+    case unsupportedScheme
+    case unknownInput
 
     var errorDescription: String? {
-        "没有找到有效书源"
+        switch self {
+        case .empty:
+            return "No valid book source was found."
+        case .urlImportRequired(let url):
+            return "URL import requires downloading first: \(url)"
+        case .unsupportedScheme:
+            return "Import link was recognized, but no src/url parameter was found."
+        case .unknownInput:
+            return "Input is not recognized as JSON, an HTTP URL, or a reader import link."
+        }
     }
 }

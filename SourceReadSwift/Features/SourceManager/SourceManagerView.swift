@@ -396,7 +396,7 @@ struct SourceManagerView: View {
                     .disabled(importURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Button {
-                        importSources()
+                        Task { await importSourcesSmart() }
                     } label: {
                         Label("自动识别并导入", systemImage: "tray.and.arrow.down")
                             .frame(maxWidth: .infinity)
@@ -433,7 +433,7 @@ struct SourceManagerView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("导入") {
-                        importSources()
+                        Task { await importSourcesSmart() }
                     }
                     .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -453,7 +453,7 @@ struct SourceManagerView: View {
     private func importSources() {
         do {
             let before = appState.sourceStore.sources.count
-            try appState.sourceStore.importJSON(importText)
+            try appState.sourceStore.importSmartInput(importText)
             let total = appState.sourceStore.sources.count
             importText = ""
             importError = nil
@@ -463,6 +463,16 @@ struct SourceManagerView: View {
             importMessage = nil
             importError = error.localizedDescription
         }
+    }
+
+    private func importSourcesSmart() async {
+        let parsed = SourceImportLinkParser.parse(importText)
+        if parsed.kind == .url {
+            importURL = parsed.value
+            await importFromURL()
+            return
+        }
+        importSources()
     }
 
     private func pasteFromClipboard() {
