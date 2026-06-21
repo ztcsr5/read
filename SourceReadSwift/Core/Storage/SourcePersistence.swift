@@ -10,17 +10,31 @@ struct SourcePersistence {
         self.rootURL = rootURL
     }
 
-    func load() throws -> [BookSource] {
+    func load() throws -> SourceLibrarySnapshot {
         let url = try storageURL()
-        guard fileManager.fileExists(atPath: url.path) else { return [] }
+        guard fileManager.fileExists(atPath: url.path) else {
+            return SourceLibrarySnapshot()
+        }
         let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode([BookSource].self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let snapshot = try? decoder.decode(SourceLibrarySnapshot.self, from: data) {
+            return snapshot
+        }
+        let legacySources = try decoder.decode([BookSource].self, from: data)
+        return SourceLibrarySnapshot(sources: legacySources)
     }
 
     func save(_ sources: [BookSource]) throws {
+        try save(SourceLibrarySnapshot(sources: sources))
+    }
+
+    func save(_ snapshot: SourceLibrarySnapshot) throws {
         let url = try storageURL()
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(sources)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
         try data.write(to: url, options: [.atomic])
     }
 

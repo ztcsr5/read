@@ -6,65 +6,89 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
     let bookSourceName: String
     let bookSourceUrl: String
     let bookSourceGroup: String?
+    let bookSourceType: Int
     let enabled: Bool
+    let weight: Int
     let searchUrl: String?
+    let exploreUrl: String?
     let ruleSearch: SourceRule?
     let ruleBookInfo: SourceRule?
     let ruleToc: SourceRule?
     let ruleContent: SourceRule?
+    let ruleExplore: SourceRule?
     let header: String?
     let loginUrl: String?
     let loginCheckJs: String?
+    let customConfig: String?
     let raw: [String: String]
 
     enum CodingKeys: String, CodingKey {
         case bookSourceName
         case bookSourceUrl
         case bookSourceGroup
+        case bookSourceType
         case enabled
+        case weight
         case searchUrl
+        case exploreUrl
         case ruleSearch
         case ruleBookInfo
         case ruleToc
         case ruleContent
+        case ruleExplore
         case header
         case loginUrl
         case loginCheckJs
+        case customConfig
+        case raw
     }
 
     init(
         bookSourceName: String,
         bookSourceUrl: String,
         bookSourceGroup: String? = nil,
+        bookSourceType: Int = 0,
         enabled: Bool = true,
+        weight: Int = 0,
         searchUrl: String? = nil,
+        exploreUrl: String? = nil,
         ruleSearch: SourceRule? = nil,
         ruleBookInfo: SourceRule? = nil,
         ruleToc: SourceRule? = nil,
         ruleContent: SourceRule? = nil,
+        ruleExplore: SourceRule? = nil,
         header: String? = nil,
         loginUrl: String? = nil,
         loginCheckJs: String? = nil,
+        customConfig: String? = nil,
         raw: [String: String] = [:]
     ) {
         self.bookSourceName = bookSourceName
         self.bookSourceUrl = bookSourceUrl
         self.bookSourceGroup = bookSourceGroup
+        self.bookSourceType = bookSourceType
         self.enabled = enabled
+        self.weight = weight
         self.searchUrl = searchUrl
+        self.exploreUrl = exploreUrl
         self.ruleSearch = ruleSearch
         self.ruleBookInfo = ruleBookInfo
         self.ruleToc = ruleToc
         self.ruleContent = ruleContent
+        self.ruleExplore = ruleExplore
         self.header = header
         self.loginUrl = loginUrl
         self.loginCheckJs = loginCheckJs
+        self.customConfig = customConfig
         self.raw = raw
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         var raw: [String: String] = [:]
+        if let persistedRaw = try? container.decode([String: String].self, forKey: DynamicCodingKey("raw")) {
+            raw.merge(persistedRaw, uniquingKeysWith: { _, new in new })
+        }
         for key in container.allKeys {
             if let value = try? container.decode(String.self, forKey: key) {
                 raw[key.stringValue] = value
@@ -77,6 +101,18 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
 
         func string(_ key: String) -> String? {
             raw[key]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        }
+
+        func int(_ keys: [String], default defaultValue: Int = 0) -> Int {
+            for key in keys {
+                if let value = try? container.decode(Int.self, forKey: DynamicCodingKey(key)) {
+                    return value
+                }
+                if let text = string(key), let value = Int(text) {
+                    return value
+                }
+            }
+            return defaultValue
         }
 
         func rule(_ key: String) -> SourceRule? {
@@ -96,15 +132,20 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             bookSourceName: name,
             bookSourceUrl: url,
             bookSourceGroup: string("bookSourceGroup") ?? string("sourceGroup"),
+            bookSourceType: int(["bookSourceType", "sourceType"]),
             enabled: (try? container.decode(Bool.self, forKey: DynamicCodingKey("enabled"))) ?? true,
-            searchUrl: string("searchUrl"),
+            weight: int(["weight"]),
+            searchUrl: string("searchUrl") ?? string("searchURL"),
+            exploreUrl: string("exploreUrl") ?? string("exploreURL"),
             ruleSearch: rule("ruleSearch") ?? rule("rulesSearch"),
-            ruleBookInfo: rule("ruleBookInfo") ?? rule("rulesBookInfo"),
+            ruleBookInfo: rule("ruleBookInfo") ?? rule("rulesBookInfo") ?? rule("ruleBook"),
             ruleToc: rule("ruleToc") ?? rule("rulesToc"),
             ruleContent: rule("ruleContent") ?? rule("ruleBookContent") ?? rule("rulesContent"),
-            header: string("header"),
+            ruleExplore: rule("ruleExplore") ?? rule("rulesExplore"),
+            header: string("header") ?? string("headers") ?? string("bookSourceHeader"),
             loginUrl: string("loginUrl"),
             loginCheckJs: string("loginCheckJs"),
+            customConfig: string("customConfig"),
             raw: raw
         )
     }
@@ -114,15 +155,23 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
         try container.encode(bookSourceName, forKey: .bookSourceName)
         try container.encode(bookSourceUrl, forKey: .bookSourceUrl)
         try container.encodeIfPresent(bookSourceGroup, forKey: .bookSourceGroup)
+        try container.encode(bookSourceType, forKey: .bookSourceType)
         try container.encode(enabled, forKey: .enabled)
+        try container.encode(weight, forKey: .weight)
         try container.encodeIfPresent(searchUrl, forKey: .searchUrl)
+        try container.encodeIfPresent(exploreUrl, forKey: .exploreUrl)
         try container.encodeIfPresent(ruleSearch, forKey: .ruleSearch)
         try container.encodeIfPresent(ruleBookInfo, forKey: .ruleBookInfo)
         try container.encodeIfPresent(ruleToc, forKey: .ruleToc)
         try container.encodeIfPresent(ruleContent, forKey: .ruleContent)
+        try container.encodeIfPresent(ruleExplore, forKey: .ruleExplore)
         try container.encodeIfPresent(header, forKey: .header)
         try container.encodeIfPresent(loginUrl, forKey: .loginUrl)
         try container.encodeIfPresent(loginCheckJs, forKey: .loginCheckJs)
+        try container.encodeIfPresent(customConfig, forKey: .customConfig)
+        if !raw.isEmpty {
+            try container.encode(raw, forKey: .raw)
+        }
     }
 
     func updatingEnabled(_ enabled: Bool) -> BookSource {
@@ -130,15 +179,20 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             bookSourceName: bookSourceName,
             bookSourceUrl: bookSourceUrl,
             bookSourceGroup: bookSourceGroup,
+            bookSourceType: bookSourceType,
             enabled: enabled,
+            weight: weight,
             searchUrl: searchUrl,
+            exploreUrl: exploreUrl,
             ruleSearch: ruleSearch,
             ruleBookInfo: ruleBookInfo,
             ruleToc: ruleToc,
             ruleContent: ruleContent,
+            ruleExplore: ruleExplore,
             header: header,
             loginUrl: loginUrl,
             loginCheckJs: loginCheckJs,
+            customConfig: customConfig,
             raw: raw
         )
     }

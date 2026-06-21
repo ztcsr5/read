@@ -6,6 +6,14 @@ Branch: `codex/native-swift-ci`
 
 Objective: rebuild SourceRead as a native Swift iOS app that preserves the old Flutter product's UI layout, feature set, source compatibility, reading behavior, and daily-use reliability, while improving native smoothness and App Store readiness.
 
+## 0. Source engine migration principle
+
+The old Flutter source engine is an absorption target, not a code-copy target.
+
+For UI, reader features, bookshelf behavior, settings, history, and product flows, Flutter is the parity baseline. For source compatibility success rate, Swift must use a new Swift-native engine architecture. The Flutter parser is used to extract capability requirements, edge cases, and acceptance tests, but the Swift engine should improve request handling, charset decoding, JavaScript execution, WebView fallback, diagnostics, and recovery instead of mechanically porting legacy implementation details.
+
+Acceptance is based on import/search/detail/TOC/content success rate against tests and realistic sources, not on how closely the Swift code resembles the old Flutter parser.
+
 ## 1. Non-negotiable standard
 
 This migration is not considered complete because it can compile, pass CI, or export an unsigned IPA. Those are only delivery mechanics.

@@ -104,6 +104,37 @@ final class SourceStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testImportsExtendedBookSourceFieldsForSwiftEngine() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        [
+          {
+            "bookSourceName": "Extended Source",
+            "bookSourceUrl": "https://extended.example.com",
+            "bookSourceType": 0,
+            "weight": 7,
+            "searchUrl": "/search?q={{key}}",
+            "exploreUrl": "/rank/{{page}}",
+            "ruleExplore": { "bookList": "data.books", "name": "title" },
+            "header": "{\\"User-Agent\\":\\"UnitTest\\"}",
+            "customConfig": "{\\"charset\\":\\"gbk\\"}"
+          }
+        ]
+        """)
+
+        let source = try XCTUnwrap(store.sources.first)
+        XCTAssertEqual(source.bookSourceType, 0)
+        XCTAssertEqual(source.weight, 7)
+        XCTAssertEqual(source.exploreUrl, "/rank/{{page}}")
+        XCTAssertEqual(source.ruleExplore?.fields["bookList"], "data.books")
+        XCTAssertEqual(source.header, "{\"User-Agent\":\"UnitTest\"}")
+        XCTAssertEqual(source.customConfig, "{\"charset\":\"gbk\"}")
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testUpdatesDuplicateBookSourceByURL() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -154,6 +185,137 @@ final class SourceStoreTests: XCTestCase {
         XCTAssertEqual(parsed.kind, .json)
         XCTAssertEqual(store.sources.count, 1)
         XCTAssertEqual(store.sources.first?.bookSourceName, "Smart Source")
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testImportsCatalogSeparatelyFromRSS() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        [
+          {
+            "sourceName": "Yiove Catalog",
+            "sourceUrl": "https://shuyuan.yiove.com",
+            "sourceGroup": "Sources",
+            "sourceComment": "Catalog home"
+          }
+        ]
+        """)
+
+        XCTAssertEqual(store.catalogs.count, 1)
+        XCTAssertEqual(store.rssSources.count, 0)
+        XCTAssertEqual(store.sources.count, 0)
+        XCTAssertEqual(store.catalogs.first?.name, "Yiove Catalog")
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testImportsMixedBookSourceRSSAndCatalog() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        {
+          "items": [
+            {
+              "bookSourceName": "Book Source",
+              "bookSourceUrl": "https://book.example.com",
+              "searchUrl": "/search?q={{key}}",
+              "ruleSearch": { "bookList": "data.list", "name": "title" }
+            },
+            {
+              "sourceName": "RSS Source",
+              "sourceUrl": "https://news.example.com/feed.xml",
+              "ruleArticles": "channel.item",
+              "ruleTitle": "title"
+            },
+            {
+              "sourceName": "Catalog Source",
+              "sourceUrl": "https://catalog.example.com/sources.json",
+              "importUrl": "https://catalog.example.com/sources.json"
+            }
+          ]
+        }
+        """)
+
+        XCTAssertEqual(store.sources.count, 1)
+        XCTAssertEqual(store.rssSources.count, 1)
+        XCTAssertEqual(store.catalogs.count, 1)
+        XCTAssertEqual(store.sources.first?.bookSourceName, "Book Source")
+        XCTAssertEqual(store.rssSources.first?.sourceName, "RSS Source")
+        XCTAssertEqual(store.catalogs.first?.name, "Catalog Source")
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testPersistsRSSAndCatalogsWithBookSources() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        [
+          {
+            "bookSourceName": "Book Source",
+            "bookSourceUrl": "https://book.example.com",
+            "searchUrl": "/search?q={{key}}"
+          },
+          {
+            "sourceName": "RSS Source",
+            "sourceUrl": "https://news.example.com/rss",
+            "ruleArticles": "items"
+          },
+          {
+            "sourceName": "Catalog Source",
+            "sourceUrl": "https://shuyuan.example.com"
+          }
+        ]
+        """)
+
+        let reloaded = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        XCTAssertEqual(reloaded.sources.count, 1)
+        XCTAssertEqual(reloaded.rssSources.count, 1)
+        XCTAssertEqual(reloaded.catalogs.count, 1)
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testClassifiesPlainFeedURLAsRSS() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        [
+          {
+            "sourceName": "Plain Feed",
+            "sourceUrl": "https://example.com/feed.xml"
+          }
+        ]
+        """)
+
+        XCTAssertEqual(store.rssSources.count, 1)
+        XCTAssertEqual(store.catalogs.count, 0)
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testClassifiesPlainSourceNameAsCatalogInsteadOfRSS() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        [
+          {
+            "sourceName": "Plain Catalog",
+            "sourceUrl": "https://catalog.example.com"
+          }
+        ]
+        """)
+
+        XCTAssertEqual(store.catalogs.count, 1)
+        XCTAssertEqual(store.rssSources.count, 0)
         try? FileManager.default.removeItem(at: root)
     }
 }

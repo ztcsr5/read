@@ -52,7 +52,7 @@ struct SourceImportLinkParser {
     private static func extractImportURL(from text: String) -> String? {
         guard let schemeRange = findImportSchemeRange(in: text) else { return nil }
         let tail = String(text[schemeRange.lowerBound...])
-        let token = trimURLToken(tail)
+        let token = trimURLToken(firstToken(in: tail))
         guard let components = URLComponents(string: token) else { return nil }
         let queryItems = components.queryItems ?? []
         for key in ["src", "url"] {
@@ -62,6 +62,10 @@ struct SourceImportLinkParser {
             }
         }
         return nil
+    }
+
+    private static func firstToken(in text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? text
     }
 
     private static func findImportSchemeRange(in text: String) -> Range<String.Index>? {

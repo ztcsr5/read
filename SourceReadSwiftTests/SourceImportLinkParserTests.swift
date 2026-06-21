@@ -52,6 +52,15 @@ final class SourceImportLinkParserTests: XCTestCase {
         XCTAssertEqual(input.value, "https://example.com/rss.json")
     }
 
+    func testTrimsTextAfterImportSchemeToken() {
+        let input = SourceImportLinkParser.parse(
+            "Share legado://import/bookSource?src=https%3A%2F%2Fexample.com%2Fsource.json please import"
+        )
+
+        XCTAssertEqual(input.kind, .url)
+        XCTAssertEqual(input.value, "https://example.com/source.json")
+    }
+
     func testExtractsURLsFromSharedText() {
         let input = SourceImportLinkParser.parse(
             "Shared source https://example.com/source.json can be imported"
