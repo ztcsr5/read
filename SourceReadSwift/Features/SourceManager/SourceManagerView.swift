@@ -21,12 +21,13 @@ struct SourceManagerView: View {
         let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !keyword.isEmpty else { return appState.sourceStore.sources }
         return appState.sourceStore.sources.filter { source in
-            [
+            let values = [
                 source.bookSourceName,
                 source.bookSourceUrl,
                 source.bookSourceGroup ?? "",
                 source.searchUrl ?? ""
-            ].contains { $0.lowercased().contains(keyword) }
+            ]
+            return values.contains { $0.lowercased().contains(keyword) }
         }
     }
 
@@ -75,7 +76,7 @@ struct SourceManagerView: View {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [.json, .plainText, .item],
+                allowedContentTypes: [.item],
                 allowsMultipleSelection: false
             ) { result in
                 importFile(result)
@@ -104,7 +105,7 @@ struct SourceManagerView: View {
                 Text("Web 书源编辑服务")
                     .font(.headline)
                 Spacer()
-                Toggle("", isOn: .constant(false))
+                Toggle("", isOn: Binding.constant(false))
                     .labelsHidden()
                     .disabled(true)
             }
@@ -123,7 +124,7 @@ struct SourceManagerView: View {
             }
         }
         .pickerStyle(.segmented)
-        .onChange(of: selectedTab) { _, _ in
+        .onChange(of: selectedTab) { _ in
             searchText = ""
             selectedSourceURLs.removeAll()
             isManaging = false
@@ -220,6 +221,7 @@ struct SourceManagerView: View {
         }
     }
 
+    @ViewBuilder
     private func smallAction(
         _ title: String,
         destructive: Bool = false,
