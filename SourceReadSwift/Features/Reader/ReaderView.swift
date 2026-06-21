@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 struct ReaderView: View {
     @EnvironmentObject private var appState: AppState
@@ -28,9 +29,19 @@ struct ReaderView: View {
     @AppStorage("reader.ttsRate") private var ttsRate: Double = 0.52
     @AppStorage("reader.autoScrollDelay") private var autoScrollDelay: Double = 2.0
     @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
+    @AppStorage("reader.mode") private var readerModeRawValue: String = ReaderMode.scroll.rawValue
+    @AppStorage("reader.tapZones") private var tapZonesRawValue: String = ReaderTapAction.defaultRawValue
 
     private var background: ReaderBackground {
         ReaderBackground(rawValue: backgroundRawValue) ?? .paper
+    }
+
+    private var readerMode: ReaderMode {
+        ReaderMode(rawValue: readerModeRawValue) ?? .scroll
+    }
+
+    private var tapZoneActions: [ReaderTapAction] {
+        ReaderTapAction.decode(rawValue: tapZonesRawValue)
     }
 
     private var bookmarks: [ReaderBookmark] {
@@ -53,56 +64,19 @@ struct ReaderView: View {
         ZStack {
             background.color.ignoresSafeArea()
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        Text(content.title)
-                            .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
-                            .foregroundStyle(background.textColor)
-                            .padding(.bottom, 12)
-                            .id(-1)
-
-                        ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                            Text(paragraph)
-                                .font(.system(size: fontSize, weight: .regular, design: .serif))
-                                .foregroundStyle(background.textColor)
-                                .lineSpacing(lineSpacing)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, speechController.currentParagraphIndex == index ? 6 : 0)
-                                .background {
-                                    if speechController.currentParagraphIndex == index {
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .fill(AppTheme.accent.opacity(background == .dark ? 0.22 : 0.12))
-                                    }
-                                }
-                                .id(index)
-                        }
-                    }
-                    .padding(CGFloat(pagePadding))
-                    .padding(.bottom, 120)
-                }
-                .onChange(of: autoScrollTarget) { target in
-                    guard autoScrollEnabled else { return }
-                    withAnimation(.easeInOut(duration: 0.45)) {
-                        proxy.scrollTo(target, anchor: .top)
-                    }
-                }
-                .onChange(of: speechController.currentParagraphIndex) { target in
-                    guard target >= 0 else { return }
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        proxy.scrollTo(target, anchor: .center)
-                    }
-                }
-            }
+            readerContent
             .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showOverlay.toggle()
-                    if !showOverlay {
-                        showSettings = false
+            .gesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        handleReaderTap(at: value.location)
                     }
+            )
+
+            if showSettings && settingsTab == 2 {
+                tapZoneOverlay
+                    .allowsHitTesting(false)
                 }
-            }
 
             if showOverlay {
                 readerOverlay
@@ -123,6 +97,7 @@ struct ReaderView: View {
         }
         .onAppear {
             sessionStartedAt = Date()
+            autoScrollTarget = 0
             appState.bookshelfStore.markReaderOpened(bookID: bookID)
             appState.bookshelfStore.updateReadingProgress(
                 bookID: bookID,
@@ -139,6 +114,94 @@ struct ReaderView: View {
                 duration: Date().timeIntervalSince(sessionStartedAt)
             )
         }
+    }
+
+    @ViewBuilder
+    private var readerContent: some View {
+        switch readerMode {
+        case .scroll:
+            scrollReaderContent
+        case .pageTurn, .cover:
+            pagedReaderContent
+        }
+    }
+
+    private var scrollReaderContent: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    Text(content.title)
+                        .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
+                        .foregroundStyle(background.textColor)
+                        .padding(.bottom, 12)
+                        .id(-1)
+
+                    ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                        paragraphText(paragraph, index: index)
+                            .id(index)
+                    }
+                }
+                .padding(CGFloat(pagePadding))
+                .padding(.bottom, 120)
+            }
+            .onChange(of: autoScrollTarget) { target in
+                withAnimation(.easeInOut(duration: 0.45)) {
+                    proxy.scrollTo(target, anchor: .top)
+                }
+            }
+            .onChange(of: speechController.currentParagraphIndex) { target in
+                guard target >= 0 else { return }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private var pagedReaderContent: some View {
+        TabView(selection: $autoScrollTarget) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(content.title)
+                    .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
+                    .foregroundStyle(background.textColor)
+                Text("第 \(chapterIndex + 1) 章")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(CGFloat(pagePadding))
+            .tag(0)
+
+            ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                ScrollView {
+                    paragraphText(paragraph, index: index)
+                        .padding(CGFloat(pagePadding))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .tag(index + 1)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .animation(readerMode == .cover ? .easeInOut(duration: 0.2) : nil, value: autoScrollTarget)
+        .onChange(of: speechController.currentParagraphIndex) { target in
+            guard target >= 0 else { return }
+            autoScrollTarget = target + 1
+        }
+    }
+
+    private func paragraphText(_ paragraph: String, index: Int) -> some View {
+        Text(paragraph)
+            .font(.system(size: fontSize, weight: .regular, design: .serif))
+            .foregroundStyle(background.textColor)
+            .lineSpacing(lineSpacing)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, speechController.currentParagraphIndex == index ? 6 : 0)
+            .background {
+                if speechController.currentParagraphIndex == index {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(AppTheme.accent.opacity(background == .dark ? 0.22 : 0.12))
+                }
+            }
     }
 
     private var readerOverlay: some View {
@@ -272,7 +335,7 @@ struct ReaderView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 390)
+            .frame(height: 500)
             .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: -5)
@@ -331,6 +394,16 @@ struct ReaderView: View {
 
     private var advancedSettings: some View {
         Group {
+            Text("阅读模式")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker("阅读模式", selection: $readerModeRawValue) {
+                ForEach(ReaderMode.allCases) { mode in
+                    Text(mode.title).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+
             Text("朗读速度")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -352,7 +425,57 @@ struct ReaderView: View {
                 }
                 .buttonStyle(.bordered)
             }
+
+            tapZoneSettings
         }
+    }
+
+    private var tapZoneSettings: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("九宫格点击区域")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                ForEach(0..<9, id: \.self) { index in
+                    Menu {
+                        ForEach(ReaderTapAction.allCases) { action in
+                            Button(action.title) {
+                                setTapZone(index: index, action: action)
+                            }
+                        }
+                    } label: {
+                        Text(tapZoneActions[index].shortTitle)
+                            .font(.caption2.weight(.bold))
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                            .background(tapZoneActions[index].color.opacity(0.16))
+                            .foregroundStyle(tapZoneActions[index].color)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+            Button("恢复默认点击区域") {
+                tapZonesRawValue = ReaderTapAction.defaultRawValue
+            }
+            .font(.caption.weight(.semibold))
+        }
+    }
+
+    private var tapZoneOverlay: some View {
+        VStack(spacing: 1) {
+            ForEach(0..<3, id: \.self) { row in
+                HStack(spacing: 1) {
+                    ForEach(0..<3, id: \.self) { column in
+                        let index = row * 3 + column
+                        Text(tapZoneActions[index].shortTitle)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(tapZoneActions[index].color)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(tapZoneActions[index].color.opacity(0.08))
+                    }
+                }
+            }
+        }
+        .padding(CGFloat(pagePadding))
     }
 
     private func settingStepper(
@@ -510,6 +633,56 @@ struct ReaderView: View {
         onSelectChapter?(target)
     }
 
+    private func handleReaderTap(at location: CGPoint) {
+        guard !showSettings else { return }
+        let size = UIScreen.main.bounds.size
+        let column = min(max(Int(location.x / max(size.width / 3, 1)), 0), 2)
+        let row = min(max(Int(location.y / max(size.height / 3, 1)), 0), 2)
+        let index = row * 3 + column
+        let actions = tapZoneActions
+        guard actions.indices.contains(index) else {
+            toggleOverlay()
+            return
+        }
+        runTapAction(actions[index])
+    }
+
+    private func runTapAction(_ action: ReaderTapAction) {
+        switch action {
+        case .previousPage:
+            autoScrollTarget = max(0, autoScrollTarget - 1)
+        case .nextPage:
+            autoScrollTarget = min(max(content.paragraphs.count, 0), autoScrollTarget + 1)
+        case .previousChapter:
+            selectRelativeChapter(offset: -1)
+        case .nextChapter:
+            selectRelativeChapter(offset: 1)
+        case .menu:
+            toggleOverlay()
+        case .disabled:
+            break
+        }
+    }
+
+    private func toggleOverlay() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            showOverlay.toggle()
+            if !showOverlay {
+                showSettings = false
+            }
+        }
+    }
+
+    private func setTapZone(index: Int, action: ReaderTapAction) {
+        var actions = tapZoneActions
+        guard actions.indices.contains(index) else { return }
+        actions[index] = action
+        if !actions.contains(.menu) {
+            actions[4] = .menu
+        }
+        tapZonesRawValue = ReaderTapAction.encode(actions)
+    }
+
     private func toggleCurrentBookmark() {
         appState.bookshelfStore.toggleBookmark(
             bookID: bookID,
@@ -618,6 +791,86 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         isSpeaking = false
         currentParagraphIndex = -1
+    }
+}
+
+private enum ReaderMode: String, CaseIterable, Identifiable {
+    case scroll
+    case pageTurn
+    case cover
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .scroll: return "滑动"
+        case .pageTurn: return "平移"
+        case .cover: return "覆盖"
+        }
+    }
+}
+
+private enum ReaderTapAction: String, CaseIterable, Identifiable {
+    case previousPage
+    case nextPage
+    case previousChapter
+    case nextChapter
+    case menu
+    case disabled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .previousPage: return "上一页"
+        case .nextPage: return "下一页"
+        case .previousChapter: return "上一章"
+        case .nextChapter: return "下一章"
+        case .menu: return "菜单"
+        case .disabled: return "无动作"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .previousPage: return "上页"
+        case .nextPage: return "下页"
+        case .previousChapter: return "上章"
+        case .nextChapter: return "下章"
+        case .menu: return "菜单"
+        case .disabled: return "关闭"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .previousPage, .previousChapter: return .blue
+        case .nextPage, .nextChapter: return .green
+        case .menu: return AppTheme.accent
+        case .disabled: return .secondary
+        }
+    }
+
+    static let defaultActions: [ReaderTapAction] = [
+        .previousPage, .previousPage, .nextPage,
+        .previousPage, .menu, .nextPage,
+        .nextPage, .nextPage, .nextPage
+    ]
+
+    static var defaultRawValue: String {
+        encode(defaultActions)
+    }
+
+    static func encode(_ actions: [ReaderTapAction]) -> String {
+        actions.map(\.rawValue).joined(separator: ",")
+    }
+
+    static func decode(rawValue: String) -> [ReaderTapAction] {
+        let values = rawValue
+            .split(separator: ",")
+            .map { ReaderTapAction(rawValue: String($0)) ?? .menu }
+        guard values.count == 9 else { return defaultActions }
+        return values.contains(.menu) ? values : defaultActions
     }
 }
 
