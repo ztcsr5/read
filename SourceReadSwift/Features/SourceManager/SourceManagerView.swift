@@ -15,7 +15,6 @@ struct SourceManagerView: View {
     @State private var sourceJSONEditor: SourceJSONEditorState?
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
-    @State private var rssPreview: RSSPreviewState?
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
     @State private var pendingDeleteBookSourceURLs: Set<String> = []
@@ -101,9 +100,6 @@ struct SourceManagerView: View {
             }
             .sheet(item: $sourceTest) { state in
                 sourceTestSheet(state)
-            }
-            .sheet(item: $rssPreview) { state in
-                rssPreviewSheet(state)
             }
             .alert("删除选中的书源？", isPresented: Binding(
                 get: { !pendingDeleteBookSourceURLs.isEmpty },
@@ -242,7 +238,12 @@ struct SourceManagerView: View {
             } else {
                 LazyVStack(spacing: 10) {
                     ForEach(filteredRSSSources) { source in
-                        rssRow(source)
+                        NavigationLink {
+                            RSSArticlesView(source: source)
+                        } label: {
+                            rssRow(source)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -403,14 +404,10 @@ struct SourceManagerView: View {
             subtitle: source.sourceUrl,
             group: source.sourceGroup,
             enabled: source.enabled,
-            badges: ["RSS"],
+            badges: ["RSS", "文章"],
             actions: {
                 Button(source.enabled ? "停用" : "启用") {
                     appState.sourceStore.setRSSEnabled(!source.enabled, for: [source.sourceUrl])
-                }
-                Button("查看文章") {
-                    rssPreview = RSSPreviewState(source: source)
-                    Task { await runRSSPreview() }
                 }
                 Button("查看 JSON") {
                     jsonPreview = SourceJSONPreview(title: source.sourceName, json: prettyJSON(source))
@@ -691,71 +688,6 @@ struct SourceManagerView: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func rssPreviewSheet(_ state: RSSPreviewState) -> some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(state.source.sourceUrl)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-
-                Button {
-                    Task { await runRSSPreview() }
-                } label: {
-                    Label(rssPreview?.isRunning == true ? "加载中..." : "刷新文章", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(rssPreview?.isRunning == true)
-
-                if let output = rssPreview?.output {
-                    ScrollView {
-                        Text(output)
-                            .font(.system(.footnote, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: .infinity)
-                } else if rssPreview?.articles.isEmpty == false {
-                    List(rssPreview?.articles ?? []) { article in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(article.title)
-                                .font(.headline)
-                            if let date = article.pubDate {
-                                Text(date)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let description = article.description {
-                                Text(description)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                            }
-                            if let link = article.link, let url = URL(string: link) {
-                                Link("打开原文", destination: url)
-                                    .font(.caption.weight(.semibold))
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .listStyle(.plain)
-                } else {
-                    CenterTextEmptyState("正在加载 RSS/Atom。", minHeight: 260)
-                }
-            }
-            .padding()
-            .navigationTitle(state.source.sourceName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { rssPreview = nil }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
     private func importSources() {
         do {
             let parsed = SourceImportLinkParser.parse(importText)
@@ -921,38 +853,6 @@ struct SourceManagerView: View {
         }
     }
 
-    @MainActor
-    private func runRSSPreview() async {
-        guard var state = rssPreview else { return }
-        state.isRunning = true
-        state.output = "正在加载：\(state.source.sourceUrl)"
-        rssPreview = state
-        do {
-            guard let url = URL(string: state.source.sourceUrl) else {
-                throw URLError(.badURL)
-            }
-            var request = URLRequest(url: url)
-            request.setValue("Mozilla/5.0 SourceReadSwift", forHTTPHeaderField: "User-Agent")
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let text = ResponseTextDecoder().decode(data: data, headers: [:])
-            let articles = RSSFeedParser().parseArticles(from: text)
-            guard var latest = rssPreview else { return }
-            latest.isRunning = false
-            if articles.isEmpty {
-                latest.output = "已加载，但没有识别到 RSS/Atom 标题。"
-            } else {
-                latest.output = nil
-                latest.articles = Array(articles.prefix(50))
-            }
-            rssPreview = latest
-        } catch {
-            guard var latest = rssPreview else { return }
-            latest.isRunning = false
-            latest.output = "RSS 加载失败：\(error.localizedDescription)"
-            rssPreview = latest
-        }
-    }
-
     private func importSourcesSmart() async {
         let parsed = SourceImportLinkParser.parse(importText)
         if parsed.kind == .url {
@@ -1071,14 +971,6 @@ private struct SourceTestState: Identifiable {
     var keyword = "斗破苍穹"
     var isRunning = false
     var output: String?
-}
-
-private struct RSSPreviewState: Identifiable {
-    let id = UUID()
-    let source: RSSSource
-    var isRunning = false
-    var output: String?
-    var articles: [RSSArticlePreview] = []
 }
 
 private enum SourceManagerTab: String, CaseIterable, Identifiable {
