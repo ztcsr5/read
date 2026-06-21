@@ -21,7 +21,8 @@ struct ContentParser {
             let root = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: "html").first
             guard let root else { return .failure(.empty("\u{6b63}\u{6587} HTML \u{4e3a}\u{7a7a}")) }
             let raw = try htmlExtractor.value(from: root, rule: contentRule, fallback: nil, baseUrl: response.url)
-            let paragraphs = splitParagraphs(raw)
+            let cleaned = applyContentTransforms(raw, rule: source.ruleContent)
+            let paragraphs = splitParagraphs(cleaned)
             let next = try htmlExtractor.value(
                 from: root,
                 rule: htmlExtractor.firstRule(source.ruleContent, keys: ["nextContentUrl"]),
@@ -53,7 +54,7 @@ struct ContentParser {
         } else {
             content = nil
         }
-        let paragraphs = splitParagraphs(content ?? "")
+        let paragraphs = splitParagraphs(applyContentTransforms(content ?? "", rule: rule))
         let next: String?
         if let dict = object as? [String: Any] {
             next = jsonExtractor.string(
@@ -89,6 +90,39 @@ struct ContentParser {
         output = output.replacingOccurrences(of: "&lt;", with: "<")
         output = output.replacingOccurrences(of: "&gt;", with: ">")
         output = output.replacingOccurrences(of: "&quot;", with: "\"")
+        return output
+    }
+
+    private func applyContentTransforms(_ text: String, rule: SourceRule?) -> String {
+        var output = text
+        let transformKeys = ["replaceRegex", "replace", "purify", "purifyRegex"]
+        for key in transformKeys {
+            guard let value = rule?.fields[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else { continue }
+            output = applyTransform(value, to: output)
+        }
+        return output
+    }
+
+    private func applyTransform(_ rule: String, to text: String) -> String {
+        var output = text
+        let lines = rule
+            .components(separatedBy: CharacterSet.newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let items = lines.isEmpty ? [rule] : lines
+        for item in items {
+            if item.contains("##") {
+                let parts = item.components(separatedBy: "##")
+                let pattern = parts.first ?? ""
+                let replacement = parts.dropFirst().first ?? ""
+                if !pattern.isEmpty {
+                    output = output.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+                }
+            } else {
+                output = output.replacingOccurrences(of: item, with: "", options: .regularExpression)
+            }
+        }
         return output
     }
 }
