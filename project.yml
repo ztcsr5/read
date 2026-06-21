@@ -11,6 +11,9 @@ packages:
   SwiftSoup:
     url: https://github.com/scinfu/SwiftSoup.git
     from: 2.8.0
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    from: 0.9.19
 targets:
   SourceReadSwift:
     type: application
@@ -19,6 +22,7 @@ targets:
       - SourceReadSwift
     dependencies:
       - package: SwiftSoup
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.edc21.SourceReadSwift
@@ -43,3 +47,4 @@ targets:
     dependencies:
       - target: SourceReadSwift
       - package: SwiftSoup
+      - package: ZIPFoundation

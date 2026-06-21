@@ -60,7 +60,7 @@ struct BookshelfView: View {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [.plainText, .text, .item],
+                allowedContentTypes: [.plainText, .text, .epub, .item],
                 allowsMultipleSelection: false,
                 onCompletion: importLocalBook
             )
@@ -141,8 +141,13 @@ struct BookshelfView: View {
                     url.stopAccessingSecurityScopedResource()
                 }
             }
-            let data = try Data(contentsOf: url)
-            let parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
+            let parsed: LocalTextBook
+            if url.pathExtension.localizedCaseInsensitiveCompare("epub") == .orderedSame {
+                parsed = try LocalEPUBBookParser().parse(fileURL: url)
+            } else {
+                let data = try Data(contentsOf: url)
+                parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
+            }
             appState.bookshelfStore.addLocalTextBook(parsed)
             importMessage = "已导入《\(parsed.title)》，共 \(parsed.chapters.count) 章、\(parsed.paragraphs.count) 段。"
         } catch {
@@ -317,6 +322,10 @@ struct BookshelfView: View {
             }
         }
     }
+}
+
+private extension UTType {
+    static let epub = UTType(filenameExtension: "epub") ?? .data
 }
 
 private struct ReaderProfileView: View {
