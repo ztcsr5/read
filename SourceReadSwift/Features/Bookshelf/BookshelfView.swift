@@ -380,6 +380,12 @@ private struct ReaderProfileView: View {
                 }
 
                 NavigationLink {
+                    ReadingStatsView()
+                } label: {
+                    Label("阅读统计", systemImage: "chart.bar.xaxis")
+                }
+
+                NavigationLink {
                     SourceManagerView()
                 } label: {
                     Label("书源管理", systemImage: "square.stack.3d.up")

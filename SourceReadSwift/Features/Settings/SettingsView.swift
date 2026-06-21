@@ -70,6 +70,12 @@ struct SettingsView: View {
                     }
 
                     NavigationLink {
+                        ReadingStatsView()
+                    } label: {
+                        Label("阅读统计", systemImage: "chart.bar.xaxis")
+                    }
+
+                    NavigationLink {
                         AboutReadView()
                     } label: {
                         Label("关于阅读", systemImage: "info.circle")
@@ -193,6 +199,139 @@ struct ReadingHistoryView: View {
     }
 
     private func readingDurationText(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds / 60)
+        if minutes < 1 { return "少于 1 分钟" }
+        if minutes < 60 { return "\(minutes) 分钟" }
+        return String(format: "%.1f 小时", Double(minutes) / 60.0)
+    }
+}
+
+struct ReadingStatsView: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var summary: ReadingStatsSummary {
+        ReadingStatsSummary(books: appState.bookshelfStore.books)
+    }
+
+    var body: some View {
+        List {
+            if summary.totalBooks == 0 {
+                emptyState
+            } else {
+                Section {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("阅读概览")
+                            .font(.headline)
+                        HStack(spacing: 12) {
+                            statCard("总时长", value: durationText(summary.totalReadingSeconds), icon: "timer")
+                            statCard("阅读次数", value: "\(summary.totalSessions)", icon: "book")
+                        }
+                        HStack(spacing: 12) {
+                            statCard("平均进度", value: "\(Int(summary.averageProgress * 100))%", icon: "chart.line.uptrend.xyaxis")
+                            statCard("书签", value: "\(summary.totalBookmarks)", icon: "bookmark")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("书架构成") {
+                    metricRow("书架书籍", value: "\(summary.totalBooks)")
+                    metricRow("在线书籍", value: "\(summary.remoteBooks)")
+                    metricRow("本地导入", value: "\(summary.localBooks)")
+                    metricRow("已阅读", value: "\(summary.readBooks)")
+                    metricRow("有书签", value: "\(summary.bookmarkedBooks)")
+                }
+
+                if let mostReadBook = summary.mostReadBook {
+                    Section("阅读最多") {
+                        NavigationLink {
+                            BookshelfReaderGatewayView(book: mostReadBook)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(mostReadBook.title)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Text("\(durationText(mostReadBook.totalReadingSeconds ?? 0)) / \(mostReadBook.readingSessionCount ?? 0) 次")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                Section("最近阅读") {
+                    ForEach(summary.recentBooks) { book in
+                        NavigationLink {
+                            BookshelfReaderGatewayView(book: book)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(book.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(Int(book.readingProgress * 100))%")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                                if let lastReadAt = book.lastReadAt {
+                                    Text(lastReadAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("阅读统计")
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 42, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+            Text("暂无统计")
+                .font(.headline)
+            Text("打开书籍阅读后，这里会汇总阅读时长、次数、进度和书签。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 42)
+    }
+
+    private func statCard(_ title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
+            Text(value)
+                .font(.title3.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func metricRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func durationText(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds / 60)
         if minutes < 1 { return "少于 1 分钟" }
         if minutes < 60 { return "\(minutes) 分钟" }

@@ -538,7 +538,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Auto repair | Missing | Rule suggestion after parser parity | Golden suggestions | P7 |
 | Local web editor | Missing | Explicit start/stop local server + token | Local API tests | P8 |
 | Purify rules | Partial | Editor, persistence, duplicate-safe import, and content application exist; batch presets, diagnostics integration, and richer management still needed | Content purification + store persistence tests | P9 |
-| Reading history/stats | Partial | Per-book session count and duration exist; aggregate stats screen still needed | Repository + UI smoke | P9 |
+| Reading history/stats | Partial | Per-book history and aggregate stats screen exist; daily/weekly charts and richer session timeline still needed | Repository + UI smoke | P9 |
 | App Store hardening | Partial | Privacy, permissions, accessibility, release checks | Release checklist + CI | P10 |
 
 ## 6. Implementation plan
@@ -796,12 +796,16 @@ Completed since the initial audit:
   - Duplicate rules are ignored during add/import to avoid noisy cleanup lists.
   - Enabled global purify rules are applied after source-level content cleanup.
   - Content parsing and store persistence are covered by unit tests.
+- Improved reading statistics:
+  - Settings and profile now expose an aggregate reading stats screen.
+  - Stats summarize total books, local/online split, read books, bookmarks, reading sessions, total duration, average progress, most-read book, and recent reads.
+  - Aggregation is covered by unit tests instead of being UI-only placeholder data.
 
 Still not complete:
 
 - No macOS build has been run after this local milestone.
 - No IPA should be produced until this milestone is pushed and CI passes.
-- Reader page mode, cover mode, richer bookmarks UI, aggregate stats, purify diagnostics/presets, and full App Store hardening remain open.
+- Reader page mode, cover mode, richer bookmarks UI, daily/weekly stats charts, purify diagnostics/presets, and full App Store hardening remain open.
 - Source compatibility still needs more JS helper APIs, WebView fallback verification, anti-crawl handling, and larger real-source fixture coverage.
 
 ## 9. Definition of done
