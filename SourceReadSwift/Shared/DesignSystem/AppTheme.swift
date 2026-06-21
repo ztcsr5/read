@@ -5,6 +5,7 @@ enum AppTheme {
     static let card = Color(.systemBackground)
     static let elevatedCard = Color(.secondarySystemGroupedBackground)
     static let accent = Color(red: 0.35, green: 0.31, blue: 0.86)
+    static let softBlue = Color(red: 0.86, green: 0.92, blue: 1.0)
     static let secondaryText = Color.secondary
 
     static let cardRadius: CGFloat = 24
@@ -41,5 +42,75 @@ struct PodcastSectionTitle: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PodcastLargeTitleBar<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Text(title)
+                .font(.system(size: 44, weight: .bold, design: .default))
+                .foregroundStyle(.primary)
+                .accessibilityAddTraits(.isHeader)
+
+            Spacer()
+
+            trailing()
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PodcastChevronSectionHeader: View {
+    let title: String
+    var action: (() -> Void)?
+
+    var body: some View {
+        Group {
+            if let action {
+                Button(action: action) {
+                    label
+                }
+                .buttonStyle(.plain)
+            } else {
+                label
+            }
+        }
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var label: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.primary)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 23, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+struct CenterTextEmptyState: View {
+    let text: String
+    var minHeight: CGFloat
+
+    init(_ text: String, minHeight: CGFloat = 220) {
+        self.text = text
+        self.minHeight = minHeight
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, minHeight: minHeight)
     }
 }
