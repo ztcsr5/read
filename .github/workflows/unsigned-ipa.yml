@@ -1,0 +1,56 @@
+name: Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/**
+
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build unsigned device app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project SourceReadSwift.xcodeproj \
+            -scheme SourceReadSwift \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Release-iphoneos/SourceReadSwift.app' -type d | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "SourceReadSwift.app not found"
+            find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/*' -maxdepth 1 -type d
+            exit 1
+          fi
+          rm -rf unsigned-ipa
+          mkdir -p unsigned-ipa/Payload
+          cp -R "$APP_PATH" unsigned-ipa/Payload/
+          ditto -c -k --keepParent unsigned-ipa/Payload SourceReadSwift-unsigned.ipa
+          ls -lh SourceReadSwift-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SourceReadSwift-unsigned-ipa
+          path: SourceReadSwift-unsigned.ipa
+          if-no-files-found: error

@@ -62,6 +62,24 @@ CI build/test does not require signing. Real App Store delivery still needs:
 
 Those can be added later after the native core is stable.
 
+## Unsigned IPA for self-signing
+
+If you already have your own signing workflow, use the `Unsigned IPA` GitHub Actions workflow.
+
+It builds an unsigned `iphoneos` app and uploads:
+
+```text
+SourceReadSwift-unsigned.ipa
+```
+
+Download it from:
+
+```text
+GitHub repository -> Actions -> Unsigned IPA -> latest run -> Artifacts
+```
+
+Then re-sign that IPA with your own certificate/profile/tooling.
+
 ## Current quality rules
 
 - Every network/rule/JS failure must return `SourceEngineError`.
