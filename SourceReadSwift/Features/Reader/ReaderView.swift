@@ -1,7 +1,11 @@
 import SwiftUI
 
 struct ReaderView: View {
+    @EnvironmentObject private var appState: AppState
+    let bookID: String
     let content: ChapterContent
+    let chapterIndex: Int
+    let totalChapters: Int?
     @Environment(\.dismiss) private var dismiss
     @State private var showOverlay = false
     @State private var showSettings = false
@@ -53,6 +57,14 @@ struct ReaderView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            appState.bookshelfStore.updateReadingProgress(
+                bookID: bookID,
+                chapterIndex: chapterIndex,
+                chapterTitle: content.title,
+                totalChapters: totalChapters ?? 0
+            )
+        }
     }
 
     private var readerOverlay: some View {

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SearchBookRow: View {
     let book: SearchBook
+    var onAdd: (() -> Void)?
+    var isInBookshelf = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -23,17 +25,30 @@ struct SearchBookRow: View {
                     .foregroundStyle(.blue)
                     .lineLimit(1)
 
-                Text(book.bookUrl)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                if let intro = book.intro, !intro.isEmpty {
+                    Text(intro)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text(book.bookUrl)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             Spacer(minLength: 0)
 
-            Image(systemName: "plus.circle")
-                .font(.title2)
-                .foregroundStyle(AppTheme.accent)
+            if let onAdd {
+                Button(action: onAdd) {
+                    Image(systemName: isInBookshelf ? "checkmark.circle.fill" : "plus.circle")
+                        .font(.title2)
+                        .foregroundStyle(isInBookshelf ? Color.green : AppTheme.accent)
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.vertical, 2)
     }

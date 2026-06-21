@@ -195,7 +195,13 @@ struct DiscoverView: View {
                 NavigationLink {
                     BookDetailView(book: book)
                 } label: {
-                    SearchBookRow(book: book)
+                    SearchBookRow(
+                        book: book,
+                        onAdd: {
+                            appState.bookshelfStore.addOrUpdate(book)
+                        },
+                        isInBookshelf: appState.bookshelfStore.contains(book)
+                    )
                         .podcastCard()
                 }
                 .buttonStyle(.plain)

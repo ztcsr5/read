@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class AppState: ObservableObject {
     let sourceStore: SourceStore
+    let bookshelfStore: BookshelfStore
     private let injectedEngine: SourceEngine?
     lazy var engine: SourceEngine = {
         if let injectedEngine {
@@ -19,9 +20,11 @@ final class AppState: ObservableObject {
 
     init(
         sourceStore: SourceStore? = nil,
+        bookshelfStore: BookshelfStore? = nil,
         engine: SourceEngine? = nil
     ) {
         self.sourceStore = sourceStore ?? SourceStore()
+        self.bookshelfStore = bookshelfStore ?? BookshelfStore()
         self.injectedEngine = engine
     }
 

@@ -11,7 +11,13 @@ struct BookDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                SearchBookRow(book: book)
+                SearchBookRow(
+                    book: book,
+                    onAdd: {
+                        appState.bookshelfStore.addOrUpdate(book)
+                    },
+                    isInBookshelf: appState.bookshelfStore.contains(book)
+                )
                     .podcastCard()
 
                 if isLoading {
@@ -80,7 +86,7 @@ struct BookDetailView: View {
 
             ForEach(Array(chapters.prefix(80))) { chapter in
                 NavigationLink {
-                    ChapterLoadingView(sourceUrl: book.sourceUrl, chapter: chapter)
+                    ChapterLoadingView(sourceUrl: book.sourceUrl, chapter: chapter, totalChapters: chapters.count)
                 } label: {
                     HStack {
                         Text(chapter.title)
@@ -115,6 +121,13 @@ struct BookDetailView: View {
             switch await appState.engine.getChapterList(source: source, book: loadedDetail) {
             case .success(let loadedChapters):
                 chapters = loadedChapters
+                appState.bookshelfStore.addOrUpdate(book)
+                appState.bookshelfStore.updateDetails(
+                    bookID: book.id,
+                    latestChapterTitle: loadedDetail.latestChapter,
+                    intro: loadedDetail.intro,
+                    totalChapters: loadedChapters.count
+                )
             case .failure(let error):
                 errorMessage = "目录加载失败：\(error.displayMessage)"
             }
@@ -128,13 +141,19 @@ struct ChapterLoadingView: View {
     @EnvironmentObject private var appState: AppState
     let sourceUrl: String
     let chapter: BookChapter
+    var totalChapters: Int? = nil
     @State private var content: ChapterContent?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let content {
-                ReaderView(content: content)
+                ReaderView(
+                    bookID: "\(sourceUrl)|\(chapter.bookUrl)",
+                    content: content,
+                    chapterIndex: chapter.index,
+                    totalChapters: totalChapters
+                )
             } else if let errorMessage {
                 EmptyStateCard(systemImage: "xmark.octagon", title: "正文加载失败", message: errorMessage)
                     .padding(AppTheme.pagePadding)
