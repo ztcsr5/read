@@ -25,4 +25,16 @@ final class ReaderSettingsModelsTests: XCTestCase {
     func testTapZoneDecodeFallsBackWhenCountIsInvalid() {
         XCTAssertEqual(ReaderTapAction.decode(rawValue: "nextPage,menu"), ReaderTapAction.defaultActions)
     }
+
+    func testPreloadPolicyClampsCount() {
+        XCTAssertEqual(ReaderPreloadPolicy.clamp(-1), 0)
+        XCTAssertEqual(ReaderPreloadPolicy.clamp(3), 3)
+        XCTAssertEqual(ReaderPreloadPolicy.clamp(99), 5)
+    }
+
+    func testPreloadPolicyTitle() {
+        XCTAssertEqual(ReaderPreloadPolicy.title(for: 0), "关闭")
+        XCTAssertEqual(ReaderPreloadPolicy.title(for: 3), "3 章")
+        XCTAssertEqual(ReaderPreloadPolicy.title(for: 99), "5 章")
+    }
 }

@@ -63,14 +63,13 @@ Current SourceReadSwift status:
 - Reader can load online/local chapters, track progress/session stats, switch source, and expose controls.
 - Online chapter cache now exists and is used before network loads.
 - Successful online chapter parses are cached by source URL, chapter URL, and active purify-rule signature.
-- Reader loading preloads the next two chapters in the background.
+- Reader loading preloads upcoming chapters in the background; the count is configurable from reader settings, with 0 disabling preload.
 - If a network reload fails after purify rules changed, reader loading can fall back to stale cached content for the same source/chapter instead of failing the reading session outright.
 - Reader shows a subtle non-blocking banner when it is displaying a cached copy after live loading fails.
 - Settings can show cache count/estimated size and clear/remove expired cache entries.
 
 Do next:
 
-- Make preload count configurable after the reader settings model is split into a dedicated view model.
 - Add device QA for cache growth, low-storage behavior, airplane-mode reading, and cache cleanup.
 
 ### Data model

@@ -830,7 +830,7 @@ Completed since the initial audit:
 - Improved chapter cache/preload:
   - Online chapter content is cached by source URL, chapter URL, and active purify-rule signature.
   - Reader loading checks cache before network and saves successful chapter parses.
-  - Reader preloads the next two chapters in the background when a chapter opens.
+  - Reader preloads upcoming chapters in the background when a chapter opens; the count is configurable from reader settings, with 0 disabling preload.
   - Settings cache cleanup now clears real chapter cache instead of being a placeholder, and shows cached chapter count plus estimated size.
   - Cache persistence, expiry, and purify-signature invalidation are covered by unit tests.
   - If a live reload fails but an older cached copy exists for the same source/chapter, the reader falls back to cached content instead of dropping the user into a hard failure state.

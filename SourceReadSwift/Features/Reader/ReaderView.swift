@@ -40,6 +40,7 @@ struct ReaderView: View {
     @AppStorage("reader.mode") private var readerModeRawValue: String = ReaderMode.scroll.rawValue
     @AppStorage("reader.tapZones") private var tapZonesRawValue: String = ReaderTapAction.defaultRawValue
     @AppStorage("reader.keepScreenAwake") private var keepScreenAwake = true
+    @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
 
     private var background: ReaderBackground {
         ReaderBackground(rawValue: backgroundRawValue) ?? .paper
@@ -517,6 +518,12 @@ struct ReaderView: View {
 
             Toggle("阅读时保持屏幕常亮", isOn: $keepScreenAwake)
                 .font(.subheadline.weight(.semibold))
+
+            settingStepper(title: "预加载章节", value: ReaderPreloadPolicy.title(for: preloadChapterCount)) {
+                preloadChapterCount = ReaderPreloadPolicy.clamp(preloadChapterCount - 1)
+            } increase: {
+                preloadChapterCount = ReaderPreloadPolicy.clamp(preloadChapterCount + 1)
+            }
 
             HStack(spacing: 12) {
                 Button(autoScrollEnabled ? "停止自动滚动" : "开始自动滚动") {

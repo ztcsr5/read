@@ -154,6 +154,7 @@ struct ChapterLoadingView: View {
     @State private var currentChapter: BookChapter?
     @State private var errorMessage: String?
     @State private var isUsingStaleCache = false
+    @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
 
     private var effectiveChapter: BookChapter {
         currentChapter ?? chapter
@@ -239,10 +240,12 @@ struct ChapterLoadingView: View {
     }
 
     private func preloadNextChapters(after chapter: BookChapter, source: BookSource, purifyRules: [String]) {
+        let count = ReaderPreloadPolicy.clamp(preloadChapterCount)
+        guard count > 0 else { return }
         let nextChapters = chapters
             .filter { $0.index > chapter.index }
             .sorted { $0.index < $1.index }
-            .prefix(2)
+            .prefix(count)
             .filter {
                 !appState.chapterContentCacheStore.isCached(
                     sourceURL: source.bookSourceUrl,

@@ -79,3 +79,18 @@ enum ReaderTapAction: String, CaseIterable, Identifiable, Sendable {
         return values.contains(.menu) ? values : defaultActions
     }
 }
+
+enum ReaderPreloadPolicy {
+    static let defaultCount = 2
+    static let minimumCount = 0
+    static let maximumCount = 5
+
+    static func clamp(_ count: Int) -> Int {
+        min(max(count, minimumCount), maximumCount)
+    }
+
+    static func title(for count: Int) -> String {
+        let value = clamp(count)
+        return value == 0 ? "关闭" : "\(value) 章"
+    }
+}
