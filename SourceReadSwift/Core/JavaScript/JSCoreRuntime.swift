@@ -177,9 +177,24 @@ final class JSCoreRuntime {
         java.SHA256 = java.sha256;
         java.timeFormat = function(timestamp, format) { return __native_timeFormat(Number(timestamp), String(format)); };
         java.getTime = function() { return Date.now(); };
-        java.getString = function(html, rule) { return __native_getString(String(html), String(rule), String(typeof baseUrl === 'undefined' ? '' : baseUrl)); };
-        java.getStringList = function(html, rule) {
-          var list = __native_getStringList(String(html), String(rule), String(typeof baseUrl === 'undefined' ? '' : baseUrl));
+        function __defaultHtml() {
+          if (typeof result !== 'undefined') return String(result);
+          if (typeof html !== 'undefined') return String(html);
+          return '';
+        }
+        function __defaultBaseUrl() {
+          return String(typeof baseUrl === 'undefined' ? '' : baseUrl);
+        }
+        java.getString = function(input, rule) {
+          if (arguments.length <= 1) {
+            return __native_getString(__defaultHtml(), String(input), __defaultBaseUrl());
+          }
+          return __native_getString(String(input), String(rule), __defaultBaseUrl());
+        };
+        java.getStringList = function(input, rule) {
+          var pageHtml = arguments.length <= 1 ? __defaultHtml() : String(input);
+          var actualRule = arguments.length <= 1 ? String(input) : String(rule);
+          var list = __native_getStringList(pageHtml, actualRule, __defaultBaseUrl());
           var out = [];
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
           return out;
@@ -340,7 +355,12 @@ final class JSCoreRuntime {
             },
             first: function() { return this; },
             get: function(_) { return this; },
-            text: function() { return __native_getString(String(html), String(selector) + '@text', String(baseUrlValue || '')); },
+            text: function() {
+              var list = __native_getStringList(String(html), String(selector) + '@text', String(baseUrlValue || ''));
+              var out = [];
+              for (var i = 0; i < list.length; i++) out.push(String(list[i]));
+              return out.join('\\n');
+            },
             html: function() { return __native_getString(String(html), String(selector) + '@html', String(baseUrlValue || '')); },
             attr: function(name) { return __native_getString(String(html), String(selector) + '@' + String(name), String(baseUrlValue || '')); },
             eachText: function() {
@@ -351,6 +371,9 @@ final class JSCoreRuntime {
             }
           };
         }
+        java.getElements = function(rule) {
+          return __makeJsoupSelection(__defaultHtml(), String(rule || ''), __defaultBaseUrl());
+        };
         Packages.org.jsoup.Jsoup = {
           parse: function(html, baseUrlValue) {
             return __makeJsoupSelection(String(html), '', String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl)));

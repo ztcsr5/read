@@ -183,4 +183,45 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "https://example.com/1,https://example.com/2")
     }
+
+    func testNativeGetStringCanUseDefaultHtmlVariable() throws {
+        let html = """
+        <html><body>
+          <h2>Title</h2>
+          <a href="/1">One</a>
+          <a href="/2">Two</a>
+        </body></html>
+        """
+        let script = """
+        java.getString('h2@text') + '|' + java.getStringList('a@href').join(',')
+        """
+
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html, "baseUrl": "https://example.com"])
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "Title|https://example.com/1,https://example.com/2")
+    }
+
+    func testNativeGetElementsUsesDefaultHtmlVariable() throws {
+        let html = """
+        <html><body>
+          <div id="content">
+            <p>A</p>
+            <p>B</p>
+          </div>
+        </body></html>
+        """
+
+        let result = JSCoreRuntime().evaluate(
+            "java.getElements('#content p').text() + '|' + java.getElements('#content p').eachText().join(',')",
+            variables: ["html": html, "baseUrl": "https://example.com"]
+        )
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "A\nB|A,B")
+    }
 }
