@@ -15,6 +15,24 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         XCTAssertEqual(value, "loaded:https://example.com/a")
     }
 
+    func testAjaxBridgeSupportsBodyMethodAndStringCoercion() throws {
+        let runtime = JSCoreRuntime { url in
+            #"{"url":"\#(url)"}"#
+        }
+
+        let result = runtime.evaluate(
+            """
+            var response = java.ajax('https://example.com/a');
+            response.body() + '|' + JSON.parse(response).url;
+            """
+        )
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, #"{"url":"https://example.com/a"}|https://example.com/a"#)
+    }
+
     func testPostBridgeAddsBodyDirective() throws {
         let runtime = JSCoreRuntime { url in
             url

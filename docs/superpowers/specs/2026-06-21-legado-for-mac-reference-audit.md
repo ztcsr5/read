@@ -40,7 +40,7 @@ Do next:
 
 - Add connector semantics for `||` and `%%` where our parser still treats rules too literally.
 - Add more fixture tests for comma JSON request config and mixed JSON field + JS segment rules.
-- Add JS response-object compatibility for helpers that expect `java.ajax(url).body()`.
+- Continue expanding JS response-object compatibility beyond the adopted `java.ajax(url).body()` path if real-source fixtures require it.
 
 ### Reader/cache
 
@@ -118,6 +118,7 @@ Implemented in `SourceReadSwift` after this audit:
 
 - Single-brace search placeholders: `{key}`, `{keyword}`, `{page}`, `{baseUrl}`.
 - Safe integer page arithmetic in `{{...}}`, e.g. `{{(page - 1) * 10}}`.
+- JS network helpers now return response-like objects with `body()`, `text()`, `toString()`, and `valueOf()` while preserving string coercion.
 - Unit coverage in `SourceReadSwiftTests/SearchURLResolverTests.swift`.
 
 ## Not worth copying

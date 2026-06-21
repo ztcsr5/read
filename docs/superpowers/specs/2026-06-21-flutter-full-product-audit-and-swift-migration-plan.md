@@ -812,6 +812,7 @@ Completed since the initial audit:
   - Added MD5/SHA256 native helpers.
   - Added common Legado aliases: `java.md5`, `java.hexMd5`, `java.MD5`, `java.sha256`, `java.base64`, `java.decodeBase64`, `md5`, `hexMd5`, `atob`, and `btoa`.
   - Added a minimal `CryptoJS.MD5(...).toString()` / `CryptoJS.SHA256(...).toString()` compatibility shim.
+  - `java.ajax`, `java.get` URL loads, and `java.post` now return response-like objects with `body()` while preserving string coercion.
 - Improved search URL compatibility:
   - `{{source.xxx}}` placeholders now resolve from imported raw source fields and normalized source metadata.
   - Search URL JavaScript can read `source.bookSourceUrl`, `source.bookSourceName`, aliases, and raw custom fields.

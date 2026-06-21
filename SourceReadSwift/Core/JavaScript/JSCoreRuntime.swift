@@ -147,16 +147,25 @@ final class JSCoreRuntime {
         function __bridgeStored(name) {
           return __native_getStore(String(name));
         }
+        function __bridgeResponse(text) {
+          var value = String(text || '');
+          return {
+            body: function() { return value; },
+            text: function() { return value; },
+            toString: function() { return value; },
+            valueOf: function() { return value; }
+          };
+        }
         java.put = function(key, value) { return __native_put(String(key), __bridgeString(value)); };
         java.getVar = function(key) { return __bridgeStored(key); };
-        java.ajax = function(url, headers) { return __native_ajax(String(url), __bridgeString(headers || '')); };
+        java.ajax = function(url, headers) { return __bridgeResponse(__native_ajax(String(url), __bridgeString(headers || ''))); };
         java.get = function(url, headers) {
           var key = String(url);
           var value = __bridgeStored(key);
           if (value && key.indexOf('://') < 0 && key.charAt(0) !== '/') return value;
-          return __native_ajax(key, __bridgeString(headers || ''));
+          return __bridgeResponse(__native_ajax(key, __bridgeString(headers || '')));
         };
-        java.post = function(url, body, headers) { return __native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || '')); };
+        java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || ''))); };
         java.log = function(value) { return String(value); };
         function base64Encode(value) { return java.base64Encode(value); }
         function base64Decode(value) { return java.base64Decode(value); }
