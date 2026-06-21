@@ -28,7 +28,9 @@ struct HtmlRuleExtractor {
         let parts = rule.components(separatedBy: "@")
         let selector = cleanCSS(parts.first ?? "")
         let target = selector.isEmpty ? root : try root.select(selector).first() ?? root
-        let attr = parts.dropFirst().first ?? "text"
+        let attrRule = parts.dropFirst().first ?? "text"
+        let attrParts = attrRule.components(separatedBy: "##")
+        let attr = attrParts.first ?? "text"
         let value: String
         if attr == "text" {
             value = try target.text()
@@ -37,11 +39,28 @@ struct HtmlRuleExtractor {
         } else {
             value = try target.attr(attr)
         }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = applyRegexTransforms(attrParts.dropFirst(), to: value)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if ["href", "src", "url"].contains(attr), let baseUrl {
             return absolutize(trimmed, base: baseUrl)
         }
         return trimmed
+    }
+
+    private func applyRegexTransforms(_ rawParts: ArraySlice<String>, to value: String) -> String {
+        let parts = Array(rawParts)
+        guard !parts.isEmpty else { return value }
+        var output = value
+        var index = 0
+        while index < parts.count {
+            let pattern = parts[index]
+            let replacement = index + 1 < parts.count ? parts[index + 1] : ""
+            if !pattern.isEmpty {
+                output = output.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+            }
+            index += 2
+        }
+        return output
     }
 
     func firstRule(_ rule: SourceRule?, keys: [String]) -> String? {

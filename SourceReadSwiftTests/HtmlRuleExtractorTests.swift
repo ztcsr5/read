@@ -34,4 +34,20 @@ final class HtmlRuleExtractorTests: XCTestCase {
 
         XCTAssertEqual(value, "https://example.com/book/1")
     }
+
+    func testRegexTransformCleansExtractedValue() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <div class="book"><a class="title">[完结] Title 最新章节</a></div>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: ".book .title@text##\\[完结\\] ## ## 最新章节##",
+            baseUrl: URL(string: "https://example.com/search")!
+        )
+
+        XCTAssertEqual(value, "Title")
+    }
 }
