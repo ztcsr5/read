@@ -68,4 +68,53 @@ final class BookshelfStoreTests: XCTestCase {
         XCTAssertEqual(store.books.first?.intro, "Existing intro")
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testSwitchSourceKeepsBookshelfIdentityAndResetsProgress() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = BookshelfStore(persistence: BookshelfPersistence(fileManager: .default, rootURL: root))
+        let original = SearchBook(
+            name: "Book",
+            author: "Author",
+            coverUrl: nil,
+            bookUrl: "https://old.example.com/book",
+            sourceName: "Old",
+            sourceUrl: "https://old.example.com",
+            intro: "Old intro"
+        )
+        store.addOrUpdate(original)
+        let bookID = original.id
+        store.updateReadingProgress(bookID: bookID, chapterIndex: 8, chapterTitle: "Old 9", totalChapters: 20)
+        store.toggleBookmark(bookID: bookID, chapterIndex: 8, chapterTitle: "Old 9", snippet: "Snippet")
+
+        let replacement = SearchBook(
+            name: "Book",
+            author: "Author 2",
+            coverUrl: "https://new.example.com/cover.jpg",
+            bookUrl: "https://new.example.com/book",
+            sourceName: "New",
+            sourceUrl: "https://new.example.com",
+            intro: "New intro"
+        )
+        store.switchSource(
+            bookID: bookID,
+            to: replacement,
+            latestChapterTitle: "New Latest",
+            intro: "Loaded intro",
+            totalChapters: 30
+        )
+
+        let updated = try XCTUnwrap(store.book(id: bookID))
+        XCTAssertEqual(updated.id, bookID)
+        XCTAssertEqual(updated.sourceName, "New")
+        XCTAssertEqual(updated.sourceURL, "https://new.example.com")
+        XCTAssertEqual(updated.bookURL, "https://new.example.com/book")
+        XCTAssertEqual(updated.currentChapterIndex, 0)
+        XCTAssertEqual(updated.currentChapterTitle, nil)
+        XCTAssertEqual(updated.totalChapters, 30)
+        XCTAssertEqual(updated.latestChapterTitle, "New Latest")
+        XCTAssertEqual(updated.intro, "Loaded intro")
+        XCTAssertEqual(updated.bookmarks, nil)
+        try? FileManager.default.removeItem(at: root)
+    }
 }

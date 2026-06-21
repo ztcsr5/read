@@ -144,10 +144,12 @@ struct BookDetailView: View {
 
 struct ChapterLoadingView: View {
     @EnvironmentObject private var appState: AppState
+    let bookID: String?
     let sourceUrl: String
     let chapter: BookChapter
     var totalChapters: Int? = nil
     var chapters: [BookChapter] = []
+    var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
     @State private var content: ChapterContent?
     @State private var currentChapter: BookChapter?
     @State private var errorMessage: String?
@@ -160,11 +162,12 @@ struct ChapterLoadingView: View {
         Group {
             if let content {
                 ReaderView(
-                    bookID: "\(sourceUrl)|\(chapter.bookUrl)",
+                    bookID: bookID ?? "\(sourceUrl)|\(chapter.bookUrl)",
                     content: content,
                     chapterIndex: effectiveChapter.index,
                     totalChapters: totalChapters,
                     chapters: chapters,
+                    extraToolbarActions: extraToolbarActions,
                     onSelectChapter: { selected in
                         currentChapter = selected
                         content = nil
@@ -207,5 +210,20 @@ struct ChapterLoadingView: View {
         case .failure(let error):
             errorMessage = error.displayMessage
         }
+    }
+    init(
+        bookID: String? = nil,
+        sourceUrl: String,
+        chapter: BookChapter,
+        totalChapters: Int? = nil,
+        chapters: [BookChapter] = [],
+        extraToolbarActions: @escaping () -> AnyView = { AnyView(EmptyView()) }
+    ) {
+        self.bookID = bookID
+        self.sourceUrl = sourceUrl
+        self.chapter = chapter
+        self.totalChapters = totalChapters
+        self.chapters = chapters
+        self.extraToolbarActions = extraToolbarActions
     }
 }

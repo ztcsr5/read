@@ -59,6 +59,31 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    func switchSource(
+        bookID: String,
+        to searchBook: SearchBook,
+        latestChapterTitle: String?,
+        intro: String?,
+        totalChapters: Int
+    ) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].title = searchBook.name
+        books[index].author = searchBook.author ?? books[index].author
+        books[index].coverURL = searchBook.coverUrl ?? books[index].coverURL
+        books[index].sourceName = searchBook.sourceName
+        books[index].sourceURL = searchBook.sourceUrl
+        books[index].bookURL = searchBook.bookUrl
+        books[index].intro = intro ?? searchBook.intro ?? books[index].intro
+        books[index].latestChapterTitle = latestChapterTitle
+        books[index].totalChapters = max(totalChapters, 0)
+        books[index].currentChapterIndex = 0
+        books[index].currentChapterTitle = nil
+        books[index].bookmarks = nil
+        books[index].lastReadAt = Date()
+        moveToFront(index: index)
+        persist()
+    }
+
     func markRefreshFailure(bookID: String, message: String) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
         books[index].intro = books[index].intro ?? message

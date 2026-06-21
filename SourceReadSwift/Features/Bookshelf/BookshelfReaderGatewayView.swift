@@ -9,6 +9,12 @@ struct BookshelfReaderGatewayView: View {
     @State private var selectedChapter: BookChapter?
     @State private var selectedLocalChapterIndex: Int?
     @State private var errorMessage: String?
+    @State private var showSourceSwitcher = false
+    @State private var sourceSwitchState = SourceSwitchState()
+
+    private var currentBook: BookshelfBook {
+        appState.bookshelfStore.book(id: book.id) ?? book
+    }
 
     var body: some View {
         Group {
@@ -28,10 +34,22 @@ struct BookshelfReaderGatewayView: View {
                 )
             } else if let selectedChapter {
                 ChapterLoadingView(
-                    sourceUrl: book.sourceURL,
+                    bookID: book.id,
+                    sourceUrl: currentBook.sourceURL,
                     chapter: selectedChapter,
                     totalChapters: chapters.count,
-                    chapters: chapters
+                    chapters: chapters,
+                    extraToolbarActions: {
+                        AnyView(
+                            Button {
+                                showSourceSwitcher = true
+                            } label: {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.title3.weight(.semibold))
+                                    .frame(width: 44, height: 44)
+                            }
+                        )
+                    }
                 )
             } else if let errorMessage {
                 EmptyStateCard(systemImage: "xmark.octagon", title: "阅读恢复失败", message: errorMessage)
@@ -46,6 +64,9 @@ struct BookshelfReaderGatewayView: View {
         .task {
             await resumeReading()
         }
+        .sheet(isPresented: $showSourceSwitcher) {
+            sourceSwitcherSheet
+        }
     }
 
     private var localBookChapters: [LocalTextChapter] {
@@ -54,7 +75,7 @@ struct BookshelfReaderGatewayView: View {
 
     private var localReader: some View {
         let chapters = localBookChapters
-        let requestedIndex = selectedLocalChapterIndex ?? book.currentChapterIndex
+        let requestedIndex = selectedLocalChapterIndex ?? currentBook.currentChapterIndex
         let safeIndex = min(max(requestedIndex, 0), max(chapters.count - 1, 0))
         let localChapter = chapters[safeIndex]
         let bookChapters = chapters.map {
@@ -90,21 +111,22 @@ struct BookshelfReaderGatewayView: View {
     }
 
     private func resumeReading() async {
-        guard book.localChapters == nil, book.localContent == nil else { return }
+        let activeBook = currentBook
+        guard activeBook.localChapters == nil, activeBook.localContent == nil else { return }
         guard selectedChapter == nil, errorMessage == nil else { return }
-        guard let source = appState.sourceStore.source(for: book.sourceURL) else {
-            errorMessage = "找不到书源：\(book.sourceName)"
+        guard let source = appState.sourceStore.source(for: activeBook.sourceURL) else {
+            errorMessage = "找不到书源：\(activeBook.sourceName)"
             return
         }
 
         let searchBook = SearchBook(
-            name: book.title,
-            author: book.author,
-            coverUrl: book.coverURL,
-            bookUrl: book.bookURL,
-            sourceName: book.sourceName,
-            sourceUrl: book.sourceURL,
-            intro: book.intro
+            name: activeBook.title,
+            author: activeBook.author,
+            coverUrl: activeBook.coverURL,
+            bookUrl: activeBook.bookURL,
+            sourceName: activeBook.sourceName,
+            sourceUrl: activeBook.sourceURL,
+            intro: activeBook.intro
         )
 
         switch await appState.engine.getBookDetail(source: source, book: searchBook) {
@@ -113,11 +135,11 @@ struct BookshelfReaderGatewayView: View {
             switch await appState.engine.getChapterList(source: source, book: loadedDetail) {
             case .success(let loadedChapters):
                 chapters = loadedChapters
-                let target = loadedChapters.first(where: { $0.index == book.currentChapterIndex })
+                let target = loadedChapters.first(where: { $0.index == activeBook.currentChapterIndex })
                     ?? loadedChapters.first
                 if let target {
                     appState.bookshelfStore.updateDetails(
-                        bookID: book.id,
+                        bookID: activeBook.id,
                         latestChapterTitle: loadedDetail.latestChapter,
                         intro: loadedDetail.intro,
                         totalChapters: loadedChapters.count
@@ -133,4 +155,123 @@ struct BookshelfReaderGatewayView: View {
             errorMessage = "详情加载失败：\(error.displayMessage)"
         }
     }
+
+    private var sourceSwitcherSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("搜索其他启用书源中的同名结果，选中后会保留当前书架项并切到新书源。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+
+                if sourceSwitchState.isLoading {
+                    ProgressView("正在搜索可用换源")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let message = sourceSwitchState.message {
+                    EmptyStateCard(systemImage: "magnifyingglass", title: "换源结果", message: message)
+                        .padding(.horizontal)
+                } else {
+                    List(sourceSwitchState.candidates) { candidate in
+                        Button {
+                            Task { await applySwitch(candidate) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(candidate.book.name)
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text("\(candidate.source.bookSourceName) · \(candidate.book.author ?? "作者未知")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(candidate.book.bookUrl)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("换源")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("关闭") { showSourceSwitcher = false }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("搜索") {
+                        Task { await searchSwitchCandidates() }
+                    }
+                    .disabled(sourceSwitchState.isLoading)
+                }
+            }
+            .task {
+                if sourceSwitchState.candidates.isEmpty, sourceSwitchState.message == nil {
+                    await searchSwitchCandidates()
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func searchSwitchCandidates() async {
+        sourceSwitchState = SourceSwitchState(isLoading: true)
+        let activeBook = currentBook
+        let enabledSources = appState.sourceStore.sources
+            .filter { $0.enabled && $0.bookSourceUrl != activeBook.sourceURL && $0.searchUrl != nil }
+            .prefix(40)
+        var candidates: [SourceSwitchCandidate] = []
+        for source in enabledSources {
+            let result = await appState.engine.searchBooks(source: source, keyword: activeBook.title, page: 1)
+            guard case .success(let books) = result else { continue }
+            let match = books.first { candidate in
+                candidate.name.localizedCaseInsensitiveContains(activeBook.title)
+                    || activeBook.title.localizedCaseInsensitiveContains(candidate.name)
+            } ?? books.first
+            if let match {
+                candidates.append(SourceSwitchCandidate(source: source, book: match))
+            }
+        }
+        candidates.sort { $0.source.bookSourceName < $1.source.bookSourceName }
+        sourceSwitchState = candidates.isEmpty
+            ? SourceSwitchState(message: "没有搜索到可用换源结果。")
+            : SourceSwitchState(candidates: candidates)
+    }
+
+    private func applySwitch(_ candidate: SourceSwitchCandidate) async {
+        sourceSwitchState.isLoading = true
+        switch await appState.engine.getBookDetail(source: candidate.source, book: candidate.book) {
+        case .success(let detail):
+            switch await appState.engine.getChapterList(source: candidate.source, book: detail) {
+            case .success(let loadedChapters):
+                appState.bookshelfStore.switchSource(
+                    bookID: book.id,
+                    to: candidate.book,
+                    latestChapterTitle: detail.latestChapter ?? loadedChapters.last?.title,
+                    intro: detail.intro,
+                    totalChapters: loadedChapters.count
+                )
+                chapters = loadedChapters
+                selectedChapter = loadedChapters.first
+                errorMessage = nil
+                showSourceSwitcher = false
+                sourceSwitchState = SourceSwitchState()
+            case .failure(let error):
+                sourceSwitchState = SourceSwitchState(message: "目录加载失败：\(error.displayMessage)")
+            }
+        case .failure(let error):
+            sourceSwitchState = SourceSwitchState(message: "详情加载失败：\(error.displayMessage)")
+        }
+    }
+}
+
+private struct SourceSwitchState {
+    var isLoading = false
+    var candidates: [SourceSwitchCandidate] = []
+    var message: String?
+}
+
+private struct SourceSwitchCandidate: Identifiable {
+    var id: String { "\(source.bookSourceUrl)|\(book.bookUrl)" }
+    let source: BookSource
+    let book: SearchBook
 }

@@ -8,6 +8,7 @@ struct ReaderView: View {
     let chapterIndex: Int
     let totalChapters: Int?
     var chapters: [BookChapter] = []
+    var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
     var onSelectChapter: ((BookChapter) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -141,6 +142,8 @@ struct ReaderView: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                extraToolbarActions()
 
                 Button {
                     showSettings = true
