@@ -22,6 +22,7 @@ struct ReaderView: View {
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var sessionStartedAt = Date()
+    @State private var previousIdleTimerDisabled = false
     @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 20
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
@@ -36,6 +37,7 @@ struct ReaderView: View {
     @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
     @AppStorage("reader.mode") private var readerModeRawValue: String = ReaderMode.scroll.rawValue
     @AppStorage("reader.tapZones") private var tapZonesRawValue: String = ReaderTapAction.defaultRawValue
+    @AppStorage("reader.keepScreenAwake") private var keepScreenAwake = true
 
     private var background: ReaderBackground {
         ReaderBackground(rawValue: backgroundRawValue) ?? .paper
@@ -103,6 +105,8 @@ struct ReaderView: View {
         .onAppear {
             sessionStartedAt = Date()
             autoScrollTarget = 0
+            previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
+            applyIdleTimerPreference()
             appState.bookshelfStore.markReaderOpened(bookID: bookID)
             appState.bookshelfStore.updateReadingProgress(
                 bookID: bookID,
@@ -114,10 +118,14 @@ struct ReaderView: View {
         .onDisappear {
             stopAutoScroll()
             speechController.stop()
+            restoreIdleTimerPreference()
             appState.bookshelfStore.recordReadingSession(
                 bookID: bookID,
                 duration: Date().timeIntervalSince(sessionStartedAt)
             )
+        }
+        .onChange(of: keepScreenAwake) { _ in
+            applyIdleTimerPreference()
         }
     }
 
@@ -449,6 +457,9 @@ struct ReaderView: View {
                 .foregroundStyle(.secondary)
             Slider(value: $autoScrollDelay, in: 0.8...5.0, step: 0.2)
 
+            Toggle("阅读时保持屏幕常亮", isOn: $keepScreenAwake)
+                .font(.subheadline.weight(.semibold))
+
             HStack(spacing: 12) {
                 Button(autoScrollEnabled ? "停止自动滚动" : "开始自动滚动") {
                     toggleAutoScroll()
@@ -771,6 +782,14 @@ struct ReaderView: View {
         autoScrollEnabled = false
         autoScrollTask?.cancel()
         autoScrollTask = nil
+    }
+
+    private func applyIdleTimerPreference() {
+        UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
+    }
+
+    private func restoreIdleTimerPreference() {
+        UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
     }
 }
 

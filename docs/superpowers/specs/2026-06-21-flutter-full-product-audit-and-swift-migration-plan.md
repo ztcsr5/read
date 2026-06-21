@@ -834,6 +834,9 @@ Completed since the initial audit:
   - HTML value and list rules now support `%%` interleaving, matching the old Flutter rule evaluator behavior for mixed free/VIP chapter lists.
   - JSON rules now support `%%` sequential merge and stringify merged arrays as newline-separated values.
   - Tests cover HTML fallback, HTML node/value merge, JSON quoted fallback, and JSON merge extraction.
+- Improved reader daily-use behavior:
+  - Reader advanced settings now include a persisted "keep screen awake while reading" toggle.
+  - Opening the reader applies the idle-timer preference; leaving the reader restores the previous app idle-timer state.
 
 Still not complete:
 
