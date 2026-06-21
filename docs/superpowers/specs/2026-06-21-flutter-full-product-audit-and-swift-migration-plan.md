@@ -835,6 +835,7 @@ Completed since the initial audit:
   - Added top-level operator splitting so `||` inside CSS attributes, JSON quoted keys, brackets, or parentheses is not treated as a fallback connector.
   - HTML value and list rules now support `%%` interleaving, matching the old Flutter rule evaluator behavior for mixed free/VIP chapter lists.
   - JSON rules now support `%%` sequential merge and stringify merged arrays as newline-separated values.
+  - `java.getStringList` now reuses the enhanced HTML list selector path, so JS rules can use `||` fallback and `%%` interleaving for list extraction.
   - Tests cover HTML fallback, HTML node/value merge, JSON quoted fallback, and JSON merge extraction.
 - Improved reader daily-use behavior:
   - Reader advanced settings now include a persisted "keep screen awake while reading" toggle.

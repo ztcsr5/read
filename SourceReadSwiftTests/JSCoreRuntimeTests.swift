@@ -138,4 +138,28 @@ final class JSCoreRuntimeTests: XCTestCase {
         XCTAssertEqual(indexedValue, "https://example.com/c/2")
         XCTAssertEqual(ownTextValue, "Outer Tail")
     }
+
+    func testNativeGetStringListSupportsConnectorRules() throws {
+        let html = """
+        <html><body>
+          <a class='free'>第一章</a>
+          <a class='free'>第三章</a>
+          <a class='vip'>第二章</a>
+          <a class='vip'>第四章</a>
+        </body></html>
+        """
+        let script = """
+        [
+          java.getStringList(html, '.missing || .free@text').join(','),
+          java.getStringList(html, '.free%%.vip@text').join(',')
+        ].join('|')
+        """
+
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html, "baseUrl": "https://example.com"])
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "第一章,第三章|第一章,第二章,第三章,第四章")
+    }
 }

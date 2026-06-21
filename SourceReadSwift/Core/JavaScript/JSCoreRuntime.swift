@@ -411,10 +411,12 @@ final class JSCoreRuntime {
 
     private static func extractStringList(from document: Document, rule: String, baseUrl: URL?) throws -> [String] {
         let split = splitSelectorAndAttribute(rule)
-        let css = split.selector
-            .replacingOccurrences(of: "&&", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let elements: [Element] = css.isEmpty ? [document] : try document.select(css).array()
+        let html = try document.outerHtml()
+        let elements = try HtmlRuleExtractor().select(
+            html,
+            baseUrl: baseUrl ?? URL(fileURLWithPath: "/"),
+            listRule: split.selector
+        )
         return try elements.map {
             try HtmlRuleExtractor().value(from: $0, rule: "@\(split.attribute)", baseUrl: baseUrl)
         }.filter { !$0.isEmpty }
