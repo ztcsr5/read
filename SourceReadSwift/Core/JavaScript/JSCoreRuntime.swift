@@ -4,9 +4,11 @@ import SwiftSoup
 
 final class JSCoreRuntime {
     private let context: JSContext
+    private let ajaxHandler: ((String) -> String)?
 
-    init() {
+    init(ajaxHandler: ((String) -> String)? = nil) {
         self.context = JSContext()!
+        self.ajaxHandler = ajaxHandler
         installNativeClosures()
         installBaseBridge()
     }
@@ -69,6 +71,14 @@ final class JSCoreRuntime {
                 return [] as NSArray
             }
         }
+        let ajaxHandler = self.ajaxHandler
+        let ajax: @convention(block) (String) -> String = { url in
+            ajaxHandler?(url) ?? ""
+        }
+        let post: @convention(block) (String, String) -> String = { url, body in
+            let separator = url.contains("@Body:") ? "" : "@Body:"
+            return ajaxHandler?("\(url)\(separator)\(body)") ?? ""
+        }
 
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
         context.setObject(base64Encode, forKeyedSubscript: "__native_base64Encode" as NSString)
@@ -76,6 +86,8 @@ final class JSCoreRuntime {
         context.setObject(timeFormat, forKeyedSubscript: "__native_timeFormat" as NSString)
         context.setObject(getString, forKeyedSubscript: "__native_getString" as NSString)
         context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
+        context.setObject(ajax, forKeyedSubscript: "__native_ajax" as NSString)
+        context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
     }
 
     private func installBaseBridge() {
@@ -97,6 +109,9 @@ final class JSCoreRuntime {
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
           return out;
         };
+        java.ajax = function(url) { return __native_ajax(String(url)); };
+        java.get = function(url) { return __native_ajax(String(url)); };
+        java.post = function(url, body) { return __native_post(String(url), String(body || '')); };
         java.log = function(value) { return String(value); };
         var Packages = Packages || {};
         Packages.org = Packages.org || {};

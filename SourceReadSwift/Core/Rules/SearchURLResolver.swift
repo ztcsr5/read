@@ -5,7 +5,7 @@ struct SearchURLResolver {
 
     func resolve(source: BookSource, keyword: String, page: Int) -> Result<String, SourceEngineError> {
         guard let searchUrl = source.searchUrl, !searchUrl.isEmpty else {
-            return .failure(.invalidSource("searchUrl 为空"))
+            return .failure(.invalidSource("searchUrl \u{4e3a}\u{7a7a}"))
         }
 
         let interpolated = ruleResolver.interpolate(
@@ -18,7 +18,7 @@ struct SearchURLResolver {
         let trimmed = interpolated.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("@js:") {
             let script = String(trimmed.dropFirst(4))
-            return JSCoreRuntime().evaluate(script, variables: [
+            return makeRuntime(source: source).evaluate(script, variables: [
                 "keyword": keyword,
                 "key": keyword,
                 "page": page,
@@ -30,7 +30,7 @@ struct SearchURLResolver {
             let start = trimmed.index(trimmed.startIndex, offsetBy: 4)
             let end = trimmed.index(trimmed.endIndex, offsetBy: -5)
             let script = String(trimmed[start..<end])
-            return JSCoreRuntime().evaluate(script, variables: [
+            return makeRuntime(source: source).evaluate(script, variables: [
                 "keyword": keyword,
                 "key": keyword,
                 "page": page,
@@ -40,5 +40,10 @@ struct SearchURLResolver {
 
         return .success(interpolated)
     }
-}
 
+    private func makeRuntime(source: BookSource) -> JSCoreRuntime {
+        JSCoreRuntime { urlText in
+            SynchronousSourceLoader().load(urlText: urlText, source: source)
+        }
+    }
+}
