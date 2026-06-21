@@ -21,19 +21,14 @@ struct SourceURLDirectiveParser {
         var method: SourceHTTPMethod = .get
         var body: Data?
 
-        if let headerRange = working.range(of: "@Header:", options: .caseInsensitive) {
-            let prefix = String(working[..<headerRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let headerText = String(working[headerRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let directives = splitURLAndTrailingDirectives(working)
+        working = directives.url
+        if let headerText = directives.header {
             headers.merge(parseStringMap(headerText), uniquingKeysWith: { _, new in new })
-            working = prefix
         }
-
-        if let bodyRange = working.range(of: "@Body:", options: .caseInsensitive) {
-            let prefix = String(working[..<bodyRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let bodyText = String(working[bodyRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let bodyText = directives.body {
             body = Data(bodyText.utf8)
             method = .post
-            working = prefix
         }
 
         let split = splitURLAndJSONOptions(working)
@@ -58,6 +53,44 @@ struct SourceURLDirectiveParser {
         }
 
         return SourceURLDirective(urlText: working, method: method, headers: headers, body: body)
+    }
+
+    private func splitURLAndTrailingDirectives(_ text: String) -> (url: String, header: String?, body: String?) {
+        var markers: [(name: String, range: Range<String.Index>)] = []
+        if let range = text.range(of: "@Header:", options: .caseInsensitive) {
+            markers.append(("header", range))
+        }
+        if let range = text.range(of: "@Body:", options: .caseInsensitive) {
+            markers.append(("body", range))
+        }
+        markers.sort { $0.range.lowerBound < $1.range.lowerBound }
+
+        guard let first = markers.first else {
+            return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil, nil)
+        }
+
+        var header: String?
+        var body: String?
+        for index in markers.indices {
+            let marker = markers[index]
+            let contentStart = marker.range.upperBound
+            let nextIndex = markers.index(after: index)
+            let contentEnd: String.Index
+            if nextIndex < markers.endIndex {
+                contentEnd = markers[nextIndex].range.lowerBound
+            } else {
+                contentEnd = text.endIndex
+            }
+            let content = String(text[contentStart..<contentEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if marker.name == "header" {
+                header = content
+            } else {
+                body = content
+            }
+        }
+
+        let url = String(text[..<first.range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (url, header, body)
     }
 
     private func splitURLAndJSONOptions(_ text: String) -> (url: String, options: [String: Any]?) {
@@ -89,4 +122,3 @@ struct SourceURLDirectiveParser {
         }
     }
 }
-

@@ -23,5 +23,26 @@ final class SourceURLDirectiveTests: XCTestCase {
         XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "keyword=test")
         XCTAssertEqual(directive.headers["Content-Type"], "application/x-www-form-urlencoded")
     }
-}
 
+    func testParseHeaderThenBodyDirectives() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/api@Header:{"Referer":"https://example.com"}@Body:q=1"#
+        )
+
+        XCTAssertEqual(directive.urlText, "https://example.com/api")
+        XCTAssertEqual(directive.method, .post)
+        XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "q=1")
+        XCTAssertEqual(directive.headers["Referer"], "https://example.com")
+    }
+
+    func testParseBodyThenHeaderDirectives() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/api@Body:q=1@Header:{"Referer":"https://example.com"}"#
+        )
+
+        XCTAssertEqual(directive.urlText, "https://example.com/api")
+        XCTAssertEqual(directive.method, .post)
+        XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "q=1")
+        XCTAssertEqual(directive.headers["Referer"], "https://example.com")
+    }
+}
