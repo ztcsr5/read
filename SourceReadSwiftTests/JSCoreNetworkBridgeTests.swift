@@ -114,4 +114,46 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         }
         XCTAssertEqual(value, #"https://example.com/a@Header:{"X-Test":"1"}"#)
     }
+
+    func testJavaConnectBuildsGetRequestWithHeaders() throws {
+        let runtime = JSCoreRuntime { url in
+            url
+        }
+
+        let result = runtime.evaluate(
+            """
+            java.connect('https://example.com/a')
+              .header('X-Test', '1')
+              .userAgent('Reader')
+              .get()
+              .body();
+            """
+        )
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, #"https://example.com/a@Header:{"User-Agent":"Reader","X-Test":"1"}"#)
+    }
+
+    func testJsoupConnectBuildsPostRequestWithData() throws {
+        let runtime = JSCoreRuntime { url in
+            url
+        }
+
+        let result = runtime.evaluate(
+            """
+            org.jsoup.Jsoup.connect('https://example.com/a')
+              .headers({'X-Test':'1'})
+              .data('keyword', 'a&b')
+              .post()
+              .text();
+            """
+        )
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, #"https://example.com/a@Header:{"X-Test":"1"}@Body:keyword=a%26b"#)
+    }
 }

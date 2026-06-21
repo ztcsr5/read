@@ -814,6 +814,7 @@ Completed since the initial audit:
   - Added common Legado aliases: `java.md5`, `java.hexMd5`, `java.MD5`, `java.sha256`, `java.base64`, `java.decodeBase64`, `md5`, `hexMd5`, `atob`, and `btoa`.
   - Added a minimal `CryptoJS.MD5(...).toString()` / `CryptoJS.SHA256(...).toString()` compatibility shim.
   - `java.ajax`, `java.get` URL loads, and `java.post` now return response-like objects with `body()` while preserving string coercion.
+  - Added minimal chainable `java.connect(...)` and `org.jsoup.Jsoup.connect(...)` support for GET/POST requests with headers, user-agent, and form body data.
   - Added URI/base64/hash aliases: `java.encodeURI`, `java.encodeURIComponent`, `java.decodeURI`, `java.decodeURIComponent`, `java.md5Encode`, `java.base64DecodeToString`, `java.base64Decoder`, `java.unbase64`, and global `unbase64`.
   - Added `java.sha1`, `CryptoJS.SHA1`, `CryptoJS.HmacSHA256`, and minimal `CryptoJS.enc.Utf8/Hex/Base64` parse/stringify support for common signing snippets.
 - Improved search URL compatibility:

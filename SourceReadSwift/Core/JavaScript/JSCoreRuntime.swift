@@ -211,6 +211,53 @@ final class JSCoreRuntime {
           return __bridgeResponse(__native_ajax(key, __bridgeString(headers || '')));
         };
         java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || ''))); };
+        function __makeConnect(url) {
+          var target = String(url || '');
+          var config = { headers: {}, body: '' };
+          var api = {
+            header: function(key, value) {
+              config.headers[String(key)] = String(value);
+              return api;
+            },
+            headers: function(value) {
+              if (value) {
+                for (var key in value) config.headers[String(key)] = String(value[key]);
+              }
+              return api;
+            },
+            data: function(key, value) {
+              if (arguments.length === 1) {
+                config.body = __bridgeString(key);
+              } else {
+                var part = encodeURIComponent(String(key)) + '=' + encodeURIComponent(String(value));
+                config.body = config.body ? config.body + '&' + part : part;
+              }
+              return api;
+            },
+            requestBody: function(value) {
+              config.body = String(value || '');
+              return api;
+            },
+            timeout: function(_) { return api; },
+            ignoreContentType: function(_) { return api; },
+            ignoreHttpErrors: function(_) { return api; },
+            userAgent: function(value) {
+              config.headers['User-Agent'] = String(value);
+              return api;
+            },
+            get: function() {
+              return __bridgeResponse(__native_ajax(target, __bridgeString(config.headers)));
+            },
+            post: function() {
+              return __bridgeResponse(__native_post(target, config.body || '', __bridgeString(config.headers)));
+            },
+            execute: function() {
+              return config.body ? api.post() : api.get();
+            }
+          };
+          return api;
+        }
+        java.connect = __makeConnect;
         java.log = function(value) { return String(value); };
         function base64Encode(value) { return java.base64Encode(value); }
         function base64Decode(value) { return java.base64Decode(value); }
@@ -307,7 +354,8 @@ final class JSCoreRuntime {
         Packages.org.jsoup.Jsoup = {
           parse: function(html, baseUrlValue) {
             return __makeJsoupSelection(String(html), '', String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl)));
-          }
+          },
+          connect: __makeConnect
         };
         function importClass(_) { return undefined; }
         """
