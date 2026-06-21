@@ -29,5 +29,18 @@ final class SearchURLResolverTests: XCTestCase {
         }
         XCTAssertTrue(url.hasPrefix("https://example.com/search?q="))
     }
-}
 
+    func testResolveJavaScriptSearchUrlWithTopLevelReturn() throws {
+        let source = BookSource(
+            bookSourceName: "Test",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "@js:return 'https://example.com/search?q=' + java.urlEncode(keyword)"
+        )
+
+        let result = SearchURLResolver().resolve(source: source, keyword: "\u{6597}\u{7834}\u{82cd}\u{7a79}", page: 1)
+        guard case .success(let url) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertTrue(url.hasPrefix("https://example.com/search?q="))
+    }
+}

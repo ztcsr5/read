@@ -18,7 +18,7 @@ struct SearchURLResolver {
         let trimmed = interpolated.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("@js:") {
             let script = String(trimmed.dropFirst(4))
-            return makeRuntime(source: source).evaluate(script, variables: [
+            return evaluateScript(script, source: source, variables: [
                 "keyword": keyword,
                 "key": keyword,
                 "page": page,
@@ -30,7 +30,7 @@ struct SearchURLResolver {
             let start = trimmed.index(trimmed.startIndex, offsetBy: 4)
             let end = trimmed.index(trimmed.endIndex, offsetBy: -5)
             let script = String(trimmed[start..<end])
-            return makeRuntime(source: source).evaluate(script, variables: [
+            return evaluateScript(script, source: source, variables: [
                 "keyword": keyword,
                 "key": keyword,
                 "page": page,
@@ -39,6 +39,18 @@ struct SearchURLResolver {
         }
 
         return .success(interpolated)
+    }
+
+    private func evaluateScript(
+        _ script: String,
+        source: BookSource,
+        variables: [String: Any]
+    ) -> Result<String, SourceEngineError> {
+        let direct = makeRuntime(source: source).evaluate(script, variables: variables)
+        if case .failure(.javascript) = direct, script.contains("return") {
+            return makeRuntime(source: source).evaluate("(function(){\(script)})()", variables: variables)
+        }
+        return direct
     }
 
     private func makeRuntime(source: BookSource) -> JSCoreRuntime {
