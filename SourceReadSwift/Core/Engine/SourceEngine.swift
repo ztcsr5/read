@@ -10,14 +10,17 @@ protocol SourceEngine: Sendable {
 final class LegadoSourceEngine: SourceEngine {
     private let network: SourceNetworkClient
     private let diagnostics: DiagnosticSink
+    private let cookieStore: SourceCookieStore
     private let requestBuilder = SourceRequestBuilder()
     private let searchURLResolver = SearchURLResolver()
 
     init(
-        network: SourceNetworkClient = URLSessionSourceNetworkClient(),
+        network: SourceNetworkClient? = nil,
+        cookieStore: SourceCookieStore = SourceCookieStore(),
         diagnostics: DiagnosticSink = .noop
     ) {
-        self.network = network
+        self.cookieStore = cookieStore
+        self.network = network ?? URLSessionSourceNetworkClient(cookieStore: cookieStore)
         self.diagnostics = diagnostics
     }
 
@@ -102,7 +105,7 @@ final class LegadoSourceEngine: SourceEngine {
         ))
 
         let delay = webViewDelay(source: source)
-        let htmlResult = await WebViewFallback().load(url: request.url, delay: delay)
+        let htmlResult = await WebViewFallback(cookieStore: cookieStore).load(url: request.url, delay: delay)
         switch htmlResult {
         case .success(let html):
             return .success(SourceResponse(

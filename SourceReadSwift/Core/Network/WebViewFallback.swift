@@ -5,6 +5,11 @@ import WebKit
 final class WebViewFallback: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<Result<String, SourceEngineError>, Never>?
     private var webView: WKWebView?
+    private let cookieStore: SourceCookieStore?
+
+    init(cookieStore: SourceCookieStore? = nil) {
+        self.cookieStore = cookieStore
+    }
 
     func load(url: URL, delay: TimeInterval = 3) async -> Result<String, SourceEngineError> {
         await withCheckedContinuation { continuation in
@@ -18,9 +23,20 @@ final class WebViewFallback: NSObject, WKNavigationDelegate {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 let html = try? await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String
+                await self.syncCookies(from: webView)
                 self.finish(.success(html ?? ""))
             }
         }
+    }
+
+    private func syncCookies(from webView: WKWebView) async {
+        guard let cookieStore else { return }
+        let cookies = await withCheckedContinuation { continuation in
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                continuation.resume(returning: cookies)
+            }
+        }
+        await cookieStore.storeWebViewCookies(cookies)
     }
 
     private func finish(_ result: Result<String, SourceEngineError>) {
@@ -33,4 +49,3 @@ final class WebViewFallback: NSObject, WKNavigationDelegate {
         finish(.failure(.network(error.localizedDescription)))
     }
 }
-

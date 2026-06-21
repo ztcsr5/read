@@ -1,5 +1,4 @@
 import Foundation
-import WebKit
 
 actor SourceCookieStore {
     private var cookiesByHost: [String: [HTTPCookie]] = [:]
@@ -17,23 +16,23 @@ actor SourceCookieStore {
 
     func store(_ cookies: [HTTPCookie], for url: URL) {
         guard let host = url.host else { return }
+        store(cookies, host: host)
+    }
+
+    func storeWebViewCookies(_ cookies: [HTTPCookie]) {
+        for cookie in cookies {
+            let host = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            guard !host.isEmpty else { continue }
+            store([cookie], host: host)
+        }
+    }
+
+    private func store(_ cookies: [HTTPCookie], host: String) {
         var current = cookiesByHost[host] ?? []
         for cookie in cookies {
             current.removeAll { $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path }
             current.append(cookie)
         }
         cookiesByHost[host] = current
-    }
-
-    func syncFromWebView(_ webView: WKWebView) async {
-        let cookies = await withCheckedContinuation { continuation in
-            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
-                continuation.resume(returning: cookies)
-            }
-        }
-        for cookie in cookies {
-            let host = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            cookiesByHost[host, default: []].append(cookie)
-        }
     }
 }
