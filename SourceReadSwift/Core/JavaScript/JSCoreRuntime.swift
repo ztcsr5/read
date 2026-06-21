@@ -115,7 +115,33 @@ final class JSCoreRuntime {
         java.log = function(value) { return String(value); };
         var Packages = Packages || {};
         Packages.org = Packages.org || {};
+        Packages.org.jsoup = Packages.org.jsoup || {};
         Packages.java = Packages.java || {};
+        var org = Packages.org;
+        function __makeJsoupSelection(html, selector, baseUrlValue) {
+          return {
+            select: function(nextSelector) {
+              var joined = selector ? selector + ' ' + String(nextSelector) : String(nextSelector);
+              return __makeJsoupSelection(html, joined, baseUrlValue);
+            },
+            first: function() { return this; },
+            get: function(_) { return this; },
+            text: function() { return __native_getString(String(html), String(selector) + '@text', String(baseUrlValue || '')); },
+            html: function() { return __native_getString(String(html), String(selector) + '@html', String(baseUrlValue || '')); },
+            attr: function(name) { return __native_getString(String(html), String(selector) + '@' + String(name), String(baseUrlValue || '')); },
+            eachText: function() {
+              var list = __native_getStringList(String(html), String(selector) + '@text', String(baseUrlValue || ''));
+              var out = [];
+              for (var i = 0; i < list.length; i++) out.push(String(list[i]));
+              return out;
+            }
+          };
+        }
+        Packages.org.jsoup.Jsoup = {
+          parse: function(html, baseUrlValue) {
+            return __makeJsoupSelection(String(html), '', String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl)));
+          }
+        };
         function importClass(_) { return undefined; }
         """
         context.evaluateScript(prelude)

@@ -27,4 +27,16 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "斗破苍穹")
     }
+
+    func testJsoupParseSelectionUsesSwiftSoupBridge() throws {
+        let title = "\u{6597}\u{7834}\u{82cd}\u{7a79}"
+        let html = "<html><body><div class='book'><a href='/b/1'>\(title)</a></div></body></html>"
+        let script = "org.jsoup.Jsoup.parse(html).select('.book a').attr('href') + '|' + Packages.org.jsoup.Jsoup.parse(html).select('.book a').text()"
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html])
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "/b/1|\(title)")
+    }
 }
