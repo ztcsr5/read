@@ -5,8 +5,11 @@ final class AppState: ObservableObject {
     let sourceStore: SourceStore
     private let injectedEngine: SourceEngine?
     lazy var engine: SourceEngine = {
-        injectedEngine ?? LegadoSourceEngine(diagnostics: DiagnosticSink { [weak self] event in
-            await MainActor.run {
+        if let injectedEngine {
+            return injectedEngine
+        }
+        return LegadoSourceEngine(diagnostics: DiagnosticSink { event in
+            Task { @MainActor [weak self] in
                 self?.record(event)
             }
         })
@@ -15,10 +18,10 @@ final class AppState: ObservableObject {
     @Published var diagnostics: [DiagnosticEvent] = []
 
     init(
-        sourceStore: SourceStore = SourceStore(),
+        sourceStore: SourceStore? = nil,
         engine: SourceEngine? = nil
     ) {
-        self.sourceStore = sourceStore
+        self.sourceStore = sourceStore ?? SourceStore()
         self.injectedEngine = engine
     }
 
