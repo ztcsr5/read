@@ -70,6 +70,13 @@ final class SourceStore: ObservableObject {
         lastError = nil
     }
 
+    func upsertBookSourceJSON(_ text: String) throws -> BookSource {
+        let decoder = JSONDecoder()
+        let source = try decoder.decode(BookSource.self, from: Data(text.utf8))
+        try importSources([source])
+        return source
+    }
+
     func importRSSSources(_ imported: [RSSSource]) throws {
         let valid = imported.filter {
             !$0.sourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

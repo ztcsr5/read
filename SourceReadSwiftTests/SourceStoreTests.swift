@@ -188,6 +188,35 @@ final class SourceStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testUpsertsBookSourceFromEditedJSON() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        {
+          "bookSourceName": "Before Edit",
+          "bookSourceUrl": "https://edit.example.com",
+          "searchUrl": "/old?q={{key}}"
+        }
+        """)
+
+        let updated = try store.upsertBookSourceJSON("""
+        {
+          "bookSourceName": "After Edit",
+          "bookSourceUrl": "https://edit.example.com",
+          "searchUrl": "/new?q={{key}}",
+          "ruleSearch": { "bookList": ".book", "name": ".title" }
+        }
+        """)
+
+        XCTAssertEqual(updated.bookSourceName, "After Edit")
+        XCTAssertEqual(store.sources.count, 1)
+        XCTAssertEqual(store.sources.first?.bookSourceName, "After Edit")
+        XCTAssertEqual(store.sources.first?.ruleSearch?.fields["bookList"], ".book")
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testSmartImportParsesPastedJSON() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

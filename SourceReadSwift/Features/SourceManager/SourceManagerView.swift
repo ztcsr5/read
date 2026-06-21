@@ -12,6 +12,7 @@ struct SourceManagerView: View {
     @State private var importMessage: String?
     @State private var showFileImporter = false
     @State private var showImportSheet = false
+    @State private var sourceJSONEditor: SourceJSONEditorState?
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
     @State private var rssPreview: RSSPreviewState?
@@ -91,6 +92,9 @@ struct SourceManagerView: View {
             }
             .sheet(isPresented: $showImportSheet) {
                 importSheet
+            }
+            .sheet(item: $sourceJSONEditor) { editor in
+                sourceJSONEditorSheet(editor)
             }
             .sheet(item: $jsonPreview) { preview in
                 jsonPreviewSheet(preview)
@@ -274,8 +278,8 @@ struct SourceManagerView: View {
                 Button("测试书源") {
                     sourceTest = SourceTestState(source: source)
                 }
-                Button("查看 JSON") {
-                    jsonPreview = SourceJSONPreview(title: source.bookSourceName, json: prettyJSON(source))
+                Button("编辑 JSON") {
+                    sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source))
                 }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.remove(source)
@@ -607,6 +611,42 @@ struct SourceManagerView: View {
         .presentationDetents([.medium, .large])
     }
 
+    private func sourceJSONEditorSheet(_ editor: SourceJSONEditorState) -> some View {
+        NavigationStack {
+            VStack(spacing: 10) {
+                TextEditor(text: Binding(
+                    get: { sourceJSONEditor?.json ?? editor.json },
+                    set: { sourceJSONEditor?.json = $0 }
+                ))
+                .font(.system(.footnote, design: .monospaced))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(8)
+                .background(AppTheme.elevatedCard)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Text("保存会按 bookSourceUrl 覆盖同一书源。建议只编辑你确认的字段。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding()
+            .navigationTitle(editor.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { sourceJSONEditor = nil }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        saveSourceJSONEditor()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
     private func sourceTestSheet(_ state: SourceTestState) -> some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
@@ -700,6 +740,19 @@ struct SourceManagerView: View {
         } catch {
             importMessage = nil
             importError = error.localizedDescription
+        }
+    }
+
+    private func saveSourceJSONEditor() {
+        guard let editor = sourceJSONEditor else { return }
+        do {
+            let source = try appState.sourceStore.upsertBookSourceJSON(editor.json)
+            importError = nil
+            importMessage = "已保存书源：\(source.bookSourceName)"
+            sourceJSONEditor = nil
+        } catch {
+            importMessage = nil
+            importError = "JSON 保存失败：\(error.localizedDescription)"
         }
     }
 
@@ -999,6 +1052,12 @@ private struct SourceJSONPreview: Identifiable {
     let id = UUID()
     let title: String
     let json: String
+}
+
+private struct SourceJSONEditorState: Identifiable {
+    let id = UUID()
+    let title: String
+    var json: String
 }
 
 private struct SourceTestState: Identifiable {
