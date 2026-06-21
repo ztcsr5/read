@@ -3,7 +3,6 @@ import UniformTypeIdentifiers
 
 struct BookshelfView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var showImportUnavailable = false
     @State private var showFileImporter = false
     @State private var importMessage: String?
 
@@ -35,8 +34,8 @@ struct BookshelfView: View {
                             }
                             .accessibilityLabel("导入本地书籍")
 
-                            Button {
-                                showImportUnavailable = true
+                            NavigationLink {
+                                ReaderProfileView()
                             } label: {
                                 Image(systemName: "person.crop.circle.fill")
                                     .font(.system(size: 38, weight: .regular))
@@ -65,11 +64,6 @@ struct BookshelfView: View {
             .pageBackground()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .alert("功能正在恢复", isPresented: $showImportUnavailable) {
-                Button("知道了", role: .cancel) {}
-            } message: {
-                Text("个人中心、EPUB 导入和分组会继续按 Flutter 版补齐。当前已先恢复 TXT 导入。")
-            }
             .alert("本地导入", isPresented: Binding(
                 get: { importMessage != nil },
                 set: { if !$0 { importMessage = nil } }
@@ -262,6 +256,78 @@ struct BookshelfView: View {
             Button("从书架删除", role: .destructive) {
                 appState.bookshelfStore.remove(bookID: book.id)
             }
+        }
+    }
+}
+
+private struct ReaderProfileView: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var totalBooks: Int {
+        appState.bookshelfStore.books.count
+    }
+
+    private var localBooks: Int {
+        appState.bookshelfStore.books.filter { $0.sourceURL.hasPrefix("local://") }.count
+    }
+
+    private var bookmarkedBooks: Int {
+        appState.bookshelfStore.books.filter { !($0.bookmarks ?? []).isEmpty }.count
+    }
+
+    private var readBooks: Int {
+        appState.bookshelfStore.books.filter { $0.lastReadAt != nil }.count
+    }
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(AppTheme.accent)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("本地阅读")
+                            .font(.headline)
+                        Text("数据仅保存在当前设备")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section("统计") {
+                profileMetric("书架书籍", value: totalBooks, icon: "books.vertical")
+                profileMetric("本地导入", value: localBooks, icon: "doc.text")
+                profileMetric("已阅读", value: readBooks, icon: "clock")
+                profileMetric("有书签", value: bookmarkedBooks, icon: "bookmark")
+            }
+
+            Section("数据") {
+                NavigationLink {
+                    ReadingHistoryView()
+                } label: {
+                    Label("阅读历史", systemImage: "clock.arrow.circlepath")
+                }
+
+                NavigationLink {
+                    SourceManagerView()
+                } label: {
+                    Label("书源管理", systemImage: "square.stack.3d.up")
+                }
+            }
+        }
+        .navigationTitle("个人中心")
+    }
+
+    private func profileMetric(_ title: String, value: Int, icon: String) -> some View {
+        HStack {
+            Label(title, systemImage: icon)
+            Spacer()
+            Text("\(value)")
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
         }
     }
 }
