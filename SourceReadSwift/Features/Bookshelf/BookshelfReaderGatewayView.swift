@@ -11,7 +11,19 @@ struct BookshelfReaderGatewayView: View {
 
     var body: some View {
         Group {
-            if let selectedChapter {
+            if let localContent = book.localContent {
+                ReaderView(
+                    bookID: book.id,
+                    content: ChapterContent(
+                        chapter: BookChapter(title: "全文", url: book.bookURL, bookUrl: book.bookURL, index: 0, isVip: false),
+                        title: book.title,
+                        paragraphs: localContent,
+                        nextContentUrl: nil
+                    ),
+                    chapterIndex: 0,
+                    totalChapters: 1
+                )
+            } else if let selectedChapter {
                 ChapterLoadingView(sourceUrl: book.sourceURL, chapter: selectedChapter, totalChapters: chapters.count)
             } else if let errorMessage {
                 EmptyStateCard(systemImage: "xmark.octagon", title: "阅读恢复失败", message: errorMessage)

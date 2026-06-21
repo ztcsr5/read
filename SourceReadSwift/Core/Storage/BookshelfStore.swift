@@ -37,6 +37,11 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    func addLocalTextBook(_ localTextBook: LocalTextBook) {
+        books.insert(BookshelfBook(localTextBook: localTextBook), at: 0)
+        persist()
+    }
+
     func updateDetails(
         bookID: String,
         latestChapterTitle: String?,

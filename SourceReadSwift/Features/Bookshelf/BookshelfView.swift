@@ -1,8 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct BookshelfView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showImportUnavailable = false
+    @State private var showFileImporter = false
+    @State private var importMessage: String?
 
     private var recentBooks: [BookshelfBook] {
         appState.bookshelfStore.recentBooks
@@ -23,7 +26,7 @@ struct BookshelfView: View {
                     PodcastLargeTitleBar(title: "主页") {
                         HStack(spacing: 18) {
                             Button {
-                                showImportUnavailable = true
+                                showFileImporter = true
                             } label: {
                                 Image(systemName: "folder.badge.plus")
                                     .font(.system(size: 30, weight: .semibold))
@@ -45,61 +48,102 @@ struct BookshelfView: View {
                     }
                     .padding(.top, 18)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        PodcastChevronSectionHeader(title: "正在阅读")
-                        if recentBooks.isEmpty {
-                            CenterTextEmptyState("暂无阅读记录", minHeight: 240)
-                        } else {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 16) {
-                                    ForEach(recentBooks.prefix(8)) { book in
-                                        heroCard(book)
-                                    }
-                                }
-                                .padding(.vertical, 6)
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        PodcastChevronSectionHeader(title: "最新更新")
-                        if updatedBooks.isEmpty {
-                            CenterTextEmptyState("暂无更新书籍", minHeight: 220)
-                        } else {
-                            LazyVStack(spacing: 16) {
-                                ForEach(updatedBooks) { book in
-                                    updateRow(book)
-                                }
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        PodcastChevronSectionHeader(title: "书架")
-                        if allBooks.isEmpty {
-                            CenterTextEmptyState("书架还是空的", minHeight: 140)
-                        } else {
-                            LazyVStack(spacing: 14) {
-                                ForEach(allBooks) { book in
-                                    bookshelfRow(book)
-                                }
-                            }
-                        }
-                    }
-
+                    readingSection
+                    updatesSection
+                    shelfSection
                     Color.clear.frame(height: 110)
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }
             .refreshable {}
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.plainText, .text, .item],
+                allowsMultipleSelection: false,
+                onCompletion: importLocalBook
+            )
             .pageBackground()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .alert("本地导入正在恢复", isPresented: $showImportUnavailable) {
+            .alert("功能正在恢复", isPresented: $showImportUnavailable) {
                 Button("知道了", role: .cancel) {}
             } message: {
-                Text("下一阶段会接回 Flutter 原版的本地文件导入、EPUB/TXT 解析和个人中心。")
+                Text("个人中心、EPUB 导入和分组会继续按 Flutter 版补齐。当前已先恢复 TXT 导入。")
             }
+            .alert("本地导入", isPresented: Binding(
+                get: { importMessage != nil },
+                set: { if !$0 { importMessage = nil } }
+            )) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(importMessage ?? "")
+            }
+        }
+    }
+
+    private var readingSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PodcastChevronSectionHeader(title: "正在阅读")
+            if recentBooks.isEmpty {
+                CenterTextEmptyState("暂无阅读记录", minHeight: 240)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(recentBooks.prefix(8)) { book in
+                            heroCard(book)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PodcastChevronSectionHeader(title: "最新更新")
+            if updatedBooks.isEmpty {
+                CenterTextEmptyState("暂无更新书籍", minHeight: 220)
+            } else {
+                LazyVStack(spacing: 16) {
+                    ForEach(updatedBooks) { book in
+                        updateRow(book)
+                    }
+                }
+            }
+        }
+    }
+
+    private var shelfSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PodcastChevronSectionHeader(title: "书架")
+            if allBooks.isEmpty {
+                CenterTextEmptyState("书架还是空的", minHeight: 140)
+            } else {
+                LazyVStack(spacing: 14) {
+                    ForEach(allBooks) { book in
+                        bookshelfRow(book)
+                    }
+                }
+            }
+        }
+    }
+
+    private func importLocalBook(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer {
+                if scoped {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            let data = try Data(contentsOf: url)
+            let parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
+            appState.bookshelfStore.addLocalTextBook(parsed)
+            importMessage = "已导入《\(parsed.title)》，共 \(parsed.paragraphs.count) 段。"
+        } catch {
+            importMessage = "导入失败：\(error.localizedDescription)"
         }
     }
 

@@ -9,6 +9,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     var sourceURL: String
     var bookURL: String
     var intro: String?
+    var localContent: [String]?
     var latestChapterTitle: String?
     var totalChapters: Int
     var currentChapterIndex: Int
@@ -34,6 +35,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         sourceURL: String,
         bookURL: String,
         intro: String?,
+        localContent: [String]? = nil,
         latestChapterTitle: String? = nil,
         totalChapters: Int = 0,
         currentChapterIndex: Int = 0,
@@ -49,6 +51,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         self.sourceURL = sourceURL
         self.bookURL = bookURL
         self.intro = intro
+        self.localContent = localContent
         self.latestChapterTitle = latestChapterTitle
         self.totalChapters = totalChapters
         self.currentChapterIndex = currentChapterIndex
@@ -67,6 +70,25 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             sourceURL: searchBook.sourceUrl,
             bookURL: searchBook.bookUrl,
             intro: searchBook.intro
+        )
+    }
+
+    init(localTextBook: LocalTextBook) {
+        let id = "local|\(UUID().uuidString)"
+        self.init(
+            id: id,
+            title: localTextBook.title,
+            author: localTextBook.author,
+            coverURL: nil,
+            sourceName: "Local",
+            sourceURL: "local://text",
+            bookURL: id,
+            intro: nil,
+            localContent: localTextBook.paragraphs,
+            latestChapterTitle: "全文",
+            totalChapters: 1,
+            currentChapterIndex: 0,
+            currentChapterTitle: "全文"
         )
     }
 }
