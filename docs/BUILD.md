@@ -15,7 +15,7 @@ This project should use this workflow:
 ```powershell
 cd D:\Gemini反重力\SourceReadSwift
 git status -sb
-git push origin codex/native-swift-rewrite
+git push origin codex/native-swift-ci
 ```
 
 Then open GitHub:
