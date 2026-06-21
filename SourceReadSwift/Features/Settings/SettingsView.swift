@@ -6,6 +6,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("书源") {
+                    NavigationLink {
+                        SourceManagerView()
+                    } label: {
+                        Label("书源管理", systemImage: "tray.full")
+                    }
+                }
+
                 Section("原生重写状态") {
                     LabeledContent("UI", value: "SwiftUI")
                     LabeledContent("核心", value: "LegadoCore V2")

@@ -13,11 +13,6 @@ struct RootTabView: View {
                     Label("发现", systemImage: "square.grid.2x2")
                 }
 
-            SourceManagerView()
-                .tabItem {
-                    Label("书源", systemImage: "tray.full")
-                }
-
             SettingsView()
                 .tabItem {
                     Label("设置", systemImage: "gearshape")

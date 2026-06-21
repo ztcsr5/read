@@ -16,16 +16,33 @@ final class SourceStore: ObservableObject {
     }
 
     func importJSON(_ text: String) throws {
-        let data = Data(text.utf8)
+        try importJSONData(Data(text.utf8))
+    }
+
+    func importJSONData(_ data: Data) throws {
+        let data = stripUTF8BOM(data)
         let decoder = JSONDecoder()
         if let list = try? decoder.decode([BookSource].self, from: data) {
-            sources = merge(existing: sources, incoming: list)
-            try persistence.save(sources)
+            try importSources(list)
+            return
+        }
+        if let wrapped = try? decoder.decode(WrappedBookSources.self, from: data),
+           let list = wrapped.sources, !list.isEmpty {
+            try importSources(list)
             return
         }
         let source = try decoder.decode(BookSource.self, from: data)
-        sources = merge(existing: sources, incoming: [source])
+        try importSources([source])
+    }
+
+    func importSources(_ imported: [BookSource]) throws {
+        let valid = imported.filter { !$0.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !valid.isEmpty else {
+            throw SourceImportError.empty
+        }
+        sources = merge(existing: sources, incoming: valid)
         try persistence.save(sources)
+        lastError = nil
     }
 
     func seedForDevelopment() {
@@ -66,5 +83,38 @@ final class SourceStore: ObservableObject {
             map[item.bookSourceUrl] = item
         }
         return map.values.sorted { $0.bookSourceName < $1.bookSourceName }
+    }
+
+    private func stripUTF8BOM(_ data: Data) -> Data {
+        let bom = Data([0xEF, 0xBB, 0xBF])
+        guard data.starts(with: bom) else { return data }
+        return data.dropFirst(3)
+    }
+}
+
+private struct WrappedBookSources: Decodable {
+    let sources: [BookSource]?
+
+    enum CodingKeys: String, CodingKey {
+        case sources
+        case bookSources
+        case bookSource
+        case data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sources = (try? container.decode([BookSource].self, forKey: .sources))
+            ?? (try? container.decode([BookSource].self, forKey: .bookSources))
+            ?? (try? container.decode([BookSource].self, forKey: .bookSource))
+            ?? (try? container.decode([BookSource].self, forKey: .data))
+    }
+}
+
+enum SourceImportError: LocalizedError {
+    case empty
+
+    var errorDescription: String? {
+        "没有找到有效书源"
     }
 }

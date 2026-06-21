@@ -8,12 +8,7 @@ struct DiscoverView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    PodcastSectionTitle(
-                        title: "发现",
-                        subtitle: "原生 Swift 核心 · iOS Podcasts 风格"
-                    )
-
-                    matchModePicker
+                    PodcastSectionTitle(title: "发现", subtitle: nil)
                     searchHeader
                     content
                 }
@@ -23,7 +18,6 @@ struct DiscoverView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .task {
-                appState.sourceStore.seedForDevelopment()
                 viewModel.bind(appState: appState)
             }
         }
@@ -44,78 +38,69 @@ struct DiscoverView: View {
             .frame(maxWidth: .infinity, minHeight: 260)
             .podcastCard()
         } else if let error = viewModel.errorMessage, viewModel.results.isEmpty {
-            EmptyStateCard(
-                systemImage: "exclamationmark.triangle",
-                title: "搜索失败",
-                message: error
-            )
+            EmptyStateCard(systemImage: "exclamationmark.triangle", title: "搜索失败", message: error)
         } else if viewModel.results.isEmpty {
-            EmptyStateCard(
-                systemImage: "magnifyingglass",
-                title: "搜索书名",
-                message: "Swift 原生核心会逐步接管搜索、目录和正文解析。"
-            )
+            EmptyStateCard(systemImage: "magnifyingglass", title: "搜索书名", message: "先在设置里导入书源，然后搜索小说。")
         } else {
             resultsList
         }
     }
 
     private var searchHeader: some View {
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("搜索结果")
+                    .font(.title.bold())
+                Spacer()
+            }
+
+            Text("已检测 \(viewModel.checkedSourceCount)/\(appState.sourceStore.sources.count) 个源 · 命中 \(viewModel.hitSourceCount) 个源 · 结果 \(viewModel.results.count) 条")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Picker("搜索模式", selection: $viewModel.matchMode) {
+                ForEach(SearchMatchMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("搜索书名或作者", text: $viewModel.keyword)
+                TextField("筛选结果：书名、作者、来源、地址", text: $viewModel.keyword)
                     .textInputAutocapitalization(.never)
                     .submitLabel(.search)
                     .onSubmit {
                         Task { await viewModel.search() }
                     }
-                Button("搜索") {
-                    Task { await viewModel.search() }
-                }
-                .buttonStyle(.borderedProminent)
             }
             .padding(14)
             .background(AppTheme.elevatedCard)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.capsuleRadius, style: .continuous))
 
-            HStack {
-                Text("已导入 \(appState.sourceStore.sources.count) 个源")
-                Spacer()
-                Text("已检 \(viewModel.checkedSourceCount) · 命中 \(viewModel.hitSourceCount) · \(viewModel.results.count) 条")
+            Button {
+                Task { await viewModel.search() }
+            } label: {
+                Label("搜索", systemImage: "magnifyingglass")
+                    .frame(maxWidth: .infinity)
             }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.secondary)
+            .buttonStyle(.borderedProminent)
         }
         .podcastCard()
-    }
-
-    private var matchModePicker: some View {
-        Picker("搜索模式", selection: $viewModel.matchMode) {
-            ForEach(SearchMatchMode.allCases) { mode in
-                Text(mode.title).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(6)
-        .background(AppTheme.elevatedCard)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.capsuleRadius, style: .continuous))
     }
 
     private var resultsList: some View {
         LazyVStack(spacing: 14) {
             HStack {
-                Text("搜索结果")
-                    .font(.title2.bold())
+                Text("显示 \(viewModel.results.count)/\(viewModel.totalResultCount) 条")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if viewModel.isSearching {
                     ProgressView()
                         .controlSize(.small)
                 }
-                Text("\(viewModel.results.count) 条")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
             }
 
             ForEach(viewModel.results) { book in
@@ -140,6 +125,7 @@ final class DiscoverViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var hitSourceCount = 0
     @Published var checkedSourceCount = 0
+    @Published var totalResultCount = 0
 
     private weak var appState: AppState?
 
@@ -155,13 +141,14 @@ final class DiscoverViewModel: ObservableObject {
         isSearching = true
         errorMessage = nil
         results = []
+        totalResultCount = 0
         hitSourceCount = 0
         checkedSourceCount = 0
         defer { isSearching = false }
 
         let sources = appState.sourceStore.sources.filter(\.enabled)
         guard !sources.isEmpty else {
-            errorMessage = "没有可用书源"
+            errorMessage = "没有可用书源，请先到 设置 > 书源管理 导入书源。"
             return
         }
 
@@ -186,26 +173,22 @@ final class DiscoverViewModel: ObservableObject {
                         if !books.isEmpty {
                             hitSources.insert(source.bookSourceUrl)
                             allBooks.append(contentsOf: books)
+                            totalResultCount = allBooks.count
                             results = filtered(allBooks, keyword: keyword)
                             hitSourceCount = hitSources.count
                         }
                     case .failure(let error):
                         failures.append("\(source.bookSourceName): \(error.displayMessage)")
-                        appState.record(.init(
-                            level: .warning,
-                            stage: "search",
-                            sourceName: source.bookSourceName,
-                            message: error.displayMessage
-                        ))
                     }
                 }
             }
         }
 
+        totalResultCount = allBooks.count
         results = filtered(allBooks, keyword: keyword)
         hitSourceCount = hitSources.count
         if results.isEmpty {
-            errorMessage = failures.prefix(5).joined(separator: "\n")
+            errorMessage = failures.prefix(8).joined(separator: "\n")
         }
     }
 
@@ -214,6 +197,8 @@ final class DiscoverViewModel: ObservableObject {
         return books.filter {
             $0.name.localizedCaseInsensitiveContains(keyword)
                 || ($0.author?.localizedCaseInsensitiveContains(keyword) ?? false)
+                || $0.sourceName.localizedCaseInsensitiveContains(keyword)
+                || $0.bookUrl.localizedCaseInsensitiveContains(keyword)
         }
     }
 }
