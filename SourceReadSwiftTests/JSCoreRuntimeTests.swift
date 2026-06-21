@@ -268,7 +268,14 @@ final class JSCoreRuntimeTests: XCTestCase {
 
     func testJavaStyleStringHelpersAreAvailable() throws {
         let script = """
-        'abcdef'.contains('bcd') + '|' + 'abcdef'.startsWith('abc') + '|' + 'abcdef'.endsWith('def')
+        [
+          'abcdef'.contains('bcd'),
+          'abcdef'.startsWith('abc'),
+          'abcdef'.endsWith('def'),
+          'Title'.equals('Title'),
+          'Title'.equalsIgnoreCase('title'),
+          'a-b-c'.replaceAll('-', '')
+        ].join('|')
         """
 
         let result = JSCoreRuntime().evaluate(script)
@@ -276,6 +283,6 @@ final class JSCoreRuntimeTests: XCTestCase {
         guard case .success(let value) = result else {
             return XCTFail("expected success")
         }
-        XCTAssertEqual(value, "true|true|true")
+        XCTAssertEqual(value, "true|true|true|true|true|abc")
     }
 }

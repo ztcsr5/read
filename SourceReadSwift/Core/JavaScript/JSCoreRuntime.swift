@@ -197,6 +197,19 @@ final class JSCoreRuntime {
             return this.substring(this.length - value.length) === value;
           };
         }
+        if (!String.prototype.equals) {
+          String.prototype.equals = function(value) { return String(this) === String(value); };
+        }
+        if (!String.prototype.equalsIgnoreCase) {
+          String.prototype.equalsIgnoreCase = function(value) {
+            return String(this).toLowerCase() === String(value).toLowerCase();
+          };
+        }
+        if (!String.prototype.replaceAll) {
+          String.prototype.replaceAll = function(search, replacement) {
+            return String(this).split(String(search)).join(String(replacement));
+          };
+        }
         function __asJavaList(list) {
           list.get = function(index) { return list[Number(index)]; };
           list.size = function() { return list.length; };
