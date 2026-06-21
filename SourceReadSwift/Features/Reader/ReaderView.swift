@@ -40,6 +40,14 @@ struct ReaderView: View {
         appState.bookshelfStore.isBookmarked(bookID: bookID, chapterIndex: chapterIndex)
     }
 
+    private var progressTitle: String {
+        guard let totalChapters, totalChapters > 0 else {
+            return "第 \(chapterIndex + 1) 章"
+        }
+        let percentage = Int((Double(chapterIndex + 1) / Double(totalChapters) * 100).rounded())
+        return "第 \(chapterIndex + 1) / \(totalChapters) 章 · \(percentage)%"
+    }
+
     var body: some View {
         ZStack {
             background.color.ignoresSafeArea()
@@ -160,11 +168,25 @@ struct ReaderView: View {
             Spacer()
 
             VStack(spacing: 10) {
-                Text("当前章节")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack {
+                    toolButton(icon: "chevron.left", title: "上一章") {
+                        selectRelativeChapter(offset: -1)
+                    }
+                    .disabled(!canSelectRelativeChapter(offset: -1))
+
+                    Text(progressTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+
+                    toolButton(icon: "chevron.right", title: "下一章") {
+                        selectRelativeChapter(offset: 1)
+                    }
+                    .disabled(!canSelectRelativeChapter(offset: 1))
+                }
 
                 HStack {
+
                     toolButton(icon: "list.bullet", title: "目录") {
                         showChapterList = true
                         showSettings = false
@@ -464,6 +486,20 @@ struct ReaderView: View {
         guard let target = chapters.first(where: { $0.index == bookmark.chapterIndex }) else { return }
         showBookmarks = false
         showOverlay = false
+        onSelectChapter?(target)
+    }
+
+    private func canSelectRelativeChapter(offset: Int) -> Bool {
+        guard onSelectChapter != nil else { return false }
+        return chapters.contains { $0.index == chapterIndex + offset }
+    }
+
+    private func selectRelativeChapter(offset: Int) {
+        guard let target = chapters.first(where: { $0.index == chapterIndex + offset }) else { return }
+        showSettings = false
+        showOverlay = false
+        stopAutoScroll()
+        speechController.stop()
         onSelectChapter?(target)
     }
 
