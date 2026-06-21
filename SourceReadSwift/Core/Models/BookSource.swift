@@ -124,6 +124,24 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(loginUrl, forKey: .loginUrl)
         try container.encodeIfPresent(loginCheckJs, forKey: .loginCheckJs)
     }
+
+    func updatingEnabled(_ enabled: Bool) -> BookSource {
+        BookSource(
+            bookSourceName: bookSourceName,
+            bookSourceUrl: bookSourceUrl,
+            bookSourceGroup: bookSourceGroup,
+            enabled: enabled,
+            searchUrl: searchUrl,
+            ruleSearch: ruleSearch,
+            ruleBookInfo: ruleBookInfo,
+            ruleToc: ruleToc,
+            ruleContent: ruleContent,
+            header: header,
+            loginUrl: loginUrl,
+            loginCheckJs: loginCheckJs,
+            raw: raw
+        )
+    }
 }
 
 struct SourceRule: Codable, Hashable, Sendable {

@@ -77,6 +77,28 @@ final class SourceStore: ObservableObject {
         }
     }
 
+    func remove(sourceURLs: Set<String>) {
+        sources.removeAll { sourceURLs.contains($0.bookSourceUrl) }
+        do {
+            try persistence.save(sources)
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func setEnabled(_ enabled: Bool, for sourceURLs: Set<String>) {
+        sources = sources.map { source in
+            sourceURLs.contains(source.bookSourceUrl) ? source.updatingEnabled(enabled) : source
+        }
+        do {
+            try persistence.save(sources)
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     private func merge(existing: [BookSource], incoming: [BookSource]) -> [BookSource] {
         var map = Dictionary(uniqueKeysWithValues: existing.map { ($0.bookSourceUrl, $0) })
         for item in incoming {
