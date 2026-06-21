@@ -241,7 +241,7 @@ struct ReaderView: View {
         NavigationStack {
             List {
                 if chapters.isEmpty {
-                    Text("当前入口暂未带入完整目录")
+                    Text("当前章节没有可切换目录")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(chapters) { chapter in

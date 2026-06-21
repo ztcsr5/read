@@ -4,7 +4,6 @@ struct DiscoverView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = DiscoverViewModel()
     @State private var selectedTab: DiscoverTab = .books
-    @State private var showWebModeNotice = false
 
     var body: some View {
         NavigationStack {
@@ -41,11 +40,6 @@ struct DiscoverView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 viewModel.bind(appState: appState)
-            }
-            .alert("智能网页小说模式", isPresented: $showWebModeNotice) {
-                Button("知道了", role: .cancel) {}
-            } message: {
-                Text("这个入口会在后续阶段接回 Flutter 版的内置网页搜索和写源流程。")
             }
         }
     }
@@ -88,8 +82,8 @@ struct DiscoverView: View {
     }
 
     private var webModeButton: some View {
-        Button {
-            showWebModeNotice = true
+        NavigationLink {
+            WebNovelModeView()
         } label: {
             Label("智能网页小说模式", systemImage: "globe")
                 .font(.system(size: 21, weight: .bold))
@@ -211,11 +205,38 @@ struct DiscoverView: View {
 
     private var subscriptionTab: some View {
         VStack(spacing: 18) {
-            EmptyStateCard(
-                systemImage: "newspaper",
-                title: "暂无订阅源",
-                message: "RSS/订阅源会在书源管理中统一导入和维护。"
-            )
+            if appState.sourceStore.rssSources.isEmpty {
+                EmptyStateCard(
+                    systemImage: "newspaper",
+                    title: "暂无订阅源",
+                    message: "RSS/订阅源会在书源管理中统一导入和维护。"
+                )
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(appState.sourceStore.rssSources) { source in
+                        HStack(spacing: 12) {
+                            Image(systemName: "newspaper")
+                                .font(.title3)
+                                .foregroundStyle(AppTheme.accent)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(source.sourceName)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Text(source.sourceUrl)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Text(source.enabled ? "启用" : "停用")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(source.enabled ? .green : .secondary)
+                        }
+                        .podcastCard()
+                    }
+                }
+            }
 
             NavigationLink {
                 SourceManagerView()
@@ -239,7 +260,7 @@ struct DiscoverView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Web 写源")
                             .font(.title2.bold())
-                        Text("用表单和网页辅助恢复 Flutter 版写源流程")
+                        Text("用网页信息辅助整理、导入和验证书源规则")
                             .font(.subheadline)
                     }
                     Spacer()
@@ -253,6 +274,37 @@ struct DiscoverView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+}
+
+private struct WebNovelModeView: View {
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("智能网页小说模式")
+                        .font(.title2.bold())
+                    Text("当前 Swift 版本优先走书源引擎。网页模式用于辅助发现站点、复制 URL、整理规则，并通过书源管理导入验证。")
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("建议流程") {
+                Label("在 Safari 或站点页面找到小说搜索/目录/正文页", systemImage: "safari")
+                Label("复制地址或分享文本到书源管理", systemImage: "doc.on.clipboard")
+                Label("用书源测试验证搜索、详情、目录、正文", systemImage: "checkmark.seal")
+            }
+
+            Section {
+                NavigationLink {
+                    SourceManagerView()
+                } label: {
+                    Label("打开书源管理", systemImage: "square.stack.3d.up")
+                }
+            }
+        }
+        .navigationTitle("网页模式")
     }
 }
 
