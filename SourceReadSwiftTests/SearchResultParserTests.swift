@@ -35,4 +35,31 @@ final class SearchResultParserTests: XCTestCase {
         }
         XCTAssertEqual(book.coverUrl, "https://example.com/covers/1.jpg")
     }
+
+    func testHTMLSearchUsesRuleAlternatives() throws {
+        let source = BookSource(
+            bookSourceName: "Test",
+            bookSourceUrl: "https://example.com",
+            ruleSearch: SourceRule(fields: [
+                "bookList": ".book",
+                "name": ".missing@text || .title@text",
+                "bookUrl": ".missing@href || a@href"
+            ])
+        )
+        let response = SourceResponse(
+            url: URL(string: "https://example.com/search?q=a")!,
+            statusCode: 200,
+            headers: [:],
+            body: #"<html><body><div class="book"><a class="title" href="/book/1">Title</a></div></body></html>"#,
+            data: Data()
+        )
+
+        let result = SearchResultParser().parse(source: source, response: response)
+
+        guard case .success(let books) = result, let book = books.first else {
+            return XCTFail("expected parsed book")
+        }
+        XCTAssertEqual(book.name, "Title")
+        XCTAssertEqual(book.bookUrl, "https://example.com/book/1")
+    }
 }

@@ -2,6 +2,8 @@ import Foundation
 import SwiftSoup
 
 struct SearchResultParser {
+    private let htmlExtractor = HtmlRuleExtractor()
+
     func parse(source: BookSource, response: SourceResponse) -> Result<[SearchBook], SourceEngineError> {
         let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if body.first == "{" || body.first == "[" {
@@ -20,19 +22,19 @@ struct SearchResultParser {
 
         do {
             let document = try SwiftSoup.parse(response.body, response.url.absoluteString)
-            let elements = try document.select(cleanCSS(listRule))
+            let elements = try document.select(htmlExtractor.cleanCSS(listRule))
             var books: [SearchBook] = []
             for element in elements.array() {
-                let name = try value(from: element, rule: firstRule(rule, keys: ["name", "bookName"]), fallback: "a@text")
-                let bookUrl = try value(from: element, rule: firstRule(rule, keys: ["bookUrl", "url"]), fallback: "a@href")
+                let name = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["name", "bookName"]), fallback: "a@text", baseUrl: response.url)
+                let bookUrl = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["bookUrl", "url"]), fallback: "a@href", baseUrl: response.url)
                 guard !name.isEmpty, !bookUrl.isEmpty else { continue }
-                let author = try value(from: element, rule: firstRule(rule, keys: ["author"]), fallback: nil).nilIfEmpty
-                let cover = try value(from: element, rule: firstRule(rule, keys: ["coverUrl", "cover"]), fallback: "img@src").nilIfEmpty
+                let author = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["author"]), fallback: nil, baseUrl: response.url).nilIfEmpty
+                let cover = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["coverUrl", "cover"]), fallback: "img@src", baseUrl: response.url).nilIfEmpty
                 books.append(SearchBook(
                     name: name,
                     author: author,
-                    coverUrl: cover.map { absolutize($0, base: response.url) },
-                    bookUrl: absolutize(bookUrl, base: response.url),
+                    coverUrl: cover,
+                    bookUrl: bookUrl,
                     sourceName: source.bookSourceName,
                     sourceUrl: source.bookSourceUrl,
                     intro: nil
@@ -77,7 +79,7 @@ struct SearchResultParser {
                     rule: firstRule(rule, keys: ["coverUrl", "cover"]),
                     fallbackKeys: ["cover", "coverUrl", "img", "image"]
                 ),
-                bookUrl: absolutize(url, base: response.url),
+                bookUrl: htmlExtractor.absolutize(url, base: response.url),
                 sourceName: source.bookSourceName,
                 sourceUrl: source.bookSourceUrl,
                 intro: extractor.string(
@@ -100,32 +102,4 @@ struct SearchResultParser {
         return rule.raw
     }
 
-    private func value(from element: Element, rule: String?, fallback: String?) throws -> String {
-        let selectedRule = rule ?? fallback
-        guard let selectedRule, !selectedRule.isEmpty else { return "" }
-        let parts = selectedRule.components(separatedBy: "@")
-        let selector = cleanCSS(parts.first ?? "")
-        let target = selector.isEmpty ? element : try element.select(selector).first() ?? element
-        let attr = parts.dropFirst().first ?? "text"
-        if attr == "text" {
-            return try target.text().trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if attr == "html" {
-            return try target.html().trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return try target.attr(attr).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func cleanCSS(_ rule: String) -> String {
-        rule
-            .replacingOccurrences(of: "&&", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func absolutize(_ text: String, base: URL) -> String {
-        if let url = URL(string: text), url.scheme != nil {
-            return url.absoluteString
-        }
-        return URL(string: text, relativeTo: base)?.absoluteURL.absoluteString ?? text
-    }
 }
