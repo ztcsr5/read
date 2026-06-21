@@ -837,6 +837,11 @@ Completed since the initial audit:
 - Improved reader daily-use behavior:
   - Reader advanced settings now include a persisted "keep screen awake while reading" toggle.
   - Opening the reader applies the idle-timer preference; leaving the reader restores the previous app idle-timer state.
+- Improved reader position recovery:
+  - Bookshelf state now persists the current paragraph index in addition to chapter index/title.
+  - Reader restores the stored paragraph when reopening the same chapter.
+  - Page/cover mode selection, auto-scroll, tap page navigation, and speech-driven paragraph movement update the stored paragraph position.
+  - Full manual scroll visibility tracking still needs a Geometry-based pass.
 
 Still not complete:
 

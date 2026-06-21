@@ -67,6 +67,15 @@ struct ReaderView: View {
         return "第 \(chapterIndex + 1) / \(totalChapters) 章 · \(percentage)%"
     }
 
+    private var maximumReaderTarget: Int {
+        switch readerMode {
+        case .scroll:
+            return max(content.paragraphs.count - 1, 0)
+        case .pageTurn, .cover:
+            return max(content.paragraphs.count, 0)
+        }
+    }
+
     var body: some View {
         ZStack {
             background.color.ignoresSafeArea()
@@ -104,16 +113,11 @@ struct ReaderView: View {
         }
         .onAppear {
             sessionStartedAt = Date()
-            autoScrollTarget = 0
+            autoScrollTarget = initialAutoScrollTarget()
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             applyIdleTimerPreference()
             appState.bookshelfStore.markReaderOpened(bookID: bookID)
-            appState.bookshelfStore.updateReadingProgress(
-                bookID: bookID,
-                chapterIndex: chapterIndex,
-                chapterTitle: content.title,
-                totalChapters: totalChapters ?? 0
-            )
+            persistReadingPosition()
         }
         .onDisappear {
             stopAutoScroll()
@@ -126,6 +130,9 @@ struct ReaderView: View {
         }
         .onChange(of: keepScreenAwake) { _ in
             applyIdleTimerPreference()
+        }
+        .onChange(of: autoScrollTarget) { _ in
+            persistReadingPosition()
         }
     }
 
@@ -158,14 +165,23 @@ struct ReaderView: View {
                 .padding(.bottom, CGFloat(footerHeight))
             }
             .onChange(of: autoScrollTarget) { target in
+                guard content.paragraphs.indices.contains(target) else { return }
                 withAnimation(.easeInOut(duration: 0.45)) {
                     proxy.scrollTo(target, anchor: .top)
                 }
             }
             .onChange(of: speechController.currentParagraphIndex) { target in
                 guard target >= 0 else { return }
+                persistReadingPosition(paragraphIndexOverride: target)
                 withAnimation(.easeInOut(duration: 0.35)) {
                     proxy.scrollTo(target, anchor: .center)
+                }
+            }
+            .onAppear {
+                let target = autoScrollTarget
+                guard target > 0, content.paragraphs.indices.contains(target) else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(target, anchor: .top)
                 }
             }
         }
@@ -698,7 +714,7 @@ struct ReaderView: View {
         case .previousPage:
             autoScrollTarget = max(0, autoScrollTarget - 1)
         case .nextPage:
-            autoScrollTarget = min(max(content.paragraphs.count, 0), autoScrollTarget + 1)
+            autoScrollTarget = min(maximumReaderTarget, autoScrollTarget + 1)
         case .previousChapter:
             selectRelativeChapter(offset: -1)
         case .nextChapter:
@@ -762,7 +778,7 @@ struct ReaderView: View {
         autoScrollEnabled = true
         autoScrollTarget = 0
         let delay = autoScrollDelay
-        let maxIndex = max(content.paragraphs.count - 1, 0)
+        let maxIndex = maximumReaderTarget
         autoScrollTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -790,6 +806,42 @@ struct ReaderView: View {
 
     private func restoreIdleTimerPreference() {
         UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
+    }
+
+    private func initialAutoScrollTarget() -> Int {
+        guard let stored = appState.bookshelfStore.book(id: bookID),
+              stored.currentChapterIndex == chapterIndex,
+              let paragraphIndex = stored.currentParagraphIndex else {
+            return 0
+        }
+        let safeParagraph = min(max(paragraphIndex, 0), max(content.paragraphs.count - 1, 0))
+        switch readerMode {
+        case .scroll:
+            return safeParagraph
+        case .pageTurn, .cover:
+            return min(safeParagraph + 1, maximumReaderTarget)
+        }
+    }
+
+    private func persistReadingPosition(paragraphIndexOverride: Int? = nil) {
+        let paragraphIndex: Int
+        if let paragraphIndexOverride {
+            paragraphIndex = min(max(paragraphIndexOverride, 0), max(content.paragraphs.count - 1, 0))
+        } else {
+            switch readerMode {
+            case .scroll:
+                paragraphIndex = min(max(autoScrollTarget, 0), max(content.paragraphs.count - 1, 0))
+            case .pageTurn, .cover:
+                paragraphIndex = min(max(autoScrollTarget - 1, 0), max(content.paragraphs.count - 1, 0))
+            }
+        }
+        appState.bookshelfStore.updateReadingProgress(
+            bookID: bookID,
+            chapterIndex: chapterIndex,
+            chapterTitle: content.title,
+            totalChapters: totalChapters ?? 0,
+            paragraphIndex: paragraphIndex
+        )
     }
 }
 

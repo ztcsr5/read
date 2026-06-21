@@ -95,6 +95,35 @@ final class BookshelfStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testPersistsParagraphReadingPosition() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = BookshelfPersistence(fileManager: .default, rootURL: root)
+        let store = BookshelfStore(persistence: persistence)
+        store.addLocalTextBook(
+            LocalTextBook(
+                title: "Local",
+                author: "Local",
+                chapters: [
+                    LocalTextChapter(title: "Chapter 1", paragraphs: ["A", "B", "C"], index: 0)
+                ]
+            )
+        )
+        let id = try XCTUnwrap(store.books.first?.id)
+
+        store.updateReadingProgress(
+            bookID: id,
+            chapterIndex: 0,
+            chapterTitle: "Chapter 1",
+            totalChapters: 1,
+            paragraphIndex: 2
+        )
+
+        let reloaded = BookshelfStore(persistence: persistence)
+        XCTAssertEqual(reloaded.book(id: id)?.currentParagraphIndex, 2)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testSwitchSourceKeepsBookshelfIdentityAndResetsProgress() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -111,6 +140,7 @@ final class BookshelfStoreTests: XCTestCase {
         store.addOrUpdate(original)
         let bookID = original.id
         store.updateReadingProgress(bookID: bookID, chapterIndex: 8, chapterTitle: "Old 9", totalChapters: 20)
+        store.updateReadingProgress(bookID: bookID, chapterIndex: 8, chapterTitle: "Old 9", totalChapters: 20, paragraphIndex: 4)
         store.toggleBookmark(bookID: bookID, chapterIndex: 8, chapterTitle: "Old 9", snippet: "Snippet")
 
         let replacement = SearchBook(
@@ -137,6 +167,7 @@ final class BookshelfStoreTests: XCTestCase {
         XCTAssertEqual(updated.bookURL, "https://new.example.com/book")
         XCTAssertEqual(updated.currentChapterIndex, 0)
         XCTAssertEqual(updated.currentChapterTitle, nil)
+        XCTAssertEqual(updated.currentParagraphIndex, nil)
         XCTAssertEqual(updated.totalChapters, 30)
         XCTAssertEqual(updated.latestChapterTitle, "New Latest")
         XCTAssertEqual(updated.intro, "Loaded intro")
