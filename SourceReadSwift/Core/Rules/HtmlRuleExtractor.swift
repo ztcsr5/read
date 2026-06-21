@@ -10,26 +10,50 @@ struct HtmlRuleExtractor {
     func value(from root: Element, rule: String?, fallback: String? = nil, baseUrl: URL? = nil) throws -> String {
         let selectedRule = rule ?? fallback
         guard let selectedRule, !selectedRule.isEmpty else { return "" }
-        let alternatives = selectedRule
-            .components(separatedBy: "||")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        for alternative in alternatives {
-            let value = try valueForSingleRule(from: root, rule: alternative, baseUrl: baseUrl)
-            if !value.isEmpty {
-                return value
+        if let alternatives = RuleOperatorSplitter.split(selectedRule, separator: "||") {
+            for alternative in alternatives {
+                let value = try self.value(from: root, rule: alternative, fallback: nil, baseUrl: baseUrl)
+                if !value.isEmpty {
+                    return value
+                }
             }
+            return ""
         }
-        return ""
+
+        if let mergeParts = RuleOperatorSplitter.split(selectedRule, separator: "%%") {
+            let lists = try mergeParts
+                .map { try valuesForSingleRule(from: root, rule: $0, baseUrl: baseUrl) }
+                .filter { !$0.isEmpty }
+            return interleave(lists).joined(separator: "\n")
+        }
+
+        return try valuesForSingleRule(from: root, rule: selectedRule, baseUrl: baseUrl).first ?? ""
     }
 
-    private func valueForSingleRule(from root: Element, rule: String, baseUrl: URL?) throws -> String {
+    private func valuesForSingleRule(from root: Element, rule: String, baseUrl: URL?) throws -> [String] {
         let split = splitSelectorAndAttribute(rule)
         let targets = try select(from: root, rule: split.selector)
-        let target = targets.first ?? root
         let attrParts = split.attribute.components(separatedBy: "##")
         let attr = attrParts.first ?? "text"
+        if attr == "all" {
+            let joined = try targets.map { try $0.text() }.joined(separator: "\n")
+            let transformed = applyRegexTransforms(attrParts.dropFirst(), to: joined)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return transformed.isEmpty ? [] : [transformed]
+        }
+        return try targets.compactMap { target in
+            let value = try attributeValue(from: target, attr: attr)
+            let trimmed = applyRegexTransforms(attrParts.dropFirst(), to: value)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if ["href", "src", "url"].contains(attr), let baseUrl {
+                let absolute = absolutize(trimmed, base: baseUrl)
+                return absolute.isEmpty ? nil : absolute
+            }
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
+    private func attributeValue(from target: Element, attr: String) throws -> String {
         let value: String
         if attr == "text" || attr == "text()" {
             value = try target.text()
@@ -39,20 +63,28 @@ struct HtmlRuleExtractor {
             value = try target.ownText()
         } else if attr == "html" || attr == "html()" {
             value = try target.html()
-        } else if attr == "all" {
-            value = try targets.map { try $0.text() }.joined(separator: "\n")
         } else {
             value = try target.attr(attr)
         }
-        let trimmed = applyRegexTransforms(attrParts.dropFirst(), to: value)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if ["href", "src", "url"].contains(attr), let baseUrl {
-            return absolutize(trimmed, base: baseUrl)
-        }
-        return trimmed
+        return value
     }
 
     private func select(from root: Element, rule: String) throws -> [Element] {
+        if let fallbackParts = RuleOperatorSplitter.split(rule, separator: "||") {
+            for part in fallbackParts {
+                let elements = try select(from: root, rule: part)
+                if !elements.isEmpty {
+                    return elements
+                }
+            }
+            return []
+        }
+        if let mergeParts = RuleOperatorSplitter.split(rule, separator: "%%") {
+            let lists = try mergeParts
+                .map { try select(from: root, rule: $0) }
+                .filter { !$0.isEmpty }
+            return interleave(lists)
+        }
         let selector = cleanCSS(rule)
         guard !selector.isEmpty else { return [root] }
         let indexed = parseIndexedSelector(selector)
@@ -136,5 +168,16 @@ struct HtmlRuleExtractor {
             return url.absoluteString
         }
         return URL(string: text, relativeTo: base)?.absoluteURL.absoluteString ?? text
+    }
+
+    private func interleave<T>(_ lists: [[T]]) -> [T] {
+        let maxCount = lists.map(\.count).max() ?? 0
+        var output: [T] = []
+        for index in 0..<maxCount {
+            for list in lists where list.indices.contains(index) {
+                output.append(list[index])
+            }
+        }
+        return output
     }
 }

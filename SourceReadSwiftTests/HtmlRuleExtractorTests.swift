@@ -12,7 +12,7 @@ final class HtmlRuleExtractorTests: XCTestCase {
 
         let value = try HtmlRuleExtractor().value(
             from: document,
-            rule: ".missing@text || .book .title@text",
+            rule: ".missing@href || .book .title@text",
             baseUrl: URL(string: "https://example.com/search")!
         )
 
@@ -106,5 +106,76 @@ final class HtmlRuleExtractorTests: XCTestCase {
         )
 
         XCTAssertEqual(value, "A\nB")
+    }
+
+    func testMergeOperatorInterleavesHTMLValues() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <a class="free" href="/1">第一章</a>
+          <a class="free" href="/3">第三章</a>
+          <a class="vip" href="/2">第二章</a>
+          <a class="vip" href="/4">第四章</a>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: ".free@text%%.vip@text",
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(value, "第一章\n第二章\n第三章\n第四章")
+    }
+
+    func testMergeOperatorInterleavesHTMLNodes() throws {
+        let html = """
+        <html><body>
+          <a class="free" href="/1">第一章</a>
+          <a class="free" href="/3">第三章</a>
+          <a class="vip" href="/2">第二章</a>
+          <a class="vip" href="/4">第四章</a>
+        </body></html>
+        """
+
+        let elements = try HtmlRuleExtractor().select(
+            html,
+            baseUrl: URL(string: "https://example.com")!,
+            listRule: ".free%%.vip"
+        )
+
+        XCTAssertEqual(try elements.map { try $0.text() }, ["第一章", "第二章", "第三章", "第四章"])
+    }
+
+    func testListFallbackUsesFirstNonEmptySelector() throws {
+        let html = """
+        <html><body>
+          <a class="book">Book</a>
+        </body></html>
+        """
+
+        let elements = try HtmlRuleExtractor().select(
+            html,
+            baseUrl: URL(string: "https://example.com")!,
+            listRule: ".missing || .book"
+        )
+
+        XCTAssertEqual(try elements.map { try $0.text() }, ["Book"])
+    }
+
+    func testFallbackOperatorIgnoresNestedCSSOperatorText() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <a data-key="Alpha || Beta">Primary</a>
+          <span>Fallback</span>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: "a[data-key='Alpha || Beta']@text || span@text",
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(value, "Primary")
     }
 }

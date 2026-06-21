@@ -829,6 +829,11 @@ Completed since the initial audit:
   - Reader preloads the next two chapters in the background when a chapter opens.
   - Settings cache cleanup now clears real chapter cache instead of being a placeholder, and shows cached chapter count plus estimated size.
   - Cache persistence, expiry, and purify-signature invalidation are covered by unit tests.
+- Improved HTML/JSON connector semantics:
+  - Added top-level operator splitting so `||` inside CSS attributes, JSON quoted keys, brackets, or parentheses is not treated as a fallback connector.
+  - HTML value and list rules now support `%%` interleaving, matching the old Flutter rule evaluator behavior for mixed free/VIP chapter lists.
+  - JSON rules now support `%%` sequential merge and stringify merged arrays as newline-separated values.
+  - Tests cover HTML fallback, HTML node/value merge, JSON quoted fallback, and JSON merge extraction.
 
 Still not complete:
 

@@ -38,7 +38,7 @@ Current SourceReadSwift status:
 
 Do next:
 
-- Add connector semantics for `||` and `%%` where our parser still treats rules too literally.
+- Connector semantics for `||` and `%%` are now partially adopted in the Swift parser; remaining work is to extend the same top-level operator handling into deeper JS/template/XPath compatibility paths.
 - Add more fixture tests for comma JSON request config and mixed JSON field + JS segment rules.
 - Continue expanding JS response-object compatibility beyond the adopted `java.ajax(url).body()` path if real-source fixtures require it.
 

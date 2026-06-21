@@ -36,15 +36,35 @@ struct JSONRuleExtractor {
 
     func value(from object: Any, path rawPath: String) -> Any? {
         let transformed = splitTransform(rawPath)
-        let path = normalize(transformed.path)
-        guard !path.isEmpty else { return object }
-        let candidates = path.components(separatedBy: "||").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        for candidate in candidates {
-            if let value = valueForSinglePath(from: object, path: candidate) {
-                return applyTransform(transformed.transform, to: value)
+        let operatorPath = transformed.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !operatorPath.isEmpty else { return object }
+        if let fallbackParts = RuleOperatorSplitter.split(operatorPath, separator: "||") {
+            for part in fallbackParts {
+                if let value = value(from: object, path: appendTransform(transformed.transform, to: part)) {
+                    return value
+                }
             }
+            return nil
+        }
+        if let mergeParts = RuleOperatorSplitter.split(operatorPath, separator: "%%") {
+            let values = mergeParts.compactMap { valueForSinglePath(from: object, path: normalize($0)) }
+            let flattened = values.flatMap { value -> [Any] in
+                if let array = value as? [Any] { return array }
+                return [value]
+            }
+            return flattened.isEmpty ? nil : applyTransform(transformed.transform, to: flattened)
+        }
+        let path = normalize(operatorPath)
+        guard !path.isEmpty else { return object }
+        if let value = valueForSinglePath(from: object, path: path) {
+            return applyTransform(transformed.transform, to: value)
         }
         return nil
+    }
+
+    private func appendTransform(_ transform: (pattern: String, replacement: String)?, to path: String) -> String {
+        guard let transform else { return path }
+        return "\(path)##\(transform.pattern)##\(transform.replacement)"
     }
 
     private func valueForSinglePath(from object: Any, path: String) -> Any? {
@@ -161,6 +181,11 @@ struct JSONRuleExtractor {
     }
 
     private func stringify(_ value: Any) -> String {
+        if let array = value as? [Any] {
+            return array.map { stringify($0) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        }
         let text = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
         return text == "<null>" ? "" : text
     }

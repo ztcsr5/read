@@ -149,4 +149,35 @@ final class JSONRuleExtractorTests: XCTestCase {
         let value = extractor.value(from: object, path: "$.data.groups.books.title") as? [Any]
         XCTAssertEqual(value as? [String], ["A", "B", "C"])
     }
+
+    func testFallbackOperatorIgnoresNestedQuotedOperatorText() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "a||b": "Primary",
+                "fallback": "Fallback"
+            ]
+        ]
+
+        let value = extractor.value(from: object, path: "$['data']['a||b'] || $.data.fallback") as? String
+        XCTAssertEqual(value, "Primary")
+    }
+
+    func testMergeOperatorCombinesJSONArraysForStringExtraction() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "free": [["title": "A"], ["title": "C"]],
+                "vip": [["title": "B"], ["title": "D"]]
+            ]
+        ]
+
+        let value = extractor.string(
+            from: object,
+            rule: "$.data.free.title%%$.data.vip.title",
+            fallbackKeys: []
+        )
+
+        XCTAssertEqual(value, "A\nC\nB\nD")
+    }
 }
