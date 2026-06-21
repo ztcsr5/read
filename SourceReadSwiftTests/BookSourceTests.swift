@@ -105,4 +105,43 @@ final class BookSourceTests: XCTestCase {
 
         XCTAssertEqual(request.url.absoluteString, "https://example.com/search?q=test")
     }
+
+    func testRequestBuilderReadsPostOptionsFromCustomConfig() {
+        let source = BookSource(
+            bookSourceName: "Post Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/api",
+            customConfig: #"{"method":"POST","body":"q={{keyword}}","headers":{"Content-Type":"application/x-www-form-urlencoded"}}"#
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 1
+        )
+
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(String(data: request.body ?? Data(), encoding: .utf8), "q=test")
+        XCTAssertEqual(request.headers["Content-Type"], "application/x-www-form-urlencoded")
+    }
+
+    func testDirectiveBodyOverridesRawBody() {
+        let source = BookSource(
+            bookSourceName: "Post Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: #"https://example.com/api@Body:q=directive"#,
+            raw: ["body": "q=raw", "method": "POST"]
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 1
+        )
+
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(String(data: request.body ?? Data(), encoding: .utf8), "q=directive")
+    }
 }

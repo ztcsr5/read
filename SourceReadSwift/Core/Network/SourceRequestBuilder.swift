@@ -13,23 +13,33 @@ struct SourceRequestBuilder {
             .replacingOccurrences(of: "{{keyword}}", with: keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)
             .replacingOccurrences(of: "{{page}}", with: String(page))
 
-        return buildRequest(source: source, resolvedText: resolved)
+        return buildRequest(source: source, resolvedText: resolved, keyword: keyword, page: page)
     }
 
-    private func buildRequest(source: BookSource, resolvedText: String) -> SourceRequest {
+    private func buildRequest(source: BookSource, resolvedText: String, keyword: String? = nil, page: Int? = nil) -> SourceRequest {
         let directive = directiveParser.parse(resolvedText)
         let url = resolveURL(directive.urlText, base: source.bookSourceUrl)
+        let sourceOptions = requestOptions(source, keyword: keyword, page: page)
 
         var headers = sourceHeaders(source)
+        headers.merge(sourceOptions.headers, uniquingKeysWith: { _, new in new })
         headers.merge(directive.headers, uniquingKeysWith: { _, new in new })
         headers["User-Agent", default: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"]
         headers["Accept", default: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"]
 
+        let body = directive.body ?? sourceOptions.body
+        let method: SourceHTTPMethod = {
+            if directive.method == .post { return .post }
+            if sourceOptions.method == .post { return .post }
+            if body != nil { return .post }
+            return .get
+        }()
+
         return SourceRequest(
             url: url,
-            method: directive.method,
+            method: method,
             headers: headers,
-            body: directive.body,
+            body: body,
             timeout: 20
         )
     }
@@ -43,6 +53,12 @@ struct SourceRequestBuilder {
             }
         }
         return [:]
+    }
+
+    private func stringMap(_ object: [String: Any]) -> [String: String] {
+        object.reduce(into: [:]) { result, item in
+            result[item.key] = String(describing: item.value)
+        }
     }
 
     private func resolveURL(_ text: String, base: String) -> URL {
@@ -82,5 +98,69 @@ struct SourceRequestBuilder {
             headers["Cookie"] = cookie
         }
         return headers
+    }
+
+    private func requestOptions(_ source: BookSource, keyword: String?, page: Int?) -> (method: SourceHTTPMethod?, body: Data?, headers: [String: String]) {
+        var method: SourceHTTPMethod?
+        var body: Data?
+        var headers: [String: String] = [:]
+
+        func apply(_ object: [String: Any]) {
+            if let methodText = object["method"] as? String, methodText.uppercased() == "POST" {
+                method = .post
+            }
+            if let methodText = object["httpMethod"] as? String, methodText.uppercased() == "POST" {
+                method = .post
+            }
+            if let bodyText = object["body"] as? String {
+                body = Data(interpolate(bodyText, keyword: keyword, page: page).utf8)
+                method = .post
+            }
+            if let bodyText = object["requestBody"] as? String {
+                body = Data(interpolate(bodyText, keyword: keyword, page: page).utf8)
+                method = .post
+            }
+            if let bodyText = object["postBody"] as? String {
+                body = Data(interpolate(bodyText, keyword: keyword, page: page).utf8)
+                method = .post
+            }
+            if let nested = object["headers"] as? [String: Any] {
+                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+            }
+            if let nested = object["header"] as? [String: Any] {
+                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+            }
+            if let text = object["headers"] as? String {
+                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+            }
+            if let text = object["header"] as? String {
+                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+            }
+        }
+
+        if let customConfig = source.customConfig,
+           let data = customConfig.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            apply(object)
+        }
+
+        apply(source.raw.reduce(into: [String: Any]()) { result, item in
+            result[item.key] = item.value
+        })
+        return (method, body, headers)
+    }
+
+    private func interpolate(_ text: String, keyword: String?, page: Int?) -> String {
+        var output = text
+        if let keyword {
+            let encoded = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
+            output = output
+                .replacingOccurrences(of: "{{key}}", with: encoded)
+                .replacingOccurrences(of: "{{keyword}}", with: encoded)
+        }
+        if let page {
+            output = output.replacingOccurrences(of: "{{page}}", with: String(page))
+        }
+        return output
     }
 }
