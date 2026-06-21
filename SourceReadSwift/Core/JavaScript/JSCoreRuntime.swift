@@ -1,6 +1,7 @@
 import Foundation
 import JavaScriptCore
 import SwiftSoup
+import CryptoKit
 
 final class JSCoreRuntime {
     private let context: JSContext
@@ -41,6 +42,14 @@ final class JSCoreRuntime {
         let base64Decode: @convention(block) (String) -> String = { value in
             guard let data = Data(base64Encoded: value) else { return "" }
             return String(data: data, encoding: .utf8) ?? ""
+        }
+        let md5: @convention(block) (String) -> String = { value in
+            let digest = Insecure.MD5.hash(data: Data(value.utf8))
+            return digest.map { String(format: "%02x", $0) }.joined()
+        }
+        let sha256: @convention(block) (String) -> String = { value in
+            let digest = SHA256.hash(data: Data(value.utf8))
+            return digest.map { String(format: "%02x", $0) }.joined()
         }
         let timeFormat: @convention(block) (Double, String) -> String = { timestamp, format in
             let date = Date(timeIntervalSince1970: timestamp > 10_000_000_000 ? timestamp / 1000 : timestamp)
@@ -93,6 +102,8 @@ final class JSCoreRuntime {
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
         context.setObject(base64Encode, forKeyedSubscript: "__native_base64Encode" as NSString)
         context.setObject(base64Decode, forKeyedSubscript: "__native_base64Decode" as NSString)
+        context.setObject(md5, forKeyedSubscript: "__native_md5" as NSString)
+        context.setObject(sha256, forKeyedSubscript: "__native_sha256" as NSString)
         context.setObject(timeFormat, forKeyedSubscript: "__native_timeFormat" as NSString)
         context.setObject(getString, forKeyedSubscript: "__native_getString" as NSString)
         context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
@@ -112,6 +123,13 @@ final class JSCoreRuntime {
         java.urlEncode = function(value) { return __native_urlEncode(String(value)); };
         java.base64Encode = function(value) { return __native_base64Encode(String(value)); };
         java.base64Decode = function(value) { return __native_base64Decode(String(value)); };
+        java.base64 = java.base64Encode;
+        java.decodeBase64 = java.base64Decode;
+        java.md5 = function(value) { return __native_md5(String(value)); };
+        java.hexMd5 = java.md5;
+        java.MD5 = java.md5;
+        java.sha256 = function(value) { return __native_sha256(String(value)); };
+        java.SHA256 = java.sha256;
         java.timeFormat = function(timestamp, format) { return __native_timeFormat(Number(timestamp), String(format)); };
         java.getTime = function() { return Date.now(); };
         java.getString = function(html, rule) { return __native_getString(String(html), String(rule), String(typeof baseUrl === 'undefined' ? '' : baseUrl)); };
@@ -140,6 +158,21 @@ final class JSCoreRuntime {
         };
         java.post = function(url, body, headers) { return __native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || '')); };
         java.log = function(value) { return String(value); };
+        function base64Encode(value) { return java.base64Encode(value); }
+        function base64Decode(value) { return java.base64Decode(value); }
+        function md5(value) { return java.md5(value); }
+        function hexMd5(value) { return java.md5(value); }
+        function atob(value) { return java.base64Decode(value); }
+        function btoa(value) { return java.base64Encode(value); }
+        var CryptoJS = CryptoJS || {};
+        CryptoJS.MD5 = function(value) {
+          return { toString: function() { return __native_md5(String(value)); } };
+        };
+        CryptoJS.SHA256 = function(value) {
+          return { toString: function() { return __native_sha256(String(value)); } };
+        };
+        CryptoJS.enc = CryptoJS.enc || {};
+        CryptoJS.enc.Utf8 = CryptoJS.enc.Utf8 || {};
         var Packages = Packages || {};
         Packages.org = Packages.org || {};
         Packages.org.jsoup = Packages.org.jsoup || {};

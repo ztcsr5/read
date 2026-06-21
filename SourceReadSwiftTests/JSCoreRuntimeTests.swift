@@ -18,6 +18,30 @@ final class JSCoreRuntimeTests: XCTestCase {
         XCTAssertEqual(value, "abc")
     }
 
+    func testCommonHashAndBase64Aliases() throws {
+        let script = """
+        [
+          java.md5('abc'),
+          java.hexMd5('abc'),
+          md5('abc'),
+          CryptoJS.MD5('abc').toString(),
+          java.sha256('abc'),
+          atob(btoa('abc')),
+          java.decodeBase64(java.base64('abc'))
+        ].join('|')
+        """
+
+        let result = JSCoreRuntime().evaluate(script)
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(
+            value,
+            "900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|abc|abc"
+        )
+    }
+
     func testNativeGetStringBridge() throws {
         let html = "<html><body><div class='book'><a href='/b/1'>斗破苍穹</a></div></body></html>"
         let script = "java.getString(html, '.book a@text')"
