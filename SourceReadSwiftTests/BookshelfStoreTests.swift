@@ -47,4 +47,25 @@ final class BookshelfStoreTests: XCTestCase {
         XCTAssertFalse(store.isBookmarked(bookID: id, chapterIndex: 0))
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testMarksRefreshFailureWithoutOverwritingIntro() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = BookshelfStore(persistence: BookshelfPersistence(fileManager: .default, rootURL: root))
+        let book = SearchBook(
+            name: "Remote",
+            author: "Author",
+            coverUrl: nil,
+            bookUrl: "https://example.com/book",
+            sourceName: "Example",
+            sourceUrl: "https://example.com",
+            intro: "Existing intro"
+        )
+        store.addOrUpdate(book)
+
+        store.markRefreshFailure(bookID: book.id, message: "Failed")
+
+        XCTAssertEqual(store.books.first?.intro, "Existing intro")
+        try? FileManager.default.removeItem(at: root)
+    }
 }

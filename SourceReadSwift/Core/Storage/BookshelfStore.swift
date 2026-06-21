@@ -59,6 +59,12 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    func markRefreshFailure(bookID: String, message: String) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].intro = books[index].intro ?? message
+        persist()
+    }
+
     func updateReadingProgress(
         bookID: String,
         chapterIndex: Int,

@@ -5,6 +5,7 @@ struct BookshelfView: View {
     @EnvironmentObject private var appState: AppState
     @State private var showFileImporter = false
     @State private var importMessage: String?
+    @State private var isRefreshingBooks = false
 
     private var recentBooks: [BookshelfBook] {
         appState.bookshelfStore.recentBooks
@@ -54,7 +55,9 @@ struct BookshelfView: View {
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }
-            .refreshable {}
+            .refreshable {
+                await refreshBookshelf()
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: [.plainText, .text, .item],
@@ -95,7 +98,13 @@ struct BookshelfView: View {
 
     private var updatesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PodcastChevronSectionHeader(title: "最新更新")
+            HStack {
+                PodcastChevronSectionHeader(title: "最新更新")
+                if isRefreshingBooks {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
             if updatedBooks.isEmpty {
                 CenterTextEmptyState("暂无更新书籍", minHeight: 220)
             } else {
@@ -138,6 +147,56 @@ struct BookshelfView: View {
             importMessage = "已导入《\(parsed.title)》，共 \(parsed.chapters.count) 章、\(parsed.paragraphs.count) 段。"
         } catch {
             importMessage = "导入失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func refreshBookshelf() async {
+        guard !isRefreshingBooks else { return }
+        isRefreshingBooks = true
+        defer { isRefreshingBooks = false }
+
+        var refreshed = 0
+        var failed = 0
+        let books = appState.bookshelfStore.books
+        for book in books where !book.sourceURL.hasPrefix("local://") {
+            guard let source = appState.sourceStore.source(for: book.sourceURL), source.enabled else {
+                failed += 1
+                continue
+            }
+            let searchBook = SearchBook(
+                name: book.title,
+                author: book.author,
+                coverUrl: book.coverURL,
+                bookUrl: book.bookURL,
+                sourceName: book.sourceName,
+                sourceUrl: book.sourceURL,
+                intro: book.intro
+            )
+            switch await appState.engine.getBookDetail(source: source, book: searchBook) {
+            case .success(let detail):
+                switch await appState.engine.getChapterList(source: source, book: detail) {
+                case .success(let chapters):
+                    appState.bookshelfStore.updateDetails(
+                        bookID: book.id,
+                        latestChapterTitle: detail.latestChapter ?? chapters.last?.title,
+                        intro: detail.intro,
+                        totalChapters: chapters.count
+                    )
+                    refreshed += 1
+                case .failure(let error):
+                    appState.bookshelfStore.markRefreshFailure(bookID: book.id, message: error.displayMessage)
+                    failed += 1
+                }
+            case .failure(let error):
+                appState.bookshelfStore.markRefreshFailure(bookID: book.id, message: error.displayMessage)
+                failed += 1
+            }
+        }
+
+        if refreshed > 0 || failed > 0 {
+            importMessage = "刷新完成：成功 \(refreshed)，失败 \(failed)。"
+        } else {
+            importMessage = "没有需要刷新的在线书籍。"
         }
     }
 
