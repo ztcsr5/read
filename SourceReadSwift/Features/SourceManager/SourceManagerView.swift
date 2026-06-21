@@ -15,6 +15,7 @@ struct SourceManagerView: View {
     @State private var sourceJSONEditor: SourceJSONEditorState?
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
+    @State private var batchCheck: SourceBatchCheckState?
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
     @State private var pendingDeleteBookSourceURLs: Set<String> = []
@@ -100,6 +101,9 @@ struct SourceManagerView: View {
             }
             .sheet(item: $sourceTest) { state in
                 sourceTestSheet(state)
+            }
+            .sheet(item: $batchCheck) { state in
+                batchCheckSheet(state)
             }
             .alert("删除选中的书源？", isPresented: Binding(
                 get: { !pendingDeleteBookSourceURLs.isEmpty },
@@ -319,6 +323,12 @@ struct SourceManagerView: View {
                 Button("停用") {
                     appState.sourceStore.setEnabled(false, for: selectedBookSourceURLs)
                     selectedBookSourceURLs.removeAll()
+                }
+                .disabled(selectedBookSourceURLs.isEmpty)
+
+                Button("批量测试") {
+                    let selected = filteredBookSources.filter { selectedBookSourceURLs.contains($0.bookSourceUrl) }
+                    batchCheck = SourceBatchCheckState(sources: selected)
                 }
                 .disabled(selectedBookSourceURLs.isEmpty)
 
@@ -688,6 +698,81 @@ struct SourceManagerView: View {
         .presentationDetents([.medium, .large])
     }
 
+    private func batchCheckSheet(_ state: SourceBatchCheckState) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("将按顺序测试 \(state.sources.count) 个书源的搜索阶段。搜索通过后，可再进入单源深测验证详情、目录和正文。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                TextField("测试关键词", text: Binding(
+                    get: { batchCheck?.keyword ?? state.keyword },
+                    set: { batchCheck?.keyword = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+
+                HStack {
+                    Button {
+                        Task { await runBatchSourceCheck() }
+                    } label: {
+                        Label(batchCheck?.isRunning == true ? "测试中..." : "开始批量测试", systemImage: "play.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(batchCheck?.isRunning == true || state.sources.isEmpty)
+
+                    if let current = batchCheck, current.isRunning {
+                        Text("\(current.checkedCount)/\(current.sources.count)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                List {
+                    let results = batchCheck?.results ?? state.results
+                    if results.isEmpty {
+                        Text("尚未开始。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(results) { result in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Image(systemName: result.status.systemImage)
+                                        .foregroundStyle(result.status.color)
+                                    Text(result.sourceName)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(result.status.title)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(result.status.color)
+                                }
+                                Text(result.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(result.sourceURL)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+            .padding()
+            .navigationTitle("批量测试")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { batchCheck = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
     private func importSources() {
         do {
             let parsed = SourceImportLinkParser.parse(importText)
@@ -793,6 +878,62 @@ struct SourceManagerView: View {
                 + sourceTestFailure(stage: "搜索", error: error)
         }
         sourceTest = latest
+    }
+
+    @MainActor
+    private func runBatchSourceCheck() async {
+        guard var state = batchCheck else { return }
+        let keyword = state.keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else {
+            state.results = [
+                SourceBatchCheckResult(
+                    sourceName: "批量测试",
+                    sourceURL: "",
+                    status: .failed,
+                    message: "请输入测试关键词。"
+                )
+            ]
+            batchCheck = state
+            return
+        }
+
+        state.isRunning = true
+        state.checkedCount = 0
+        state.results = []
+        batchCheck = state
+
+        for source in state.sources {
+            let result = await appState.engine.searchBooks(source: source, keyword: keyword, page: 1)
+            guard var latest = batchCheck else { return }
+            latest.checkedCount += 1
+            switch result {
+            case .success(let books):
+                latest.results.append(
+                    SourceBatchCheckResult(
+                        sourceName: source.bookSourceName,
+                        sourceURL: source.bookSourceUrl,
+                        status: books.isEmpty ? .warning : .passed,
+                        message: books.isEmpty
+                            ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
+                            : "搜索通过：\(books.count) 条结果。"
+                    )
+                )
+            case .failure(let error):
+                latest.results.append(
+                    SourceBatchCheckResult(
+                        sourceName: source.bookSourceName,
+                        sourceURL: source.bookSourceUrl,
+                        status: .failed,
+                        message: "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
+                    )
+                )
+            }
+            batchCheck = latest
+        }
+
+        guard var finished = batchCheck else { return }
+        finished.isRunning = false
+        batchCheck = finished
     }
 
     private func sourceTestHeader(source: BookSource, keyword: String) -> String {
@@ -971,6 +1112,53 @@ private struct SourceTestState: Identifiable {
     var keyword = "斗破苍穹"
     var isRunning = false
     var output: String?
+}
+
+private struct SourceBatchCheckState: Identifiable {
+    let id = UUID()
+    let sources: [BookSource]
+    var keyword = "斗破苍穹"
+    var isRunning = false
+    var checkedCount = 0
+    var results: [SourceBatchCheckResult] = []
+}
+
+private struct SourceBatchCheckResult: Identifiable {
+    let id = UUID()
+    let sourceName: String
+    let sourceURL: String
+    let status: SourceBatchCheckStatus
+    let message: String
+}
+
+private enum SourceBatchCheckStatus {
+    case passed
+    case warning
+    case failed
+
+    var title: String {
+        switch self {
+        case .passed: return "PASS"
+        case .warning: return "WARN"
+        case .failed: return "FAIL"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .passed: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .failed: return "xmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .passed: return .green
+        case .warning: return .orange
+        case .failed: return .red
+        }
+    }
 }
 
 private enum SourceManagerTab: String, CaseIterable, Identifiable {
