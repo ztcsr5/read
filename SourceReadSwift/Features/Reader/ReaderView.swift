@@ -273,7 +273,7 @@ struct ReaderView: View {
             .navigationTitle("目录")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {
                         showChapterList = false
                     }
@@ -321,7 +321,7 @@ struct ReaderView: View {
             .navigationTitle("书签")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {
                         showBookmarks = false
                     }

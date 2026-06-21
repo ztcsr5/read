@@ -12,9 +12,9 @@ struct SourceManagerView: View {
     @State private var importMessage: String?
     @State private var showFileImporter = false
     @State private var showImportSheet = false
-    @State private var showUnavailableNotice = false
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
+    @State private var rssPreview: RSSPreviewState?
 
     private var filteredBookSources: [BookSource] {
         let keyword = normalizedSearchText
@@ -65,7 +65,7 @@ struct SourceManagerView: View {
             .navigationTitle("源管理")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showImportSheet = true
                     } label: {
@@ -83,33 +83,36 @@ struct SourceManagerView: View {
             .sheet(item: $sourceTest) { state in
                 sourceTestSheet(state)
             }
+            .sheet(item: $rssPreview) { state in
+                rssPreviewSheet(state)
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: [.json, .plainText, .data, .item],
                 allowsMultipleSelection: false,
                 onCompletion: importFile
             )
-            .alert("功能正在恢复", isPresented: $showUnavailableNotice) {
-                Button("知道了", role: .cancel) {}
-            } message: {
-                Text("测试源、JSON 编辑、仓库浏览和 RSS 阅读会继续按 Flutter 版补齐。当前先保证导入、分类、启停和删除可用。")
-            }
         }
     }
 
     private var webServiceCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "globe")
                     .font(.title3)
-                Text("Web 书源编辑服务")
+                Text("源库状态")
                     .font(.headline)
                 Spacer()
-                Toggle("", isOn: Binding.constant(false))
-                    .labelsHidden()
-                    .disabled(true)
+                Text("\(sourceCounts.total)")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
             }
-            Text("本地 Web 编辑服务会在核心导入和新 Swift 书源引擎稳定后恢复。")
+            HStack(spacing: 10) {
+                statusPill("书源 \(sourceCounts.books)", color: .blue)
+                statusPill("仓库 \(sourceCounts.catalogs)", color: .purple)
+                statusPill("RSS \(sourceCounts.rss)", color: .orange)
+            }
+            Text("支持本地 JSON、URL、阅读分享链接、仓库导入、RSS 预览和书源搜索/详情/目录/正文链路测试。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -275,6 +278,10 @@ struct SourceManagerView: View {
                 Button(source.enabled ? "停用" : "启用") {
                     appState.sourceStore.setRSSEnabled(!source.enabled, for: [source.sourceUrl])
                 }
+                Button("查看文章") {
+                    rssPreview = RSSPreviewState(source: source)
+                    Task { await runRSSPreview() }
+                }
                 Button("查看 JSON") {
                     jsonPreview = SourceJSONPreview(title: source.sourceName, json: prettyJSON(source))
                 }
@@ -327,6 +334,10 @@ struct SourceManagerView: View {
     }
 
     private func statusBadge(_ text: String, color: Color) -> some View {
+        statusPill(text, color: color)
+    }
+
+    private func statusPill(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 8)
@@ -514,6 +525,43 @@ struct SourceManagerView: View {
         .presentationDetents([.medium, .large])
     }
 
+    private func rssPreviewSheet(_ state: RSSPreviewState) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(state.source.sourceUrl)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                Button {
+                    Task { await runRSSPreview() }
+                } label: {
+                    Label(rssPreview?.isRunning == true ? "加载中..." : "刷新文章", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(rssPreview?.isRunning == true)
+
+                ScrollView {
+                    Text(rssPreview?.output ?? "正在加载 RSS/Atom。")
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .padding()
+            .navigationTitle(state.source.sourceName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { rssPreview = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
     private func importSources() {
         do {
             let before = sourceCounts
@@ -550,11 +598,70 @@ struct SourceManagerView: View {
             let preview = books.prefix(10).enumerated().map { index, book in
                 "\(index + 1). \(book.name) | \(book.author ?? "未知作者")\n   \(book.bookUrl)"
             }.joined(separator: "\n")
-            latest.output = "搜索成功：\(books.count) 条结果\n\n\(preview)"
+            var output = "搜索成功：\(books.count) 条结果\n\n\(preview)"
+            if let first = books.first {
+                output += "\n\n正在验证首条结果详情..."
+                latest.output = output
+                sourceTest = latest
+                switch await appState.engine.getBookDetail(source: state.source, book: first) {
+                case .success(let detail):
+                    output += "\n详情成功：\(detail.name)"
+                    switch await appState.engine.getChapterList(source: state.source, book: detail) {
+                    case .success(let chapters):
+                        output += "\n目录成功：\(chapters.count) 章"
+                        if let chapter = chapters.first {
+                            switch await appState.engine.getContent(source: state.source, chapter: chapter) {
+                            case .success(let content):
+                                output += "\n正文成功：\(content.paragraphs.count) 段"
+                            case .failure(let error):
+                                output += "\n正文失败：\(error.displayMessage)"
+                            }
+                        }
+                    case .failure(let error):
+                        output += "\n目录失败：\(error.displayMessage)"
+                    }
+                case .failure(let error):
+                    output += "\n详情失败：\(error.displayMessage)"
+                }
+            }
+            latest.output = output
         case .failure(let error):
             latest.output = "测试失败：\(error.displayMessage)"
         }
         sourceTest = latest
+    }
+
+    @MainActor
+    private func runRSSPreview() async {
+        guard var state = rssPreview else { return }
+        state.isRunning = true
+        state.output = "正在加载：\(state.source.sourceUrl)"
+        rssPreview = state
+        do {
+            guard let url = URL(string: state.source.sourceUrl) else {
+                throw URLError(.badURL)
+            }
+            var request = URLRequest(url: url)
+            request.setValue("Mozilla/5.0 SourceReadSwift", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let text = ResponseTextDecoder().decode(data: data, headers: [:])
+            let titles = extractFeedTitles(from: text)
+            guard var latest = rssPreview else { return }
+            latest.isRunning = false
+            if titles.isEmpty {
+                latest.output = "已加载，但没有识别到 RSS/Atom 标题。"
+            } else {
+                latest.output = titles.prefix(30).enumerated()
+                    .map { "\($0.offset + 1). \($0.element)" }
+                    .joined(separator: "\n")
+            }
+            rssPreview = latest
+        } catch {
+            guard var latest = rssPreview else { return }
+            latest.isRunning = false
+            latest.output = "RSS 加载失败：\(error.localizedDescription)"
+            rssPreview = latest
+        }
     }
 
     private func importSourcesSmart() async {
@@ -650,6 +757,35 @@ struct SourceManagerView: View {
             && (lower.contains("challenge-platform") || lower.contains("cf-chl") || lower.contains("checking your browser"))
     }
 
+    private func extractFeedTitles(from text: String) -> [String] {
+        let patterns = [
+            #"<item[\s\S]*?<title><!\[CDATA\[(.*?)\]\]></title>"#,
+            #"<item[\s\S]*?<title>(.*?)</title>"#,
+            #"<entry[\s\S]*?<title[^>]*>(.*?)</title>"#
+        ]
+        var titles: [String] = []
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            let matches = regex.matches(in: text, range: range)
+            for match in matches {
+                guard match.numberOfRanges > 1,
+                      let valueRange = Range(match.range(at: 1), in: text) else { continue }
+                let title = String(text[valueRange])
+                    .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                    .replacingOccurrences(of: "&lt;", with: "<")
+                    .replacingOccurrences(of: "&gt;", with: ">")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !title.isEmpty {
+                    titles.append(title)
+                }
+            }
+            if !titles.isEmpty { break }
+        }
+        return titles
+    }
+
     private func prettyJSON<T: Encodable>(_ value: T) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -671,6 +807,13 @@ private struct SourceTestState: Identifiable {
     let id = UUID()
     let source: BookSource
     var keyword = "斗破苍穹"
+    var isRunning = false
+    var output: String?
+}
+
+private struct RSSPreviewState: Identifiable {
+    let id = UUID()
+    let source: RSSSource
     var isRunning = false
     var output: String?
 }
