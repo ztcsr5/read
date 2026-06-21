@@ -34,7 +34,12 @@ final class JSCoreRuntime {
 
     private func installNativeClosures() {
         let urlEncode: @convention(block) (String) -> String = { value in
-            value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+            var allowed = CharacterSet.alphanumerics
+            allowed.insert(charactersIn: "-._*")
+            return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+        }
+        let urlDecode: @convention(block) (String) -> String = { value in
+            value.removingPercentEncoding ?? value
         }
         let base64Encode: @convention(block) (String) -> String = { value in
             Data(value.utf8).base64EncodedString()
@@ -100,6 +105,7 @@ final class JSCoreRuntime {
         }
 
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
+        context.setObject(urlDecode, forKeyedSubscript: "__native_urlDecode" as NSString)
         context.setObject(base64Encode, forKeyedSubscript: "__native_base64Encode" as NSString)
         context.setObject(base64Decode, forKeyedSubscript: "__native_base64Decode" as NSString)
         context.setObject(md5, forKeyedSubscript: "__native_md5" as NSString)
@@ -121,11 +127,19 @@ final class JSCoreRuntime {
         let prelude = """
         var java = java || {};
         java.urlEncode = function(value) { return __native_urlEncode(String(value)); };
+        java.encodeURI = java.urlEncode;
+        java.encodeURIComponent = java.urlEncode;
+        java.decodeURI = function(value) { return __native_urlDecode(String(value)); };
+        java.decodeURIComponent = java.decodeURI;
         java.base64Encode = function(value) { return __native_base64Encode(String(value)); };
         java.base64Decode = function(value) { return __native_base64Decode(String(value)); };
+        java.base64DecodeToString = java.base64Decode;
+        java.base64Decoder = java.base64Decode;
         java.base64 = java.base64Encode;
+        java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
         java.md5 = function(value) { return __native_md5(String(value)); };
+        java.md5Encode = java.md5;
         java.hexMd5 = java.md5;
         java.MD5 = java.md5;
         java.sha256 = function(value) { return __native_sha256(String(value)); };
@@ -169,6 +183,7 @@ final class JSCoreRuntime {
         java.log = function(value) { return String(value); };
         function base64Encode(value) { return java.base64Encode(value); }
         function base64Decode(value) { return java.base64Decode(value); }
+        function unbase64(value) { return java.base64Decode(value); }
         function md5(value) { return java.md5(value); }
         function hexMd5(value) { return java.md5(value); }
         function atob(value) { return java.base64Decode(value); }

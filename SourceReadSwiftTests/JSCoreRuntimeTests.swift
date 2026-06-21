@@ -3,11 +3,12 @@ import XCTest
 
 final class JSCoreRuntimeTests: XCTestCase {
     func testNativeUrlEncodeBridge() throws {
-        let result = JSCoreRuntime().evaluate("java.urlEncode('斗破苍穹')")
+        let result = JSCoreRuntime().evaluate("java.urlEncode('斗破苍穹&a=1')")
         guard case .success(let value) = result else {
             return XCTFail("expected success")
         }
         XCTAssertTrue(value.contains("%"))
+        XCTAssertFalse(value.contains("&"))
     }
 
     func testNativeBase64Bridge() throws {
@@ -23,11 +24,16 @@ final class JSCoreRuntimeTests: XCTestCase {
         [
           java.md5('abc'),
           java.hexMd5('abc'),
+          java.md5Encode('abc'),
           md5('abc'),
           CryptoJS.MD5('abc').toString(),
           java.sha256('abc'),
           atob(btoa('abc')),
-          java.decodeBase64(java.base64('abc'))
+          java.decodeBase64(java.base64('abc')),
+          java.base64DecodeToString(java.base64Encode('abc')),
+          java.base64Decoder(java.base64Encode('abc')),
+          java.unbase64(java.base64Encode('abc')),
+          unbase64(java.base64Encode('abc'))
         ].join('|')
         """
 
@@ -38,8 +44,26 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(
             value,
-            "900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|abc|abc"
+            "900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|abc|abc|abc|abc|abc|abc"
         )
+    }
+
+    func testURIEncodingAliases() throws {
+        let script = """
+        [
+          java.encodeURI('a&b=1'),
+          java.encodeURIComponent('a&b=1'),
+          java.decodeURI('a%26b%3D1'),
+          java.decodeURIComponent('a%26b%3D1')
+        ].join('|')
+        """
+
+        let result = JSCoreRuntime().evaluate(script)
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "a%26b%3D1|a%26b%3D1|a&b=1|a&b=1")
     }
 
     func testNativeGetStringBridge() throws {
