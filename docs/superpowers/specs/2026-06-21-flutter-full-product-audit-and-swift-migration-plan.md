@@ -515,8 +515,8 @@ This prevents one giant reader file from becoming unmaintainable.
 | JSON import wrappers | Partial | Support `data/list/items/bookSources/sources/bookSource` | Port `source_import_test.dart` | P1 |
 | Source catalogs | Missing/partial | Model, import, list, browse, import catalog | XCTest + UI smoke | P2 |
 | RSS | Missing | RSS model, import, article list, reader | RSS fixture test | P2 |
-| Source manager batch ops | Partial | Batch delete/enable/disable/test | Unit + UI smoke | P2 |
-| Source JSON editor | Missing | Lossless edit/save/re-export | Edit-save-import test | P2 |
+| Source manager batch ops | Partial | Batch delete/enable/disable exists; batch test still needed | Unit + UI smoke | P2 |
+| Source JSON editor | Partial | Book source JSON edit/save exists; RSS/catalog edit and lossless re-export still needed | Edit-save-import test | P2 |
 | GBK decoding | Partial | Ensure GBK/GB2312/GB18030 detection | Decoder tests | P3 |
 | Search URL JS/POST/header | Partial | Match Flutter request builder | Request builder tests | P3 |
 | `@js`/`<js>` rules | Partial | JSCore bridge with java helpers | JS rule fixtures | P3 |
@@ -531,7 +531,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Reader scroll mode | Partial | Infinite load, progress save, overlay | Manual + state tests | P6 |
 | Reader page/cover modes | Missing/partial | Page mode and cover transition | UI smoke | P6 |
 | Reader settings | Partial | Full typography/background/tap-zone settings | Settings persistence test | P6 |
-| Bookmarks | Missing/partial | Add/remove/list/jump | XCTest + UI smoke | P6 |
+| Bookmarks | Partial | Add/remove/list/jump exists; needs richer paragraph-level position and UI polish | XCTest + UI smoke | P6 |
 | Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
 | TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
 | Diagnostics | Partial | Test source, report steps, failure reasons, batch checks | Diagnostic fixture test | P7 |
@@ -775,6 +775,15 @@ Completed since the initial audit:
 - Improved source diagnostics:
   - Source manager test output now reports search/detail/TOC/content stages.
   - Failure output includes stage-specific suggestions instead of only raw errors.
+- Improved source maintenance:
+  - Book source batch select/enable/disable/delete.
+  - Destructive batch delete confirmation.
+  - Book source JSON edit/save by `bookSourceUrl`.
+  - Import reports now distinguish added, updated, and ignored items instead of estimating from total count.
+- Improved reader controls:
+  - Reader bottom overlay now shows chapter count and percentage.
+  - Previous/next chapter buttons are available when chapter switching is possible.
+  - Bookmark list entries can jump to their chapter.
 
 Still not complete:
 
