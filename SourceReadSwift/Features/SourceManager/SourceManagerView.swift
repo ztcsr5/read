@@ -730,12 +730,23 @@ struct SourceManagerView: View {
 
     private func importSources() {
         do {
-            let before = sourceCounts
-            try appState.sourceStore.importSmartInput(importText)
-            let after = sourceCounts
+            let parsed = SourceImportLinkParser.parse(importText)
+            let report: SourceImportReport
+            switch parsed.kind {
+            case .empty:
+                throw SourceImportError.empty
+            case .json:
+                report = try appState.sourceStore.importJSON(parsed.value)
+            case .url:
+                throw SourceImportError.urlImportRequired(parsed.value)
+            case .unsupportedScheme:
+                throw SourceImportError.unsupportedScheme
+            case .unknown:
+                throw SourceImportError.unknownInput
+            }
             importText = ""
             importError = nil
-            importMessage = "导入成功：书源 \(after.books)，仓库 \(after.catalogs)，RSS \(after.rss)，本次新增/更新约 \(after.total - before.total)"
+            importMessage = report.userMessage
             showImportSheet = false
         } catch {
             importMessage = nil
@@ -951,12 +962,10 @@ struct SourceManagerView: View {
             if looksLikeCloudflareChallenge(decoded) {
                 throw SourceImportError.challengePage
             }
-            let before = sourceCounts
-            try appState.sourceStore.importJSON(decoded)
-            let after = sourceCounts
+            let report = try appState.sourceStore.importJSON(decoded)
             importURL = ""
             importError = nil
-            importMessage = "URL 导入成功：书源 \(after.books)，仓库 \(after.catalogs)，RSS \(after.rss)，本次新增/更新约 \(after.total - before.total)"
+            importMessage = "URL \(report.userMessage)"
             showImportSheet = false
         } catch {
             importMessage = nil
@@ -975,11 +984,9 @@ struct SourceManagerView: View {
             }
             let data = try Data(contentsOf: url)
             let text = ResponseTextDecoder().decode(data: data, headers: [:])
-            let before = sourceCounts
-            try appState.sourceStore.importJSON(text)
-            let after = sourceCounts
+            let report = try appState.sourceStore.importJSON(text)
             importError = nil
-            importMessage = "文件导入成功：书源 \(after.books)，仓库 \(after.catalogs)，RSS \(after.rss)，本次新增/更新约 \(after.total - before.total)"
+            importMessage = "文件 \(report.userMessage)"
         } catch {
             importMessage = nil
             importError = error.localizedDescription

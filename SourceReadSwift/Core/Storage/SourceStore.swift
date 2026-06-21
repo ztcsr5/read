@@ -1,5 +1,27 @@
 import Foundation
 
+struct SourceImportReport: Equatable, Sendable {
+    var addedBookSources = 0
+    var updatedBookSources = 0
+    var addedRSSSources = 0
+    var updatedRSSSources = 0
+    var addedCatalogs = 0
+    var updatedCatalogs = 0
+    var ignored = 0
+
+    var totalAdded: Int {
+        addedBookSources + addedRSSSources + addedCatalogs
+    }
+
+    var totalUpdated: Int {
+        updatedBookSources + updatedRSSSources + updatedCatalogs
+    }
+
+    var userMessage: String {
+        "导入完成：新增 \(totalAdded)，更新 \(totalUpdated)，忽略 \(ignored)；书源 \(addedBookSources)/\(updatedBookSources)，仓库 \(addedCatalogs)/\(updatedCatalogs)，RSS \(addedRSSSources)/\(updatedRSSSources)"
+    }
+}
+
 @MainActor
 final class SourceStore: ObservableObject {
     @Published private(set) var sources: [BookSource] = []
@@ -20,7 +42,8 @@ final class SourceStore: ObservableObject {
         }
     }
 
-    func importJSON(_ text: String) throws {
+    @discardableResult
+    func importJSON(_ text: String) throws -> SourceImportReport {
         try importJSONData(Data(text.utf8))
     }
 
@@ -31,7 +54,7 @@ final class SourceStore: ObservableObject {
         case .empty:
             throw SourceImportError.empty
         case .json:
-            try importJSON(parsed.value)
+            _ = try importJSON(parsed.value)
         case .url:
             throw SourceImportError.urlImportRequired(parsed.value)
         case .unsupportedScheme:
@@ -42,20 +65,19 @@ final class SourceStore: ObservableObject {
         return parsed
     }
 
-    func importJSONData(_ data: Data) throws {
+    @discardableResult
+    func importJSONData(_ data: Data) throws -> SourceImportReport {
         let normalized = try normalizeImportData(stripUTF8BOM(data))
         let decoder = JSONDecoder()
         if let items = try? decoder.decode([AnySourceImportItem].self, from: normalized) {
-            try importItems(items)
-            return
+            return try importItems(items)
         }
         if let wrapped = try? decoder.decode(WrappedSourceImportItems.self, from: normalized),
            !wrapped.items.isEmpty {
-            try importItems(wrapped.items)
-            return
+            return try importItems(wrapped.items)
         }
         let item = try decoder.decode(AnySourceImportItem.self, from: normalized)
-        try importItems([item])
+        return try importItems([item])
     }
 
     func importSources(_ imported: [BookSource]) throws {
@@ -189,25 +211,47 @@ final class SourceStore: ObservableObject {
         )
     }
 
-    private func importItems(_ items: [AnySourceImportItem]) throws {
+    private func importItems(_ items: [AnySourceImportItem]) throws -> SourceImportReport {
         var bookSources: [BookSource] = []
         var rss: [RSSSource] = []
         var sourceCatalogs: [SourceCatalog] = []
+        var ignored = 0
         for item in items {
             switch item.kind {
             case .bookSource:
-                bookSources.append(item.bookSource)
+                if item.bookSource.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ignored += 1
+                } else {
+                    bookSources.append(item.bookSource)
+                }
             case .rss:
-                rss.append(item.rssSource)
+                if item.rssSource.sourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ignored += 1
+                } else {
+                    rss.append(item.rssSource)
+                }
             case .catalog:
-                sourceCatalogs.append(item.catalog)
+                if item.catalog.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ignored += 1
+                } else {
+                    sourceCatalogs.append(item.catalog)
+                }
             case .unknown:
-                continue
+                ignored += 1
             }
         }
         if bookSources.isEmpty && rss.isEmpty && sourceCatalogs.isEmpty {
             throw SourceImportError.empty
         }
+        let report = SourceImportReport(
+            addedBookSources: addedCount(existing: sources.map(\.bookSourceUrl), incoming: bookSources.map(\.bookSourceUrl)),
+            updatedBookSources: updatedCount(existing: sources.map(\.bookSourceUrl), incoming: bookSources.map(\.bookSourceUrl)),
+            addedRSSSources: addedCount(existing: rssSources.map(\.sourceUrl), incoming: rss.map(\.sourceUrl)),
+            updatedRSSSources: updatedCount(existing: rssSources.map(\.sourceUrl), incoming: rss.map(\.sourceUrl)),
+            addedCatalogs: addedCount(existing: catalogs.map(\.url), incoming: sourceCatalogs.map(\.url)),
+            updatedCatalogs: updatedCount(existing: catalogs.map(\.url), incoming: sourceCatalogs.map(\.url)),
+            ignored: ignored
+        )
         if !bookSources.isEmpty {
             sources = merge(existing: sources, incoming: bookSources)
         }
@@ -219,6 +263,15 @@ final class SourceStore: ObservableObject {
         }
         try persist()
         lastError = nil
+        return report
+    }
+
+    private func addedCount(existing: [String], incoming: [String]) -> Int {
+        Set(incoming).subtracting(Set(existing)).count
+    }
+
+    private func updatedCount(existing: [String], incoming: [String]) -> Int {
+        Set(incoming).intersection(Set(existing)).count
     }
 
     private func merge(existing: [BookSource], incoming: [BookSource]) -> [BookSource] {
