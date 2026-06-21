@@ -7,7 +7,7 @@ protocol SourceEngine: Sendable {
     func getContent(source: BookSource, chapter: BookChapter) async -> Result<ChapterContent, SourceEngineError>
 }
 
-final class LegadoSourceEngine: SourceEngine {
+final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     private let network: SourceNetworkClient
     private let diagnostics: DiagnosticSink
     private let cookieStore: SourceCookieStore
