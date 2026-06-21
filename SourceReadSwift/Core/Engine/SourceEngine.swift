@@ -11,17 +11,20 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     private let network: SourceNetworkClient
     private let diagnostics: DiagnosticSink
     private let cookieStore: SourceCookieStore
+    private let purifyRules: () async -> [String]
     private let requestBuilder = SourceRequestBuilder()
     private let searchURLResolver = SearchURLResolver()
 
     init(
         network: SourceNetworkClient? = nil,
         cookieStore: SourceCookieStore = SourceCookieStore(),
-        diagnostics: DiagnosticSink = .noop
+        diagnostics: DiagnosticSink = .noop,
+        purifyRules: @escaping () async -> [String] = { [] }
     ) {
         self.cookieStore = cookieStore
         self.network = network ?? URLSessionSourceNetworkClient(cookieStore: cookieStore)
         self.diagnostics = diagnostics
+        self.purifyRules = purifyRules
     }
 
     func searchBooks(source: BookSource, keyword: String, page: Int) async -> Result<[SearchBook], SourceEngineError> {
@@ -95,7 +98,13 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
-            let parsed = ContentParser().parse(source: source, chapter: chapter, response: response)
+            let globalPurifyRules = await purifyRules()
+            let parsed = ContentParser().parse(
+                source: source,
+                chapter: chapter,
+                response: response,
+                globalPurifyRules: globalPurifyRules
+            )
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "content.parse", source: source, details: ["url": response.url.absoluteString])
             }

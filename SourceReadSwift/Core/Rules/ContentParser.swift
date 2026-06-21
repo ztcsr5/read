@@ -4,15 +4,25 @@ struct ContentParser {
     private let htmlExtractor = HtmlRuleExtractor()
     private let jsonExtractor = JSONRuleExtractor()
 
-    func parse(source: BookSource, chapter: BookChapter, response: SourceResponse) -> Result<ChapterContent, SourceEngineError> {
+    func parse(
+        source: BookSource,
+        chapter: BookChapter,
+        response: SourceResponse,
+        globalPurifyRules: [String] = []
+    ) -> Result<ChapterContent, SourceEngineError> {
         let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if body.first == "{" || body.first == "[" {
-            return parseJSON(source: source, chapter: chapter, response: response)
+            return parseJSON(source: source, chapter: chapter, response: response, globalPurifyRules: globalPurifyRules)
         }
-        return parseHTML(source: source, chapter: chapter, response: response)
+        return parseHTML(source: source, chapter: chapter, response: response, globalPurifyRules: globalPurifyRules)
     }
 
-    private func parseHTML(source: BookSource, chapter: BookChapter, response: SourceResponse) -> Result<ChapterContent, SourceEngineError> {
+    private func parseHTML(
+        source: BookSource,
+        chapter: BookChapter,
+        response: SourceResponse,
+        globalPurifyRules: [String]
+    ) -> Result<ChapterContent, SourceEngineError> {
         guard let contentRule = htmlExtractor.firstRule(source.ruleContent, keys: ["content", "bookContent"]) else {
             return .failure(.rule("ruleContent.content \u{4e3a}\u{7a7a}"))
         }
@@ -21,7 +31,7 @@ struct ContentParser {
             let root = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: "html").first
             guard let root else { return .failure(.empty("\u{6b63}\u{6587} HTML \u{4e3a}\u{7a7a}")) }
             let raw = try htmlExtractor.value(from: root, rule: contentRule, fallback: nil, baseUrl: response.url)
-            let cleaned = applyContentTransforms(raw, rule: source.ruleContent)
+            let cleaned = applyContentTransforms(raw, rule: source.ruleContent, globalPurifyRules: globalPurifyRules)
             let paragraphs = splitParagraphs(cleaned)
             let next = try htmlExtractor.value(
                 from: root,
@@ -37,7 +47,12 @@ struct ContentParser {
         }
     }
 
-    private func parseJSON(source: BookSource, chapter: BookChapter, response: SourceResponse) -> Result<ChapterContent, SourceEngineError> {
+    private func parseJSON(
+        source: BookSource,
+        chapter: BookChapter,
+        response: SourceResponse,
+        globalPurifyRules: [String]
+    ) -> Result<ChapterContent, SourceEngineError> {
         guard let data = response.body.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) else {
             return .failure(.rule("JSON \u{89e3}\u{6790}\u{5931}\u{8d25}"))
@@ -54,7 +69,7 @@ struct ContentParser {
         } else {
             content = nil
         }
-        let paragraphs = splitParagraphs(applyContentTransforms(content ?? "", rule: rule))
+        let paragraphs = splitParagraphs(applyContentTransforms(content ?? "", rule: rule, globalPurifyRules: globalPurifyRules))
         let next: String?
         if let dict = object as? [String: Any] {
             next = jsonExtractor.string(
@@ -93,13 +108,16 @@ struct ContentParser {
         return output
     }
 
-    private func applyContentTransforms(_ text: String, rule: SourceRule?) -> String {
+    private func applyContentTransforms(_ text: String, rule: SourceRule?, globalPurifyRules: [String]) -> String {
         var output = text
         let transformKeys = ["replaceRegex", "replace", "purify", "purifyRegex"]
         for key in transformKeys {
             guard let value = rule?.fields[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !value.isEmpty else { continue }
             output = applyTransform(value, to: output)
+        }
+        for rule in globalPurifyRules {
+            output = applyTransform(rule, to: output)
         }
         return output
     }

@@ -537,7 +537,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Diagnostics | Partial | Test source, report steps, failure reasons, batch checks | Diagnostic fixture test | P7 |
 | Auto repair | Missing | Rule suggestion after parser parity | Golden suggestions | P7 |
 | Local web editor | Missing | Explicit start/stop local server + token | Local API tests | P8 |
-| Purify rules | Missing | Persist and apply rules to content | Content purification test | P9 |
+| Purify rules | Partial | Editor, persistence, duplicate-safe import, and content application exist; batch presets, diagnostics integration, and richer management still needed | Content purification + store persistence tests | P9 |
 | Reading history/stats | Partial | Per-book session count and duration exist; aggregate stats screen still needed | Repository + UI smoke | P9 |
 | App Store hardening | Partial | Privacy, permissions, accessibility, release checks | Release checklist + CI | P10 |
 
@@ -790,12 +790,18 @@ Completed since the initial audit:
   - Discover and Source Manager can open a real RSS/Atom article list.
   - RSS feed parsing is covered by unit tests.
   - Reading sessions now record open time, session count, and total reading duration per book.
+- Improved purify rules:
+  - Settings now exposes a purify rule editor.
+  - Rules persist to app support storage and can be added, deleted, disabled, or batch-imported by line.
+  - Duplicate rules are ignored during add/import to avoid noisy cleanup lists.
+  - Enabled global purify rules are applied after source-level content cleanup.
+  - Content parsing and store persistence are covered by unit tests.
 
 Still not complete:
 
 - No macOS build has been run after this local milestone.
 - No IPA should be produced until this milestone is pushed and CI passes.
-- Reader page mode, cover mode, full tap-zone editor, richer bookmarks UI, reading history, stats, purify rules, and full App Store hardening remain open.
+- Reader page mode, cover mode, richer bookmarks UI, aggregate stats, purify diagnostics/presets, and full App Store hardening remain open.
 - Source compatibility still needs more JS helper APIs, WebView fallback verification, anti-crawl handling, and larger real-source fixture coverage.
 
 ## 9. Definition of done

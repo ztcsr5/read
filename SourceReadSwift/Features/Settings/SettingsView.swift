@@ -43,6 +43,12 @@ struct SettingsView: View {
                     } label: {
                         Label("规则体检", systemImage: "shield")
                     }
+
+                    NavigationLink {
+                        PurifyRulesView()
+                    } label: {
+                        Label("净化规则", systemImage: "wand.and.stars")
+                    }
                 }
 
                 Section("通用") {
@@ -261,6 +267,71 @@ private struct RuleHealthView: View {
             problems.append("缺正文规则")
         }
         return problems.joined(separator: " / ")
+    }
+}
+
+private struct PurifyRulesView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var newRule = ""
+    @State private var importText = ""
+    @State private var message: String?
+
+    var body: some View {
+        List {
+            Section("新增规则") {
+                TextField("正则或 规则##替换文本", text: $newRule)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("添加") {
+                    appState.purifyRuleStore.add(newRule)
+                    newRule = ""
+                }
+                .disabled(newRule.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            Section("批量导入") {
+                TextEditor(text: $importText)
+                    .font(.system(.footnote, design: .monospaced))
+                    .frame(minHeight: 120)
+                Button("按行导入") {
+                    let count = appState.purifyRuleStore.importLines(importText)
+                    importText = ""
+                    message = "已导入 \(count) 条净化规则"
+                }
+                .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if let message {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("已启用规则") {
+                if appState.purifyRuleStore.rules.isEmpty {
+                    Text("暂无净化规则。规则会在正文解析后执行，用于删除广告、站点尾巴或固定乱码片段。")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(appState.purifyRuleStore.rules) { rule in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(isOn: Binding(
+                                get: { rule.enabled },
+                                set: { appState.purifyRuleStore.setEnabled($0, ruleID: rule.id) }
+                            )) {
+                                Text(rule.pattern)
+                                    .font(.system(.body, design: .monospaced))
+                                    .lineLimit(3)
+                            }
+                        }
+                        .swipeActions {
+                            Button("删除", role: .destructive) {
+                                appState.purifyRuleStore.remove(ruleID: rule.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("净化规则")
     }
 }
 
