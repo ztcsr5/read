@@ -178,4 +178,89 @@ final class HtmlRuleExtractorTests: XCTestCase {
 
         XCTAssertEqual(value, "Primary")
     }
+
+    func testXPathTextRuleJoinsMultipleValues() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <div id="content">
+            <p>Line A</p>
+            <p>Line B</p>
+          </div>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: #"//div[@id="content"]/p/text()"#,
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(value, "Line A\nLine B")
+    }
+
+    func testXPathAttributeAndTextRulesInterleave() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <div class="toc">
+            <a href="/1">Chapter 1</a>
+            <a href="/2">Chapter 2</a>
+          </div>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: #"//div[@class="toc"]/a/@href%%//div[@class="toc"]/a/text()"#,
+            baseUrl: URL(string: "https://example.com/book")!
+        )
+
+        XCTAssertEqual(value, "https://example.com/1\nChapter 1\nhttps://example.com/2\nChapter 2")
+    }
+
+    func testXPathPrefixAndCSSPrefixAreNormalized() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <div class="book"><a href="/book/1">Book One</a></div>
+        </body></html>
+        """)
+
+        let xpath = try HtmlRuleExtractor().value(
+            from: document,
+            rule: #"@XPath://div[@class="book"]/a/text()"#,
+            baseUrl: URL(string: "https://example.com")!
+        )
+        let css = try HtmlRuleExtractor().value(
+            from: document,
+            rule: "@CSS:.book a@href",
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(xpath, "Book One")
+        XCTAssertEqual(css, "https://example.com/book/1")
+    }
+
+    func testXPathSelectorSupportsAttributeFiltersAndIndexes() throws {
+        let html = """
+        <html><body>
+          <ul>
+            <li data-id="1"><a href="/a">A</a></li>
+            <li data-id="2"><a href="/b">B</a></li>
+          </ul>
+        </body></html>
+        """
+
+        let first = try HtmlRuleExtractor().select(
+            html,
+            baseUrl: URL(string: "https://example.com")!,
+            listRule: #"//li[@data-id="2"]/a"#
+        )
+        let last = try HtmlRuleExtractor().select(
+            html,
+            baseUrl: URL(string: "https://example.com")!,
+            listRule: "//li[last()]"
+        )
+
+        XCTAssertEqual(try first.map { try $0.text() }, ["B"])
+        XCTAssertEqual(try last.map { try $0.text() }, ["B"])
+    }
 }

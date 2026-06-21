@@ -838,6 +838,10 @@ Completed since the initial audit:
   - JSON rules now support `%%` sequential merge and stringify merged arrays as newline-separated values.
   - `java.getStringList` now reuses the enhanced HTML list selector path, so JS rules can use `||` fallback and `%%` interleaving for list extraction.
   - Tests cover HTML fallback, HTML node/value merge, JSON quoted fallback, and JSON merge extraction.
+- Improved XPath compatibility:
+  - Added a Swift-native translator for common XPath subsets used by old Legado sources: `//tag`, `@XPath:` / `xpath:` prefixes, `text()`, terminal attributes such as `@href/@src/@content`, id/class/attribute predicates, `contains(@class, ...)`, and final-node indexes including `last()`.
+  - HTML value/list extraction and `java.getStringList` now route these XPath forms through SwiftSoup-backed extraction.
+  - Full arbitrary XPath remains out of scope for this layer and should be handled later by a dedicated evaluator if real fixtures require it.
 - Improved reader daily-use behavior:
   - Reader advanced settings now include a persisted "keep screen awake while reading" toggle.
   - Opening the reader applies the idle-timer preference; leaving the reader restores the previous app idle-timer state.

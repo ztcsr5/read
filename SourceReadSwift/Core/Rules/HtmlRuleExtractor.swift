@@ -31,7 +31,7 @@ struct HtmlRuleExtractor {
     }
 
     private func valuesForSingleRule(from root: Element, rule: String, baseUrl: URL?) throws -> [String] {
-        let split = splitSelectorAndAttribute(rule)
+        let split = XPathRuleTranslator.valueRule(rule) ?? splitSelectorAndAttribute(rule)
         let targets = try select(from: root, rule: split.selector)
         let attrParts = split.attribute.components(separatedBy: "##")
         let attr = attrParts.first ?? "text"
@@ -85,7 +85,7 @@ struct HtmlRuleExtractor {
                 .filter { !$0.isEmpty }
             return interleave(lists)
         }
-        let selector = cleanCSS(rule)
+        let selector = XPathRuleTranslator.selectorRule(rule) ?? cleanCSS(rule)
         guard !selector.isEmpty else { return [root] }
         let indexed = parseIndexedSelector(selector)
         let elements = try root.select(indexed.selector).array()
@@ -158,7 +158,14 @@ struct HtmlRuleExtractor {
     }
 
     func cleanCSS(_ rule: String) -> String {
-        rule
+        var output = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = output.lowercased()
+        if lower.hasPrefix("@css:") {
+            output = String(output.dropFirst(5))
+        } else if lower.hasPrefix("css:") {
+            output = String(output.dropFirst(4))
+        }
+        return output
             .replacingOccurrences(of: "&&", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

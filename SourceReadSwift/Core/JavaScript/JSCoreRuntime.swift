@@ -458,7 +458,7 @@ final class JSCoreRuntime {
     }
 
     private static func extractStringList(from document: Document, rule: String, baseUrl: URL?) throws -> [String] {
-        let split = splitSelectorAndAttribute(rule)
+        let split = XPathRuleTranslator.valueRule(rule) ?? splitSelectorAndAttribute(rule)
         let html = try document.outerHtml()
         let elements = try HtmlRuleExtractor().select(
             html,

@@ -162,4 +162,25 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "第一章,第三章|第一章,第二章,第三章,第四章")
     }
+
+    func testNativeGetStringListSupportsXPathRules() throws {
+        let html = """
+        <html><body>
+          <div class='toc'>
+            <a href='/1'>One</a>
+            <a href='/2'>Two</a>
+          </div>
+        </body></html>
+        """
+
+        let result = JSCoreRuntime().evaluate(
+            #"java.getStringList(html, '//div[@class="toc"]/a/@href').join(',')"#,
+            variables: ["html": html, "baseUrl": "https://example.com/book"]
+        )
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "https://example.com/1,https://example.com/2")
+    }
 }
