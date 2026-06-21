@@ -4,7 +4,7 @@ import SwiftSoup
 struct HtmlRuleExtractor {
     func select(_ html: String, baseUrl: URL, listRule: String) throws -> [Element] {
         let document = try SwiftSoup.parse(html, baseUrl.absoluteString)
-        return try document.select(cleanCSS(listRule)).array()
+        return try select(from: document, rule: listRule)
     }
 
     func value(from root: Element, rule: String?, fallback: String? = nil, baseUrl: URL? = nil) throws -> String {
@@ -25,17 +25,22 @@ struct HtmlRuleExtractor {
     }
 
     private func valueForSingleRule(from root: Element, rule: String, baseUrl: URL?) throws -> String {
-        let parts = rule.components(separatedBy: "@")
-        let selector = cleanCSS(parts.first ?? "")
-        let target = selector.isEmpty ? root : try root.select(selector).first() ?? root
-        let attrRule = parts.dropFirst().first ?? "text"
-        let attrParts = attrRule.components(separatedBy: "##")
+        let split = splitSelectorAndAttribute(rule)
+        let targets = try select(from: root, rule: split.selector)
+        let target = targets.first ?? root
+        let attrParts = split.attribute.components(separatedBy: "##")
         let attr = attrParts.first ?? "text"
         let value: String
-        if attr == "text" {
+        if attr == "text" || attr == "text()" {
             value = try target.text()
-        } else if attr == "html" {
+        } else if attr == "ownText" || attr == "ownText()" {
+            value = try target.ownText()
+        } else if attr == "textNodes" {
+            value = try target.ownText()
+        } else if attr == "html" || attr == "html()" {
             value = try target.html()
+        } else if attr == "all" {
+            value = try targets.map { try $0.text() }.joined(separator: "\n")
         } else {
             value = try target.attr(attr)
         }
@@ -45,6 +50,53 @@ struct HtmlRuleExtractor {
             return absolutize(trimmed, base: baseUrl)
         }
         return trimmed
+    }
+
+    private func select(from root: Element, rule: String) throws -> [Element] {
+        let selector = cleanCSS(rule)
+        guard !selector.isEmpty else { return [root] }
+        let indexed = parseIndexedSelector(selector)
+        let elements = try root.select(indexed.selector).array()
+        guard let index = indexed.index else { return elements }
+        let normalized = index >= 0 ? index : elements.count + index
+        guard elements.indices.contains(normalized) else { return [] }
+        return [elements[normalized]]
+    }
+
+    private func splitSelectorAndAttribute(_ rule: String) -> (selector: String, attribute: String) {
+        let parts = rule.components(separatedBy: "@")
+        guard parts.count > 1 else {
+            return (rule, "text")
+        }
+        let selector = parts.dropLast().joined(separator: "@")
+        let attribute = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "text"
+        return (selector, attribute)
+    }
+
+    private func parseIndexedSelector(_ selector: String) -> (selector: String, index: Int?) {
+        let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let regex = try? NSRegularExpression(pattern: #"^(.*?)(?:@(-?\d+)|:eq\((-?\d+)\))$"#) else {
+            return (trimmed, nil)
+        }
+        let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        guard let match = regex.firstMatch(in: trimmed, range: range) else {
+            return (trimmed, nil)
+        }
+        let selectorRange = match.range(at: 1)
+        let firstIndexRange = match.range(at: 2)
+        let secondIndexRange = match.range(at: 3)
+        guard let cssRange = Range(selectorRange, in: trimmed) else {
+            return (trimmed, nil)
+        }
+        let rawIndex: String?
+        if let range = Range(firstIndexRange, in: trimmed) {
+            rawIndex = String(trimmed[range])
+        } else if let range = Range(secondIndexRange, in: trimmed) {
+            rawIndex = String(trimmed[range])
+        } else {
+            rawIndex = nil
+        }
+        return (String(trimmed[cssRange]).trimmingCharacters(in: .whitespacesAndNewlines), rawIndex.flatMap(Int.init))
     }
 
     private func applyRegexTransforms(_ rawParts: ArraySlice<String>, to value: String) -> String {

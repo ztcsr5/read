@@ -50,4 +50,61 @@ final class HtmlRuleExtractorTests: XCTestCase {
 
         XCTAssertEqual(value, "Title")
     }
+
+    func testIndexedSelectorPicksRequestedElement() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <a class="chapter" href="/c/1">One</a>
+          <a class="chapter" href="/c/2">Two</a>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: ".chapter@1@href",
+            baseUrl: URL(string: "https://example.com/book")!
+        )
+
+        XCTAssertEqual(value, "https://example.com/c/2")
+    }
+
+    func testOwnTextAndTextNodesAreSupported() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <div class="intro">Outer <span>Inner</span> Tail</div>
+        </body></html>
+        """)
+
+        let ownText = try HtmlRuleExtractor().value(
+            from: document,
+            rule: ".intro@ownText",
+            baseUrl: URL(string: "https://example.com")!
+        )
+        let textNodes = try HtmlRuleExtractor().value(
+            from: document,
+            rule: ".intro@textNodes",
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(ownText, "Outer Tail")
+        XCTAssertTrue(textNodes.contains("Outer"))
+        XCTAssertTrue(textNodes.contains("Tail"))
+    }
+
+    func testAllAttributeJoinsMultipleElements() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <p>A</p>
+          <p>B</p>
+        </body></html>
+        """)
+
+        let value = try HtmlRuleExtractor().value(
+            from: document,
+            rule: "p@all",
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(value, "A\nB")
+    }
 }
