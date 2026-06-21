@@ -15,6 +15,9 @@ struct SourceManagerView: View {
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
     @State private var rssPreview: RSSPreviewState?
+    @State private var isManagingBookSources = false
+    @State private var selectedBookSourceURLs: Set<String> = []
+    @State private var pendingDeleteBookSourceURLs: Set<String> = []
 
     private var filteredBookSources: [BookSource] {
         let keyword = normalizedSearchText
@@ -65,6 +68,18 @@ struct SourceManagerView: View {
             .navigationTitle("源管理")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if selectedTab == .bookSources, !appState.sourceStore.sources.isEmpty {
+                        Button(isManagingBookSources ? "完成" : "管理") {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isManagingBookSources.toggle()
+                                if !isManagingBookSources {
+                                    selectedBookSourceURLs.removeAll()
+                                }
+                            }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showImportSheet = true
@@ -85,6 +100,21 @@ struct SourceManagerView: View {
             }
             .sheet(item: $rssPreview) { state in
                 rssPreviewSheet(state)
+            }
+            .alert("删除选中的书源？", isPresented: Binding(
+                get: { !pendingDeleteBookSourceURLs.isEmpty },
+                set: { if !$0 { pendingDeleteBookSourceURLs.removeAll() } }
+            )) {
+                Button("取消", role: .cancel) {
+                    pendingDeleteBookSourceURLs.removeAll()
+                }
+                Button("删除", role: .destructive) {
+                    appState.sourceStore.remove(sourceURLs: pendingDeleteBookSourceURLs)
+                    selectedBookSourceURLs.removeAll()
+                    pendingDeleteBookSourceURLs.removeAll()
+                }
+            } message: {
+                Text("将删除 \(pendingDeleteBookSourceURLs.count) 个书源。此操作不会删除书架里的书，但对应书籍可能需要换源后才能继续加载。")
             }
             .fileImporter(
                 isPresented: $showFileImporter,
@@ -126,7 +156,11 @@ struct SourceManagerView: View {
             }
         }
         .pickerStyle(.segmented)
-        .onChange(of: selectedTab) { _ in searchText = "" }
+        .onChange(of: selectedTab) { _ in
+            searchText = ""
+            isManagingBookSources = false
+            selectedBookSourceURLs.removeAll()
+        }
     }
 
     private var searchField: some View {
@@ -156,6 +190,9 @@ struct SourceManagerView: View {
     private var bookSourceContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader(title: "书源", count: appState.sourceStore.sources.count)
+            if isManagingBookSources {
+                bookSourceBatchToolbar
+            }
             if appState.sourceStore.sources.isEmpty {
                 EmptyStateCard(systemImage: "tray", title: "暂无书源", message: "点击右上角 + 导入书源 JSON")
             } else if filteredBookSources.isEmpty {
@@ -163,7 +200,11 @@ struct SourceManagerView: View {
             } else {
                 LazyVStack(spacing: 10) {
                     ForEach(filteredBookSources) { source in
-                        bookSourceRow(source)
+                        if isManagingBookSources {
+                            selectableBookSourceRow(source)
+                        } else {
+                            bookSourceRow(source)
+                        }
                     }
                 }
             }
@@ -241,6 +282,91 @@ struct SourceManagerView: View {
                 }
             }
         )
+    }
+
+    private var bookSourceBatchToolbar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button("全选") {
+                    selectedBookSourceURLs = Set(filteredBookSources.map(\.bookSourceUrl))
+                }
+                Button("反选") {
+                    let visible = Set(filteredBookSources.map(\.bookSourceUrl))
+                    selectedBookSourceURLs = visible.subtracting(selectedBookSourceURLs)
+                }
+                Button("清空") {
+                    selectedBookSourceURLs.removeAll()
+                }
+                Spacer()
+                Text("已选 \(selectedBookSourceURLs.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 10) {
+                Button("启用") {
+                    appState.sourceStore.setEnabled(true, for: selectedBookSourceURLs)
+                    selectedBookSourceURLs.removeAll()
+                }
+                .disabled(selectedBookSourceURLs.isEmpty)
+
+                Button("停用") {
+                    appState.sourceStore.setEnabled(false, for: selectedBookSourceURLs)
+                    selectedBookSourceURLs.removeAll()
+                }
+                .disabled(selectedBookSourceURLs.isEmpty)
+
+                Button("删除", role: .destructive) {
+                    pendingDeleteBookSourceURLs = selectedBookSourceURLs
+                }
+                .disabled(selectedBookSourceURLs.isEmpty)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(12)
+        .background(AppTheme.elevatedCard)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func selectableBookSourceRow(_ source: BookSource) -> some View {
+        Button {
+            if selectedBookSourceURLs.contains(source.bookSourceUrl) {
+                selectedBookSourceURLs.remove(source.bookSourceUrl)
+            } else {
+                selectedBookSourceURLs.insert(source.bookSourceUrl)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: selectedBookSourceURLs.contains(source.bookSourceUrl) ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selectedBookSourceURLs.contains(source.bookSourceUrl) ? AppTheme.accent : .secondary)
+                    .frame(width: 32, height: 44)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(source.bookSourceName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text([source.bookSourceUrl, source.bookSourceGroup].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        statusBadge(source.enabled ? "启用" : "停用", color: source.enabled ? .green : .gray)
+                        if source.ruleSearch != nil {
+                            statusBadge("可搜索", color: .blue)
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 5)
+        }
+        .buttonStyle(.plain)
     }
 
     private func catalogRow(_ catalog: SourceCatalog) -> some View {
