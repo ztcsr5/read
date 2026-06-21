@@ -9,6 +9,7 @@ struct ReaderView: View {
     let chapterIndex: Int
     let totalChapters: Int?
     var chapters: [BookChapter] = []
+    var statusMessage: String?
     var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
     var onSelectChapter: ((BookChapter) -> Void)?
 
@@ -98,6 +99,11 @@ struct ReaderView: View {
             if showOverlay {
                 readerOverlay
                     .transition(.opacity)
+            }
+
+            if let statusMessage {
+                readerStatusBanner(message: statusMessage)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if showSettings {
@@ -419,6 +425,27 @@ struct ReaderView: View {
                 }
             }
         }
+    }
+
+    private func readerStatusBanner(message: String) -> some View {
+        VStack {
+            HStack(spacing: 8) {
+                Image(systemName: "externaldrive.badge.exclamationmark")
+                Text(message)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(background.textColor)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+
+            Spacer()
+        }
+        .allowsHitTesting(false)
     }
 
     private var layoutSettings: some View {

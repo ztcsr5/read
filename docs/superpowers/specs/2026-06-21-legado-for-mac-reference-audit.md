@@ -65,11 +65,11 @@ Current SourceReadSwift status:
 - Successful online chapter parses are cached by source URL, chapter URL, and active purify-rule signature.
 - Reader loading preloads the next two chapters in the background.
 - If a network reload fails after purify rules changed, reader loading can fall back to stale cached content for the same source/chapter instead of failing the reading session outright.
+- Reader shows a subtle non-blocking banner when it is displaying a cached copy after live loading fails.
 - Settings can show cache count/estimated size and clear/remove expired cache entries.
 
 Do next:
 
-- Surface a subtle "using cached copy" state in the reader when stale fallback is used.
 - Make preload count configurable after the reader settings model is split into a dedicated view model.
 - Add device QA for cache growth, low-storage behavior, airplane-mode reading, and cache cleanup.
 

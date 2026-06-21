@@ -834,6 +834,7 @@ Completed since the initial audit:
   - Settings cache cleanup now clears real chapter cache instead of being a placeholder, and shows cached chapter count plus estimated size.
   - Cache persistence, expiry, and purify-signature invalidation are covered by unit tests.
   - If a live reload fails but an older cached copy exists for the same source/chapter, the reader falls back to cached content instead of dropping the user into a hard failure state.
+  - The reader now shows a non-blocking banner when it is displaying a cached copy after live loading fails.
 - Improved HTML/JSON connector semantics:
   - Added top-level operator splitting so `||` inside CSS attributes, JSON quoted keys, brackets, or parentheses is not treated as a fallback connector.
   - HTML value and list rules now support `%%` interleaving, matching the old Flutter rule evaluator behavior for mixed free/VIP chapter lists.

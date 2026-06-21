@@ -153,6 +153,7 @@ struct ChapterLoadingView: View {
     @State private var content: ChapterContent?
     @State private var currentChapter: BookChapter?
     @State private var errorMessage: String?
+    @State private var isUsingStaleCache = false
 
     private var effectiveChapter: BookChapter {
         currentChapter ?? chapter
@@ -167,11 +168,13 @@ struct ChapterLoadingView: View {
                     chapterIndex: effectiveChapter.index,
                     totalChapters: totalChapters,
                     chapters: chapters,
+                    statusMessage: isUsingStaleCache ? "网络加载失败，正在显示本地缓存副本" : nil,
                     extraToolbarActions: extraToolbarActions,
                     onSelectChapter: { selected in
                         currentChapter = selected
                         content = nil
                         errorMessage = nil
+                        isUsingStaleCache = false
                     }
                 )
             } else if let errorMessage {
@@ -198,6 +201,7 @@ struct ChapterLoadingView: View {
         if force {
             content = nil
             errorMessage = nil
+            isUsingStaleCache = false
         }
         guard content == nil, errorMessage == nil else { return }
         guard let source = appState.sourceStore.source(for: sourceUrl) else {
@@ -211,6 +215,7 @@ struct ChapterLoadingView: View {
             purifyRules: purifyRules
         ) {
             content = cached
+            isUsingStaleCache = false
             preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
             return
         }
@@ -218,6 +223,7 @@ struct ChapterLoadingView: View {
         case .success(let loaded):
             appState.chapterContentCacheStore.save(loaded, sourceURL: source.bookSourceUrl, purifyRules: purifyRules)
             content = loaded
+            isUsingStaleCache = false
             preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
         case .failure(let error):
             if let cached = appState.chapterContentCacheStore.staleContent(
@@ -225,6 +231,7 @@ struct ChapterLoadingView: View {
                 chapter: effectiveChapter
             ) {
                 content = cached
+                isUsingStaleCache = true
             } else {
                 errorMessage = error.displayMessage
             }
