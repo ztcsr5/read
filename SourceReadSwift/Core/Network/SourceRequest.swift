@@ -10,6 +10,7 @@ struct SourceRequest: Sendable {
     let method: SourceHTTPMethod
     let headers: [String: String]
     let body: Data?
+    let expectedCharset: String?
     let timeout: TimeInterval
 }
 
@@ -53,7 +54,7 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key)] = String(describing: item.value)
             }
-            let text = ResponseTextDecoder().decode(data: data, headers: headers)
+            let text = ResponseTextDecoder().decode(data: data, headers: headers, preferredCharset: request.expectedCharset)
             let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: http.url ?? request.url)
             if !responseCookies.isEmpty {
                 await cookieStore.store(responseCookies, for: http.url ?? request.url)

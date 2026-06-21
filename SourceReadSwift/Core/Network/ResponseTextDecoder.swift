@@ -2,7 +2,11 @@ import Foundation
 import CoreFoundation
 
 struct ResponseTextDecoder {
-    func decode(data: Data, headers: [String: String]) -> String {
+    func decode(data: Data, headers: [String: String], preferredCharset: String? = nil) -> String {
+        if let preferredCharset,
+           let text = decode(data: data, charset: preferredCharset) {
+            return text
+        }
         if let charset = charset(from: headers),
            let text = decode(data: data, charset: charset) {
             return text

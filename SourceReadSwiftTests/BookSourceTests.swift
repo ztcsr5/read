@@ -144,4 +144,22 @@ final class BookSourceTests: XCTestCase {
         XCTAssertEqual(request.method, .post)
         XCTAssertEqual(String(data: request.body ?? Data(), encoding: .utf8), "q=directive")
     }
+
+    func testRequestBuilderReadsCharsetFromCustomConfig() {
+        let source = BookSource(
+            bookSourceName: "Charset Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/search",
+            customConfig: #"{"charset":"gbk"}"#
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 1
+        )
+
+        XCTAssertEqual(request.expectedCharset, "gbk")
+    }
 }

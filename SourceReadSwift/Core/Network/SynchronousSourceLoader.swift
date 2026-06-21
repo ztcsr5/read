@@ -31,7 +31,7 @@ struct SynchronousSourceLoader {
               let result = resultBox.load() else {
             return ""
         }
-        return ResponseTextDecoder().decode(data: result.data, headers: result.headers)
+        return ResponseTextDecoder().decode(data: result.data, headers: result.headers, preferredCharset: request.expectedCharset)
     }
 }
 

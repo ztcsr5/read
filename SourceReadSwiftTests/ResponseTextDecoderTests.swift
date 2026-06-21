@@ -17,4 +17,15 @@ final class ResponseTextDecoderTests: XCTestCase {
 
         XCTAssertTrue(text.contains("ok"))
     }
+
+    func testPreferredCharsetOverridesHeaderWhenProvided() {
+        let data = Data([0xC4, 0xE3, 0xBA, 0xC3])
+        let text = ResponseTextDecoder().decode(
+            data: data,
+            headers: ["Content-Type": "text/html; charset=utf-8"],
+            preferredCharset: "gbk"
+        )
+
+        XCTAssertEqual(text, "你好")
+    }
 }

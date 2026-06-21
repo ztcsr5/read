@@ -20,6 +20,7 @@ struct SourceRequestBuilder {
         let directive = directiveParser.parse(resolvedText)
         let url = resolveURL(directive.urlText, base: source.bookSourceUrl)
         let sourceOptions = requestOptions(source, keyword: keyword, page: page)
+        let charset = sourceCharset(source)
 
         var headers = sourceHeaders(source)
         headers.merge(sourceOptions.headers, uniquingKeysWith: { _, new in new })
@@ -40,6 +41,7 @@ struct SourceRequestBuilder {
             method: method,
             headers: headers,
             body: body,
+            expectedCharset: charset,
             timeout: 20
         )
     }
@@ -148,6 +150,25 @@ struct SourceRequestBuilder {
             result[item.key] = item.value
         })
         return (method, body, headers)
+    }
+
+    private func sourceCharset(_ source: BookSource) -> String? {
+        if let charset = source.raw["charset"]?.trimmingCharacters(in: .whitespacesAndNewlines), !charset.isEmpty {
+            return charset
+        }
+        if let customConfig = source.customConfig,
+           let data = customConfig.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["charset", "encoding", "encode"] {
+                if let value = object[key] as? String {
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        return trimmed
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     private func interpolate(_ text: String, keyword: String?, page: Int?) -> String {
