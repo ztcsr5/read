@@ -84,6 +84,8 @@ struct JSONRuleExtractor {
                 .filter { !$0.isEmpty && !$0.hasPrefix("@") }
                 .joined(separator: ".")
         }
+        output = output.replacingOccurrences(of: #"\[['"]?([^'"\]]+)['"]?\]"#, with: ".$1", options: .regularExpression)
+        output = output.replacingOccurrences(of: #"\[\*\]"#, with: "", options: .regularExpression)
         return output.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
     }
 
@@ -106,4 +108,3 @@ struct JSONRuleExtractor {
         return text == "<null>" ? "" : text
     }
 }
-

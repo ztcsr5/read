@@ -33,5 +33,34 @@ final class JSONRuleExtractorTests: XCTestCase {
         XCTAssertEqual(extractor.string(from: list[0], rule: "Name", fallbackKeys: []), "斗破苍穹")
         XCTAssertEqual(extractor.string(from: list[0], rule: "BookId", fallbackKeys: []), "1209977")
     }
-}
 
+    func testExtractBracketNotationPath() throws {
+        let title = "\u{6597}\u{7834}\u{82cd}\u{7a79}"
+        let object: [String: Any] = [
+            "data": [
+                "books": [
+                    ["title": title]
+                ]
+            ]
+        ]
+
+        let value = JSONRuleExtractor().value(from: object, path: "$.data.books[0].title") as? String
+
+        XCTAssertEqual(value, title)
+    }
+
+    func testExtractQuotedBracketPath() throws {
+        let title = "\u{6597}\u{7834}\u{82cd}\u{7a79}"
+        let object: [String: Any] = [
+            "data": [
+                "book-list": [
+                    ["title": title]
+                ]
+            ]
+        ]
+
+        let value = JSONRuleExtractor().value(from: object, path: "$['data']['book-list'][0]['title']") as? String
+
+        XCTAssertEqual(value, title)
+    }
+}
