@@ -52,9 +52,34 @@ final class JSCoreRuntime {
             let digest = Insecure.MD5.hash(data: Data(value.utf8))
             return digest.map { String(format: "%02x", $0) }.joined()
         }
+        let sha1: @convention(block) (String) -> String = { value in
+            let digest = Insecure.SHA1.hash(data: Data(value.utf8))
+            return digest.map { String(format: "%02x", $0) }.joined()
+        }
         let sha256: @convention(block) (String) -> String = { value in
             let digest = SHA256.hash(data: Data(value.utf8))
             return digest.map { String(format: "%02x", $0) }.joined()
+        }
+        let hmacSHA256: @convention(block) (String, String) -> String = { value, key in
+            let secret = SymmetricKey(data: Data(key.utf8))
+            let digest = HMAC<SHA256>.authenticationCode(for: Data(value.utf8), using: secret)
+            return digest.map { String(format: "%02x", $0) }.joined()
+        }
+        let hexEncode: @convention(block) (String) -> String = { value in
+            Data(value.utf8).map { String(format: "%02x", $0) }.joined()
+        }
+        let hexDecode: @convention(block) (String) -> String = { value in
+            let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard cleaned.count.isMultiple(of: 2) else { return "" }
+            var bytes: [UInt8] = []
+            var index = cleaned.startIndex
+            while index < cleaned.endIndex {
+                let next = cleaned.index(index, offsetBy: 2)
+                guard let byte = UInt8(cleaned[index..<next], radix: 16) else { return "" }
+                bytes.append(byte)
+                index = next
+            }
+            return String(data: Data(bytes), encoding: .utf8) ?? ""
         }
         let timeFormat: @convention(block) (Double, String) -> String = { timestamp, format in
             let date = Date(timeIntervalSince1970: timestamp > 10_000_000_000 ? timestamp / 1000 : timestamp)
@@ -109,7 +134,11 @@ final class JSCoreRuntime {
         context.setObject(base64Encode, forKeyedSubscript: "__native_base64Encode" as NSString)
         context.setObject(base64Decode, forKeyedSubscript: "__native_base64Decode" as NSString)
         context.setObject(md5, forKeyedSubscript: "__native_md5" as NSString)
+        context.setObject(sha1, forKeyedSubscript: "__native_sha1" as NSString)
         context.setObject(sha256, forKeyedSubscript: "__native_sha256" as NSString)
+        context.setObject(hmacSHA256, forKeyedSubscript: "__native_hmacSHA256" as NSString)
+        context.setObject(hexEncode, forKeyedSubscript: "__native_hexEncode" as NSString)
+        context.setObject(hexDecode, forKeyedSubscript: "__native_hexDecode" as NSString)
         context.setObject(timeFormat, forKeyedSubscript: "__native_timeFormat" as NSString)
         context.setObject(getString, forKeyedSubscript: "__native_getString" as NSString)
         context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
@@ -142,6 +171,8 @@ final class JSCoreRuntime {
         java.md5Encode = java.md5;
         java.hexMd5 = java.md5;
         java.MD5 = java.md5;
+        java.sha1 = function(value) { return __native_sha1(String(value)); };
+        java.SHA1 = java.sha1;
         java.sha256 = function(value) { return __native_sha256(String(value)); };
         java.SHA256 = java.sha256;
         java.timeFormat = function(timestamp, format) { return __native_timeFormat(Number(timestamp), String(format)); };
@@ -186,17 +217,69 @@ final class JSCoreRuntime {
         function unbase64(value) { return java.base64Decode(value); }
         function md5(value) { return java.md5(value); }
         function hexMd5(value) { return java.md5(value); }
+        function sha1(value) { return java.sha1(value); }
         function atob(value) { return java.base64Decode(value); }
         function btoa(value) { return java.base64Encode(value); }
         var CryptoJS = CryptoJS || {};
+        function __cryptoText(value) {
+          if (value && value.__text !== undefined) return String(value.__text);
+          return String(value);
+        }
+        function __cryptoWordArray(text, defaultEncoding) {
+          var value = String(text || '');
+          var defaultEnc = defaultEncoding || 'utf8';
+          return {
+            __text: value,
+            toString: function(encoder) {
+              var enc = encoder && encoder.__encoding ? String(encoder.__encoding) : defaultEnc;
+              if (enc === 'hex') return __native_hexEncode(value);
+              if (enc === 'base64') return __native_base64Encode(value);
+              return value;
+            },
+            valueOf: function() { return value; }
+          };
+        }
+        function __cryptoDigest(hex) {
+          var value = String(hex || '');
+          return {
+            __hex: value,
+            toString: function(encoder) {
+              var enc = encoder && encoder.__encoding ? String(encoder.__encoding) : 'hex';
+              if (enc === 'utf8') return __native_hexDecode(value);
+              if (enc === 'base64') return __native_base64Encode(__native_hexDecode(value));
+              return value;
+            },
+            valueOf: function() { return value; }
+          };
+        }
         CryptoJS.MD5 = function(value) {
-          return { toString: function() { return __native_md5(String(value)); } };
+          return __cryptoDigest(__native_md5(__cryptoText(value)));
+        };
+        CryptoJS.SHA1 = function(value) {
+          return __cryptoDigest(__native_sha1(__cryptoText(value)));
         };
         CryptoJS.SHA256 = function(value) {
-          return { toString: function() { return __native_sha256(String(value)); } };
+          return __cryptoDigest(__native_sha256(__cryptoText(value)));
+        };
+        CryptoJS.HmacSHA256 = function(value, key) {
+          return __cryptoDigest(__native_hmacSHA256(__cryptoText(value), __cryptoText(key)));
         };
         CryptoJS.enc = CryptoJS.enc || {};
-        CryptoJS.enc.Utf8 = CryptoJS.enc.Utf8 || {};
+        CryptoJS.enc.Utf8 = {
+          __encoding: 'utf8',
+          parse: function(value) { return __cryptoWordArray(String(value), 'utf8'); },
+          stringify: function(value) { return __cryptoText(value); }
+        };
+        CryptoJS.enc.Hex = {
+          __encoding: 'hex',
+          parse: function(value) { return __cryptoWordArray(__native_hexDecode(String(value)), 'hex'); },
+          stringify: function(value) { return value && value.__hex ? String(value.__hex) : __native_hexEncode(__cryptoText(value)); }
+        };
+        CryptoJS.enc.Base64 = {
+          __encoding: 'base64',
+          parse: function(value) { return __cryptoWordArray(__native_base64Decode(String(value)), 'base64'); },
+          stringify: function(value) { return __native_base64Encode(__cryptoText(value)); }
+        };
         var Packages = Packages || {};
         Packages.org = Packages.org || {};
         Packages.org.jsoup = Packages.org.jsoup || {};

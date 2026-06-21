@@ -27,6 +27,8 @@ final class JSCoreRuntimeTests: XCTestCase {
           java.md5Encode('abc'),
           md5('abc'),
           CryptoJS.MD5('abc').toString(),
+          java.sha1('abc'),
+          CryptoJS.SHA1('abc').toString(),
           java.sha256('abc'),
           atob(btoa('abc')),
           java.decodeBase64(java.base64('abc')),
@@ -44,7 +46,30 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(
             value,
-            "900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|abc|abc|abc|abc|abc|abc"
+            "900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|900150983cd24fb0d6963f7d28e17f72|a9993e364706816aba3e25717850c26c9cd0d89d|a9993e364706816aba3e25717850c26c9cd0d89d|ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|abc|abc|abc|abc|abc|abc"
+        )
+    }
+
+    func testCryptoJSHmacAndEncoders() throws {
+        let script = """
+        [
+          CryptoJS.HmacSHA256('abc', 'key').toString(),
+          CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse('abc')),
+          CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Hex.parse('616263')),
+          CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse('abc')),
+          CryptoJS.enc.Utf8.stringify(CryptoJS.enc.Base64.parse('YWJj')),
+          CryptoJS.SHA256(CryptoJS.enc.Utf8.parse('abc')).toString()
+        ].join('|')
+        """
+
+        let result = JSCoreRuntime().evaluate(script)
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(
+            value,
+            "9c196e32dc0175f86f4b1cb89289d6619de6bee699e4c378e68309ed97a1a6ab|616263|abc|YWJj|abc|ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         )
     }
 

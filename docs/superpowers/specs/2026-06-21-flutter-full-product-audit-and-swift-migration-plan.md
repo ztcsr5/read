@@ -815,6 +815,7 @@ Completed since the initial audit:
   - Added a minimal `CryptoJS.MD5(...).toString()` / `CryptoJS.SHA256(...).toString()` compatibility shim.
   - `java.ajax`, `java.get` URL loads, and `java.post` now return response-like objects with `body()` while preserving string coercion.
   - Added URI/base64/hash aliases: `java.encodeURI`, `java.encodeURIComponent`, `java.decodeURI`, `java.decodeURIComponent`, `java.md5Encode`, `java.base64DecodeToString`, `java.base64Decoder`, `java.unbase64`, and global `unbase64`.
+  - Added `java.sha1`, `CryptoJS.SHA1`, `CryptoJS.HmacSHA256`, and minimal `CryptoJS.enc.Utf8/Hex/Base64` parse/stringify support for common signing snippets.
 - Improved search URL compatibility:
   - `{{source.xxx}}` placeholders now resolve from imported raw source fields and normalized source metadata.
   - Search URL JavaScript can read `source.bookSourceUrl`, `source.bookSourceName`, aliases, and raw custom fields.
