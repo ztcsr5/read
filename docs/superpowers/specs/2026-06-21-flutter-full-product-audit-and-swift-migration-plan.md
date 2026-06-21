@@ -529,8 +529,8 @@ This prevents one giant reader file from becoming unmaintainable.
 | Local TXT | Partial | File picker, parse, save chapters, external file handoff | Local fixture import test + device import | P5 |
 | Local EPUB | Partial | EPUB parser/import, multi-file spine, metadata, device import | EPUB fixture import test + device import | P5 |
 | Reader scroll mode | Partial | Infinite load, progress save, overlay | Manual + state tests | P6 |
-| Reader page/cover modes | Missing/partial | Page mode and cover transition | UI smoke | P6 |
-| Reader settings | Partial | Full typography/background/tap-zone settings | Settings persistence test | P6 |
+| Reader page/cover modes | Partial | Basic page/cover mode entry exists; true text pagination still needs refinement | UI smoke | P6 |
+| Reader settings | Partial | Typography/background/mode/tap-zone settings exist; full Flutter settings surface still needs completion | Settings persistence test | P6 |
 | Bookmarks | Partial | Add/remove/list/jump exists; needs richer paragraph-level position and UI polish | XCTest + UI smoke | P6 |
 | Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
 | TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
@@ -784,6 +784,8 @@ Completed since the initial audit:
   - Reader bottom overlay now shows chapter count and percentage.
   - Previous/next chapter buttons are available when chapter switching is possible.
   - Bookmark list entries can jump to their chapter.
+  - Basic scroll/page/cover mode switch is persisted.
+  - 3x3 tap zone actions are configurable and covered by unit tests.
 - Improved RSS and history:
   - Discover and Source Manager can open a real RSS/Atom article list.
   - RSS feed parsing is covered by unit tests.
