@@ -8,8 +8,10 @@ struct SearchURLResolver {
             return .failure(.invalidSource("searchUrl \u{4e3a}\u{7a7a}"))
         }
 
+        let sourceInterpolated = interpolateSourcePlaceholders(searchUrl, source: source)
+        let scriptVariables = scriptVariables(source: source, keyword: keyword, page: page)
         let interpolated = ruleResolver.interpolate(
-            searchUrl,
+            sourceInterpolated,
             keyword: keyword,
             page: page,
             baseUrl: source.bookSourceUrl
@@ -18,36 +20,21 @@ struct SearchURLResolver {
         let trimmed = interpolated.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("@js:") {
             let script = String(trimmed.dropFirst(4))
-            return evaluateScript(script, source: source, variables: [
-                "keyword": keyword,
-                "key": keyword,
-                "page": page,
-                "baseUrl": source.bookSourceUrl
-            ])
+            return evaluateScript(script, source: source, variables: scriptVariables)
         }
 
         if trimmed.hasPrefix("<js>"), trimmed.hasSuffix("</js>") {
             let start = trimmed.index(trimmed.startIndex, offsetBy: 4)
             let end = trimmed.index(trimmed.endIndex, offsetBy: -5)
             let script = String(trimmed[start..<end])
-            return evaluateScript(script, source: source, variables: [
-                "keyword": keyword,
-                "key": keyword,
-                "page": page,
-                "baseUrl": source.bookSourceUrl
-            ])
+            return evaluateScript(script, source: source, variables: scriptVariables)
         }
 
         if trimmed.contains("<js>"), trimmed.contains("</js>") {
             return resolveEmbeddedScripts(
                 trimmed,
                 source: source,
-                variables: [
-                    "keyword": keyword,
-                    "key": keyword,
-                    "page": page,
-                    "baseUrl": source.bookSourceUrl
-                ]
+                variables: scriptVariables
             )
         }
 
@@ -89,5 +76,39 @@ struct SearchURLResolver {
         JSCoreRuntime { urlText in
             SynchronousSourceLoader().load(urlText: urlText, source: source)
         }
+    }
+
+    private func interpolateSourcePlaceholders(_ text: String, source: BookSource) -> String {
+        sourceVariableMap(source: source).reduce(text) { output, item in
+            output.replacingOccurrences(of: "{{source.\(item.key)}}", with: item.value)
+        }
+    }
+
+    private func scriptVariables(source: BookSource, keyword: String, page: Int) -> [String: Any] {
+        let sourceMap = sourceVariableMap(source: source) as NSDictionary
+        return [
+            "keyword": keyword,
+            "key": keyword,
+            "page": page,
+            "baseUrl": source.bookSourceUrl,
+            "source": sourceMap
+        ]
+    }
+
+    private func sourceVariableMap(source: BookSource) -> [String: String] {
+        var values = source.raw
+        values["bookSourceName"] = source.bookSourceName
+        values["sourceName"] = source.bookSourceName
+        values["bookSourceUrl"] = source.bookSourceUrl
+        values["sourceUrl"] = source.bookSourceUrl
+        values["bookSourceGroup"] = source.bookSourceGroup ?? ""
+        values["sourceGroup"] = source.bookSourceGroup ?? ""
+        values["bookSourceType"] = String(source.bookSourceType)
+        values["weight"] = String(source.weight)
+        values["searchUrl"] = source.searchUrl ?? ""
+        values["exploreUrl"] = source.exploreUrl ?? ""
+        values["header"] = source.header ?? ""
+        values["customConfig"] = source.customConfig ?? ""
+        return values
     }
 }

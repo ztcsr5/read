@@ -518,7 +518,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Source manager batch ops | Partial | Batch delete/enable/disable exists; batch test still needed | Unit + UI smoke | P2 |
 | Source JSON editor | Partial | Book source JSON edit/save exists; RSS/catalog edit and lossless re-export still needed | Edit-save-import test | P2 |
 | GBK decoding | Partial | Ensure GBK/GB2312/GB18030 detection | Decoder tests | P3 |
-| Search URL JS/POST/header | Partial | Match Flutter request builder | Request builder tests | P3 |
+| Search URL JS/POST/header | Partial | Template/JS search URL, source variables, POST/header directives | Request builder tests | P3 |
 | `@js`/`<js>` rules | Partial | JSCore bridge with java/network/base64/hash/CryptoJS subset helpers | JS rule fixtures | P3 |
 | HTML/CSS rules | Partial | Full common selector attr/text rules | Parser tests | P3 |
 | JSONPath-ish rules | Partial | Match Flutter resolver behavior | Parser tests | P3 |
@@ -812,6 +812,10 @@ Completed since the initial audit:
   - Added MD5/SHA256 native helpers.
   - Added common Legado aliases: `java.md5`, `java.hexMd5`, `java.MD5`, `java.sha256`, `java.base64`, `java.decodeBase64`, `md5`, `hexMd5`, `atob`, and `btoa`.
   - Added a minimal `CryptoJS.MD5(...).toString()` / `CryptoJS.SHA256(...).toString()` compatibility shim.
+- Improved search URL compatibility:
+  - `{{source.xxx}}` placeholders now resolve from imported raw source fields and normalized source metadata.
+  - Search URL JavaScript can read `source.bookSourceUrl`, `source.bookSourceName`, aliases, and raw custom fields.
+  - Source-variable search URL behavior is covered by unit tests.
 
 Still not complete:
 

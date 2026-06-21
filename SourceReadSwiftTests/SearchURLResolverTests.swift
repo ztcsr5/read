@@ -57,4 +57,38 @@ final class SearchURLResolverTests: XCTestCase {
         }
         XCTAssertEqual(url, "https://example.com/search?q=abc%20def&page=2")
     }
+
+    func testResolveSourceTemplateVariables() throws {
+        let source = BookSource(
+            bookSourceName: "Test",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "{{source.api}}/{{source.path}}?q={{keyword}}&base={{source.bookSourceUrl}}",
+            raw: [
+                "api": "https://api.example.com",
+                "path": "search"
+            ]
+        )
+
+        let result = SearchURLResolver().resolve(source: source, keyword: "abc", page: 1)
+
+        guard case .success(let url) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(url, "https://api.example.com/search?q=abc&base=https://example.com")
+    }
+
+    func testResolveJavaScriptCanReadSourceObject() throws {
+        let source = BookSource(
+            bookSourceName: "Test",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "@js:source.bookSourceUrl + '/search?q=' + java.urlEncode(key)"
+        )
+
+        let result = SearchURLResolver().resolve(source: source, keyword: "abc def", page: 1)
+
+        guard case .success(let url) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(url, "https://example.com/search?q=abc%20def")
+    }
 }
