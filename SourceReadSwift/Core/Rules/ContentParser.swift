@@ -70,13 +70,25 @@ struct ContentParser {
     }
 
     private func splitParagraphs(_ text: String) -> [String] {
-        text
+        normalizeContentText(text)
             .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "<br>", with: "\n")
-            .replacingOccurrences(of: "<br/>", with: "\n")
-            .replacingOccurrences(of: "<br />", with: "\n")
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func normalizeContentText(_ text: String) -> String {
+        var output = text
+        output = output.replacingOccurrences(of: "(?i)<br\\s*/?>", with: "\n", options: .regularExpression)
+        output = output.replacingOccurrences(of: "(?i)</p\\s*>", with: "\n", options: .regularExpression)
+        output = output.replacingOccurrences(of: "(?i)</div\\s*>", with: "\n", options: .regularExpression)
+        output = output.replacingOccurrences(of: "(?i)</li\\s*>", with: "\n", options: .regularExpression)
+        output = output.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        output = output.replacingOccurrences(of: "&nbsp;", with: " ")
+        output = output.replacingOccurrences(of: "&amp;", with: "&")
+        output = output.replacingOccurrences(of: "&lt;", with: "<")
+        output = output.replacingOccurrences(of: "&gt;", with: ">")
+        output = output.replacingOccurrences(of: "&quot;", with: "\"")
+        return output
     }
 }
