@@ -10,7 +10,22 @@ struct HtmlRuleExtractor {
     func value(from root: Element, rule: String?, fallback: String? = nil, baseUrl: URL? = nil) throws -> String {
         let selectedRule = rule ?? fallback
         guard let selectedRule, !selectedRule.isEmpty else { return "" }
-        let parts = selectedRule.components(separatedBy: "@")
+        let alternatives = selectedRule
+            .components(separatedBy: "||")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        for alternative in alternatives {
+            let value = try valueForSingleRule(from: root, rule: alternative, baseUrl: baseUrl)
+            if !value.isEmpty {
+                return value
+            }
+        }
+        return ""
+    }
+
+    private func valueForSingleRule(from root: Element, rule: String, baseUrl: URL?) throws -> String {
+        let parts = rule.components(separatedBy: "@")
         let selector = cleanCSS(parts.first ?? "")
         let target = selector.isEmpty ? root : try root.select(selector).first() ?? root
         let attr = parts.dropFirst().first ?? "text"
@@ -52,4 +67,3 @@ struct HtmlRuleExtractor {
         return URL(string: text, relativeTo: base)?.absoluteURL.absoluteString ?? text
     }
 }
-
