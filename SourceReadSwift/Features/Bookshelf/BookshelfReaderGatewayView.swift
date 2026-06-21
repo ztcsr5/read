@@ -52,9 +52,7 @@ struct BookshelfReaderGatewayView: View {
                     }
                 )
             } else if let errorMessage {
-                EmptyStateCard(systemImage: "xmark.octagon", title: "阅读恢复失败", message: errorMessage)
-                    .padding(AppTheme.pagePadding)
-                    .pageBackground()
+                readerRecoveryErrorView(errorMessage)
             } else {
                 ProgressView("正在恢复阅读进度")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -71,6 +69,37 @@ struct BookshelfReaderGatewayView: View {
 
     private var localBookChapters: [LocalTextChapter] {
         book.localChapters ?? []
+    }
+
+    private func readerRecoveryErrorView(_ message: String) -> some View {
+        VStack(spacing: 14) {
+            EmptyStateCard(systemImage: "xmark.octagon", title: "阅读恢复失败", message: message)
+
+            Button {
+                showSourceSwitcher = true
+            } label: {
+                Label("尝试换源继续阅读", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            Button {
+                errorMessage = nil
+                selectedChapter = nil
+                chapters = []
+                Task { await resumeReading() }
+            } label: {
+                Label("重试当前书源", systemImage: "arrow.clockwise")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        }
+        .padding(AppTheme.pagePadding)
+        .pageBackground()
     }
 
     private var localReader: some View {

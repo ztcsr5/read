@@ -587,7 +587,7 @@ struct SourceManagerView: View {
             return
         }
         state.isRunning = true
-        state.output = "正在搜索：\(keyword)\n源：\(state.source.bookSourceName)"
+        state.output = sourceTestHeader(source: state.source, keyword: keyword)
         sourceTest = state
 
         let result = await appState.engine.searchBooks(source: state.source, keyword: keyword, page: 1)
@@ -598,37 +598,109 @@ struct SourceManagerView: View {
             let preview = books.prefix(10).enumerated().map { index, book in
                 "\(index + 1). \(book.name) | \(book.author ?? "未知作者")\n   \(book.bookUrl)"
             }.joined(separator: "\n")
-            var output = "搜索成功：\(books.count) 条结果\n\n\(preview)"
+            var output = sourceTestHeader(source: state.source, keyword: keyword)
+            output += "\n\n[PASS] 搜索：\(books.count) 条结果"
+            if preview.isEmpty {
+                output += "\n[WARN] 搜索请求成功但列表为空。建议检查 keyword/page 占位符、搜索规则列表选择器或接口返回结构。"
+            } else {
+                output += "\n\n\(preview)"
+            }
             if let first = books.first {
                 output += "\n\n正在验证首条结果详情..."
                 latest.output = output
                 sourceTest = latest
                 switch await appState.engine.getBookDetail(source: state.source, book: first) {
                 case .success(let detail):
-                    output += "\n详情成功：\(detail.name)"
+                    output += "\n[PASS] 详情：\(detail.name)"
                     switch await appState.engine.getChapterList(source: state.source, book: detail) {
                     case .success(let chapters):
-                        output += "\n目录成功：\(chapters.count) 章"
+                        output += "\n[PASS] 目录：\(chapters.count) 章"
                         if let chapter = chapters.first {
                             switch await appState.engine.getContent(source: state.source, chapter: chapter) {
                             case .success(let content):
-                                output += "\n正文成功：\(content.paragraphs.count) 段"
+                                output += "\n[PASS] 正文：\(content.paragraphs.count) 段"
+                                if content.paragraphs.isEmpty {
+                                    output += "\n[WARN] 正文解析为空。建议检查 ruleContent.content / content 正则清洗是否过度。"
+                                } else {
+                                    output += "\n\n首段预览：\(content.paragraphs.first?.prefix(120) ?? "")"
+                                }
                             case .failure(let error):
-                                output += "\n正文失败：\(error.displayMessage)"
+                                output += sourceTestFailure(stage: "正文", error: error)
                             }
+                        } else {
+                            output += "\n[WARN] 目录为空，无法验证正文。建议检查 ruleToc.chapterList / chapterName / chapterUrl。"
                         }
                     case .failure(let error):
-                        output += "\n目录失败：\(error.displayMessage)"
+                        output += sourceTestFailure(stage: "目录", error: error)
                     }
                 case .failure(let error):
-                    output += "\n详情失败：\(error.displayMessage)"
+                    output += sourceTestFailure(stage: "详情", error: error)
                 }
             }
             latest.output = output
         case .failure(let error):
-            latest.output = "测试失败：\(error.displayMessage)"
+            latest.output = sourceTestHeader(source: state.source, keyword: keyword)
+                + sourceTestFailure(stage: "搜索", error: error)
         }
         sourceTest = latest
+    }
+
+    private func sourceTestHeader(source: BookSource, keyword: String) -> String {
+        """
+        书源诊断
+        源：\(source.bookSourceName)
+        URL：\(source.bookSourceUrl)
+        关键词：\(keyword)
+
+        规则覆盖：
+        \(sourceRuleCoverage(source))
+
+        正在执行链路：搜索 -> 详情 -> 目录 -> 正文
+        """
+    }
+
+    private func sourceRuleCoverage(_ source: BookSource) -> String {
+        let items = [
+            ("searchUrl", source.searchUrl?.nilIfEmpty != nil),
+            ("ruleSearch", source.ruleSearch != nil),
+            ("ruleBookInfo", source.ruleBookInfo != nil),
+            ("ruleToc", source.ruleToc != nil),
+            ("ruleContent", source.ruleContent != nil),
+            ("header", source.header?.nilIfEmpty != nil || source.raw["bookSourceHeader"]?.nilIfEmpty != nil),
+            ("customConfig", source.customConfig?.nilIfEmpty != nil)
+        ]
+        return items
+            .map { "\($0.1 ? "[OK]" : "[--]") \($0.0)" }
+            .joined(separator: "\n")
+    }
+
+    private func sourceTestFailure(stage: String, error: SourceEngineError) -> String {
+        "\n[FAIL] \(stage)：\(error.displayMessage)\n建议：\(sourceTestAdvice(stage: stage, error: error))"
+    }
+
+    private func sourceTestAdvice(stage: String, error: SourceEngineError) -> String {
+        let message = error.displayMessage.lowercased()
+        if message.contains("unsupported") || message.contains("javascript") || message.contains("js") {
+            return "优先检查书源 JS API 兼容；如果旧阅读能跑，通常需要补 java/ajax/base64/加密或变量桥接。"
+        }
+        if message.contains("empty") || message.contains("空") {
+            return "网络有返回但内容为空，优先检查请求方式、Header/Cookie、charset、反爬或 WebView fallback。"
+        }
+        if message.contains("url") || message.contains("invalid") || message.contains("无效") {
+            return "优先检查相对 URL 拼接、searchUrl 模板、@Header/@Body 指令和 encode 规则。"
+        }
+        switch stage {
+        case "搜索":
+            return "重点看 searchUrl、ruleSearch.bookList/name/author/bookUrl；如果搜索为空，换关键词再测一次。"
+        case "详情":
+            return "重点看搜索结果 bookUrl 是否正确、详情页是否需要 Cookie/Header、ruleBookInfo 字段名是否兼容。"
+        case "目录":
+            return "重点看 ruleToc.chapterList/chapterName/chapterUrl，以及目录是否由 JS 延迟加载。"
+        case "正文":
+            return "重点看 ruleContent.content、正文净化 replaceRegex，以及章节 URL 是否需要 Referer。"
+        default:
+            return "按当前失败阶段检查对应规则和请求配置。"
+        }
     }
 
     @MainActor

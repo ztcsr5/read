@@ -65,7 +65,7 @@ final class LocalEPUBBookParserTests: XCTestCase {
         let data = Data(text.utf8)
         try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { position, size in
             let start = Int(position)
-            let end = Int(position) + size
+            let end = start + Int(size)
             return data.subdata(in: start..<end)
         }
     }

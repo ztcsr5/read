@@ -129,7 +129,7 @@ struct LocalEPUBBookParser {
     private func firstTagText(in text: String, names: [String]) -> String? {
         for name in names {
             let escaped = NSRegularExpression.escapedPattern(for: name)
-            let pattern = #"<\#(escaped)(?:\s[^>]*)?>([\s\S]*?)</\#(escaped)>"#
+            let pattern = "<\(escaped)(?:\\s[^>]*)?>([\\s\\S]*?)</\(escaped)>"
             if let raw = try? firstMatch(in: text, pattern: pattern) {
                 let cleaned = raw
                     .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)

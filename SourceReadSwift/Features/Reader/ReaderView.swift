@@ -413,14 +413,31 @@ struct ReaderView: View {
                 } else {
                     Section("我的书签") {
                         ForEach(bookmarks) { bookmark in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(bookmark.chapterTitle)
-                                    .font(.headline)
-                                Text(bookmark.snippet)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
+                            Button {
+                                jumpToBookmark(bookmark)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(bookmark.chapterTitle)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+                                        Text(bookmark.snippet)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer()
+                                    if bookmark.chapterIndex == chapterIndex {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(AppTheme.accent)
+                                    } else {
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
                             }
+                            .disabled(bookmark.chapterIndex == chapterIndex || onSelectChapter == nil)
                             .swipeActions {
                                 Button("删除", role: .destructive) {
                                     appState.bookshelfStore.removeBookmark(bookID: bookID, bookmarkID: bookmark.id)
@@ -441,6 +458,13 @@ struct ReaderView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func jumpToBookmark(_ bookmark: ReaderBookmark) {
+        guard let target = chapters.first(where: { $0.index == bookmark.chapterIndex }) else { return }
+        showBookmarks = false
+        showOverlay = false
+        onSelectChapter?(target)
     }
 
     private func toggleCurrentBookmark() {

@@ -383,16 +383,20 @@ Current Swift branch has:
 - Basic search/detail/TOC/content flow.
 - Basic reader controls.
 - Bookshelf and progress persistence added in `a35b460`.
+- Source import now handles more Legado/Yuedu wrappers, aliases, request headers, POST/body directives, and embedded share JSON.
+- Source manager now has a practical search/detail/TOC/content diagnostic chain with stage-specific failure advice.
+- Reader now has usable native TTS controls, auto-scroll controls, TOC jump, source switching entry, and recovery actions when a saved online book fails to reopen.
+- Local TXT and EPUB import paths exist, with a minimal EPUB parser and fixture test.
 - Unit tests for partial parser/request/source store pieces.
 
 Current Swift gaps:
 
 - UI does not yet fully match the Flutter product's functional layout.
 - No full route parity.
-- Source import taxonomy is incomplete: RSS and catalogs are not first-class.
+- Source import taxonomy is still incomplete compared with Flutter, although RSS and catalogs now exist as first-class stored items.
 - `BookSource` model drops many raw fields and aliases needed for real Legado compatibility.
 - Reader is far from Flutter feature parity.
-- Local TXT/EPUB import is missing.
+- Local TXT/EPUB import exists but needs device verification, richer EPUB coverage, external file handoff validation, and cache/progress integration hardening.
 - Groups, bookmarks, stats, reading history, purify rules, diagnostics, source testing, batch checking, JSON editor, WebView import, and local web editor service are missing or partial.
 - Current IPA size is not a quality signal. A small Swift IPA is normal, but this specific app is small also because many product modules are still absent.
 
@@ -522,15 +526,15 @@ This prevents one giant reader file from becoming unmaintainable.
 | TOC | Partial | TOC parse, relative URLs, duplicate retry | Fixture tests | P4 |
 | Content | Partial | replaceRegex, nextContentUrl, purify | Fixture tests | P4 |
 | Add to bookshelf | Partial | Save detail/TOC/progress and tolerate TOC failure | End-to-end mocked source test | P4 |
-| Local TXT | Missing | File picker, parse, save chapters | Local fixture import test | P5 |
-| Local EPUB | Missing | EPUB parser/import | EPUB fixture import test | P5 |
+| Local TXT | Partial | File picker, parse, save chapters, external file handoff | Local fixture import test + device import | P5 |
+| Local EPUB | Partial | EPUB parser/import, multi-file spine, metadata, device import | EPUB fixture import test + device import | P5 |
 | Reader scroll mode | Partial | Infinite load, progress save, overlay | Manual + state tests | P6 |
 | Reader page/cover modes | Missing/partial | Page mode and cover transition | UI smoke | P6 |
 | Reader settings | Partial | Full typography/background/tap-zone settings | Settings persistence test | P6 |
 | Bookmarks | Missing/partial | Add/remove/list/jump | XCTest + UI smoke | P6 |
-| Source switch | Missing/partial | Switch source, match chapter title | Mocked source test | P6 |
-| TTS | Missing/partial | Native speech start/stop/next | Manual + state test | P6 |
-| Diagnostics | Missing | Test source, report steps, failure reasons | Diagnostic fixture test | P7 |
+| Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
+| TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
+| Diagnostics | Partial | Test source, report steps, failure reasons, batch checks | Diagnostic fixture test | P7 |
 | Auto repair | Missing | Rule suggestion after parser parity | Golden suggestions | P7 |
 | Local web editor | Missing | Explicit start/stop local server + token | Local API tests | P8 |
 | Purify rules | Missing | Persist and apply rules to content | Content purification test | P9 |
@@ -732,14 +736,52 @@ QA must cover:
 
 ## 8. Immediate next tasks
 
-1. Commit this audit/plan document.
-2. Verify latest `a35b460` CI and unsigned IPA status.
-3. Start P1:
-   - Add/expand source import link parser.
-   - Port source import link parser tests.
-   - Expand source import normalization and classification.
-   - Port source import tests.
-4. Then continue into P2/P3 without waiting for another redesign unless the plan proves wrong.
+1. Keep working locally without pushing every small commit, because GitHub Actions quota is limited.
+2. Finish the next coherent product milestone before pushing:
+   - Reader error recovery and source switching polish.
+   - Source diagnostics/reporting polish.
+   - Parser/import compatibility tests for the newly supported aliases.
+   - Documentation of what is still missing before device QA.
+3. After a coherent milestone is committed, push once and run CI/IPA only when the app is worth testing.
+4. Then continue into P3/P6 work:
+   - More JS API compatibility.
+   - More HTML/JSON rule operators.
+   - Reader page mode/tap-zone/settings parity.
+   - Bookmarks/history/stats/purify parity.
+
+## 10. Current local milestone notes
+
+This local milestone is intentionally not pushed yet.
+
+Completed since the initial audit:
+
+- Broadened source import/link compatibility:
+  - Embedded JSON extraction from share links.
+  - Wrapped object import for `bookSource`, `bookSources`, `sources`, `data`, `list`, and `items`.
+  - Request method/body/header aliases.
+  - Dictionary POST body handling.
+- Improved Swift source engine compatibility:
+  - JS bridge variable storage and network helper directives.
+  - Charset-aware response decoding.
+  - More HTML/JSON rule transforms.
+  - Content cleanup rules.
+- Improved reader daily-use flow:
+  - Native TTS and auto-scroll controls are functional.
+  - Source switching can update an existing bookshelf item without changing its identity.
+  - Saved online reader failure now exposes "try another source" and "retry current source" actions.
+- Added local EPUB import:
+  - ZIP/OPF/spine parser.
+  - Minimal EPUB fixture test.
+- Improved source diagnostics:
+  - Source manager test output now reports search/detail/TOC/content stages.
+  - Failure output includes stage-specific suggestions instead of only raw errors.
+
+Still not complete:
+
+- No macOS build has been run after this local milestone.
+- No IPA should be produced until this milestone is pushed and CI passes.
+- Reader page mode, cover mode, full tap-zone editor, richer bookmarks UI, reading history, stats, purify rules, and full App Store hardening remain open.
+- Source compatibility still needs more JS helper APIs, WebView fallback verification, anti-crawl handling, and larger real-source fixture coverage.
 
 ## 9. Definition of done
 
