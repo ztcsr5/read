@@ -708,13 +708,41 @@ struct SourceManagerView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(rssPreview?.isRunning == true)
 
-                ScrollView {
-                    Text(rssPreview?.output ?? "正在加载 RSS/Atom。")
-                        .font(.system(.footnote, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if let output = rssPreview?.output {
+                    ScrollView {
+                        Text(output)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: .infinity)
+                } else if rssPreview?.articles.isEmpty == false {
+                    List(rssPreview?.articles ?? []) { article in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(article.title)
+                                .font(.headline)
+                            if let date = article.pubDate {
+                                Text(date)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let description = article.description {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                            if let link = article.link, let url = URL(string: link) {
+                                Link("打开原文", destination: url)
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .listStyle(.plain)
+                } else {
+                    CenterTextEmptyState("正在加载 RSS/Atom。", minHeight: 260)
                 }
-                .frame(maxHeight: .infinity)
             }
             .padding()
             .navigationTitle(state.source.sourceName)
@@ -907,15 +935,14 @@ struct SourceManagerView: View {
             request.setValue("Mozilla/5.0 SourceReadSwift", forHTTPHeaderField: "User-Agent")
             let (data, _) = try await URLSession.shared.data(for: request)
             let text = ResponseTextDecoder().decode(data: data, headers: [:])
-            let titles = extractFeedTitles(from: text)
+            let articles = RSSFeedParser().parseArticles(from: text)
             guard var latest = rssPreview else { return }
             latest.isRunning = false
-            if titles.isEmpty {
+            if articles.isEmpty {
                 latest.output = "已加载，但没有识别到 RSS/Atom 标题。"
             } else {
-                latest.output = titles.prefix(30).enumerated()
-                    .map { "\($0.offset + 1). \($0.element)" }
-                    .joined(separator: "\n")
+                latest.output = nil
+                latest.articles = Array(articles.prefix(50))
             }
             rssPreview = latest
         } catch {
@@ -1015,35 +1042,6 @@ struct SourceManagerView: View {
             && (lower.contains("challenge-platform") || lower.contains("cf-chl") || lower.contains("checking your browser"))
     }
 
-    private func extractFeedTitles(from text: String) -> [String] {
-        let patterns = [
-            #"<item[\s\S]*?<title><!\[CDATA\[(.*?)\]\]></title>"#,
-            #"<item[\s\S]*?<title>(.*?)</title>"#,
-            #"<entry[\s\S]*?<title[^>]*>(.*?)</title>"#
-        ]
-        var titles: [String] = []
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
-            let range = NSRange(text.startIndex..<text.endIndex, in: text)
-            let matches = regex.matches(in: text, range: range)
-            for match in matches {
-                guard match.numberOfRanges > 1,
-                      let valueRange = Range(match.range(at: 1), in: text) else { continue }
-                let title = String(text[valueRange])
-                    .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-                    .replacingOccurrences(of: "&amp;", with: "&")
-                    .replacingOccurrences(of: "&lt;", with: "<")
-                    .replacingOccurrences(of: "&gt;", with: ">")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !title.isEmpty {
-                    titles.append(title)
-                }
-            }
-            if !titles.isEmpty { break }
-        }
-        return titles
-    }
-
     private func prettyJSON<T: Encodable>(_ value: T) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -1080,6 +1078,7 @@ private struct RSSPreviewState: Identifiable {
     let source: RSSSource
     var isRunning = false
     var output: String?
+    var articles: [RSSArticlePreview] = []
 }
 
 private enum SourceManagerTab: String, CaseIterable, Identifiable {
