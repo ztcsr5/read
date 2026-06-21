@@ -31,7 +31,7 @@ struct SearchResultParser {
                 books.append(SearchBook(
                     name: name,
                     author: author,
-                    coverUrl: cover,
+                    coverUrl: cover.map { absolutize($0, base: response.url) },
                     bookUrl: absolutize(bookUrl, base: response.url),
                     sourceName: source.bookSourceName,
                     sourceUrl: source.bookSourceUrl,
