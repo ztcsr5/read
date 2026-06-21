@@ -13,6 +13,8 @@ struct SourceManagerView: View {
     @State private var showFileImporter = false
     @State private var showImportSheet = false
     @State private var showUnavailableNotice = false
+    @State private var jsonPreview: SourceJSONPreview?
+    @State private var sourceTest: SourceTestState?
 
     private var filteredBookSources: [BookSource] {
         let keyword = normalizedSearchText
@@ -74,6 +76,12 @@ struct SourceManagerView: View {
             }
             .sheet(isPresented: $showImportSheet) {
                 importSheet
+            }
+            .sheet(item: $jsonPreview) { preview in
+                jsonPreviewSheet(preview)
+            }
+            .sheet(item: $sourceTest) { state in
+                sourceTestSheet(state)
             }
             .fileImporter(
                 isPresented: $showFileImporter,
@@ -219,8 +227,12 @@ struct SourceManagerView: View {
                 Button(source.enabled ? "停用" : "启用") {
                     appState.sourceStore.setEnabled(!source.enabled, for: [source.bookSourceUrl])
                 }
-                Button("测试书源") { showUnavailableNotice = true }
-                Button("查看 JSON") { showUnavailableNotice = true }
+                Button("测试书源") {
+                    sourceTest = SourceTestState(source: source)
+                }
+                Button("查看 JSON") {
+                    jsonPreview = SourceJSONPreview(title: source.bookSourceName, json: prettyJSON(source))
+                }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.remove(source)
                 }
@@ -242,6 +254,9 @@ struct SourceManagerView: View {
                 Button("导入仓库") {
                     Task { await importCatalog(catalog) }
                 }
+                Button("查看 JSON") {
+                    jsonPreview = SourceJSONPreview(title: catalog.name, json: prettyJSON(catalog))
+                }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.removeCatalogs(urls: [catalog.url])
                 }
@@ -260,7 +275,9 @@ struct SourceManagerView: View {
                 Button(source.enabled ? "停用" : "启用") {
                     appState.sourceStore.setRSSEnabled(!source.enabled, for: [source.sourceUrl])
                 }
-                Button("查看文章") { showUnavailableNotice = true }
+                Button("查看 JSON") {
+                    jsonPreview = SourceJSONPreview(title: source.sourceName, json: prettyJSON(source))
+                }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.removeRSS(sourceURLs: [source.sourceUrl])
                 }
@@ -427,6 +444,76 @@ struct SourceManagerView: View {
         .presentationDetents([.large])
     }
 
+    private func jsonPreviewSheet(_ preview: SourceJSONPreview) -> some View {
+        NavigationStack {
+            ScrollView {
+                Text(preview.json)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle(preview.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { jsonPreview = nil }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("复制") {
+                        UIPasteboard.general.string = preview.json
+                        importMessage = "JSON 已复制到剪贴板"
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func sourceTestSheet(_ state: SourceTestState) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(state.source.bookSourceUrl)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                TextField("测试关键词", text: Binding(
+                    get: { sourceTest?.keyword ?? state.keyword },
+                    set: { sourceTest?.keyword = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+
+                Button {
+                    Task { await runSourceTest() }
+                } label: {
+                    Label(sourceTest?.isRunning == true ? "测试中..." : "开始测试", systemImage: "play.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(sourceTest?.isRunning == true)
+
+                ScrollView {
+                    Text(sourceTest?.output ?? "将执行搜索 URL、网络请求、解码和搜索规则解析。")
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .padding()
+            .navigationTitle(state.source.bookSourceName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { sourceTest = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
     private func importSources() {
         do {
             let before = sourceCounts
@@ -440,6 +527,34 @@ struct SourceManagerView: View {
             importMessage = nil
             importError = error.localizedDescription
         }
+    }
+
+    @MainActor
+    private func runSourceTest() async {
+        guard var state = sourceTest else { return }
+        let keyword = state.keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else {
+            state.output = "请输入测试关键词。"
+            sourceTest = state
+            return
+        }
+        state.isRunning = true
+        state.output = "正在搜索：\(keyword)\n源：\(state.source.bookSourceName)"
+        sourceTest = state
+
+        let result = await appState.engine.searchBooks(source: state.source, keyword: keyword, page: 1)
+        guard var latest = sourceTest else { return }
+        latest.isRunning = false
+        switch result {
+        case .success(let books):
+            let preview = books.prefix(10).enumerated().map { index, book in
+                "\(index + 1). \(book.name) | \(book.author ?? "未知作者")\n   \(book.bookUrl)"
+            }.joined(separator: "\n")
+            latest.output = "搜索成功：\(books.count) 条结果\n\n\(preview)"
+        case .failure(let error):
+            latest.output = "测试失败：\(error.displayMessage)"
+        }
+        sourceTest = latest
     }
 
     private func importSourcesSmart() async {
@@ -534,6 +649,30 @@ struct SourceManagerView: View {
         return lower.contains("cloudflare")
             && (lower.contains("challenge-platform") || lower.contains("cf-chl") || lower.contains("checking your browser"))
     }
+
+    private func prettyJSON<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
+    }
+}
+
+private struct SourceJSONPreview: Identifiable {
+    let id = UUID()
+    let title: String
+    let json: String
+}
+
+private struct SourceTestState: Identifiable {
+    let id = UUID()
+    let source: BookSource
+    var keyword = "斗破苍穹"
+    var isRunning = false
+    var output: String?
 }
 
 private enum SourceManagerTab: String, CaseIterable, Identifiable {
