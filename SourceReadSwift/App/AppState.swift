@@ -3,16 +3,23 @@ import Foundation
 @MainActor
 final class AppState: ObservableObject {
     let sourceStore: SourceStore
-    let engine: SourceEngine
+    private(set) var engine: SourceEngine
 
     @Published var diagnostics: [DiagnosticEvent] = []
 
     init(
         sourceStore: SourceStore = SourceStore(),
-        engine: SourceEngine = LegadoSourceEngine()
+        engine: SourceEngine? = nil
     ) {
         self.sourceStore = sourceStore
-        self.engine = engine
+        self.engine = engine ?? LegadoSourceEngine()
+        if engine == nil {
+            self.engine = LegadoSourceEngine(diagnostics: DiagnosticSink { [weak self] event in
+                await MainActor.run {
+                    self?.record(event)
+                }
+            })
+        }
     }
 
     func record(_ event: DiagnosticEvent) {
@@ -22,4 +29,3 @@ final class AppState: ObservableObject {
         }
     }
 }
-
