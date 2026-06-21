@@ -841,7 +841,7 @@ Completed since the initial audit:
   - Bookshelf state now persists the current paragraph index in addition to chapter index/title.
   - Reader restores the stored paragraph when reopening the same chapter.
   - Page/cover mode selection, auto-scroll, tap page navigation, and speech-driven paragraph movement update the stored paragraph position.
-  - Full manual scroll visibility tracking still needs a Geometry-based pass.
+  - Scroll mode tracks the top visible paragraph with a Geometry preference and persists it when the visible paragraph changes.
 
 Still not complete:
 

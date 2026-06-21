@@ -23,6 +23,7 @@ struct ReaderView: View {
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var sessionStartedAt = Date()
     @State private var previousIdleTimerDisabled = false
+    @State private var visibleParagraphIndex = 0
     @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 20
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
@@ -159,11 +160,13 @@ struct ReaderView: View {
                     ForEach(Array(content.paragraphs.enumerated()), id: \.offset) { index, paragraph in
                         paragraphText(paragraph, index: index)
                             .id(index)
+                            .background(paragraphPositionReader(index: index))
                     }
                 }
                 .padding(CGFloat(pagePadding))
                 .padding(.bottom, CGFloat(footerHeight))
             }
+            .coordinateSpace(name: "readerScroll")
             .onChange(of: autoScrollTarget) { target in
                 guard content.paragraphs.indices.contains(target) else { return }
                 withAnimation(.easeInOut(duration: 0.45)) {
@@ -183,6 +186,9 @@ struct ReaderView: View {
                 DispatchQueue.main.async {
                     proxy.scrollTo(target, anchor: .top)
                 }
+            }
+            .onPreferenceChange(ParagraphPositionPreferenceKey.self) { positions in
+                updateVisibleParagraph(from: positions)
             }
         }
     }
@@ -233,6 +239,15 @@ struct ReaderView: View {
                         .fill(AppTheme.accent.opacity(background == .dark ? 0.22 : 0.12))
                 }
             }
+    }
+
+    private func paragraphPositionReader(index: Int) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: ParagraphPositionPreferenceKey.self,
+                value: [ParagraphPosition(index: index, minY: proxy.frame(in: .named("readerScroll")).minY)]
+            )
+        }
     }
 
     private var readerOverlay: some View {
@@ -808,6 +823,22 @@ struct ReaderView: View {
         UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
     }
 
+    private func updateVisibleParagraph(from positions: [ParagraphPosition]) {
+        guard readerMode == .scroll, !autoScrollEnabled, !positions.isEmpty else { return }
+        let topInset = CGFloat(pagePadding)
+        let visible = positions
+            .filter { $0.minY >= topInset }
+            .min { $0.minY < $1.minY }
+            ?? positions
+                .filter { $0.minY < topInset }
+                .max { $0.minY < $1.minY }
+        guard let index = visible?.index,
+              index != visibleParagraphIndex,
+              content.paragraphs.indices.contains(index) else { return }
+        visibleParagraphIndex = index
+        persistReadingPosition(paragraphIndexOverride: index)
+    }
+
     private func initialAutoScrollTarget() -> Int {
         guard let stored = appState.bookshelfStore.book(id: bookID),
               stored.currentChapterIndex == chapterIndex,
@@ -815,6 +846,7 @@ struct ReaderView: View {
             return 0
         }
         let safeParagraph = min(max(paragraphIndex, 0), max(content.paragraphs.count - 1, 0))
+        visibleParagraphIndex = safeParagraph
         switch readerMode {
         case .scroll:
             return safeParagraph
@@ -842,6 +874,19 @@ struct ReaderView: View {
             totalChapters: totalChapters ?? 0,
             paragraphIndex: paragraphIndex
         )
+    }
+}
+
+private struct ParagraphPosition: Equatable {
+    let index: Int
+    let minY: CGFloat
+}
+
+private struct ParagraphPositionPreferenceKey: PreferenceKey {
+    static var defaultValue: [ParagraphPosition] = []
+
+    static func reduce(value: inout [ParagraphPosition], nextValue: () -> [ParagraphPosition]) {
+        value.append(contentsOf: nextValue())
     }
 }
 
