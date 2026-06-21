@@ -244,4 +244,25 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "Title|One,Two")
     }
+
+    func testNativeStringListsSupportJavaListAliases() throws {
+        let html = """
+        <html><body>
+          <a>One</a>
+          <a>Two</a>
+        </body></html>
+        """
+        let script = """
+        var list = java.getStringList('a@text');
+        var elements = java.getElements('a').eachText();
+        list.get(1) + '|' + list.size() + '|' + list.isEmpty() + '|' + elements.get(0)
+        """
+
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html])
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "Two|2|false|One")
+    }
 }

@@ -185,6 +185,12 @@ final class JSCoreRuntime {
         function __defaultBaseUrl() {
           return String(typeof baseUrl === 'undefined' ? '' : baseUrl);
         }
+        function __asJavaList(list) {
+          list.get = function(index) { return list[Number(index)]; };
+          list.size = function() { return list.length; };
+          list.isEmpty = function() { return list.length === 0; };
+          return list;
+        }
         java.getString = function(input, rule) {
           if (arguments.length <= 1 || typeof rule === 'boolean') {
             return __native_getString(__defaultHtml(), String(input), __defaultBaseUrl());
@@ -198,7 +204,7 @@ final class JSCoreRuntime {
           var list = __native_getStringList(pageHtml, actualRule, __defaultBaseUrl());
           var out = [];
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
-          return out;
+          return __asJavaList(out);
         };
         function __bridgeString(value) {
           if (value === undefined || value === null) return '';
@@ -368,7 +374,7 @@ final class JSCoreRuntime {
               var list = __native_getStringList(String(html), String(selector) + '@text', String(baseUrlValue || ''));
               var out = [];
               for (var i = 0; i < list.length; i++) out.push(String(list[i]));
-              return out;
+              return __asJavaList(out);
             }
           };
         }
