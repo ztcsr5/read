@@ -7,6 +7,10 @@ struct ResponseTextDecoder {
            let text = decode(data: data, charset: charset) {
             return text
         }
+        if let charset = sniffCharset(from: data),
+           let text = decode(data: data, charset: charset) {
+            return text
+        }
         return String(data: data, encoding: .utf8)
             ?? decode(data: data, charset: "gb18030")
             ?? decode(data: data, charset: "gbk")
@@ -27,6 +31,21 @@ struct ResponseTextDecoder {
             }
         }
         return nil
+    }
+
+    private func sniffCharset(from data: Data) -> String? {
+        let prefix = data.prefix(4096)
+        let ascii = String(data: prefix, encoding: .ascii)
+            ?? String(data: prefix, encoding: .isoLatin1)
+            ?? ""
+        let lower = ascii.lowercased()
+        guard let range = lower.range(of: "charset") else { return nil }
+        let tail = lower[range.upperBound...].prefix(80)
+        guard let separator = tail.firstIndex(where: { $0 == "=" || $0 == ":" }) else { return nil }
+        let value = tail[tail.index(after: separator)...]
+            .drop(while: { $0 == "\"" || $0 == "'" || $0.isWhitespace })
+            .prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+        return value.isEmpty ? nil : String(value)
     }
 
     private func decode(data: Data, charset: String) -> String? {

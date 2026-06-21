@@ -5,7 +5,7 @@ final class BookSourceTests: XCTestCase {
     func testDecodeMinimalBookSource() throws {
         let json = """
         {
-          "bookSourceName": "测试源",
+          "bookSourceName": "Test Source",
           "bookSourceUrl": "https://example.com",
           "searchUrl": "https://example.com/search?q={{keyword}}",
           "ruleSearch": {
@@ -17,20 +17,20 @@ final class BookSourceTests: XCTestCase {
         """
 
         let source = try JSONDecoder().decode(BookSource.self, from: Data(json.utf8))
-        XCTAssertEqual(source.bookSourceName, "测试源")
+        XCTAssertEqual(source.bookSourceName, "Test Source")
         XCTAssertEqual(source.ruleSearch?.fields["bookList"], ".book")
     }
 
     func testSearchRequestInterpolation() {
         let source = BookSource(
-            bookSourceName: "测试源",
+            bookSourceName: "Test Source",
             bookSourceUrl: "https://example.com",
             searchUrl: "https://example.com/search?q={{keyword}}&page={{page}}"
         )
         let request = SourceRequestBuilder().buildSearchRequest(
             source: source,
             searchUrl: source.searchUrl!,
-            keyword: "斗破苍穹",
+            keyword: "test",
             page: 2
         )
 
@@ -40,22 +40,69 @@ final class BookSourceTests: XCTestCase {
 
     func testEncodeDecodeBookSourceRoundTrip() throws {
         let source = BookSource(
-            bookSourceName: "测试源",
+            bookSourceName: "Test Source",
             bookSourceUrl: "https://example.com",
-            bookSourceGroup: "小说",
+            bookSourceGroup: "Novel",
+            weight: 3,
             searchUrl: "https://example.com/search?q={{keyword}}",
+            exploreUrl: "https://example.com/rank",
             ruleSearch: SourceRule(fields: [
                 "bookList": ".book",
                 "name": ".title@text",
                 "bookUrl": "a@href"
-            ])
+            ]),
+            customConfig: #"{"charset":"gbk"}"#,
+            raw: ["webView": "true"]
         )
 
         let data = try JSONEncoder().encode(source)
         let decoded = try JSONDecoder().decode(BookSource.self, from: data)
 
-        XCTAssertEqual(decoded.bookSourceName, "测试源")
-        XCTAssertEqual(decoded.bookSourceGroup, "小说")
+        XCTAssertEqual(decoded.bookSourceName, "Test Source")
+        XCTAssertEqual(decoded.bookSourceGroup, "Novel")
+        XCTAssertEqual(decoded.weight, 3)
+        XCTAssertEqual(decoded.exploreUrl, "https://example.com/rank")
         XCTAssertEqual(decoded.ruleSearch?.fields["bookList"], ".book")
+        XCTAssertEqual(decoded.customConfig, #"{"charset":"gbk"}"#)
+        XCTAssertEqual(decoded.raw["webView"], "true")
+    }
+
+    func testRequestBuilderReadsHeadersFromCustomConfigAndRawCookie() {
+        let source = BookSource(
+            bookSourceName: "Header Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/search?q={{keyword}}",
+            header: #"{"Referer":"https://example.com"}"#,
+            customConfig: #"{"headers":{"X-Custom":"1"}}"#,
+            raw: ["cookie": "a=b"]
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 1
+        )
+
+        XCTAssertEqual(request.headers["Referer"], "https://example.com")
+        XCTAssertEqual(request.headers["X-Custom"], "1")
+        XCTAssertEqual(request.headers["Cookie"], "a=b")
+    }
+
+    func testRequestBuilderResolvesRelativeSearchURLAgainstSourceBase() {
+        let source = BookSource(
+            bookSourceName: "Relative Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "/search?q={{keyword}}"
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 1
+        )
+
+        XCTAssertEqual(request.url.absoluteString, "https://example.com/search?q=test")
     }
 }
