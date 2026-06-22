@@ -29,12 +29,23 @@ jobs:
 
       - name: Build
         run: |
+          set -o pipefail
           xcodebuild \
             -project SourceReadSwift.xcodeproj \
             -scheme SourceReadSwift \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee xcodebuild-build.log
+
+      - name: Summarize build failure
+        if: failure()
+        run: |
+          if [ -f xcodebuild-build.log ]; then
+            grep -E "error:|fatal error:" xcodebuild-build.log | tail -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            tail -n 220 xcodebuild-build.log
+          fi
 
       - name: Test
         run: |
@@ -50,4 +61,14 @@ jobs:
             -scheme SourceReadSwift \
             -destination "id=$DEVICE_ID" \
             CODE_SIGNING_ALLOWED=NO \
-            test
+            test 2>&1 | tee xcodebuild-test.log
+
+      - name: Summarize test failure
+        if: failure()
+        run: |
+          if [ -f xcodebuild-test.log ]; then
+            grep -E "error:|fatal error:|failed:" xcodebuild-test.log | tail -n 80 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            tail -n 220 xcodebuild-test.log
+          fi
