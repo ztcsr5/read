@@ -46,4 +46,45 @@ final class PurifyRuleStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.rules.map(\.pattern), ["B"])
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testImportsPresetPatternsAndBulkToggles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = PurifyRulePersistence(fileManager: .default, rootURL: root)
+        let store = PurifyRuleStore(persistence: persistence)
+        let preset = PurifyRulePreset.builtIn[0]
+
+        store.add(preset.patterns[0])
+        let imported = store.importPatterns(preset.patterns)
+
+        XCTAssertEqual(imported, preset.patterns.count - 1)
+        XCTAssertTrue(store.containsPattern(preset.patterns[0]))
+        XCTAssertEqual(store.enabledPatterns.count, preset.patterns.count)
+
+        store.setAllEnabled(false)
+        XCTAssertTrue(store.enabledPatterns.isEmpty)
+
+        let reloaded = PurifyRuleStore(persistence: persistence)
+        XCTAssertTrue(reloaded.enabledPatterns.isEmpty)
+
+        reloaded.setAllEnabled(true)
+        XCTAssertEqual(reloaded.enabledPatterns.count, preset.patterns.count)
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testPreviewUsesEnabledRulesAndIgnoresInvalidRegex() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = PurifyRulePersistence(fileManager: .default, rootURL: root)
+        let store = PurifyRuleStore(persistence: persistence)
+
+        store.importPatterns([
+            "广告.*##",
+            "[",
+            "保留##替换"
+        ])
+
+        XCTAssertEqual(store.preview(text: "正文\n广告内容\n保留"), "正文\n\n替换")
+        try? FileManager.default.removeItem(at: root)
+    }
 }

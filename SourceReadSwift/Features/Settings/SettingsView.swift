@@ -433,6 +433,8 @@ private struct PurifyRulesView: View {
     @EnvironmentObject private var appState: AppState
     @State private var newRule = ""
     @State private var importText = ""
+    @State private var selectedPresetIDs: Set<String> = []
+    @State private var previewText = "正文第一段\n请收藏本站，最新网址 example.com\n广告内容"
     @State private var message: String?
 
     var body: some View {
@@ -465,6 +467,89 @@ private struct PurifyRulesView: View {
                 }
             }
 
+            Section("推荐预设") {
+                Text("预设只作为起点导入，后续仍可逐条关闭或删除。导入会自动跳过已存在规则。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(PurifyRulePreset.builtIn) { preset in
+                    let isFullyImported = preset.patterns.allSatisfy {
+                        appState.purifyRuleStore.containsPattern($0)
+                    }
+                    Toggle(isOn: Binding(
+                        get: { selectedPresetIDs.contains(preset.id) },
+                        set: { isSelected in
+                            if isSelected {
+                                selectedPresetIDs.insert(preset.id)
+                            } else {
+                                selectedPresetIDs.remove(preset.id)
+                            }
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(preset.title)
+                                if isFullyImported {
+                                    Text("已导入")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Text(preset.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(isFullyImported)
+                }
+
+                Button("导入选中预设") {
+                    let imported = appState.purifyRuleStore.importPatterns(selectedPresetPatterns)
+                    selectedPresetIDs.removeAll()
+                    message = "已导入 \(imported) 条预设规则"
+                }
+                .disabled(selectedPresetPatterns.isEmpty)
+            }
+
+            Section("快速管理") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(appState.purifyRuleStore.enabledPatterns.count) / \(appState.purifyRuleStore.rules.count) 条启用")
+                        Text("关闭规则会保留内容，便于排查误删正文。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                HStack {
+                    Button("启用全部") {
+                        appState.purifyRuleStore.setAllEnabled(true)
+                    }
+                    .disabled(appState.purifyRuleStore.rules.isEmpty)
+
+                    Button("停用全部") {
+                        appState.purifyRuleStore.setAllEnabled(false)
+                    }
+                    .disabled(appState.purifyRuleStore.rules.isEmpty)
+                }
+            }
+
+            Section("规则测试") {
+                TextEditor(text: $previewText)
+                    .font(.system(.footnote, design: .monospaced))
+                    .frame(minHeight: 90)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("净化结果")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(appState.purifyRuleStore.preview(text: previewText))
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+            }
+
             Section("已启用规则") {
                 if appState.purifyRuleStore.rules.isEmpty {
                     Text("暂无净化规则。规则会在正文解析后执行，用于删除广告、站点尾巴或固定乱码片段。")
@@ -491,6 +576,13 @@ private struct PurifyRulesView: View {
             }
         }
         .navigationTitle("净化规则")
+    }
+
+    private var selectedPresetPatterns: [String] {
+        PurifyRulePreset.builtIn
+            .filter { selectedPresetIDs.contains($0.id) }
+            .flatMap(\.patterns)
+            .filter { !appState.purifyRuleStore.containsPattern($0) }
     }
 }
 

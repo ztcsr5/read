@@ -538,7 +538,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Diagnostics | Partial | Single-source deep test and selected-source batch search check exist; persisted health history and full batch detail/TOC/content still needed | Diagnostic fixture test | P7 |
 | Auto repair | Missing | Rule suggestion after parser parity | Golden suggestions | P7 |
 | Local web editor | Missing | Explicit start/stop local server + token | Local API tests | P8 |
-| Purify rules | Partial | Editor, persistence, duplicate-safe import, and content application exist; batch presets, diagnostics integration, and richer management still needed | Content purification + store persistence tests | P9 |
+| Purify rules | Partial | Editor, persistence, duplicate-safe import, built-in presets, preview testing, bulk enable/disable, and content application exist; diagnostics integration still needed | Content purification + store persistence tests | P9 |
 | Reading history/stats | Partial | Per-book history and aggregate stats screen exist; daily/weekly charts and richer session timeline still needed | Repository + UI smoke | P9 |
 | App Store hardening | Partial | Privacy, permissions, accessibility, release checks | Release checklist + CI | P10 |
 
@@ -862,12 +862,18 @@ Completed since the initial audit:
 - Improved reader bookmarks:
   - Bookmarks now store an optional paragraph index and snippet from the current visible/page paragraph.
   - Same-chapter bookmarks jump directly to the bookmarked paragraph; cross-chapter jumps pre-save the target paragraph so the next chapter restores near the bookmark.
+- Improved purify rule management:
+  - Settings now provides built-in presets for common ads, site-tail text, and noise cleanup.
+  - Preset import skips duplicates and remains editable after import.
+  - Rules can be bulk-enabled or bulk-disabled to diagnose false positives without deleting user content.
+  - A local preview field shows enabled-rule cleanup results before users risk applying broad rules to real chapters.
+  - Content cleanup now uses a shared safe regex evaluator, so invalid user regexes are ignored instead of breaking chapter rendering.
 
 Still not complete:
 
 - No macOS build has been run after this local milestone.
 - No IPA should be produced until this milestone is pushed and CI passes.
-- Reader page mode, cover mode, richer bookmarks UI, daily/weekly stats charts, purify diagnostics/presets, and full App Store hardening remain open.
+- Reader page mode, cover mode, richer bookmarks UI, daily/weekly stats charts, purify diagnostics integration, and full App Store hardening remain open.
 - Source compatibility still needs more JS helper APIs, WebView fallback verification, anti-crawl handling, persisted health history, and larger real-source fixture coverage.
 
 ## 9. Definition of done

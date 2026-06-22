@@ -114,33 +114,9 @@ struct ContentParser {
         for key in transformKeys {
             guard let value = rule?.fields[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !value.isEmpty else { continue }
-            output = applyTransform(value, to: output)
+            output = PurifyRuleEvaluator.apply(rule: value, to: output)
         }
-        for rule in globalPurifyRules {
-            output = applyTransform(rule, to: output)
-        }
-        return output
-    }
-
-    private func applyTransform(_ rule: String, to text: String) -> String {
-        var output = text
-        let lines = rule
-            .components(separatedBy: CharacterSet.newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let items = lines.isEmpty ? [rule] : lines
-        for item in items {
-            if item.contains("##") {
-                let parts = item.components(separatedBy: "##")
-                let pattern = parts.first ?? ""
-                let replacement = parts.dropFirst().first ?? ""
-                if !pattern.isEmpty {
-                    output = output.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
-                }
-            } else {
-                output = output.replacingOccurrences(of: item, with: "", options: .regularExpression)
-            }
-        }
+        output = PurifyRuleEvaluator.apply(rules: globalPurifyRules, to: output)
         return output
     }
 }

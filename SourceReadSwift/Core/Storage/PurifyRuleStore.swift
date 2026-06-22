@@ -12,6 +12,50 @@ struct PurifyRule: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+struct PurifyRulePreset: Identifiable, Hashable, Sendable {
+    var id: String
+    var title: String
+    var detail: String
+    var patterns: [String]
+
+    static let builtIn: [PurifyRulePreset] = [
+        PurifyRulePreset(
+            id: "ads",
+            title: "广告与推广",
+            detail: "删除常见章节内广告、推广、备用网址提示。",
+            patterns: [
+                ".*最新地址.*",
+                ".*备用网址.*",
+                ".*APP内阅读.*",
+                ".*下载.*app.*",
+                ".*关注.*公众号.*"
+            ]
+        ),
+        PurifyRulePreset(
+            id: "site-tail",
+            title: "站点尾巴",
+            detail: "删除站点在正文首尾追加的收藏、推荐、版权尾巴。",
+            patterns: [
+                "请收藏本站.*##",
+                "喜欢.*请大家收藏.*##",
+                "本章未完.*请点击下一页继续阅读.*##",
+                "章节错误.*请点击报错.*##"
+            ]
+        ),
+        PurifyRulePreset(
+            id: "noise",
+            title: "乱码与占位",
+            detail: "删除常见空白占位、重复分隔符和正文噪声。",
+            patterns: [
+                "\\u3000{4,}##\\n",
+                "[-—=]{6,}##",
+                "\\[.*?最新网址.*?\\]##",
+                "『.*?』##"
+            ]
+        )
+    ]
+}
+
 @MainActor
 final class PurifyRuleStore: ObservableObject {
     @Published private(set) var rules: [PurifyRule] = []
@@ -44,9 +88,14 @@ final class PurifyRuleStore: ObservableObject {
     }
 
     func importLines(_ text: String) -> Int {
+        let values = text.components(separatedBy: CharacterSet.newlines)
+        return importPatterns(values)
+    }
+
+    @discardableResult
+    func importPatterns(_ patterns: [String]) -> Int {
         var seen = Set(rules.map(\.pattern))
-        let values = text
-            .components(separatedBy: CharacterSet.newlines)
+        let values = patterns
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .filter { seen.insert($0).inserted }
@@ -57,10 +106,30 @@ final class PurifyRuleStore: ObservableObject {
         return values.count
     }
 
+    func containsPattern(_ pattern: String) -> Bool {
+        let clean = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        return rules.contains { $0.pattern == clean }
+    }
+
     func setEnabled(_ enabled: Bool, ruleID: String) {
         guard let index = rules.firstIndex(where: { $0.id == ruleID }) else { return }
         rules[index].enabled = enabled
         persist()
+    }
+
+    func setAllEnabled(_ enabled: Bool) {
+        guard rules.contains(where: { $0.enabled != enabled }) else { return }
+        rules = rules.map { rule in
+            var updated = rule
+            updated.enabled = enabled
+            return updated
+        }
+        persist()
+    }
+
+    func preview(text: String) -> String {
+        PurifyRuleEvaluator.apply(rules: enabledPatterns, to: text)
     }
 
     func remove(ruleID: String) {
