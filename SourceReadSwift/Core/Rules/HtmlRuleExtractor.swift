@@ -111,7 +111,7 @@ struct HtmlRuleExtractor {
     private func select(from root: Element, rule: String, baseUrl: URL? = nil) throws -> [Element] {
         let materializedRule = try applyDirectives(root: root, rule: rule, baseUrl: baseUrl)
         if materializedRule.isEmpty {
-            return []
+            return [root]
         }
         if let fallbackParts = RuleOperatorSplitter.split(materializedRule, separator: "||") {
             for part in fallbackParts {

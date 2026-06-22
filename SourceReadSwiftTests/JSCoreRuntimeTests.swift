@@ -110,7 +110,7 @@ final class JSCoreRuntimeTests: XCTestCase {
         guard case .success(let value) = result else {
             return XCTFail("expected success")
         }
-        XCTAssertEqual(value, "/b/1|\(title)")
+        XCTAssertEqual(value, "http://localhost/b/1|\(title)")
     }
 
     func testNativeGetStringSupportsEnhancedHtmlRules() throws {
