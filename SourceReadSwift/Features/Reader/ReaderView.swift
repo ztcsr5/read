@@ -292,9 +292,8 @@ struct ReaderView: View {
     }
 
     private var pagedReaderContent: some View {
-        let pages = pagedBlocks
         TabView(selection: $autoScrollTarget) {
-            ForEach(pages) { page in
+            ForEach(pagedBlocks) { page in
                 pageSurface {
                     ScrollView {
                         VStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
@@ -1047,15 +1046,15 @@ struct ReaderView: View {
     private func moveReaderTarget(to rawTarget: Int) {
         let target = min(max(rawTarget, 0), maximumReaderTarget)
         autoScrollTarget = target
-        let paragraphIndex: Int
+        let resolvedParagraphIndex: Int
         switch readerMode {
         case .scroll:
-            paragraphIndex = min(target, max(content.paragraphs.count - 1, 0))
+            resolvedParagraphIndex = min(target, max(content.paragraphs.count - 1, 0))
         case .pageTurn, .cover:
-            paragraphIndex = paragraphIndex(forPage: target)
+            resolvedParagraphIndex = paragraphIndex(forPage: target)
         }
-        visibleParagraphIndex = paragraphIndex
-        scheduleReadingPositionPersistence(paragraphIndex: paragraphIndex)
+        visibleParagraphIndex = resolvedParagraphIndex
+        scheduleReadingPositionPersistence(paragraphIndex: resolvedParagraphIndex)
     }
 
     private func toggleOverlay() {
