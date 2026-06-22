@@ -59,7 +59,8 @@ struct HtmlRuleExtractor {
             return interleave(lists).joined(separator: "\n")
         }
 
-        return try valuesForSingleRule(from: root, rule: selectedRule, baseUrl: baseUrl).first ?? ""
+        let values = try valuesForSingleRule(from: root, rule: selectedRule, baseUrl: baseUrl)
+        return values.joined(separator: "\n")
     }
 
     private func valuesForSingleRule(from root: Element, rule: String, baseUrl: URL?) throws -> [String] {
@@ -108,7 +109,7 @@ struct HtmlRuleExtractor {
         return value
     }
 
-    private func select(from root: Element, rule: String, baseUrl: URL? = nil) throws -> [Element] {
+    func select(from root: Element, rule: String, baseUrl: URL? = nil) throws -> [Element] {
         let materializedRule = try applyDirectives(root: root, rule: rule, baseUrl: baseUrl)
         if materializedRule.isEmpty {
             return [root]

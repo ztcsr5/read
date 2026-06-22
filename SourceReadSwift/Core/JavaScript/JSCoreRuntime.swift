@@ -209,8 +209,13 @@ final class JSCoreRuntime {
         }
         let removeElements: @convention(block) (String, String) -> String = { html, selector in
             do {
-                let doc = try SwiftSoup.parse(html)
-                try doc.select(selector).remove()
+                let defaultBaseUrl = URL(string: "http://localhost/")!
+                let doc = try SwiftSoup.parse(html, defaultBaseUrl.absoluteString)
+                let extractor = HtmlRuleExtractor()
+                let elements = try extractor.select(from: doc, rule: selector, baseUrl: defaultBaseUrl)
+                for el in elements {
+                    try el.remove()
+                }
                 return try doc.outerHtml()
             } catch {
                 return html
@@ -220,9 +225,10 @@ final class JSCoreRuntime {
             do {
                 let safeBaseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "http://localhost/" : baseUrl
                 let doc = try SwiftSoup.parse(html, safeBaseUrl)
-                let elements = try doc.select(selector)
+                let extractor = HtmlRuleExtractor()
+                let elements = try extractor.select(from: doc, rule: selector, baseUrl: URL(string: safeBaseUrl))
                 var parentsHtml: [String] = []
-                for el in elements.array() {
+                for el in elements {
                     var curr = el.parent()
                     while let p = curr {
                         parentsHtml.append(try p.outerHtml())

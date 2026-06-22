@@ -25,7 +25,7 @@ struct XPathRuleTranslator {
         var attribute = "text"
         if rule.hasSuffix("/text()") {
             rule.removeLast("/text()".count)
-            attribute = "all"
+            attribute = "text"
         } else if rule.hasSuffix("/@href") {
             rule.removeLast("/@href".count)
             attribute = "href"
