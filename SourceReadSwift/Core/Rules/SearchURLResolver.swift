@@ -80,7 +80,11 @@ struct SearchURLResolver {
 
     private func interpolateSourcePlaceholders(_ text: String, source: BookSource) -> String {
         sourceVariableMap(source: source).reduce(text) { output, item in
-            output.replacingOccurrences(of: "{{source.\(item.key)}}", with: item.value)
+            output
+                .replacingOccurrences(of: "{{source.\(item.key)}}", with: item.value)
+                .replacingOccurrences(of: "{source.\(item.key)}", with: item.value)
+                .replacingOccurrences(of: "{{\(item.key)}}", with: item.value)
+                .replacingOccurrences(of: "{\(item.key)}", with: item.value)
         }
     }
 

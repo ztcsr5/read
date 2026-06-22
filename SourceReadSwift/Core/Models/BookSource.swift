@@ -90,12 +90,8 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             raw.merge(persistedRaw, uniquingKeysWith: { _, new in new })
         }
         for key in container.allKeys {
-            if let value = try? container.decode(String.self, forKey: key) {
-                raw[key.stringValue] = value
-            } else if let value = try? container.decode(Bool.self, forKey: key) {
-                raw[key.stringValue] = String(value)
-            } else if let value = try? container.decode(Int.self, forKey: key) {
-                raw[key.stringValue] = String(value)
+            if let value = try? container.decode(LosslessJSONValue.self, forKey: key) {
+                raw[key.stringValue] = value.stringValue
             }
         }
 
@@ -133,11 +129,11 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
         }
 
         func rule(_ key: String) -> SourceRule? {
-            if let ruleText = string(key) {
-                return SourceRule(raw: ruleText)
-            }
             if let nested = try? container.decode(SourceRule.self, forKey: DynamicCodingKey(key)) {
                 return nested
+            }
+            if let ruleText = string(key) {
+                return SourceRule(raw: ruleText)
             }
             return nil
         }
@@ -233,8 +229,8 @@ struct SourceRule: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         var fields: [String: String] = [:]
         for key in container.allKeys {
-            if let value = try? container.decode(String.self, forKey: key) {
-                fields[key.stringValue] = value
+            if let value = try? container.decode(LosslessJSONValue.self, forKey: key) {
+                fields[key.stringValue] = value.stringValue
             }
         }
         self.init(fields: fields)
@@ -268,5 +264,82 @@ struct DynamicCodingKey: CodingKey {
     init?(intValue: Int) {
         self.stringValue = String(intValue)
         self.intValue = intValue
+    }
+}
+
+private enum LosslessJSONValue: Decodable {
+    case string(String)
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case object([String: LosslessJSONValue])
+    case array([LosslessJSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let single = try decoder.singleValueContainer()
+        if single.decodeNil() {
+            self = .null
+        } else if let value = try? single.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? single.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? single.decode(Int.self) {
+            self = .int(value)
+        } else if let value = try? single.decode(Double.self) {
+            self = .double(value)
+        } else if let value = try? single.decode([String: LosslessJSONValue].self) {
+            self = .object(value)
+        } else if let value = try? single.decode([LosslessJSONValue].self) {
+            self = .array(value)
+        } else {
+            self = .null
+        }
+    }
+
+    var stringValue: String {
+        switch self {
+        case .string(let value):
+            return value
+        case .bool(let value):
+            return value ? "true" : "false"
+        case .int(let value):
+            return String(value)
+        case .double(let value):
+            return String(value)
+        case .object, .array:
+            return jsonCompatibleString
+        case .null:
+            return ""
+        }
+    }
+
+    private var jsonCompatibleString: String {
+        let value = jsonCompatibleValue
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return text
+    }
+
+    private var jsonCompatibleValue: Any {
+        switch self {
+        case .string(let value):
+            return value
+        case .bool(let value):
+            return value
+        case .int(let value):
+            return value
+        case .double(let value):
+            return value
+        case .object(let value):
+            return value.mapValues(\.jsonCompatibleValue)
+        case .array(let value):
+            return value.map(\.jsonCompatibleValue)
+        case .null:
+            return NSNull()
+        }
     }
 }
