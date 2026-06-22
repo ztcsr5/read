@@ -267,7 +267,7 @@ struct DynamicCodingKey: CodingKey {
     }
 }
 
-private enum LosslessJSONValue: Decodable {
+private indirect enum LosslessJSONValue: Decodable {
     case string(String)
     case bool(Bool)
     case int(Int)
