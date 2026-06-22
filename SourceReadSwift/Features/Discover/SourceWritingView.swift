@@ -197,48 +197,59 @@ final class LightweightHTTPServer: ObservableObject {
         isStarting = true
         lastError = nil
         localIP = getLocalIPAddress() ?? "127.0.0.1"
-        do {
-            let parameters = NWParameters.tcp
-            let selectedPort = firstAvailablePort(preferred: port)
-            port = selectedPort
-            listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: selectedPort) ?? 8080)
-            
-            listener?.stateUpdateHandler = { [weak self] state in
-                guard let self = self else { return }
-                DispatchQueue.main.async {
-                    switch state {
-                    case .ready:
-                        self.isStarting = false
-                        self.isRunning = true
-                        self.localIP = getLocalIPAddress() ?? self.localIP
-                        self.localURLs = self.webURLs()
-                        self.log("服务器启动成功，正在监听端口 \(self.port)...")
-                    case .failed(let error):
-                        self.isStarting = false
-                        self.lastError = "服务器启动失败：\(error.localizedDescription)"
-                        self.log(self.lastError ?? "服务器启动失败")
-                        self.stop()
-                    case .cancelled:
-                        self.isStarting = false
-                        self.isRunning = false
-                        self.localURLs = []
-                        self.log("服务器已停止")
-                    default:
-                        break
-                    }
+        let parameters = NWParameters.tcp
+        let candidates = [port] + Array(UInt16(1122)...UInt16(1132)).filter { $0 != port }
+        var lastStartError: Error?
+        for candidate in candidates {
+            do {
+                listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: candidate) ?? 8080)
+                port = candidate
+                lastStartError = nil
+                break
+            } catch {
+                lastStartError = error
+                listener = nil
+            }
+        }
+
+        guard listener != nil else {
+            isStarting = false
+            lastError = "无法创建 Listener：\(lastStartError?.localizedDescription ?? "端口不可用")"
+            log(lastError ?? "无法创建 Listener")
+            return
+        }
+
+        listener?.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                switch state {
+                case .ready:
+                    self.isStarting = false
+                    self.isRunning = true
+                    self.localIP = getLocalIPAddress() ?? self.localIP
+                    self.localURLs = self.webURLs()
+                    self.log("服务器启动成功，正在监听端口 \(self.port)...")
+                case .failed(let error):
+                    self.isStarting = false
+                    self.lastError = "服务器启动失败：\(error.localizedDescription)"
+                    self.log(self.lastError ?? "服务器启动失败")
+                    self.stop()
+                case .cancelled:
+                    self.isStarting = false
+                    self.isRunning = false
+                    self.localURLs = []
+                    self.log("服务器已停止")
+                default:
+                    break
                 }
             }
-            
-            listener?.newConnectionHandler = { [weak self] connection in
-                self?.handleNewConnection(connection)
-            }
-            
-            listener?.start(queue: DispatchQueue.global(qos: .userInitiated))
-        } catch {
-            isStarting = false
-            lastError = "无法创建 Listener：\(error.localizedDescription)"
-            log(lastError ?? "无法创建 Listener")
         }
+
+        listener?.newConnectionHandler = { [weak self] connection in
+            self?.handleNewConnection(connection)
+        }
+
+        listener?.start(queue: DispatchQueue.global(qos: .userInitiated))
     }
     
     func stop() {
@@ -426,31 +437,6 @@ final class LightweightHTTPServer: ObservableObject {
         return urls
     }
 
-    private func firstAvailablePort(preferred: UInt16) -> UInt16 {
-        let candidates = [preferred] + Array(UInt16(1122)...UInt16(1132)).filter { $0 != preferred }
-        for candidate in candidates {
-            let socketFD = socket(AF_INET, SOCK_STREAM, 0)
-            guard socketFD >= 0 else { continue }
-            var value: Int32 = 1
-            setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &value, socklen_t(MemoryLayout<Int32>.size))
-            var addr = sockaddr_in()
-            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-            addr.sin_family = sa_family_t(AF_INET)
-            addr.sin_port = candidate.bigEndian
-            addr.sin_addr = in_addr(s_addr: INADDR_ANY.bigEndian)
-            let canBind = withUnsafePointer(to: &addr) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
-                }
-            }
-            close(socketFD)
-            if canBind {
-                return candidate
-            }
-        }
-        return preferred
-    }
-    
     private func getWebPageHtml() -> String {
         return """
         <!DOCTYPE html>
