@@ -1,7 +1,12 @@
 import SwiftUI
+import UIKit
 
 enum AppTheme {
-    static let background = Color(red: 0.96, green: 0.96, blue: 0.99)
+    static var background: Color {
+        UserDefaults.standard.string(forKey: "settings.themeMode") == "eyeCare"
+            ? Color(red: 0.90, green: 0.95, blue: 0.88)
+            : Color(.systemGroupedBackground)
+    }
     static let card = Color(.systemBackground)
     static let elevatedCard = Color(.secondarySystemGroupedBackground)
     static let accent = Color(red: 0.35, green: 0.31, blue: 0.86)
@@ -88,12 +93,25 @@ struct PodcastChevronSectionHeader: View {
             Text(title)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.primary)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+            if action != nil {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
         }
         .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 }
 

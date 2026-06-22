@@ -7,7 +7,7 @@ import Darwin
 
 struct SourceWritingView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var server = LightweightHTTPServer()
+    @ObservedObject var server: LightweightHTTPServer
     @State private var importStatus: String?
     @State private var importError: String?
 
@@ -159,9 +159,6 @@ struct SourceWritingView: View {
             // Auto start server
             server.start()
         }
-        .onDisappear {
-            server.stop()
-        }
     }
 }
 
@@ -303,14 +300,17 @@ final class LightweightHTTPServer: ObservableObject {
             let cleanBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
             
             if let onJSONReceived = onJSONReceived {
-                let result = onJSONReceived(cleanBody)
-                switch result {
-                case .success(let msg):
-                    self.log("导入成功：\(msg)")
-                    sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: msg)
-                case .failure(let err):
-                    self.log("导入失败：\(err.localizedDescription)")
-                    sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "text/plain; charset=utf-8", body: err.localizedDescription)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let result = onJSONReceived(cleanBody)
+                    switch result {
+                    case .success(let msg):
+                        self.log("导入成功：\(msg)")
+                        self.sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: msg)
+                    case .failure(let err):
+                        self.log("导入失败：\(err.localizedDescription)")
+                        self.sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "text/plain; charset=utf-8", body: err.localizedDescription)
+                    }
                 }
             } else {
                 sendResponse(connection: connection, statusCode: 500, statusText: "Internal Error", contentType: "text/plain; charset=utf-8", body: "No import handler registered")

@@ -33,6 +33,7 @@ targets:
       path: SourceReadSwift/App/Info.plist
       properties:
         CFBundleDisplayName: SourceReadSwift
+        CADisableMinimumFrameDurationOnPhone: true
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

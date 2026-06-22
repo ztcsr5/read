@@ -4,21 +4,23 @@ struct RootTabView: View {
     @State private var selectedTab = 0
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                BookshelfView()
-                    .tag(0)
+        TabView(selection: $selectedTab) {
+            BookshelfView()
+                .tag(0)
 
-                DiscoverView()
-                    .tag(1)
+            DiscoverView()
+                .tag(1)
 
-                SettingsView()
-                    .tag(2)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea(edges: .bottom)
-
+            SettingsView()
+                .tag(2)
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             customTabBar
+        }
+        .simultaneousGesture(edgeTabSwipeGesture)
+        .onChange(of: selectedTab) { _ in
+            dismissKeyboard()
         }
     }
 
@@ -36,7 +38,7 @@ struct RootTabView: View {
             }
             .padding(.horizontal, 40)
             .padding(.top, 10)
-            .padding(.bottom, safeAreaBottomInset > 0 ? safeAreaBottomInset - 4 : 10)
+            .padding(.bottom, 8)
             .background(.ultraThinMaterial)
         }
     }
@@ -64,11 +66,32 @@ struct RootTabView: View {
         .buttonStyle(.plain)
     }
 
-    private var safeAreaBottomInset: CGFloat {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first else {
-            return 0
-        }
-        return window.safeAreaInsets.bottom
+    private var edgeTabSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 36, coordinateSpace: .local)
+            .onEnded { value in
+                let width = UIScreen.main.bounds.width
+                let isLeadingEdge = value.startLocation.x <= 28
+                let isTrailingEdge = value.startLocation.x >= width - 28
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > 72, abs(horizontal) > abs(vertical) * 1.4 else { return }
+
+                if horizontal < 0, isLeadingEdge, selectedTab < 2 {
+                    selectedTab += 1
+                } else if horizontal > 0, isTrailingEdge, selectedTab > 0 {
+                    selectedTab -= 1
+                }
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+            }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 }

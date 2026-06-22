@@ -108,6 +108,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("设置")
             .onAppear {
                 updateCacheSummary()
@@ -132,7 +133,7 @@ struct SettingsView: View {
     }
 }
 
-private enum ThemeMode: String, CaseIterable, Identifiable {
+enum ThemeMode: String, CaseIterable, Identifiable {
     case system
     case light
     case dark
@@ -146,6 +147,14 @@ private enum ThemeMode: String, CaseIterable, Identifiable {
         case .light: return "浅色模式"
         case .dark: return "深色模式"
         case .eyeCare: return "护眼模式"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light, .eyeCare: return .light
+        case .dark: return .dark
         }
     }
 }
@@ -592,6 +601,13 @@ private struct PurifyRulesView: View {
                         }
                     }
                 }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") { dismissKeyboard() }
             }
         }
         .navigationTitle("净化规则")

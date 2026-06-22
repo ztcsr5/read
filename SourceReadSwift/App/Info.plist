@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>SourceReadSwift</string>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -15,4 +17,3 @@
 	<dict/>
 </dict>
 </plist>
-

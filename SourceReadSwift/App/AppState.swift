@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
     let purifyRuleStore: PurifyRuleStore
     let chapterContentCacheStore: ChapterContentCacheStore
     let sourceHealthStore: SourceHealthStore
+    let sourceWritingServer: LightweightHTTPServer
     private let injectedEngine: SourceEngine?
     private var cancellables: Set<AnyCancellable> = []
     lazy var engine: SourceEngine = {
@@ -43,6 +44,7 @@ final class AppState: ObservableObject {
         self.purifyRuleStore = purifyRuleStore ?? PurifyRuleStore()
         self.chapterContentCacheStore = chapterContentCacheStore ?? ChapterContentCacheStore()
         self.sourceHealthStore = sourceHealthStore ?? SourceHealthStore()
+        self.sourceWritingServer = LightweightHTTPServer()
         self.injectedEngine = engine
         bindChildStores()
     }

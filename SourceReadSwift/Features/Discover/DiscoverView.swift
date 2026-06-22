@@ -261,7 +261,7 @@ struct DiscoverView: View {
     private var sourceWritingTab: some View {
         VStack(alignment: .leading, spacing: 18) {
             NavigationLink {
-                SourceWritingView()
+                SourceWritingView(server: appState.sourceWritingServer)
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "globe")
