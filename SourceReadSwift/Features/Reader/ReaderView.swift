@@ -11,6 +11,7 @@ struct ReaderView: View {
     var chapters: [BookChapter] = []
     var statusMessage: String?
     var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
+    var onRequestSourceSwitch: (() -> Void)?
     var onSelectChapter: ((BookChapter) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -19,6 +20,9 @@ struct ReaderView: View {
     @State private var showChapterList = false
     @State private var showBookmarks = false
     @State private var settingsTab = 0
+    @State private var tocTab = 0
+    @State private var tocQuery = ""
+    @State private var tocReversed = false
     @State private var autoScrollEnabled = false
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
@@ -85,20 +89,24 @@ struct ReaderView: View {
     }
 
     private var currentBookmarkParagraphIndex: Int {
-        switch readerMode {
-        case .scroll:
-            return min(max(visibleParagraphIndex, 0), max(content.paragraphs.count - 1, 0))
-        case .pageTurn, .cover:
-            return min(max(autoScrollTarget - 1, 0), max(content.paragraphs.count - 1, 0))
-        }
+        currentParagraphIndexForPersistence()
     }
 
     private var progressTitle: String {
-        guard let totalChapters, totalChapters > 0 else {
-            return "第 \(chapterIndex + 1) 章"
+        var parts: [String] = []
+        if let totalChapters, totalChapters > 0 {
+            let percentage = Int((Double(chapterIndex + 1) / Double(totalChapters) * 100).rounded())
+            parts.append("第 \(chapterIndex + 1) / \(totalChapters) 章")
+            parts.append("\(percentage)%")
+        } else {
+            parts.append("第 \(chapterIndex + 1) 章")
         }
-        let percentage = Int((Double(chapterIndex + 1) / Double(totalChapters) * 100).rounded())
-        return "第 \(chapterIndex + 1) / \(totalChapters) 章 · \(percentage)%"
+        if readerMode != .scroll {
+            let pageCount = max(pagedBlocks.count, 1)
+            let page = min(max(autoScrollTarget + 1, 1), pageCount)
+            parts.append("页 \(page)/\(pageCount)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var maximumReaderTarget: Int {
@@ -106,8 +114,25 @@ struct ReaderView: View {
         case .scroll:
             return max(content.paragraphs.count - 1, 0)
         case .pageTurn, .cover:
-            return max(content.paragraphs.count, 0)
+            return max(pagedBlocks.count - 1, 0)
         }
+    }
+
+    private var filteredChapters: [BookChapter] {
+        let query = tocQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var result = chapters.filter { chapter in
+            query.isEmpty
+                || chapter.title.lowercased().contains(query)
+                || "\(chapter.index + 1)".contains(query)
+        }
+        if tocReversed {
+            result.reverse()
+        }
+        return result
+    }
+
+    private var pagedBlocks: [ReaderPageBlock] {
+        buildReaderPageBlocks()
     }
 
     private var readerLayoutKey: String {
@@ -177,7 +202,7 @@ struct ReaderView: View {
         }
         .onDisappear {
             positionPersistTask?.cancel()
-            persistReadingPosition(paragraphIndexOverride: visibleParagraphIndex)
+            persistReadingPosition(paragraphIndexOverride: currentParagraphIndexForPersistence())
             stopAutoScroll()
             speechController.stop()
             restoreIdleTimerPreference()
@@ -267,35 +292,38 @@ struct ReaderView: View {
     }
 
     private var pagedReaderContent: some View {
+        let pages = pagedBlocks
         TabView(selection: $autoScrollTarget) {
-            pageSurface {
-                VStack(alignment: .leading, spacing: 18) {
-                Text(content.title)
-                    .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
-                    .foregroundStyle(background.textColor)
-                Text("第 \(chapterIndex + 1) 章")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                }
-            }
-            .tag(0)
-
-            ForEach(content.paragraphs.indices, id: \.self) { index in
+            ForEach(pages) { page in
                 pageSurface {
                     ScrollView {
-                        paragraphText(content.paragraphs[index], index: index)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
+                            if page.includesTitle {
+                                Text(content.title)
+                                    .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
+                                    .foregroundStyle(background.textColor)
+                                    .padding(.bottom, CGFloat(titleSpacing))
+                                    .textSelection(.enabled)
+                            }
+
+                            ForEach(page.paragraphs, id: \.index) { entry in
+                                paragraphText(entry.text, index: entry.index)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .tag(index + 1)
+                .tag(page.id)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .animation(readerMode == .cover ? .easeInOut(duration: 0.2) : nil, value: autoScrollTarget)
+        .onChange(of: autoScrollTarget) { target in
+            updatePagedVisibleParagraph(pageIndex: target)
+        }
         .onChange(of: speechController.currentParagraphIndex) { target in
             guard target >= 0 else { return }
-            autoScrollTarget = target + 1
+            autoScrollTarget = pageIndex(containingParagraph: target)
         }
     }
 
@@ -329,6 +357,7 @@ struct ReaderView: View {
                         .fill(AppTheme.accent.opacity(background == .dark ? 0.22 : 0.12))
                 }
             }
+            .textSelection(.enabled)
     }
 
     private func paragraphPositionReader(index: Int) -> some View {
@@ -380,6 +409,14 @@ struct ReaderView: View {
                 extraToolbarActions()
 
                 Button {
+                    toggleCurrentBookmark(openList: false)
+                } label: {
+                    Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+
+                Button {
                     showSettings = true
                 } label: {
                     Image(systemName: "ellipsis")
@@ -414,13 +451,19 @@ struct ReaderView: View {
                 HStack {
 
                     toolButton(icon: "list.bullet", title: "目录") {
+                        tocTab = 0
                         showChapterList = true
                         showSettings = false
                     }
-                    toolButton(icon: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark", title: "书签") {
-                        toggleCurrentBookmark()
-                        showSettings = false
+
+                    if let onRequestSourceSwitch {
+                        toolButton(icon: "arrow.triangle.2.circlepath", title: "换源") {
+                            showOverlay = false
+                            showSettings = false
+                            onRequestSourceSwitch()
+                        }
                     }
+
                     toolButton(icon: speechController.isSpeaking ? "speaker.slash.fill" : "speaker.wave.2", title: speechController.isSpeaking ? "暂停" : "朗读") {
                         toggleSpeech()
                         showSettings = false
@@ -604,7 +647,7 @@ struct ReaderView: View {
             Text("底部留白")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Slider(value: $footerHeight, in: 80...180, step: 10)
+            Slider(value: $footerHeight, in: 48...180, step: 8)
         }
     }
 
@@ -728,26 +771,77 @@ struct ReaderView: View {
 
     private var chapterListSheet: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+                Picker("目录", selection: $tocTab) {
+                    Text("目录").tag(0)
+                    Text("书签").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 10)
+
+                if tocTab == 0 {
+                    tocList
+                } else {
+                    bookmarkList(includeAddButton: true)
+                }
+            }
+            .navigationTitle(tocTab == 0 ? "目录" : "书签")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if tocTab == 0 {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(tocReversed ? "倒序" : "顺序") {
+                            tocReversed.toggle()
+                        }
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") {
+                        showChapterList = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var tocList: some View {
+        VStack(spacing: 8) {
+            TextField("筛选章节名或序号", text: $tocQuery)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal)
+                .padding(.top, 10)
+
             List {
                 if chapters.isEmpty {
                     Text("当前章节没有可切换目录")
                         .foregroundStyle(.secondary)
+                } else if filteredChapters.isEmpty {
+                    Text("没有匹配章节")
+                        .foregroundStyle(.secondary)
                 } else {
-                    ForEach(chapters) { chapter in
+                    ForEach(filteredChapters) { chapter in
                         Button {
                             showChapterList = false
                             showOverlay = false
                             onSelectChapter?(chapter)
                         } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(chapter.title)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-                                    Text("第 \(chapter.index + 1) 章")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                            HStack(spacing: 12) {
+                                Text("\(chapter.index + 1)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(chapter.index == chapterIndex ? AppTheme.accent : .secondary)
+                                    .frame(width: 42, alignment: .leading)
+
+                                Text(chapter.title)
+                                    .foregroundStyle(chapter.index == chapterIndex ? AppTheme.accent : .primary)
+                                    .fontWeight(chapter.index == chapterIndex ? .semibold : .regular)
+                                    .lineLimit(1)
+
                                 Spacer()
                                 if chapter.index == chapterIndex {
                                     Image(systemName: "checkmark.circle.fill")
@@ -759,95 +853,13 @@ struct ReaderView: View {
                     }
                 }
             }
-            .navigationTitle("目录")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") {
-                        showChapterList = false
-                    }
-                }
-            }
+            .listStyle(.plain)
         }
-        .presentationDetents([.medium, .large])
     }
 
     private var bookmarkSheet: some View {
         NavigationStack {
-            List {
-                Button {
-                    toggleCurrentBookmark()
-                } label: {
-                    Label(
-                        isCurrentChapterBookmarked ? "取消当前段落书签" : "加入当前段落书签",
-                        systemImage: isCurrentChapterBookmarked ? "bookmark.slash" : "bookmark"
-                    )
-                }
-
-                if bookmarks.isEmpty {
-                    Text("暂无书签")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Section {
-                        HStack {
-                            Label("\(bookmarks.count) 个书签", systemImage: "bookmark")
-                            Spacer()
-                            Text("本章 \(currentChapterBookmarkCount)")
-                                .foregroundStyle(.secondary)
-                        }
-                        .font(.caption.weight(.semibold))
-                    }
-
-                    Section("我的书签") {
-                        ForEach(sortedBookmarks) { bookmark in
-                            Button {
-                                jumpToBookmark(bookmark)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(bookmark.chapterTitle)
-                                            .font(.headline)
-                                            .foregroundStyle(.primary)
-                                        HStack(spacing: 6) {
-                                            Text(bookmarkLocationText(bookmark))
-                                            Text(bookmark.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                            if isCurrentBookmark(bookmark) {
-                                                Text("当前")
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(AppTheme.accent.opacity(0.12))
-                                                    .foregroundStyle(AppTheme.accent)
-                                                    .clipShape(Capsule())
-                                            }
-                                        }
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(isCurrentBookmark(bookmark) ? AppTheme.accent : .secondary)
-                                        Text(bookmark.snippet)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                    Spacer()
-                                    if bookmark.chapterIndex == chapterIndex {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(AppTheme.accent)
-                                    } else {
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption.weight(.bold))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                            }
-                            .disabled(bookmark.chapterIndex != chapterIndex && onSelectChapter == nil)
-                            .swipeActions {
-                                Button("删除", role: .destructive) {
-                                    appState.bookshelfStore.removeBookmark(bookID: bookID, bookmarkID: bookmark.id)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            bookmarkList(includeAddButton: true)
             .navigationTitle("书签")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -859,6 +871,86 @@ struct ReaderView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func bookmarkList(includeAddButton: Bool) -> some View {
+        List {
+            if includeAddButton {
+                Button {
+                    toggleCurrentBookmark(openList: false)
+                } label: {
+                    Label(
+                        isCurrentChapterBookmarked ? "取消当前段落书签" : "加入当前段落书签",
+                        systemImage: isCurrentChapterBookmarked ? "bookmark.slash" : "bookmark"
+                    )
+                }
+            }
+
+            if bookmarks.isEmpty {
+                Text("暂无书签")
+                    .foregroundStyle(.secondary)
+            } else {
+                Section {
+                    HStack {
+                        Label("\(bookmarks.count) 个书签", systemImage: "bookmark")
+                        Spacer()
+                        Text("本章 \(currentChapterBookmarkCount)")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+
+                Section("我的书签") {
+                    ForEach(sortedBookmarks) { bookmark in
+                        Button {
+                            jumpToBookmark(bookmark)
+                        } label: {
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(bookmark.chapterTitle)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    HStack(spacing: 6) {
+                                        Text(bookmarkLocationText(bookmark))
+                                        Text(bookmark.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                        if isCurrentBookmark(bookmark) {
+                                            Text("当前")
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(AppTheme.accent.opacity(0.12))
+                                                .foregroundStyle(AppTheme.accent)
+                                                .clipShape(Capsule())
+                                        }
+                                    }
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(isCurrentBookmark(bookmark) ? AppTheme.accent : .secondary)
+                                    Text(bookmark.snippet)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                if bookmark.chapterIndex == chapterIndex {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(AppTheme.accent)
+                                } else {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .disabled(bookmark.chapterIndex != chapterIndex && onSelectChapter == nil)
+                        .swipeActions {
+                            Button("删除", role: .destructive) {
+                                appState.bookshelfStore.removeBookmark(bookID: bookID, bookmarkID: bookmark.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
     }
 
     private func bookmarkLocationText(_ bookmark: ReaderBookmark) -> String {
@@ -902,7 +994,7 @@ struct ReaderView: View {
             autoScrollTarget = safeIndex
             paragraphJumpRequest = ParagraphJumpRequest(index: safeIndex)
         case .pageTurn, .cover:
-            autoScrollTarget = min(safeIndex + 1, maximumReaderTarget)
+            autoScrollTarget = pageIndex(containingParagraph: safeIndex)
         }
         persistReadingPosition(paragraphIndexOverride: safeIndex)
     }
@@ -960,7 +1052,7 @@ struct ReaderView: View {
         case .scroll:
             paragraphIndex = min(target, max(content.paragraphs.count - 1, 0))
         case .pageTurn, .cover:
-            paragraphIndex = min(max(target - 1, 0), max(content.paragraphs.count - 1, 0))
+            paragraphIndex = paragraphIndex(forPage: target)
         }
         visibleParagraphIndex = paragraphIndex
         scheduleReadingPositionPersistence(paragraphIndex: paragraphIndex)
@@ -985,7 +1077,7 @@ struct ReaderView: View {
         tapZonesRawValue = ReaderTapAction.encode(actions)
     }
 
-    private func toggleCurrentBookmark() {
+    private func toggleCurrentBookmark(openList: Bool = true) {
         let paragraphIndex = currentBookmarkParagraphIndex
         let snippet = content.paragraphs.indices.contains(paragraphIndex)
             ? content.paragraphs[paragraphIndex]
@@ -997,7 +1089,9 @@ struct ReaderView: View {
             paragraphIndex: paragraphIndex,
             snippet: snippet
         )
-        showBookmarks = true
+        if openList {
+            showBookmarks = true
+        }
     }
 
     private func toggleSpeech() {
@@ -1021,14 +1115,14 @@ struct ReaderView: View {
     private func startAutoScroll() {
         stopAutoScroll()
         autoScrollEnabled = true
-        autoScrollTarget = 0
+        autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
         let delay = autoScrollDelay
-        let maxIndex = maximumReaderTarget
         autoScrollTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 await MainActor.run {
                     guard autoScrollEnabled else { return }
+                    let maxIndex = maximumReaderTarget
                     if autoScrollTarget >= maxIndex {
                         stopAutoScroll()
                     } else {
@@ -1081,7 +1175,7 @@ struct ReaderView: View {
         case .scroll:
             return safeParagraph
         case .pageTurn, .cover:
-            return min(safeParagraph + 1, maximumReaderTarget)
+            return pageIndex(containingParagraph: safeParagraph)
         }
     }
 
@@ -1090,12 +1184,7 @@ struct ReaderView: View {
         if let paragraphIndexOverride {
             paragraphIndex = min(max(paragraphIndexOverride, 0), max(content.paragraphs.count - 1, 0))
         } else {
-            switch readerMode {
-            case .scroll:
-                paragraphIndex = min(max(autoScrollTarget, 0), max(content.paragraphs.count - 1, 0))
-            case .pageTurn, .cover:
-                paragraphIndex = min(max(autoScrollTarget - 1, 0), max(content.paragraphs.count - 1, 0))
-            }
+            paragraphIndex = currentParagraphIndexForPersistence()
         }
         appState.bookshelfStore.updateReadingProgress(
             bookID: bookID,
@@ -1115,6 +1204,102 @@ struct ReaderView: View {
             positionPersistTask = nil
         }
     }
+
+    private func currentParagraphIndexForPersistence() -> Int {
+        guard !content.paragraphs.isEmpty else { return 0 }
+        switch readerMode {
+        case .scroll:
+            return min(max(visibleParagraphIndex, 0), content.paragraphs.count - 1)
+        case .pageTurn, .cover:
+            return paragraphIndex(forPage: autoScrollTarget)
+        }
+    }
+
+    private func updatePagedVisibleParagraph(pageIndex: Int) {
+        guard readerMode != .scroll, !content.paragraphs.isEmpty else { return }
+        let paragraphIndex = paragraphIndex(forPage: pageIndex)
+        guard paragraphIndex != visibleParagraphIndex else { return }
+        visibleParagraphIndex = paragraphIndex
+        scheduleReadingPositionPersistence(paragraphIndex: paragraphIndex)
+    }
+
+    private func paragraphIndex(forPage pageIndex: Int) -> Int {
+        guard !content.paragraphs.isEmpty else { return 0 }
+        let pages = pagedBlocks
+        guard !pages.isEmpty else { return 0 }
+        let safePage = min(max(pageIndex, 0), pages.count - 1)
+        return pages[safePage].firstParagraphIndex ?? 0
+    }
+
+    private func pageIndex(containingParagraph paragraphIndex: Int) -> Int {
+        let pages = pagedBlocks
+        guard !pages.isEmpty else { return 0 }
+        let safeParagraph = min(max(paragraphIndex, 0), max(content.paragraphs.count - 1, 0))
+        if let match = pages.first(where: { page in
+            guard let first = page.firstParagraphIndex, let last = page.lastParagraphIndex else {
+                return false
+            }
+            return safeParagraph >= first && safeParagraph <= last
+        }) {
+            return match.id
+        }
+        return min(max(safeParagraph, 0), pages.count - 1)
+    }
+
+    private func buildReaderPageBlocks() -> [ReaderPageBlock] {
+        guard !content.paragraphs.isEmpty else {
+            return [ReaderPageBlock(id: 0, includesTitle: true, paragraphs: [])]
+        }
+
+        let screen = UIScreen.main.bounds.size
+        let availableWidth = max(screen.width - pagePadding * 2, 260)
+        let availableHeight = max(screen.height - pagePadding * 2 - footerHeight - 70, 360)
+        let charWidth = max(fontSize * 0.56 + letterSpacing, 7)
+        let lineHeight = max(fontSize + lineSpacing, 18)
+        let charsPerLine = max(Int(availableWidth / charWidth), 10)
+        let linesPerPage = max(Int(availableHeight / lineHeight), 8)
+        let pageBudget = max(charsPerLine * linesPerPage, 220)
+        let paragraphBreakCost = max(charsPerLine / 2, 10)
+        let titleCost = max(charsPerLine * 3, 90)
+
+        var pages: [ReaderPageBlock] = []
+        var currentEntries: [ReaderPageEntry] = []
+        var currentCost = titleCost
+        var currentIncludesTitle = true
+
+        func flush() {
+            pages.append(
+                ReaderPageBlock(
+                    id: pages.count,
+                    includesTitle: currentIncludesTitle,
+                    paragraphs: currentEntries
+                )
+            )
+            currentEntries = []
+            currentCost = 0
+            currentIncludesTitle = false
+        }
+
+        for (index, paragraph) in content.paragraphs.enumerated() {
+            let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            let charCount = max(trimmed.count, 1)
+            let lineCount = max(Int(ceil(Double(charCount) / Double(charsPerLine))), 1)
+            let cost = lineCount * charsPerLine + paragraphBreakCost
+            if !currentEntries.isEmpty && currentCost + cost > pageBudget {
+                flush()
+            }
+            currentEntries.append(ReaderPageEntry(index: index, text: paragraph))
+            currentCost += cost
+            if cost >= pageBudget, !currentEntries.isEmpty {
+                flush()
+            }
+        }
+
+        if currentIncludesTitle || !currentEntries.isEmpty {
+            flush()
+        }
+        return pages
+    }
 }
 
 private struct ParagraphPosition: Equatable {
@@ -1133,6 +1318,25 @@ private struct ParagraphPositionPreferenceKey: PreferenceKey {
 private struct ParagraphJumpRequest: Equatable {
     let id = UUID()
     let index: Int
+}
+
+private struct ReaderPageEntry: Equatable {
+    let index: Int
+    let text: String
+}
+
+private struct ReaderPageBlock: Identifiable, Equatable {
+    let id: Int
+    let includesTitle: Bool
+    let paragraphs: [ReaderPageEntry]
+
+    var firstParagraphIndex: Int? {
+        paragraphs.first?.index
+    }
+
+    var lastParagraphIndex: Int? {
+        paragraphs.last?.index
+    }
 }
 
 final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {

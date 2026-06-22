@@ -150,6 +150,7 @@ struct ChapterLoadingView: View {
     var totalChapters: Int? = nil
     var chapters: [BookChapter] = []
     var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
+    var onRequestSourceSwitch: (() -> Void)?
     @State private var content: ChapterContent?
     @State private var currentChapter: BookChapter?
     @State private var errorMessage: String?
@@ -171,6 +172,7 @@ struct ChapterLoadingView: View {
                     chapters: chapters,
                     statusMessage: isUsingStaleCache ? "网络加载失败，正在显示本地缓存副本" : nil,
                     extraToolbarActions: extraToolbarActions,
+                    onRequestSourceSwitch: onRequestSourceSwitch,
                     onSelectChapter: { selected in
                         currentChapter = selected
                         content = nil
