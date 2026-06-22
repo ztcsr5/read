@@ -531,7 +531,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Reader scroll mode | Partial | Infinite load, progress save, overlay | Manual + state tests | P6 |
 | Reader page/cover modes | Partial | Basic page/cover mode entry exists; true text pagination still needs refinement | UI smoke | P6 |
 | Reader settings | Partial | Typography/background/mode/tap-zone settings exist; full Flutter settings surface still needs completion | Settings persistence test | P6 |
-| Bookmarks | Partial | Add/remove/list/jump exists with paragraph-level position; needs UI polish and device smoke | XCTest + UI smoke | P6 |
+| Bookmarks | Partial | Add/remove/list/jump exists with paragraph-level position, sorted list metadata, and current-position highlighting; needs device smoke | XCTest + UI smoke | P6 |
 | Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
 | TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
 | Chapter cache/preload | Partial | Online chapter content cache and next-chapter preload exist; cache count/size/expiry exist and need deeper device QA | Cache store tests + reader smoke | P6 |
@@ -863,6 +863,7 @@ Completed since the initial audit:
 - Improved reader bookmarks:
   - Bookmarks now store an optional paragraph index and snippet from the current visible/page paragraph.
   - Same-chapter bookmarks jump directly to the bookmarked paragraph; cross-chapter jumps pre-save the target paragraph so the next chapter restores near the bookmark.
+  - The bookmark sheet now sorts by chapter/paragraph, shows total/current-chapter counts, displays saved time, and highlights the current paragraph bookmark.
 - Improved purify rule management:
   - Settings now provides built-in presets for common ads, site-tail text, and noise cleanup.
   - Preset import skips duplicates and remains editable after import.

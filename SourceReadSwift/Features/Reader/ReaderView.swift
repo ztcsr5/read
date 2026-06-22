@@ -60,6 +60,22 @@ struct ReaderView: View {
         appState.bookshelfStore.book(id: bookID)?.bookmarks ?? []
     }
 
+    private var sortedBookmarks: [ReaderBookmark] {
+        bookmarks.sorted { lhs, rhs in
+            if lhs.chapterIndex != rhs.chapterIndex {
+                return lhs.chapterIndex < rhs.chapterIndex
+            }
+            if lhs.paragraphIndex != rhs.paragraphIndex {
+                return (lhs.paragraphIndex ?? -1) < (rhs.paragraphIndex ?? -1)
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    private var currentChapterBookmarkCount: Int {
+        bookmarks.filter { $0.chapterIndex == chapterIndex }.count
+    }
+
     private var isCurrentChapterBookmarked: Bool {
         appState.bookshelfStore.isBookmarked(
             bookID: bookID,
@@ -721,8 +737,18 @@ struct ReaderView: View {
                     Text("暂无书签")
                         .foregroundStyle(.secondary)
                 } else {
+                    Section {
+                        HStack {
+                            Label("\(bookmarks.count) 个书签", systemImage: "bookmark")
+                            Spacer()
+                            Text("本章 \(currentChapterBookmarkCount)")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+
                     Section("我的书签") {
-                        ForEach(bookmarks) { bookmark in
+                        ForEach(sortedBookmarks) { bookmark in
                             Button {
                                 jumpToBookmark(bookmark)
                             } label: {
@@ -731,11 +757,20 @@ struct ReaderView: View {
                                         Text(bookmark.chapterTitle)
                                             .font(.headline)
                                             .foregroundStyle(.primary)
-                                        if let paragraphIndex = bookmark.paragraphIndex {
-                                            Text("第 \(paragraphIndex + 1) 段")
-                                                .font(.caption2.weight(.semibold))
-                                                .foregroundStyle(AppTheme.accent)
+                                        HStack(spacing: 6) {
+                                            Text(bookmarkLocationText(bookmark))
+                                            Text(bookmark.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                            if isCurrentBookmark(bookmark) {
+                                                Text("当前")
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(AppTheme.accent.opacity(0.12))
+                                                    .foregroundStyle(AppTheme.accent)
+                                                    .clipShape(Capsule())
+                                            }
                                         }
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(isCurrentBookmark(bookmark) ? AppTheme.accent : .secondary)
                                         Text(bookmark.snippet)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -773,6 +808,18 @@ struct ReaderView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func bookmarkLocationText(_ bookmark: ReaderBookmark) -> String {
+        if let paragraphIndex = bookmark.paragraphIndex {
+            return "第 \(bookmark.chapterIndex + 1) 章 · 第 \(paragraphIndex + 1) 段"
+        }
+        return "第 \(bookmark.chapterIndex + 1) 章"
+    }
+
+    private func isCurrentBookmark(_ bookmark: ReaderBookmark) -> Bool {
+        bookmark.chapterIndex == chapterIndex
+            && bookmark.paragraphIndex == currentBookmarkParagraphIndex
     }
 
     private func jumpToBookmark(_ bookmark: ReaderBookmark) {
