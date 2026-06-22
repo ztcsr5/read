@@ -340,7 +340,11 @@ final class JSCoreRuntimeTests: XCTestCase {
           java.getWebViewUA().contains('SourceReadSwift'),
           java.toast('x'),
           Packages.android.text.TextUtils.isEmpty(''),
-          java.util.UUID.randomUUID().length > 20
+          java.util.UUID.randomUUID().length > 20,
+          'ABC'.getBytes().join(','),
+          Packages.java.util.Base64.encodeToString('ABC'.getBytes()),
+          JavaImporter().String('ok').toString(),
+          importPackage(Packages.java.util) === Packages.java.util
         ].join('|')
         """
 
@@ -352,7 +356,7 @@ final class JSCoreRuntimeTests: XCTestCase {
         guard case .success(let value) = result else {
             return XCTFail("expected success")
         }
-        XCTAssertEqual(value, "42|3.5|7|abc|12|true|ok|sid=ok; theme=dark|true||true|true")
+        XCTAssertEqual(value, "42|3.5|7|abc|12|true|ok|sid=ok; theme=dark|true||true|true|65,66,67|QUJD|ok|true")
     }
 
     func testConnectChainSupportsCookiesBodyAndExecuteAliases() throws {

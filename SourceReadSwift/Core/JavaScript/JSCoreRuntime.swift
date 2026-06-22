@@ -230,6 +230,14 @@ final class JSCoreRuntime {
             return String(this).split(String(search)).join(String(replacement));
           };
         }
+        if (!String.prototype.getBytes) {
+          String.prototype.getBytes = function() {
+            var text = String(this);
+            var bytes = [];
+            for (var i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xff);
+            return bytes;
+          };
+        }
         function __asJavaList(list) {
           list.get = function(index) { return list[Number(index)]; };
           list.size = function() { return list.length; };
@@ -515,6 +523,16 @@ final class JSCoreRuntime {
         Packages.util = Packages.java.util;
         java.lang = Packages.java.lang;
         java.util = Packages.java.util;
+        function JavaImporter() {
+          return {
+            importPackage: function(_) {},
+            importClass: function(_) {},
+            String: Packages.java.lang.String,
+            Jsoup: Packages.org.jsoup.Jsoup,
+            Base64: Packages.java.util.Base64
+          };
+        }
+        function importPackage(value) { return value; }
         var org = Packages.org;
         function __selectorWithIndex(selector, index) {
           if (index === undefined || index === null || isNaN(Number(index))) return String(selector || '');
