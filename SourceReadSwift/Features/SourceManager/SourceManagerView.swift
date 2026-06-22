@@ -270,7 +270,7 @@ struct SourceManagerView: View {
     }
 
     private func bookSourceRow(_ source: BookSource) -> some View {
-        sourceCard(
+        return sourceCard(
             title: source.bookSourceName,
             subtitle: source.bookSourceUrl,
             group: source.bookSourceGroup,
@@ -392,7 +392,7 @@ struct SourceManagerView: View {
             catalog.lastImportedAt.map { "最近导入 \($0.formatted(date: .abbreviated, time: .shortened))" }
         ].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
 
-        sourceCard(
+        return sourceCard(
             title: catalog.name,
             subtitle: catalog.importUrl ?? catalog.url,
             group: statusLine,

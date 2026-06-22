@@ -162,10 +162,10 @@ struct ChapterLoadingView: View {
 
     var body: some View {
         Group {
-            if let content {
+            if let loadedContent = content {
                 ReaderView(
                     bookID: bookID ?? "\(sourceUrl)|\(chapter.bookUrl)",
-                    content: content,
+                    content: loadedContent,
                     chapterIndex: effectiveChapter.index,
                     totalChapters: totalChapters,
                     chapters: chapters,
