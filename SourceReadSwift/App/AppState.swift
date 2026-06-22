@@ -58,26 +58,20 @@ final class AppState: ObservableObject {
     }
 
     func importSharedDocument(_ url: URL) {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer {
-            if scoped {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-
         do {
-            let ext = url.pathExtension.lowercased()
+            let localURL = try PickedDocumentAccess.copiedURL(from: url)
+            let ext = localURL.pathExtension.lowercased()
             if ext == "epub" {
-                let parsed = try LocalEPUBBookParser().parse(fileURL: url)
+                let parsed = try LocalEPUBBookParser().parse(fileURL: localURL)
                 bookshelfStore.addLocalTextBook(parsed)
                 record(DiagnosticEvent(level: .info, stage: "import", sourceName: parsed.title, message: "已导入 EPUB"))
             } else {
-                let data = try Data(contentsOf: url)
+                let data = try Data(contentsOf: localURL)
                 if ext == "json", let text = String(data: data, encoding: .utf8) {
                     let report = try sourceStore.importJSON(text)
                     record(DiagnosticEvent(level: .info, stage: "import", message: report.userMessage))
                 } else {
-                    let parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
+                    let parsed = LocalTextBookParser().parse(data: data, fileName: localURL.lastPathComponent)
                     bookshelfStore.addLocalTextBook(parsed)
                     record(DiagnosticEvent(level: .info, stage: "import", sourceName: parsed.title, message: "已导入本地文本"))
                 }

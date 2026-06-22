@@ -146,7 +146,7 @@ struct BookshelfView: View {
 
     private var shelfSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            collectionHeader(title: "全部书架", books: allBooks)
+            shelfHeader
             if allBooks.isEmpty {
                 compactEmptyState(icon: "books.vertical", title: "书架还是空的", message: "支持 TXT、EPUB 与在线书源书籍")
             } else {
@@ -157,6 +157,24 @@ struct BookshelfView: View {
                 }
             }
         }
+    }
+
+    private var shelfHeader: some View {
+        NavigationLink {
+            BookshelfCollectionView(title: "书架", books: allBooks)
+        } label: {
+            HStack(spacing: 7) {
+                Text("书架")
+                    .font(.system(size: 22, weight: .bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .foregroundStyle(.primary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -246,18 +264,13 @@ struct BookshelfView: View {
     private func importLocalBook(_ result: Result<[URL], Error>) {
         do {
             guard let url = try result.get().first else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer {
-                if scoped {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
+            let localURL = try PickedDocumentAccess.copiedURL(from: url)
             let parsed: LocalTextBook
-            if url.pathExtension.localizedCaseInsensitiveCompare("epub") == .orderedSame {
-                parsed = try LocalEPUBBookParser().parse(fileURL: url)
+            if localURL.pathExtension.localizedCaseInsensitiveCompare("epub") == .orderedSame {
+                parsed = try LocalEPUBBookParser().parse(fileURL: localURL)
             } else {
-                let data = try Data(contentsOf: url)
-                parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
+                let data = try Data(contentsOf: localURL)
+                parsed = LocalTextBookParser().parse(data: data, fileName: localURL.lastPathComponent)
             }
             appState.bookshelfStore.addLocalTextBook(parsed)
             importMessage = "已导入《\(parsed.title)》，共 \(parsed.chapters.count) 章、\(parsed.paragraphs.count) 段。"

@@ -5,6 +5,7 @@ import UIKit
 struct UniversalDocumentPicker: UIViewControllerRepresentable {
     let contentTypes: [UTType]
     var allowsMultipleSelection = false
+    var opensAllFiles = true
     let onPick: ([URL]) -> Void
     let onCancel: () -> Void
 
@@ -14,7 +15,8 @@ struct UniversalDocumentPicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         var pickerTypes: [UTType] = []
-        for type in contentTypes + [.data, .content, .item] where !pickerTypes.contains(type) {
+        let requestedTypes = opensAllFiles ? [.item] : contentTypes + [.data, .content, .item]
+        for type in requestedTypes where !pickerTypes.contains(type) {
             pickerTypes.append(type)
         }
         let picker = UIDocumentPickerViewController(

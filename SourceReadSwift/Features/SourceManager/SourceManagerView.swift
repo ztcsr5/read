@@ -1121,13 +1121,8 @@ struct SourceManagerView: View {
     private func importFile(_ result: Result<[URL], Error>) {
         do {
             guard let url = try result.get().first else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer {
-                if scoped {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
-            let data = try Data(contentsOf: url)
+            let file = try PickedDocumentAccess.data(from: url)
+            let data = file.data
             let text = ResponseTextDecoder().decode(data: data, headers: [:])
             let report = try appState.sourceStore.importJSON(text)
             importError = nil

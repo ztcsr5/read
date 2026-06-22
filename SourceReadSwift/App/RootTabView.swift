@@ -7,18 +7,19 @@ struct RootTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
+            ZStack {
                 BookshelfView()
-                    .tag(0)
+                    .opacity(selectedTab == 0 ? 1 : 0)
+                    .allowsHitTesting(selectedTab == 0)
 
                 DiscoverView()
-                    .tag(1)
+                    .opacity(selectedTab == 1 ? 1 : 0)
+                    .allowsHitTesting(selectedTab == 1)
 
                 SettingsView()
-                    .tag(2)
+                    .opacity(selectedTab == 2 ? 1 : 0)
+                    .allowsHitTesting(selectedTab == 2)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .toolbar(.hidden, for: .tabBar)
 
             if !appState.isTabChromeHidden {
                 customTabBar
@@ -28,7 +29,7 @@ struct RootTabView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: appState.isTabChromeHidden)
-        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.88), value: selectedTab)
+        .animation(.easeOut(duration: 0.16), value: selectedTab)
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
