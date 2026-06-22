@@ -40,6 +40,18 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: 用于在局域网内导入、导出和管理书源。
+        LSSupportsOpeningDocumentsInPlace: true
+        UIFileSharingEnabled: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Readable text, EPUB and source JSON
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.json
+              - public.text
+              - public.plain-text
+              - public.data
+              - org.idpf.epub-container
   SourceReadSwiftTests:
     type: bundle.unit-test
     platform: iOS

@@ -405,14 +405,20 @@ final class DiscoverViewModel: ObservableObject {
                             hitSources.insert(source.bookSourceUrl)
                             allBooks.append(contentsOf: books)
                             totalResultCount = allBooks.count
-                            results = filtered(allBooks, keyword: keyword)
                             hitSourceCount = hitSources.count
                         }
                     case .failure(let error):
                         failures.append("\(source.bookSourceName): \(error.displayMessage)")
                     }
+                    if checkedSourceCount % 6 == 0 || !allBooks.isEmpty && checkedSourceCount % 3 == 0 {
+                        results = filtered(allBooks, keyword: keyword)
+                        totalResultCount = allBooks.count
+                    }
                 }
             }
+            results = filtered(allBooks, keyword: keyword)
+            totalResultCount = allBooks.count
+            hitSourceCount = hitSources.count
         }
 
         guard activeSearchID == searchID else { return }

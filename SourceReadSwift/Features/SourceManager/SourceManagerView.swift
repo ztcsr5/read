@@ -152,6 +152,25 @@ struct SourceManagerView: View {
                 statusPill("仓库 \(sourceCounts.catalogs)", color: .purple)
                 statusPill("RSS \(sourceCounts.rss)", color: .orange)
             }
+            HStack(spacing: 10) {
+                Button {
+                    let enabled = appState.sourceStore.sources.filter(\.enabled)
+                    batchCheck = SourceBatchCheckState(sources: enabled)
+                } label: {
+                    Label("一键检测启用书源", systemImage: "checkmark.seal")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.sourceStore.sources.filter(\.enabled).isEmpty)
+
+                Button {
+                    showImportSheet = true
+                } label: {
+                    Label("导入", systemImage: "tray.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
             Text("支持本地 JSON、URL、阅读分享链接、仓库导入、RSS 预览和书源搜索/详情/目录/正文链路测试。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)

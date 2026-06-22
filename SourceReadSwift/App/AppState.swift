@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
     }()
 
     @Published var diagnostics: [DiagnosticEvent] = []
+    @Published var isTabChromeHidden = false
 
     init(
         sourceStore: SourceStore? = nil,
@@ -53,6 +54,36 @@ final class AppState: ObservableObject {
         diagnostics.insert(event, at: 0)
         if diagnostics.count > 200 {
             diagnostics.removeLast(diagnostics.count - 200)
+        }
+    }
+
+    func importSharedDocument(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            let ext = url.pathExtension.lowercased()
+            if ext == "epub" {
+                let parsed = try LocalEPUBBookParser().parse(fileURL: url)
+                bookshelfStore.addLocalTextBook(parsed)
+                record(DiagnosticEvent(level: .info, stage: "import", sourceName: parsed.title, message: "已导入 EPUB"))
+            } else {
+                let data = try Data(contentsOf: url)
+                if ext == "json", let text = String(data: data, encoding: .utf8) {
+                    let report = try sourceStore.importJSON(text)
+                    record(DiagnosticEvent(level: .info, stage: "import", message: report.userMessage))
+                } else {
+                    let parsed = LocalTextBookParser().parse(data: data, fileName: url.lastPathComponent)
+                    bookshelfStore.addLocalTextBook(parsed)
+                    record(DiagnosticEvent(level: .info, stage: "import", sourceName: parsed.title, message: "已导入本地文本"))
+                }
+            }
+        } catch {
+            record(DiagnosticEvent(level: .error, stage: "import", message: "文件导入失败：\(error.localizedDescription)", details: ["file": url.lastPathComponent]))
         }
     }
 

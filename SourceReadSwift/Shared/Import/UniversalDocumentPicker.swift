@@ -13,9 +13,10 @@ struct UniversalDocumentPicker: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        // Some providers expose JSON/TXT files through dynamic UTTypes. Using public.item
-        // keeps them selectable; the importer validates the actual payload afterwards.
-        let pickerTypes = contentTypes.contains(.item) ? [UTType.item] : contentTypes
+        var pickerTypes: [UTType] = []
+        for type in contentTypes + [.data, .content, .item] where !pickerTypes.contains(type) {
+            pickerTypes.append(type)
+        }
         let picker = UIDocumentPickerViewController(
             forOpeningContentTypes: pickerTypes,
             asCopy: true

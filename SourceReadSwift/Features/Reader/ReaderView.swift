@@ -14,7 +14,7 @@ struct ReaderView: View {
     var onSelectChapter: ((BookChapter) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showOverlay = false
+    @State private var showOverlay = true
     @State private var showSettings = false
     @State private var showChapterList = false
     @State private var showBookmarks = false
@@ -151,6 +151,7 @@ struct ReaderView: View {
             bookmarkSheet
         }
         .onAppear {
+            appState.isTabChromeHidden = true
             sessionStartedAt = Date()
             autoScrollTarget = initialAutoScrollTarget()
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
@@ -164,6 +165,7 @@ struct ReaderView: View {
             stopAutoScroll()
             speechController.stop()
             restoreIdleTimerPreference()
+            appState.isTabChromeHidden = false
             appState.bookshelfStore.recordReadingSession(
                 bookID: bookID,
                 duration: Date().timeIntervalSince(sessionStartedAt)

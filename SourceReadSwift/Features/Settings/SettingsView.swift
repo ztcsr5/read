@@ -39,6 +39,12 @@ struct SettingsView: View {
                     }
 
                     NavigationLink {
+                        SourceWritingView(server: appState.sourceWritingServer)
+                    } label: {
+                        Label("Web 写源", systemImage: "network")
+                    }
+
+                    NavigationLink {
                         RuleHealthView()
                     } label: {
                         Label("规则体检", systemImage: "shield")

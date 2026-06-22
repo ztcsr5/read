@@ -6,22 +6,29 @@ struct RootTabView: View {
     @State private var presentedBook: BookshelfBook?
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            BookshelfView()
-                .tag(0)
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                BookshelfView()
+                    .tag(0)
 
-            DiscoverView()
-                .tag(1)
+                DiscoverView()
+                    .tag(1)
 
-            SettingsView()
-                .tag(2)
-        }
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            customTabBar
+                SettingsView()
+                    .tag(2)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .toolbar(.hidden, for: .tabBar)
+
+            if !appState.isTabChromeHidden {
+                customTabBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(10)
+            }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .simultaneousGesture(edgeTabSwipeGesture)
+        .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: appState.isTabChromeHidden)
+        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.88), value: selectedTab)
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
@@ -115,9 +122,10 @@ struct RootTabView: View {
 
     private func tabButton(index: Int, title: String, systemImage: String) -> some View {
         Button {
-            selectedTab = index
+            guard selectedTab != index else { return }
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
+            selectedTab = index
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: selectedTab == index ? "\(systemImage).fill" : systemImage)
@@ -132,26 +140,6 @@ struct RootTabView: View {
             .frame(width: 60)
         }
         .buttonStyle(.plain)
-    }
-
-    private var edgeTabSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 36, coordinateSpace: .local)
-            .onEnded { value in
-                let width = UIScreen.main.bounds.width
-                let isLeadingEdge = value.startLocation.x <= 28
-                let isTrailingEdge = value.startLocation.x >= width - 28
-                let horizontal = value.translation.width
-                let vertical = value.translation.height
-                guard abs(horizontal) > 72, abs(horizontal) > abs(vertical) * 1.4 else { return }
-
-                if horizontal < 0, isLeadingEdge, selectedTab < 2 {
-                    selectedTab += 1
-                } else if horizontal > 0, isTrailingEdge, selectedTab > 0 {
-                    selectedTab -= 1
-                }
-                let generator = UIImpactFeedbackGenerator(style: .light)
-                generator.impactOccurred()
-            }
     }
 
     private func dismissKeyboard() {

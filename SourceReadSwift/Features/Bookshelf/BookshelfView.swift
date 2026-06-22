@@ -55,6 +55,9 @@ struct BookshelfView: View {
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }
+            .refreshable {
+                await refreshBookshelf()
+            }
             .pageBackground()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
