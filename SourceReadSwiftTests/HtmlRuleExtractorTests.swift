@@ -263,4 +263,51 @@ final class HtmlRuleExtractorTests: XCTestCase {
         XCTAssertEqual(try first.map { try $0.text() }, ["B"])
         XCTAssertEqual(try last.map { try $0.text() }, ["B"])
     }
+
+    func testPutAndGetDirectivesShareValuesAcrossRules() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <div class="book">
+            <span class="host">https://example.com</span>
+            <a class="path" href="/book/1">Title</a>
+          </div>
+        </body></html>
+        """)
+        let extractor = HtmlRuleExtractor()
+
+        _ = try extractor.value(
+            from: document,
+            rule: "@put:{host:.host@text}.book@text",
+            baseUrl: URL(string: "https://example.com/search")!
+        )
+        let value = try extractor.value(
+            from: document,
+            rule: "@get:{host}/book/1",
+            baseUrl: URL(string: "https://example.com/search")!
+        )
+
+        XCTAssertEqual(value, "https://example.com/book/1")
+    }
+
+    func testPutDirectiveSplitsQuotedCommaAndColonSafely() throws {
+        let document = try SwiftSoup.parse("""
+        <html><body>
+          <span class="url">https://example.com/a,b:c</span>
+        </body></html>
+        """)
+        let extractor = HtmlRuleExtractor()
+
+        _ = try extractor.value(
+            from: document,
+            rule: #"@put:{"base":".url@text"}span@text"#,
+            baseUrl: URL(string: "https://example.com")!
+        )
+        let value = try extractor.value(
+            from: document,
+            rule: "@get:{base}",
+            baseUrl: URL(string: "https://example.com")!
+        )
+
+        XCTAssertEqual(value, "https://example.com/a,b:c")
+    }
 }

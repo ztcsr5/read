@@ -1,5 +1,4 @@
 import Foundation
-import SwiftSoup
 
 struct SearchResultParser {
     private let htmlExtractor = HtmlRuleExtractor()
@@ -21,8 +20,7 @@ struct SearchResultParser {
         }
 
         do {
-            let document = try SwiftSoup.parse(response.body, response.url.absoluteString)
-            let elements = try document.select(htmlExtractor.cleanCSS(listRule))
+            let elements = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: listRule)
             var books: [SearchBook] = []
             for element in elements.array() {
                 let name = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["name", "bookName"]), fallback: "a@text", baseUrl: response.url)
