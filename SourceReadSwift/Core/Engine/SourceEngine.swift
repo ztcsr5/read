@@ -48,14 +48,15 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let request = requestBuilder.buildSearchRequest(source: source, searchUrl: searchUrl, keyword: keyword, page: page)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "search.load") {
         case .success(let response):
-            guard !response.body.isEmpty else {
+            let transformedResponse = transformBodyIfNeeded(response, source: source)
+            guard !transformedResponse.body.isEmpty else {
                 let error = SourceEngineError.empty("\u{641c}\u{7d22}\u{54cd}\u{5e94}\u{4e3a}\u{7a7a}")
-                await emitFailure(error, stage: "search.empty", source: source, details: ["url": response.url.absoluteString])
+                await emitFailure(error, stage: "search.empty", source: source, details: ["url": transformedResponse.url.absoluteString])
                 return .failure(error)
             }
-            let parsed = SearchResultParser().parse(source: source, response: response)
+            let parsed = SearchResultParser().parse(source: source, response: transformedResponse)
             if case .failure(let error) = parsed {
-                await emitFailure(error, stage: "search.parse", source: source, details: ["url": response.url.absoluteString])
+                await emitFailure(error, stage: "search.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
             }
             return parsed
         case .failure(let error):
@@ -68,9 +69,10 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
-            let parsed = BookDetailParser().parse(source: source, book: book, response: response)
+            let transformedResponse = transformBodyIfNeeded(response, source: source)
+            let parsed = BookDetailParser().parse(source: source, book: book, response: transformedResponse)
             if case .failure(let error) = parsed {
-                await emitFailure(error, stage: "detail.parse", source: source, details: ["url": response.url.absoluteString])
+                await emitFailure(error, stage: "detail.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
             }
             return parsed
         case .failure(let error):
@@ -83,9 +85,10 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
-            let parsed = ChapterListParser().parse(source: source, book: book, response: response)
+            let transformedResponse = transformBodyIfNeeded(response, source: source)
+            let parsed = ChapterListParser().parse(source: source, book: book, response: transformedResponse)
             if case .failure(let error) = parsed {
-                await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
+                await emitFailure(error, stage: "toc.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
             }
             return parsed
         case .failure(let error):
@@ -98,15 +101,16 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
+            let transformedResponse = transformBodyIfNeeded(response, source: source)
             let globalPurifyRules = await purifyRules()
             let parsed = ContentParser().parse(
                 source: source,
                 chapter: chapter,
-                response: response,
+                response: transformedResponse,
                 globalPurifyRules: globalPurifyRules
             )
             if case .failure(let error) = parsed {
-                await emitFailure(error, stage: "content.parse", source: source, details: ["url": response.url.absoluteString])
+                await emitFailure(error, stage: "content.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
             }
             return parsed
         case .failure(let error):
@@ -175,6 +179,58 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             return max(0.5, min(value / 1000, 20))
         }
         return 3
+    }
+
+    private func transformBodyIfNeeded(_ response: SourceResponse, source: BookSource) -> SourceResponse {
+        guard let script = bodyJSScript(source), !script.isEmpty else { return response }
+        let runtime = JSCoreRuntime()
+        let variables: [String: Any] = [
+            "result": response.body,
+            "html": response.body,
+            "body": response.body,
+            "baseUrl": response.url.absoluteString
+        ]
+
+        let evaluated = runtime.evaluate(script, variables: variables)
+        let result: Result<String, SourceEngineError>
+        if case .failure(.javascript) = evaluated, script.contains("return") {
+            result = runtime.evaluate("(function(){\(script)})()", variables: variables)
+        } else {
+            result = evaluated
+        }
+
+        guard case .success(let output) = result else { return response }
+        let transformed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transformed.isEmpty else { return response }
+        return SourceResponse(
+            url: response.url,
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: output,
+            data: Data(output.utf8)
+        )
+    }
+
+    private func bodyJSScript(_ source: BookSource) -> String? {
+        for key in ["bodyJs", "bodyjs", "bodyJS"] {
+            if let value = source.raw[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                return value
+            }
+        }
+        guard let customConfig = source.customConfig,
+              let data = customConfig.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        for key in ["bodyJs", "bodyjs", "bodyJS"] {
+            if let value = object[key] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+        return nil
     }
 
     private func emitFailure(
