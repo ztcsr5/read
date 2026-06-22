@@ -266,6 +266,36 @@ final class JSCoreRuntimeTests: XCTestCase {
         XCTAssertEqual(value, "Two|2|false|One")
     }
 
+    func testNativeElementsSupportIndexedAccess() throws {
+        let html = """
+        <html><body>
+          <a href="/1"><span>One</span></a>
+          <a href="/2"><span>Two</span></a>
+          <a href="/3"></a>
+        </body></html>
+        """
+        let script = """
+        var links = java.getElements('a');
+        var parsed = Packages.org.jsoup.Jsoup.parse(html).select('a');
+        [
+          links.get(1).text(),
+          links.get(1).attr('href'),
+          links.first().text(),
+          links.size(),
+          links.isEmpty(),
+          parsed.get(0).text(),
+          links.get(1).select('span').text()
+        ].join('|')
+        """
+
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html, "baseUrl": "https://example.com"])
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "Two|https://example.com/2|One|3|false|One|Two")
+    }
+
     func testJavaStyleStringHelpersAreAvailable() throws {
         let script = """
         [

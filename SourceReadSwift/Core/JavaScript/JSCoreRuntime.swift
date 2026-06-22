@@ -111,6 +111,14 @@ final class JSCoreRuntime {
                 return [] as NSArray
             }
         }
+        let countElements: @convention(block) (String, String, String) -> Int = { html, selector, baseUrl in
+            do {
+                let document = try SwiftSoup.parse(html, baseUrl)
+                return try Self.countElements(in: document, selector: selector, baseUrl: URL(string: baseUrl))
+            } catch {
+                return 0
+            }
+        }
         let ajaxHandler = self.ajaxHandler
         weak var weakSelf = self
         let ajax: @convention(block) (String, String) -> String = { url, headers in
@@ -142,6 +150,7 @@ final class JSCoreRuntime {
         context.setObject(timeFormat, forKeyedSubscript: "__native_timeFormat" as NSString)
         context.setObject(getString, forKeyedSubscript: "__native_getString" as NSString)
         context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
+        context.setObject(countElements, forKeyedSubscript: "__native_countElements" as NSString)
         context.setObject(ajax, forKeyedSubscript: "__native_ajax" as NSString)
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
         context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
@@ -379,24 +388,43 @@ final class JSCoreRuntime {
         Packages.org.jsoup = Packages.org.jsoup || {};
         Packages.java = Packages.java || {};
         var org = Packages.org;
-        function __makeJsoupSelection(html, selector, baseUrlValue) {
+        function __selectorWithIndex(selector, index) {
+          if (index === undefined || index === null || isNaN(Number(index))) return String(selector || '');
+          return String(selector || '') + '@' + String(Number(index));
+        }
+        function __makeJsoupSelection(html, selector, baseUrlValue, selectionIndex) {
           return {
             select: function(nextSelector) {
-              var joined = selector ? selector + ' ' + String(nextSelector) : String(nextSelector);
+              var baseSelector = __selectorWithIndex(selector, selectionIndex);
+              if (selectionIndex !== undefined && selectionIndex !== null && !isNaN(Number(selectionIndex))) {
+                var subHtml = __native_getString(String(html), baseSelector + '@html', String(baseUrlValue || ''));
+                return __makeJsoupSelection(subHtml, String(nextSelector), baseUrlValue);
+              }
+              var joined = baseSelector ? baseSelector + ' ' + String(nextSelector) : String(nextSelector);
               return __makeJsoupSelection(html, joined, baseUrlValue);
             },
-            first: function() { return this; },
-            get: function(_) { return this; },
+            first: function() { return __makeJsoupSelection(html, selector, baseUrlValue, 0); },
+            get: function(index) { return __makeJsoupSelection(html, selector, baseUrlValue, Number(index)); },
+            size: function() { return __native_countElements(String(html), String(selector), String(baseUrlValue || '')); },
+            isEmpty: function() { return this.size() === 0; },
             text: function() {
-              var list = __native_getStringList(String(html), String(selector) + '@text', String(baseUrlValue || ''));
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              var list = __native_getStringList(String(html), selected + '@text', String(baseUrlValue || ''));
               var out = [];
               for (var i = 0; i < list.length; i++) out.push(String(list[i]));
               return out.join('\\n');
             },
-            html: function() { return __native_getString(String(html), String(selector) + '@html', String(baseUrlValue || '')); },
-            attr: function(name) { return __native_getString(String(html), String(selector) + '@' + String(name), String(baseUrlValue || '')); },
+            html: function() {
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              return __native_getString(String(html), selected + '@html', String(baseUrlValue || ''));
+            },
+            attr: function(name) {
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              return __native_getString(String(html), selected + '@' + String(name), String(baseUrlValue || ''));
+            },
             eachText: function() {
-              var list = __native_getStringList(String(html), String(selector) + '@text', String(baseUrlValue || ''));
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              var list = __native_getStringList(String(html), selected + '@text', String(baseUrlValue || ''));
               var out = [];
               for (var i = 0; i < list.length; i++) out.push(String(list[i]));
               return __asJavaList(out);
@@ -523,6 +551,15 @@ final class JSCoreRuntime {
         return try elements.map {
             try HtmlRuleExtractor().value(from: $0, rule: "@\(split.attribute)", baseUrl: baseUrl)
         }.filter { !$0.isEmpty }
+    }
+
+    private static func countElements(in document: Document, selector: String, baseUrl: URL?) throws -> Int {
+        let html = try document.outerHtml()
+        return try HtmlRuleExtractor().select(
+            html,
+            baseUrl: baseUrl ?? URL(fileURLWithPath: "/"),
+            listRule: selector
+        ).count
     }
 
     private static func splitSelectorAndAttribute(_ rule: String) -> (selector: String, attribute: String) {
