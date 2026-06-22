@@ -535,7 +535,7 @@ This prevents one giant reader file from becoming unmaintainable.
 | Source switch | Partial | Switch source, match chapter title, error-page recovery | Mocked source test | P6 |
 | TTS | Partial | Native speech start/stop/next, queue state, interruption handling | Manual + state test | P6 |
 | Chapter cache/preload | Partial | Online chapter content cache and next-chapter preload exist; cache count/size/expiry exist and need deeper device QA | Cache store tests + reader smoke | P6 |
-| Diagnostics | Partial | Single-source deep test and selected-source batch search check exist; persisted health history and full batch detail/TOC/content still needed | Diagnostic fixture test | P7 |
+| Diagnostics | Partial | Single-source deep test, selected-source batch search check, and persisted search health history exist; full batch detail/TOC/content still needed | Diagnostic fixture test | P7 |
 | Auto repair | Missing | Rule suggestion after parser parity | Golden suggestions | P7 |
 | Local web editor | Missing | Explicit start/stop local server + token | Local API tests | P8 |
 | Purify rules | Partial | Editor, persistence, duplicate-safe import, built-in presets, preview testing, bulk enable/disable, and content application exist; diagnostics integration still needed | Content purification + store persistence tests | P9 |
@@ -869,6 +869,9 @@ Completed since the initial audit:
   - Rules can be bulk-enabled or bulk-disabled to diagnose false positives without deleting user content.
   - A local preview field shows enabled-rule cleanup results before users risk applying broad rules to real chapters.
   - Content cleanup now uses a shared safe regex evaluator, so invalid user regexes are ignored instead of breaking chapter rendering.
+- Improved source diagnostics:
+  - Batch source checks now persist the latest per-source search health, keyword, result count, message, and test time.
+  - Source Manager rows surface the last pass/warn/fail state so bad sources remain visible after leaving the batch-check sheet.
 
 Still not complete:
 

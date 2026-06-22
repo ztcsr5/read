@@ -276,6 +276,7 @@ struct SourceManagerView: View {
             group: source.bookSourceGroup,
             enabled: source.enabled,
             badges: source.ruleSearch == nil ? [] : ["可搜索"],
+            health: appState.sourceHealthStore.record(for: source),
             actions: {
                 Button(source.enabled ? "停用" : "启用") {
                     appState.sourceStore.setEnabled(!source.enabled, for: [source.bookSourceUrl])
@@ -441,6 +442,7 @@ struct SourceManagerView: View {
         group: String?,
         enabled: Bool,
         badges: [String],
+        health: SourceHealthRecord? = nil,
         @ViewBuilder actions: @escaping () -> MenuContent
     ) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -458,6 +460,19 @@ struct SourceManagerView: View {
                     ForEach(badges, id: \.self) { badge in
                         statusBadge(badge, color: .blue)
                     }
+                }
+                if let health {
+                    HStack(spacing: 6) {
+                        Image(systemName: health.status.systemImage)
+                        Text("\(health.status.title) · \(health.testedAt.formatted(date: .abbreviated, time: .shortened))")
+                            .lineLimit(1)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(health.status.color)
+                    Text(health.message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
             Spacer()
@@ -503,6 +518,11 @@ struct SourceManagerView: View {
                 .foregroundStyle(.red)
         }
         if let lastError = appState.sourceStore.lastError {
+            Text(lastError)
+                .font(.footnote)
+                .foregroundStyle(.red)
+        }
+        if let lastError = appState.sourceHealthStore.lastError {
             Text(lastError)
                 .font(.footnote)
                 .foregroundStyle(.red)
@@ -914,24 +934,41 @@ struct SourceManagerView: View {
             latest.checkedCount += 1
             switch result {
             case .success(let books):
+                let status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
+                let message = books.isEmpty
+                    ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
+                    : "搜索通过：\(books.count) 条结果。"
                 latest.results.append(
                     SourceBatchCheckResult(
                         sourceName: source.bookSourceName,
                         sourceURL: source.bookSourceUrl,
-                        status: books.isEmpty ? .warning : .passed,
-                        message: books.isEmpty
-                            ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
-                            : "搜索通过：\(books.count) 条结果。"
+                        status: status,
+                        message: message
                     )
                 )
+                appState.sourceHealthStore.record(
+                    source: source,
+                    status: status.healthStatus,
+                    message: message,
+                    keyword: keyword,
+                    resultCount: books.count
+                )
             case .failure(let error):
+                let message = "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
                 latest.results.append(
                     SourceBatchCheckResult(
                         sourceName: source.bookSourceName,
                         sourceURL: source.bookSourceUrl,
                         status: .failed,
-                        message: "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
+                        message: message
                     )
+                )
+                appState.sourceHealthStore.record(
+                    source: source,
+                    status: .failed,
+                    message: message,
+                    keyword: keyword,
+                    resultCount: 0
                 )
             }
             batchCheck = latest
@@ -1140,10 +1177,44 @@ private struct SourceBatchCheckResult: Identifiable {
     let message: String
 }
 
+private extension SourceHealthStatus {
+    var title: String {
+        switch self {
+        case .passed: return "上次通过"
+        case .warning: return "上次警告"
+        case .failed: return "上次失败"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .passed: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .failed: return "xmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .passed: return .green
+        case .warning: return .orange
+        case .failed: return .red
+        }
+    }
+}
+
 private enum SourceBatchCheckStatus {
     case passed
     case warning
     case failed
+
+    var healthStatus: SourceHealthStatus {
+        switch self {
+        case .passed: return .passed
+        case .warning: return .warning
+        case .failed: return .failed
+        }
+    }
 
     var title: String {
         switch self {
