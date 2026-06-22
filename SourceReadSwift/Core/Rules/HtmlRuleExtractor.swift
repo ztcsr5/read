@@ -27,12 +27,24 @@ struct HtmlRuleExtractor {
         return try select(from: document, rule: listRule, baseUrl: baseUrl)
     }
 
-    func value(from root: Element, rule: String?, fallback: String? = nil, baseUrl: URL? = nil) throws -> String {
+    func value(
+        from root: Element,
+        rule: String?,
+        fallback: String? = nil,
+        baseUrl: URL? = nil,
+        variables: [String: Any] = [:]
+    ) throws -> String {
         let selectedRule = rule ?? fallback
         guard let selectedRule, !selectedRule.isEmpty else { return "" }
+
+        let trimmed = selectedRule.trimmingCharacters(in: .whitespacesAndNewlines)
+        if LegadoRuleResolver().isJavaScriptRule(trimmed) {
+            return try evaluateJS(rule: trimmed, rootHtml: try root.outerHtml(), baseUrl: baseUrl, extraVariables: variables)
+        }
+
         if let alternatives = RuleOperatorSplitter.split(selectedRule, separator: "||") {
             for alternative in alternatives {
-                let value = try self.value(from: root, rule: alternative, fallback: nil, baseUrl: baseUrl)
+                let value = try self.value(from: root, rule: alternative, fallback: nil, baseUrl: baseUrl, variables: variables)
                 if !value.isEmpty {
                     return value
                 }
@@ -355,5 +367,50 @@ struct HtmlRuleExtractor {
             }
         }
         return output
+    }
+
+    private func evaluateJS(
+        rule: String,
+        rootHtml: String,
+        baseUrl: URL?,
+        extraVariables: [String: Any]
+    ) throws -> String {
+        var script = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        if script.hasPrefix("@js:") {
+            script = String(script.dropFirst(4))
+        } else if script.hasPrefix("<js>") && script.hasSuffix("</js>") {
+            let start = script.index(script.startIndex, offsetBy: 4)
+            let end = script.index(script.endIndex, offsetBy: -5)
+            script = String(script[start..<end])
+        }
+
+        let source = extraVariables["source"] as? BookSource
+        let runtime = JSCoreRuntime { urlText in
+            if let source {
+                return SynchronousSourceLoader().load(urlText: urlText, source: source)
+            }
+            return ""
+        }
+
+        var variables: [String: Any] = [
+            "result": rootHtml,
+            "html": rootHtml,
+            "baseUrl": baseUrl?.absoluteString ?? ""
+        ]
+        for (k, v) in extraVariables {
+            variables[k] = v
+        }
+
+        let evaluated = runtime.evaluate(script, variables: variables)
+        if case .failure(.javascript) = evaluated, script.contains("return") {
+            switch runtime.evaluate("(function(){\(script)})()", variables: variables) {
+            case .success(let val): return val
+            case .failure(let err): throw err
+            }
+        }
+        switch evaluated {
+        case .success(let val): return val
+        case .failure(let err): throw err
+        }
     }
 }

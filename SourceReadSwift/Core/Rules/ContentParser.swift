@@ -24,23 +24,34 @@ struct ContentParser {
         globalPurifyRules: [String]
     ) -> Result<ChapterContent, SourceEngineError> {
         guard let contentRule = htmlExtractor.firstRule(source.ruleContent, keys: ["content", "bookContent"]) else {
-            return .failure(.rule("ruleContent.content \u{4e3a}\u{7a7a}"))
+            return .failure(.rule("ruleContent.content 为空"))
         }
 
         do {
             let root = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: "html").first
-            guard let root else { return .failure(.empty("\u{6b63}\u{6587} HTML \u{4e3a}\u{7a7a}")) }
-            let raw = try htmlExtractor.value(from: root, rule: contentRule, fallback: nil, baseUrl: response.url)
+            guard let root else { return .failure(.empty("正文 HTML 为空")) }
+            let chapterMap: [String: Any] = [
+                "title": chapter.title,
+                "url": chapter.url,
+                "bookUrl": chapter.bookUrl,
+                "index": chapter.index
+            ]
+            let variables: [String: Any] = [
+                "source": source,
+                "chapter": chapterMap
+            ]
+            let raw = try htmlExtractor.value(from: root, rule: contentRule, fallback: nil, baseUrl: response.url, variables: variables)
             let cleaned = applyContentTransforms(raw, rule: source.ruleContent, globalPurifyRules: globalPurifyRules)
             let paragraphs = splitParagraphs(cleaned)
             let next = try htmlExtractor.value(
                 from: root,
                 rule: htmlExtractor.firstRule(source.ruleContent, keys: ["nextContentUrl"]),
                 fallback: nil,
-                baseUrl: response.url
+                baseUrl: response.url,
+                variables: variables
             ).nilIfEmpty
             return paragraphs.isEmpty
-                ? .failure(.empty("\u{6b63}\u{6587}\u{89e3}\u{6790}\u{7ed3}\u{679c}\u{4e3a}\u{7a7a}"))
+                ? .failure(.empty("正文解析结果为空"))
                 : .success(ChapterContent(chapter: chapter, title: chapter.title, paragraphs: paragraphs, nextContentUrl: next))
         } catch {
             return .failure(.rule(error.localizedDescription))
@@ -55,16 +66,27 @@ struct ContentParser {
     ) -> Result<ChapterContent, SourceEngineError> {
         guard let data = response.body.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) else {
-            return .failure(.rule("JSON \u{89e3}\u{6790}\u{5931}\u{8d25}"))
+            return .failure(.rule("JSON 解析失败"))
         }
         let rule = source.ruleContent
         let contentRule = htmlExtractor.firstRule(rule, keys: ["content", "bookContent"])
+        let chapterMap: [String: Any] = [
+            "title": chapter.title,
+            "url": chapter.url,
+            "bookUrl": chapter.bookUrl,
+            "index": chapter.index
+        ]
+        let variables: [String: Any] = [
+            "source": source,
+            "chapter": chapterMap
+        ]
         let content: String?
         if let dict = object as? [String: Any] {
             content = jsonExtractor.string(
                 from: dict,
                 rule: contentRule,
-                fallbackKeys: ["content", "bookContent", "text", "body"]
+                fallbackKeys: ["content", "bookContent", "text", "body"],
+                variables: variables
             )
         } else {
             content = nil
@@ -75,7 +97,8 @@ struct ContentParser {
             next = jsonExtractor.string(
                 from: dict,
                 rule: htmlExtractor.firstRule(rule, keys: ["nextContentUrl"]),
-                fallbackKeys: ["nextContentUrl", "nextUrl", "next"]
+                fallbackKeys: ["nextContentUrl", "nextUrl", "next"],
+                variables: variables
             ).map { htmlExtractor.absolutize($0, base: response.url) }
         } else {
             next = nil

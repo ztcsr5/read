@@ -22,12 +22,13 @@ struct SearchResultParser {
         do {
             let elements = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: listRule)
             var books: [SearchBook] = []
+            let variables: [String: Any] = ["source": source]
             for element in elements {
-                let name = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["name", "bookName"]), fallback: "a@text", baseUrl: response.url)
-                let bookUrl = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["bookUrl", "url"]), fallback: "a@href", baseUrl: response.url)
+                let name = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["name", "bookName"]), fallback: "a@text", baseUrl: response.url, variables: variables)
+                let bookUrl = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["bookUrl", "url"]), fallback: "a@href", baseUrl: response.url, variables: variables)
                 guard !name.isEmpty, !bookUrl.isEmpty else { continue }
-                let author = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["author"]), fallback: nil, baseUrl: response.url).nilIfEmpty
-                let cover = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["coverUrl", "cover"]), fallback: "img@src", baseUrl: response.url).nilIfEmpty
+                let author = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["author"]), fallback: nil, baseUrl: response.url, variables: variables).nilIfEmpty
+                let cover = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["coverUrl", "cover"]), fallback: "img@src", baseUrl: response.url, variables: variables).nilIfEmpty
                 books.append(SearchBook(
                     name: name,
                     author: author,
@@ -52,17 +53,20 @@ struct SearchResultParser {
         let extractor = JSONRuleExtractor()
         let rule = source.ruleSearch
         let listRule = firstRule(rule, keys: ["bookList", "list", "books"])
-        let candidates = extractor.list(from: object, rule: listRule).prefix(120)
+        let variables: [String: Any] = ["source": source]
+        let candidates = extractor.list(from: object, rule: listRule, variables: variables).prefix(120)
         let books = candidates.compactMap { item -> SearchBook? in
             let name = extractor.string(
                 from: item,
                 rule: firstRule(rule, keys: ["name", "bookName"]),
-                fallbackKeys: ["name", "bookName", "title", "book_name"]
+                fallbackKeys: ["name", "bookName", "title", "book_name"],
+                variables: variables
             )
             let url = extractor.string(
                 from: item,
                 rule: firstRule(rule, keys: ["bookUrl", "url"]),
-                fallbackKeys: ["bookUrl", "url", "link", "book_url", "id"]
+                fallbackKeys: ["bookUrl", "url", "link", "book_url", "id"],
+                variables: variables
             )
             guard let name, let url else { return nil }
             return SearchBook(
@@ -70,12 +74,14 @@ struct SearchResultParser {
                 author: extractor.string(
                     from: item,
                     rule: firstRule(rule, keys: ["author"]),
-                    fallbackKeys: ["author", "writer"]
+                    fallbackKeys: ["author", "writer"],
+                    variables: variables
                 ),
                 coverUrl: extractor.string(
                     from: item,
                     rule: firstRule(rule, keys: ["coverUrl", "cover"]),
-                    fallbackKeys: ["cover", "coverUrl", "img", "image"]
+                    fallbackKeys: ["cover", "coverUrl", "img", "image"],
+                    variables: variables
                 ),
                 bookUrl: htmlExtractor.absolutize(url, base: response.url),
                 sourceName: source.bookSourceName,
@@ -83,7 +89,8 @@ struct SearchResultParser {
                 intro: extractor.string(
                     from: item,
                     rule: firstRule(rule, keys: ["intro"]),
-                    fallbackKeys: ["intro", "desc", "description"]
+                    fallbackKeys: ["intro", "desc", "description"],
+                    variables: variables
                 )
             )
         }

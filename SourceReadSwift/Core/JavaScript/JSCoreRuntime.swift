@@ -18,6 +18,56 @@ final class JSCoreRuntime {
     func evaluate(_ script: String, variables: [String: Any] = [:]) -> Result<String, SourceEngineError> {
         for (key, value) in variables {
             context.setObject(value, forKeyedSubscript: key as NSString)
+            if key == "chapter" {
+                let injectScript = """
+                if (typeof chapter !== 'undefined' && chapter !== null) {
+                    chapter.isVip = function() {
+                        var title = String(chapter.title || chapter.name || '').toLowerCase();
+                        return title.indexOf('vip') >= 0 || title.indexOf('订阅') >= 0 || title.indexOf('付费') >= 0;
+                    };
+                }
+                """
+                context.evaluateScript(injectScript)
+            } else if key == "source" {
+                let injectScript = """
+                if (typeof source !== 'undefined' && source !== null) {
+                    source.getKey = function() { return source.key || source.bookSourceUrl || source.sourceUrl || ''; };
+                    source.getVariable = function(key) {
+                        if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('source.variable.' + String(key));
+                        return source.variable || java.getVar('source.variable') || '';
+                    };
+                    source.setVariable = function(key, value) {
+                        if (arguments.length > 1) return java.put('source.variable.' + String(key), value == null ? '' : String(value));
+                        source.variable = key == null ? '' : String(key);
+                        return java.put('source.variable', source.variable);
+                    };
+                    source.getVariableMap = function() {
+                        var parsed = {};
+                        try { parsed = JSON.parse(source.getVariable() || '{}'); } catch (_) {}
+                        return { get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; } };
+                    };
+                    source.getLoginInfoMap = function() { return { get: function(k) { return java.getVar('source.login.' + String(k || '')); } }; };
+                    source.putLoginHeader = function(k, v) { return java.put('source.loginHeader.' + String(k || ''), v == null ? '' : String(v)); };
+                    source.getLoginHeader = function(k) { return java.getVar('source.loginHeader.' + String(k || '')); };
+                }
+                """
+                context.evaluateScript(injectScript)
+            } else if key == "book" {
+                let injectScript = """
+                if (typeof book !== 'undefined' && book !== null) {
+                    book.getVariable = function(key) {
+                        if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('book.variable.' + String(key));
+                        return book.variable || java.getVar('book.variable') || '';
+                    };
+                    book.setVariable = function(key, value) {
+                        if (arguments.length > 1) return java.put('book.variable.' + String(key), value == null ? '' : String(value));
+                        book.variable = key == null ? '' : String(key);
+                        return java.put('book.variable', book.variable);
+                    };
+                }
+                """
+                context.evaluateScript(injectScript)
+            }
         }
         guard let result = context.evaluateScript(script) else {
             if let exception = context.exception {
@@ -136,6 +186,32 @@ final class JSCoreRuntime {
         let getStore: @convention(block) (String) -> String = { key in
             weakSelf?.bridgeStore[key] ?? ""
         }
+        let removeElements: @convention(block) (String, String) -> String = { html, selector in
+            do {
+                let doc = try SwiftSoup.parse(html)
+                try doc.select(selector).remove()
+                return try doc.outerHtml()
+            } catch {
+                return html
+            }
+        }
+        let getParents: @convention(block) (String, String, String) -> NSArray = { html, selector, baseUrl in
+            do {
+                let doc = try SwiftSoup.parse(html, baseUrl)
+                let elements = try doc.select(selector)
+                var parentsHtml: [String] = []
+                for el in elements.array() {
+                    var curr = el.parent()
+                    while let p = curr {
+                        parentsHtml.append(try p.outerHtml())
+                        curr = p.parent()
+                    }
+                }
+                return parentsHtml as NSArray
+            } catch {
+                return [] as NSArray
+            }
+        }
 
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
         context.setObject(urlDecode, forKeyedSubscript: "__native_urlDecode" as NSString)
@@ -155,6 +231,8 @@ final class JSCoreRuntime {
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
         context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
         context.setObject(getStore, forKeyedSubscript: "__native_getStore" as NSString)
+        context.setObject(removeElements, forKeyedSubscript: "__native_removeElements" as NSString)
+        context.setObject(getParents, forKeyedSubscript: "__native_getParents" as NSString)
     }
 
     private func installBaseBridge() {
@@ -538,51 +616,73 @@ final class JSCoreRuntime {
           if (index === undefined || index === null || isNaN(Number(index))) return String(selector || '');
           return String(selector || '') + '@' + String(Number(index));
         }
-        function __makeJsoupSelection(html, selector, baseUrlValue, selectionIndex) {
+        function __makeJsoupSelection(docState, selector, baseUrlValue, selectionIndex) {
           return {
             select: function(nextSelector) {
               var baseSelector = __selectorWithIndex(selector, selectionIndex);
               if (selectionIndex !== undefined && selectionIndex !== null && !isNaN(Number(selectionIndex))) {
-                var subHtml = __native_getString(String(html), baseSelector + '@html', String(baseUrlValue || ''));
-                return __makeJsoupSelection(subHtml, String(nextSelector), baseUrlValue);
+                var subHtml = __native_getString(String(docState.html), baseSelector + '@html', String(baseUrlValue || ''));
+                return __makeJsoupSelection({ html: subHtml }, String(nextSelector), baseUrlValue);
               }
               var joined = baseSelector ? baseSelector + ' ' + String(nextSelector) : String(nextSelector);
-              return __makeJsoupSelection(html, joined, baseUrlValue);
+              return __makeJsoupSelection(docState, joined, baseUrlValue);
             },
-            first: function() { return __makeJsoupSelection(html, selector, baseUrlValue, 0); },
-            get: function(index) { return __makeJsoupSelection(html, selector, baseUrlValue, Number(index)); },
-            size: function() { return __native_countElements(String(html), String(selector), String(baseUrlValue || '')); },
+            first: function() { return __makeJsoupSelection(docState, selector, baseUrlValue, 0); },
+            get: function(index) { return __makeJsoupSelection(docState, selector, baseUrlValue, Number(index)); },
+            eq: function(index) { return __makeJsoupSelection(docState, selector, baseUrlValue, Number(index)); },
+            size: function() { return __native_countElements(String(docState.html), String(selector), String(baseUrlValue || '')); },
             isEmpty: function() { return this.size() === 0; },
             text: function() {
               var selected = __selectorWithIndex(selector, selectionIndex);
-              var list = __native_getStringList(String(html), selected + '@text', String(baseUrlValue || ''));
+              var list = __native_getStringList(String(docState.html), selected + '@text', String(baseUrlValue || ''));
               var out = [];
               for (var i = 0; i < list.length; i++) out.push(String(list[i]));
               return out.join('\\n');
             },
             html: function() {
               var selected = __selectorWithIndex(selector, selectionIndex);
-              return __native_getString(String(html), selected + '@html', String(baseUrlValue || ''));
+              return __native_getString(String(docState.html), selected + '@html', String(baseUrlValue || ''));
+            },
+            outerHtml: function() {
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              return __native_getString(String(docState.html), selected + '@html', String(baseUrlValue || ''));
             },
             attr: function(name) {
               var selected = __selectorWithIndex(selector, selectionIndex);
-              return __native_getString(String(html), selected + '@' + String(name), String(baseUrlValue || ''));
+              return __native_getString(String(docState.html), selected + '@' + String(name), String(baseUrlValue || ''));
             },
             eachText: function() {
               var selected = __selectorWithIndex(selector, selectionIndex);
-              var list = __native_getStringList(String(html), selected + '@text', String(baseUrlValue || ''));
+              var list = __native_getStringList(String(docState.html), selected + '@text', String(baseUrlValue || ''));
               var out = [];
               for (var i = 0; i < list.length; i++) out.push(String(list[i]));
               return __asJavaList(out);
+            },
+            children: function() {
+              return this.select("> *");
+            },
+            parents: function() {
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              var parentHtmls = __native_getParents(String(docState.html), selected, String(baseUrlValue || ''));
+              var list = [];
+              for (var i = 0; i < parentHtmls.length; i++) list.push(String(parentHtmls[i]));
+              return __makeJsoupSelection({ html: list.join('') }, '', baseUrlValue);
+            },
+            remove: function() {
+              var selected = __selectorWithIndex(selector, selectionIndex);
+              if (selected) {
+                docState.html = __native_removeElements(String(docState.html), selected);
+              }
+              return this;
             }
           };
         }
         java.getElements = function(rule) {
-          return __makeJsoupSelection(__defaultHtml(), String(rule || ''), __defaultBaseUrl());
+          return __makeJsoupSelection({ html: __defaultHtml() }, String(rule || ''), __defaultBaseUrl());
         };
         Packages.org.jsoup.Jsoup = {
           parse: function(html, baseUrlValue) {
-            return __makeJsoupSelection(String(html), '', String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl)));
+            return __makeJsoupSelection({ html: String(html) }, '', String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl)));
           },
           connect: __makeConnect
         };

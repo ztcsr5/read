@@ -26,8 +26,8 @@ struct JSONRuleExtractor {
         self.directiveStore = directiveStore
     }
 
-    func list(from object: Any, rule: String?) -> [[String: Any]] {
-        if let rule, let selected = value(from: object, path: rule) {
+    func list(from object: Any, rule: String?, variables: [String: Any] = [:]) -> [[String: Any]] {
+        if let rule, let selected = value(from: object, path: rule, variables: variables) {
             if let array = selected as? [[String: Any]] {
                 return array
             }
@@ -41,11 +41,24 @@ struct JSONRuleExtractor {
         return collectDictionaries(object)
     }
 
-    func string(from item: [String: Any], rule: String?, fallbackKeys: [String]) -> String? {
-        if let rule, let value = value(from: item, path: rule) {
-            let text = stringify(value)
-            if !text.isEmpty {
-                return text
+    func string(
+        from item: [String: Any],
+        rule: String?,
+        fallbackKeys: [String],
+        variables: [String: Any] = [:]
+    ) -> String? {
+        if let rule {
+            let trimmed = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+            if LegadoRuleResolver().isJavaScriptRule(trimmed) {
+                if let evaluated = evaluateJS(rule: trimmed, object: item, extraVariables: variables) {
+                    return stringify(evaluated)
+                }
+            }
+            if let value = value(from: item, path: rule, variables: variables) {
+                let text = stringify(value)
+                if !text.isEmpty {
+                    return text
+                }
             }
         }
         for key in fallbackKeys {
@@ -59,7 +72,12 @@ struct JSONRuleExtractor {
         return nil
     }
 
-    func value(from object: Any, path rawPath: String) -> Any? {
+    func value(from object: Any, path rawPath: String, variables: [String: Any] = [:]) -> Any? {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if LegadoRuleResolver().isJavaScriptRule(trimmed) {
+            return evaluateJS(rule: trimmed, object: object, extraVariables: variables)
+        }
+
         let transformed = splitTransform(rawPath)
         let directiveResult = applyDirectives(from: object, path: transformed.path)
         let operatorPath: String
@@ -72,7 +90,7 @@ struct JSONRuleExtractor {
         guard !operatorPath.isEmpty else { return object }
         if let fallbackParts = RuleOperatorSplitter.split(operatorPath, separator: "||") {
             for part in fallbackParts {
-                if let value = value(from: object, path: appendTransform(transformed.transform, to: part)) {
+                if let value = value(from: object, path: appendTransform(transformed.transform, to: part), variables: variables) {
                     return value
                 }
             }
@@ -359,5 +377,52 @@ struct JSONRuleExtractor {
         }
         let text = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
         return text == "<null>" ? "" : text
+    }
+
+    private func evaluateJS(
+        rule: String,
+        object: Any,
+        extraVariables: [String: Any]
+    ) -> Any? {
+        var script = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        if script.hasPrefix("@js:") {
+            script = String(script.dropFirst(4))
+        } else if script.hasPrefix("<js>") && script.hasSuffix("</js>") {
+            let start = script.index(script.startIndex, offsetBy: 4)
+            let end = script.index(script.endIndex, offsetBy: -5)
+            script = String(script[start..<end])
+        }
+
+        let source = extraVariables["source"] as? BookSource
+        let runtime = JSCoreRuntime { urlText in
+            if let source {
+                return SynchronousSourceLoader().load(urlText: urlText, source: source)
+            }
+            return ""
+        }
+
+        var variables: [String: Any] = [
+            "result": object
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: object, options: []),
+           let jsonStr = String(data: data, encoding: .utf8) {
+            variables["html"] = jsonStr
+        }
+
+        for (k, v) in extraVariables {
+            variables[k] = v
+        }
+
+        let evaluated = runtime.evaluate(script, variables: variables)
+        if case .failure(.javascript) = evaluated, script.contains("return") {
+            if case .success(let val) = runtime.evaluate("(function(){\(script)})()", variables: variables) {
+                return val
+            }
+        }
+        if case .success(let val) = evaluated {
+            return val
+        }
+        return nil
     }
 }

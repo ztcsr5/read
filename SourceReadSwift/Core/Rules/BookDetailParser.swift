@@ -17,35 +17,51 @@ struct BookDetailParser {
         do {
             let document = try SwiftSoup.parse(response.body, response.url.absoluteString)
             let rule = source.ruleBookInfo
+            let bookMap: [String: Any] = [
+                "name": book.name,
+                "author": book.author ?? "",
+                "coverUrl": book.coverUrl ?? "",
+                "bookUrl": book.bookUrl,
+                "intro": book.intro ?? ""
+            ]
+            let variables: [String: Any] = [
+                "source": source,
+                "book": bookMap
+            ]
             let name = try htmlExtractor.value(
                 from: document,
                 rule: htmlExtractor.firstRule(rule, keys: ["name", "bookName"]),
                 fallback: nil,
-                baseUrl: response.url
+                baseUrl: response.url,
+                variables: variables
             ).nilIfEmpty ?? book.name
             let author = try htmlExtractor.value(
                 from: document,
                 rule: htmlExtractor.firstRule(rule, keys: ["author"]),
                 fallback: nil,
-                baseUrl: response.url
+                baseUrl: response.url,
+                variables: variables
             ).nilIfEmpty ?? book.author
             let cover = try htmlExtractor.value(
                 from: document,
                 rule: htmlExtractor.firstRule(rule, keys: ["coverUrl", "cover"]),
                 fallback: nil,
-                baseUrl: response.url
+                baseUrl: response.url,
+                variables: variables
             ).nilIfEmpty ?? book.coverUrl
             let intro = try htmlExtractor.value(
                 from: document,
                 rule: htmlExtractor.firstRule(rule, keys: ["intro", "introduction"]),
                 fallback: nil,
-                baseUrl: response.url
+                baseUrl: response.url,
+                variables: variables
             ).nilIfEmpty ?? book.intro
             let latest = try htmlExtractor.value(
                 from: document,
                 rule: htmlExtractor.firstRule(rule, keys: ["latestChapter", "lastChapter"]),
                 fallback: nil,
-                baseUrl: response.url
+                baseUrl: response.url,
+                variables: variables
             ).nilIfEmpty
 
             return .success(BookDetail(
@@ -66,7 +82,7 @@ struct BookDetailParser {
     private func parseJSON(source: BookSource, book: SearchBook, response: SourceResponse) -> Result<BookDetail, SourceEngineError> {
         guard let data = response.body.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) else {
-            return .failure(.rule("JSON \u{89e3}\u{6790}\u{5931}\u{8d25}"))
+            return .failure(.rule("JSON 解析失败"))
         }
         let dict: [String: Any]
         if let direct = object as? [String: Any] {
@@ -74,34 +90,50 @@ struct BookDetailParser {
         } else if let first = jsonExtractor.list(from: object, rule: nil).first {
             dict = first
         } else {
-            return .failure(.empty("JSON \u{8be6}\u{60c5}\u{4e3a}\u{7a7a}"))
+            return .failure(.empty("JSON 详情为空"))
         }
 
         let rule = source.ruleBookInfo
+        let bookMap: [String: Any] = [
+            "name": book.name,
+            "author": book.author ?? "",
+            "coverUrl": book.coverUrl ?? "",
+            "bookUrl": book.bookUrl,
+            "intro": book.intro ?? ""
+        ]
+        let variables: [String: Any] = [
+            "source": source,
+            "book": bookMap
+        ]
         let name = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["name", "bookName"]),
-            fallbackKeys: ["name", "bookName", "title", "book_name"]
+            fallbackKeys: ["name", "bookName", "title", "book_name"],
+            variables: variables
         ) ?? book.name
         let author = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["author"]),
-            fallbackKeys: ["author", "writer"]
+            fallbackKeys: ["author", "writer"],
+            variables: variables
         ) ?? book.author
         let cover = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["coverUrl", "cover"]),
-            fallbackKeys: ["cover", "coverUrl", "img", "image"]
+            fallbackKeys: ["cover", "coverUrl", "img", "image"],
+            variables: variables
         ) ?? book.coverUrl
         let intro = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["intro", "introduction"]),
-            fallbackKeys: ["intro", "desc", "description"]
+            fallbackKeys: ["intro", "desc", "description"],
+            variables: variables
         ) ?? book.intro
         let latest = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["latestChapter", "lastChapter"]),
-            fallbackKeys: ["latestChapter", "lastChapter", "last"]
+            fallbackKeys: ["latestChapter", "lastChapter", "last"],
+            variables: variables
         )
 
         return .success(BookDetail(

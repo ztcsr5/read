@@ -382,4 +382,56 @@ final class JSCoreRuntimeTests: XCTestCase {
         XCTAssertTrue(value.contains("https://example.com/c@Body:k=v"))
         XCTAssertTrue(value.contains("https://example.com/d@Header:{\"X-Fetch\":\"1\"}"))
     }
+
+    func testChapterIsVipAvoidsDictionaryOverride() throws {
+        // 验证传入外部 chapter 覆盖后，isVip() 方法依然可用
+        let script = "chapter.isVip()"
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate(script, variables: ["chapter": ["title": "第123章 VIP订阅付费"]])
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "true")
+    }
+
+    func testJsoupSelectionCascadingDOMAPIs() throws {
+        let html = """
+        <html><body>
+          <div id="content">
+            <p class="remove-me">Header</p>
+            <div class="chapters">
+              <a href="/c/1"><span>One</span></a>
+              <a href="/c/2"><span>Two</span></a>
+              <a href="/c/3"><span>Three</span></a>
+            </div>
+          </div>
+        </body></html>
+        """
+        let script = """
+        var doc = org.jsoup.Jsoup.parse(html, 'https://example.com');
+        // 测试 remove
+        doc.select('.remove-me').remove();
+        // 测试 eq 级联和 outerHtml/text
+        var firstLinkText = doc.select('.chapters a').eq(1).select('span').text();
+        var outer = doc.select('.chapters a').eq(2).outerHtml();
+        // 测试 children
+        var childCount = doc.select('.chapters').children().size();
+        // 测试 parents
+        var parentHtml = doc.select('.chapters span').eq(0).parents().html();
+        
+        [
+          doc.select('.remove-me').size(), // 应该为 0
+          firstLinkText, // 应该为 "Two"
+          outer.contains('Three'), // 应该为 true
+          childCount, // 应该为 3
+          parentHtml.contains('id="content"') // 应该为 true
+        ].join('|')
+        """
+        
+        let result = JSCoreRuntime().evaluate(script, variables: ["html": html])
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "0|Two|true|3|true")
+    }
 }
