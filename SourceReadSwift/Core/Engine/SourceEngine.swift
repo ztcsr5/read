@@ -183,12 +183,15 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
 
     private func transformBodyIfNeeded(_ response: SourceResponse, source: BookSource) -> SourceResponse {
         guard let script = bodyJSScript(source), !script.isEmpty else { return response }
-        let runtime = JSCoreRuntime()
+        let runtime = JSCoreRuntime { urlText in
+            SynchronousSourceLoader().load(urlText: urlText, source: source)
+        }
         let variables: [String: Any] = [
             "result": response.body,
             "html": response.body,
             "body": response.body,
-            "baseUrl": response.url.absoluteString
+            "baseUrl": response.url.absoluteString,
+            "source": source
         ]
 
         let evaluated = runtime.evaluate(script, variables: variables)

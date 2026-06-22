@@ -54,6 +54,33 @@ final class SourceEngineBodyJSTests: XCTestCase {
         }
         XCTAssertEqual(content.paragraphs, ["B"])
     }
+
+    func testContentAppliesBodyJsWithSourceVariable() async throws {
+        let source = BookSource(
+            bookSourceName: "BodyJSWithSource",
+            bookSourceUrl: "https://source.example.com",
+            ruleContent: SourceRule(fields: ["content": "#content@text"]),
+            raw: [
+                "bodyJs": "var name = source.sourceName; return result.replace('A', name);"
+            ]
+        )
+        let chapter = BookChapter(
+            title: "第一章",
+            url: "https://source.example.com/chapter/1",
+            bookUrl: "https://source.example.com/book",
+            index: 0,
+            isVip: false
+        )
+        let network = StaticSourceNetworkClient(body: "<html><body><div id='content'>A</div></body></html>")
+        let engine = LegadoSourceEngine(network: network)
+
+        let result = await engine.getContent(source: source, chapter: chapter)
+
+        guard case .success(let content) = result else {
+            return XCTFail("expected content")
+        }
+        XCTAssertEqual(content.paragraphs, ["BodyJSWithSource"])
+    }
 }
 
 private final class StaticSourceNetworkClient: SourceNetworkClient, @unchecked Sendable {
