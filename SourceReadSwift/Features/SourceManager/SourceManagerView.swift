@@ -121,12 +121,17 @@ struct SourceManagerView: View {
             } message: {
                 Text("将删除 \(pendingDeleteBookSourceURLs.count) 个书源。此操作不会删除书架里的书，但对应书籍可能需要换源后才能继续加载。")
             }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: false,
-                onCompletion: importFile
-            )
+            .sheet(isPresented: $showFileImporter) {
+                UniversalDocumentPicker(
+                    contentTypes: [.json, .plainText, .text, .data, .content, .item],
+                    onPick: { urls in
+                        showFileImporter = false
+                        importFile(.success(urls))
+                    },
+                    onCancel: { showFileImporter = false }
+                )
+                .ignoresSafeArea()
+            }
         }
     }
 

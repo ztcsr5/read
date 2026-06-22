@@ -20,6 +20,7 @@ struct RootTabView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             customTabBar
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .simultaneousGesture(edgeTabSwipeGesture)
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
@@ -114,9 +115,7 @@ struct RootTabView: View {
 
     private func tabButton(index: Int, title: String, systemImage: String) -> some View {
         Button {
-            withAnimation(.interactiveSpring(response: 0.35, dampingFraction: 0.82)) {
-                selectedTab = index
-            }
+            selectedTab = index
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
         } label: {

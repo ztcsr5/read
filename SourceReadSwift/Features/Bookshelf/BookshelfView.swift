@@ -55,15 +55,6 @@ struct BookshelfView: View {
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }
-            .refreshable {
-                await refreshBookshelf()
-            }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: false,
-                onCompletion: importLocalBook
-            )
             .pageBackground()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -74,6 +65,24 @@ struct BookshelfView: View {
                 Button("知道了", role: .cancel) {}
             } message: {
                 Text(importMessage ?? "")
+            }
+            .sheet(isPresented: $showFileImporter) {
+                UniversalDocumentPicker(
+                    contentTypes: [
+                        .plainText,
+                        .text,
+                        .data,
+                        .content,
+                        .item,
+                        UTType(filenameExtension: "epub") ?? UTType(importedAs: "org.idpf.epub-container")
+                    ],
+                    onPick: { urls in
+                        showFileImporter = false
+                        importLocalBook(.success(urls))
+                    },
+                    onCancel: { showFileImporter = false }
+                )
+                .ignoresSafeArea()
             }
         }
     }
@@ -103,13 +112,24 @@ struct BookshelfView: View {
                 if isRefreshingBooks {
                     ProgressView()
                         .controlSize(.small)
+                } else if !allBooks.isEmpty {
+                    Button {
+                        Task { await refreshBookshelf() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("检查书籍更新")
                 }
             }
             if updatedBooks.isEmpty {
                 compactEmptyState(
                     icon: "sparkles",
                     title: "暂无更新",
-                    message: allBooks.isEmpty ? "导入书籍后，更新会显示在这里" : "下拉即可检查书籍更新"
+                    message: allBooks.isEmpty ? "导入书籍后，更新会显示在这里" : "点击刷新按钮检查书籍更新"
                 )
             } else {
                 LazyVStack(spacing: 16) {
@@ -477,10 +497,6 @@ private struct BookshelfCollectionView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
     }
-}
-
-private extension UTType {
-    static let epub = UTType(filenameExtension: "epub") ?? .data
 }
 
 private struct ReaderProfileView: View {
