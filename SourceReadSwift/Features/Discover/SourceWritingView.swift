@@ -198,7 +198,7 @@ final class LightweightHTTPServer: ObservableObject {
         lastError = nil
         localIP = getLocalIPAddress() ?? "127.0.0.1"
         let parameters = NWParameters.tcp
-        let candidates = [port] + Array(UInt16(1122)...UInt16(1132)).filter { $0 != port }
+        let candidates = [port] + (1122...1132).map(UInt16.init).filter { $0 != port }
         var lastStartError: Error?
         for candidate in candidates {
             do {

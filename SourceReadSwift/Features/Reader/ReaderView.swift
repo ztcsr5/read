@@ -1252,8 +1252,10 @@ struct ReaderView: View {
         }
 
         let screen = UIScreen.main.bounds.size
-        let availableWidth = max(screen.width - pagePadding * 2, 260)
-        let availableHeight = max(screen.height - pagePadding * 2 - footerHeight - 70, 360)
+        let screenWidth = Double(screen.width)
+        let screenHeight = Double(screen.height)
+        let availableWidth = max(screenWidth - pagePadding * 2, 260)
+        let availableHeight = max(screenHeight - pagePadding * 2 - footerHeight - 70, 360)
         let charWidth = max(fontSize * 0.56 + letterSpacing, 7)
         let lineHeight = max(fontSize + lineSpacing, 18)
         let charsPerLine = max(Int(availableWidth / charWidth), 10)
