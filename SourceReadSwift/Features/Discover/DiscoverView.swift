@@ -35,6 +35,7 @@ struct DiscoverView: View {
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }
+            .scrollDismissesKeyboard(.interactively)
             .pageBackground()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)

@@ -14,7 +14,7 @@ struct ReaderView: View {
     var onSelectChapter: ((BookChapter) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showOverlay = true
+    @State private var showOverlay = false
     @State private var showSettings = false
     @State private var showChapterList = false
     @State private var showBookmarks = false
@@ -28,14 +28,14 @@ struct ReaderView: View {
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
     @StateObject private var speechController = ReaderSpeechController()
-    @AppStorage("reader.fontSize") private var fontSize: Double = 20
+    @AppStorage("reader.fontSize") private var fontSize: Double = 19
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
     @AppStorage("reader.pagePadding") private var pagePadding: Double = 24
     @AppStorage("reader.letterSpacing") private var letterSpacing: Double = 0
     @AppStorage("reader.paragraphSpacing") private var paragraphSpacing: Double = 16
     @AppStorage("reader.paragraphIndent") private var paragraphIndent: Double = 0
     @AppStorage("reader.titleSpacing") private var titleSpacing: Double = 12
-    @AppStorage("reader.footerHeight") private var footerHeight: Double = 120
+    @AppStorage("reader.footerHeight") private var footerHeight: Double = 72
     @AppStorage("reader.ttsRate") private var ttsRate: Double = 0.52
     @AppStorage("reader.autoScrollDelay") private var autoScrollDelay: Double = 2.0
     @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
@@ -110,11 +110,27 @@ struct ReaderView: View {
         }
     }
 
+    private var readerLayoutKey: String {
+        [
+            readerModeRawValue,
+            backgroundRawValue,
+            String(format: "%.1f", fontSize),
+            String(format: "%.1f", lineSpacing),
+            String(format: "%.1f", pagePadding),
+            String(format: "%.1f", letterSpacing),
+            String(format: "%.1f", paragraphSpacing),
+            String(format: "%.1f", paragraphIndent),
+            String(format: "%.1f", titleSpacing),
+            String(format: "%.1f", footerHeight)
+        ].joined(separator: "|")
+    }
+
     var body: some View {
         ZStack {
             background.color.ignoresSafeArea()
 
             readerContent
+            .id(readerLayoutKey)
             .contentShape(Rectangle())
             .gesture(
                 SpatialTapGesture()
@@ -176,6 +192,11 @@ struct ReaderView: View {
         }
         .onChange(of: autoScrollTarget) { _ in
             persistReadingPosition()
+        }
+        .onChange(of: readerModeRawValue) { _ in
+            stopAutoScroll()
+            speechController.stop()
+            autoScrollTarget = initialAutoScrollTarget()
         }
     }
 
@@ -247,7 +268,8 @@ struct ReaderView: View {
 
     private var pagedReaderContent: some View {
         TabView(selection: $autoScrollTarget) {
-            VStack(alignment: .leading, spacing: 18) {
+            pageSurface {
+                VStack(alignment: .leading, spacing: 18) {
                 Text(content.title)
                     .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
                     .foregroundStyle(background.textColor)
@@ -255,15 +277,16 @@ struct ReaderView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                }
             }
-            .padding(CGFloat(pagePadding))
             .tag(0)
 
             ForEach(content.paragraphs.indices, id: \.self) { index in
-                ScrollView {
-                    paragraphText(content.paragraphs[index], index: index)
-                        .padding(CGFloat(pagePadding))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                pageSurface {
+                    ScrollView {
+                        paragraphText(content.paragraphs[index], index: index)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .tag(index + 1)
             }
@@ -274,6 +297,21 @@ struct ReaderView: View {
             guard target >= 0 else { return }
             autoScrollTarget = target + 1
         }
+    }
+
+    private func pageSurface<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(CGFloat(pagePadding))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background {
+                if readerMode == .cover {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(background.color)
+                        .shadow(color: .black.opacity(background == .dark ? 0.35 : 0.12), radius: 18, x: -6, y: 0)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 4)
+                }
+            }
     }
 
     private func paragraphText(_ paragraph: String, index: Int) -> some View {
