@@ -52,7 +52,7 @@ struct PodcastLargeTitleBar<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .top) {
             Text(title)
-                .font(.system(size: 44, weight: .bold, design: .default))
+                .font(.system(size: 32, weight: .bold, design: .default))
                 .foregroundStyle(.primary)
                 .accessibilityAddTraits(.isHeader)
 
@@ -84,12 +84,12 @@ struct PodcastChevronSectionHeader: View {
     }
 
     private var label: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text(title)
-                .font(.system(size: 28, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.primary)
             Image(systemName: "chevron.right")
-                .font(.system(size: 23, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
         }
@@ -108,7 +108,7 @@ struct CenterTextEmptyState: View {
 
     var body: some View {
         Text(text)
-            .font(.title3.weight(.semibold))
+            .font(.system(size: 15, weight: .regular))
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, minHeight: minHeight)

@@ -464,6 +464,17 @@ struct ReaderView: View {
 
     private var appearanceSettings: some View {
         Group {
+            Text("翻页模式")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker("翻页模式", selection: $readerModeRawValue) {
+                ForEach(ReaderMode.allCases) { mode in
+                    Text(mode.title).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.bottom, 8)
+
             Text("字号大小")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)

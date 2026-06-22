@@ -433,9 +433,12 @@ private struct PurifyRulesView: View {
     @EnvironmentObject private var appState: AppState
     @State private var newRule = ""
     @State private var importText = ""
+    @State private var importUrl = ""
     @State private var selectedPresetIDs: Set<String> = []
     @State private var previewText = "正文第一段\n请收藏本站，最新网址 example.com\n广告内容"
     @State private var message: String?
+    @State private var urlMessage: String?
+    @State private var isDownloadingRules = false
 
     var body: some View {
         List {
@@ -462,6 +465,22 @@ private struct PurifyRulesView: View {
                 .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if let message {
                     Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("URL 导入") {
+                TextField("请输入净化规则的 URL 地址", text: $importUrl)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                Button(isDownloadingRules ? "正在下载..." : "从 URL 导入") {
+                    Task { await importRulesFromUrl() }
+                }
+                .disabled(importUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isDownloadingRules)
+                if let urlMessage {
+                    Text(urlMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -583,6 +602,40 @@ private struct PurifyRulesView: View {
             .filter { selectedPresetIDs.contains($0.id) }
             .flatMap(\.patterns)
             .filter { !appState.purifyRuleStore.containsPattern($0) }
+    }
+
+    private func importRulesFromUrl() async {
+        let trimmed = importUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed) else {
+            urlMessage = "无效的 URL 地址"
+            return
+        }
+
+        isDownloadingRules = true
+        urlMessage = "正在拉取规则..."
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                isDownloadingRules = false
+                urlMessage = "下载失败：服务器响应错误"
+                return
+            }
+
+            guard let text = String(data: data, encoding: .utf8) else {
+                isDownloadingRules = false
+                urlMessage = "解码失败：内容不是有效的 UTF-8 文本"
+                return
+            }
+
+            let count = appState.purifyRuleStore.importLines(text)
+            importUrl = ""
+            isDownloadingRules = false
+            urlMessage = "已成功从网络导入 \(count) 条净化规则"
+        } catch {
+            isDownloadingRules = false
+            urlMessage = "下载失败：\(error.localizedDescription)"
+        }
     }
 }
 

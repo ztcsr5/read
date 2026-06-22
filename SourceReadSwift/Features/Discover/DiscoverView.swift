@@ -10,7 +10,7 @@ struct DiscoverView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     Text("发现")
-                        .font(.system(size: 44, weight: .bold))
+                        .font(.system(size: 32, weight: .bold))
                         .foregroundStyle(.primary)
                         .accessibilityAddTraits(.isHeader)
                         .padding(.top, 18)
@@ -54,7 +54,7 @@ struct DiscoverView: View {
             }
 
             Text("搜索结果")
-                .font(.system(size: 30, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.primary)
                 .accessibilityAddTraits(.isHeader)
 
@@ -65,10 +65,10 @@ struct DiscoverView: View {
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 25, weight: .regular))
+                .font(.system(size: 18, weight: .regular))
                 .foregroundStyle(.secondary)
             TextField("搜索书名或作者", text: $viewModel.keyword)
-                .font(.system(size: 24, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
                 .onSubmit {
@@ -76,9 +76,9 @@ struct DiscoverView: View {
                 }
         }
         .padding(.horizontal, 16)
-        .frame(height: 64)
+        .frame(height: 50)
         .background(Color(.systemGray5))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var webModeButton: some View {
@@ -86,12 +86,12 @@ struct DiscoverView: View {
             WebNovelModeView()
         } label: {
             Label("智能网页小说模式", systemImage: "globe")
-                .font(.system(size: 21, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(.blue)
                 .frame(maxWidth: .infinity)
-                .frame(height: 64)
+                .frame(height: 50)
                 .background(AppTheme.softBlue)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -100,31 +100,31 @@ struct DiscoverView: View {
         NavigationLink {
             SourceManagerView()
         } label: {
-            HStack(spacing: 18) {
+            HStack(spacing: 14) {
                 Image(systemName: "cube")
-                    .font(.system(size: 36, weight: .semibold))
+                    .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
+                    .frame(width: 44, height: 44)
 
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("书源管理")
-                        .font(.system(size: 25, weight: .bold))
+                        .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(.white)
                     Text("导入、测试、验证和管理网络书源")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.85))
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
             }
-            .padding(22)
+            .padding(16)
             .frame(maxWidth: .infinity)
             .background(AppTheme.accent)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -163,8 +163,8 @@ struct DiscoverView: View {
             EmptyStateCard(systemImage: "exclamationmark.triangle", title: "搜索失败", message: error)
         } else if viewModel.results.isEmpty {
             Text("输入书名后，会从启用的小说书源里搜索")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.82))
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, minHeight: 250)
         } else {
@@ -261,25 +261,25 @@ struct DiscoverView: View {
     private var sourceWritingTab: some View {
         VStack(alignment: .leading, spacing: 18) {
             NavigationLink {
-                SourceManagerView()
+                SourceWritingView()
             } label: {
-                HStack(spacing: 16) {
+                HStack(spacing: 14) {
                     Image(systemName: "globe")
-                        .font(.system(size: 32, weight: .semibold))
+                        .font(.system(size: 28, weight: .semibold))
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Web 写源")
-                            .font(.title2.bold())
+                            .font(.system(size: 20, weight: .bold))
                         Text("用网页信息辅助整理、导入和验证书源规则")
-                            .font(.subheadline)
+                            .font(.system(size: 13, weight: .regular))
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.headline)
+                        .font(.system(size: 16, weight: .semibold))
                 }
                 .foregroundStyle(.white)
-                .padding(20)
+                .padding(16)
                 .background(AppTheme.accent)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
         }

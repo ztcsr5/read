@@ -120,12 +120,6 @@ struct SourceManagerView: View {
             } message: {
                 Text("将删除 \(pendingDeleteBookSourceURLs.count) 个书源。此操作不会删除书架里的书，但对应书籍可能需要换源后才能继续加载。")
             }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.json, .plainText, .data, .item],
-                allowsMultipleSelection: false,
-                onCompletion: importFile
-            )
         }
     }
 
@@ -567,7 +561,6 @@ struct SourceManagerView: View {
                     .buttonStyle(.bordered)
 
                     Button {
-                        showImportSheet = false
                         showFileImporter = true
                     } label: {
                         Label("选择本地 JSON 文件", systemImage: "doc.badge.plus")
@@ -616,6 +609,20 @@ struct SourceManagerView: View {
             }
         }
         .presentationDetents([.large])
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [
+                UTType(filenameExtension: "json") ?? .json,
+                UTType(filenameExtension: "txt") ?? .plainText,
+                .json,
+                .plainText,
+                .data,
+                .item,
+                .content
+            ],
+            allowsMultipleSelection: false,
+            onCompletion: importFile
+        )
     }
 
     private func jsonPreviewSheet(_ preview: SourceJSONPreview) -> some View {
@@ -1101,6 +1108,7 @@ struct SourceManagerView: View {
             let report = try appState.sourceStore.importJSON(text)
             importError = nil
             importMessage = "文件 \(report.userMessage)"
+            showImportSheet = false
         } catch {
             importMessage = nil
             importError = error.localizedDescription

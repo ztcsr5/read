@@ -60,7 +60,16 @@ struct BookshelfView: View {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [.plainText, .text, .epub, .item],
+                allowedContentTypes: [
+                    UTType(filenameExtension: "epub") ?? UTType(importedAs: "org.idpf.epub-container"),
+                    UTType(filenameExtension: "txt") ?? .plainText,
+                    .plainText,
+                    .text,
+                    .epub,
+                    .data,
+                    .item,
+                    .content
+                ],
                 allowsMultipleSelection: false,
                 onCompletion: importLocalBook
             )
