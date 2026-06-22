@@ -27,6 +27,7 @@ struct SourceRequestBuilder {
         headers.merge(directive.headers, uniquingKeysWith: { _, new in new })
         headers["User-Agent", default: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"]
         headers["Accept", default: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"]
+        applyDefaultNavigationHeaders(to: &headers, sourceBase: source.bookSourceUrl)
 
         let body = directive.body ?? sourceOptions.body
         let method: SourceHTTPMethod = {
@@ -95,11 +96,28 @@ struct SourceRequestBuilder {
             if let cookie = object["cookie"] as? String, !cookie.isEmpty {
                 headers["Cookie"] = cookie
             }
+            applyUserAgentAlias(from: object, to: &headers)
         }
         if let cookie = source.raw["cookie"], !cookie.isEmpty {
             headers["Cookie"] = cookie
         }
+        applyUserAgentAlias(from: source.raw.reduce(into: [String: Any]()) { result, item in
+            result[item.key] = item.value
+        }, to: &headers)
         return headers
+    }
+
+    private func applyUserAgentAlias(from object: [String: Any], to headers: inout [String: String]) {
+        guard !containsHeader(headers, "User-Agent") else { return }
+        for key in ["userAgent", "ua"] {
+            if let value = object[key] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    headers["User-Agent"] = trimmed
+                    return
+                }
+            }
+        }
     }
 
     private func requestOptions(_ source: BookSource, keyword: String?, page: Int?) -> (method: SourceHTTPMethod?, body: Data?, headers: [String: String]) {
@@ -112,6 +130,9 @@ struct SourceRequestBuilder {
                 method = .post
             }
             if let methodText = object["httpMethod"] as? String, methodText.uppercased() == "POST" {
+                method = .post
+            }
+            if let methodText = object["type"] as? String, methodText.uppercased() == "POST" {
                 method = .post
             }
             if let nested = object["headers"] as? [String: Any] {
@@ -132,7 +153,7 @@ struct SourceRequestBuilder {
             if let text = object["bookSourceHeader"] as? String {
                 headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
             }
-            if let bodyOption = firstValue(in: object, keys: ["body", "requestBody", "postBody"]),
+            if let bodyOption = firstValue(in: object, keys: ["body", "requestBody", "postBody", "data"]),
                let encoded = encodeBodyOption(bodyOption, headers: headers, keyword: keyword, page: page) {
                 body = encoded
                 method = .post
@@ -149,6 +170,22 @@ struct SourceRequestBuilder {
             result[item.key] = item.value
         })
         return (method, body, headers)
+    }
+
+    private func applyDefaultNavigationHeaders(to headers: inout [String: String], sourceBase: String) {
+        guard let baseURL = URL(string: sourceBase), let host = baseURL.host else { return }
+        let scheme = baseURL.scheme ?? "https"
+        let origin = "\(scheme)://\(host)"
+        if !containsHeader(headers, "Referer") {
+            headers["Referer"] = "\(origin)/"
+        }
+        if !containsHeader(headers, "Origin") {
+            headers["Origin"] = origin
+        }
+    }
+
+    private func containsHeader(_ headers: [String: String], _ name: String) -> Bool {
+        headers.keys.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 
     private func sourceCharset(_ source: BookSource) -> String? {

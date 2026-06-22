@@ -37,11 +37,11 @@ struct SourceURLDirectiveParser {
             for key in ["headers", "header", "bookSourceHeader"] {
                 headers.merge(parseHeadersOption(options[key]), uniquingKeysWith: { _, new in new })
             }
-            if let methodText = firstString(in: options, keys: ["method", "httpMethod"]),
+            if let methodText = firstString(in: options, keys: ["method", "httpMethod", "type"]),
                methodText.uppercased() == "POST" {
                 method = .post
             }
-            if let bodyOption = firstValue(in: options, keys: ["body", "requestBody", "postBody"]) {
+            if let bodyOption = firstValue(in: options, keys: ["body", "requestBody", "postBody", "data"]) {
                 body = encodeBodyOption(bodyOption, headers: headers)
                 method = .post
             }

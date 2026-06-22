@@ -85,4 +85,14 @@ final class SourceURLDirectiveTests: XCTestCase {
         XCTAssertEqual(directive.method, .post)
         XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), #"{"a":"1","b":"2"}"#)
     }
+
+    func testParseLegadoTypeAndDataAliases() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/api,{"type":"POST","data":{"q":"test","page":"2"}}"#
+        )
+
+        XCTAssertEqual(directive.urlText, "https://example.com/api")
+        XCTAssertEqual(directive.method, .post)
+        XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "page=2&q=test")
+    }
 }

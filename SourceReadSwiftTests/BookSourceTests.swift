@@ -202,4 +202,26 @@ final class BookSourceTests: XCTestCase {
 
         XCTAssertEqual(request.expectedCharset, "gbk")
     }
+
+    func testRequestBuilderReadsLegadoTypeDataAndUserAgentAliases() {
+        let source = BookSource(
+            bookSourceName: "Legado Alias Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/api",
+            customConfig: #"{"type":"POST","data":{"q":"{{keyword}}","page":"{{page}}"},"ua":"AliasUA/1.0"}"#
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 3
+        )
+
+        XCTAssertEqual(request.method, .post)
+        XCTAssertEqual(String(data: request.body ?? Data(), encoding: .utf8), "page=3&q=test")
+        XCTAssertEqual(request.headers["User-Agent"], "AliasUA/1.0")
+        XCTAssertEqual(request.headers["Referer"], "https://example.com/")
+        XCTAssertEqual(request.headers["Origin"], "https://example.com")
+    }
 }
