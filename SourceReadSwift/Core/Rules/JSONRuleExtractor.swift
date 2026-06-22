@@ -1,6 +1,31 @@
 import Foundation
 
+final class JSONRuleDirectiveStore {
+    private var values: [String: Any] = [:]
+
+    func put(_ key: String, value: Any) {
+        let clean = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        values[clean] = value
+    }
+
+    func get(_ key: String) -> Any? {
+        values[key.trimmingCharacters(in: .whitespacesAndNewlines)]
+    }
+}
+
 struct JSONRuleExtractor {
+    private enum DirectiveResult {
+        case path(String)
+        case value(Any)
+    }
+
+    private let directiveStore: JSONRuleDirectiveStore
+
+    init(directiveStore: JSONRuleDirectiveStore = JSONRuleDirectiveStore()) {
+        self.directiveStore = directiveStore
+    }
+
     func list(from object: Any, rule: String?) -> [[String: Any]] {
         if let rule, let selected = value(from: object, path: rule) {
             if let array = selected as? [[String: Any]] {
@@ -36,7 +61,14 @@ struct JSONRuleExtractor {
 
     func value(from object: Any, path rawPath: String) -> Any? {
         let transformed = splitTransform(rawPath)
-        let operatorPath = transformed.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let directiveResult = applyDirectives(from: object, path: transformed.path)
+        let operatorPath: String
+        switch directiveResult {
+        case .path(let path):
+            operatorPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .value(let value):
+            return applyTransform(transformed.transform, to: value)
+        }
         guard !operatorPath.isEmpty else { return object }
         if let fallbackParts = RuleOperatorSplitter.split(operatorPath, separator: "||") {
             for part in fallbackParts {
@@ -60,6 +92,69 @@ struct JSONRuleExtractor {
             return applyTransform(transformed.transform, to: value)
         }
         return nil
+    }
+
+    private func applyDirectives(from object: Any, path: String) -> DirectiveResult {
+        var output = path
+        for directive in extractPutDirectives(from: output) {
+            if let value = value(from: object, path: directive.valueRule) {
+                directiveStore.put(directive.key, value: value)
+            }
+        }
+        output = removePutDirectives(from: output)
+        let directOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let key = directGetKey(from: directOutput), let value = directiveStore.get(key) {
+            return .value(value)
+        }
+        output = replaceGetDirectives(in: output)
+
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .path(trimmed)
+    }
+
+    private func extractPutDirectives(from rule: String) -> [(key: String, valueRule: String)] {
+        guard let regex = try? NSRegularExpression(pattern: #"(?i)@put:\{([^}]*)\}"#) else { return [] }
+        let range = NSRange(rule.startIndex..<rule.endIndex, in: rule)
+        return regex.matches(in: rule, range: range).flatMap { match -> [(key: String, valueRule: String)] in
+            guard let bodyRange = Range(match.range(at: 1), in: rule) else { return [] }
+            return splitTopLevel(String(rule[bodyRange]), separator: ",")
+                .compactMap { entry in
+                    let parts = splitTopLevel(entry, separator: ":", maxSplits: 1)
+                    guard parts.count == 2 else { return nil }
+                    let key = unquote(parts[0].trimmingCharacters(in: .whitespacesAndNewlines))
+                    let valueRule = unquote(parts[1].trimmingCharacters(in: .whitespacesAndNewlines))
+                    return key.isEmpty || valueRule.isEmpty ? nil : (key, valueRule)
+                }
+        }
+    }
+
+    private func removePutDirectives(from rule: String) -> String {
+        rule.replacingOccurrences(of: #"(?i)@put:\{[^}]*\}"#, with: "", options: .regularExpression)
+    }
+
+    private func replaceGetDirectives(in rule: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"(?i)@get:\{([^}]*)\}"#) else { return rule }
+        var output = rule
+        let matches = regex.matches(in: rule, range: NSRange(rule.startIndex..<rule.endIndex, in: rule)).reversed()
+        for match in matches {
+            guard let fullRange = Range(match.range(at: 0), in: output),
+                  let keyRange = Range(match.range(at: 1), in: output) else { continue }
+            let key = String(output[keyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            output.replaceSubrange(fullRange, with: stringify(directiveStore.get(key) ?? ""))
+        }
+        return output
+    }
+
+    private func directGetKey(from rule: String) -> String? {
+        let lower = rule.lowercased()
+        guard lower.hasPrefix("@get:") else { return nil }
+        if lower.hasPrefix("@get:{"), rule.hasSuffix("}") {
+            return String(rule.dropFirst(6).dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return String(rule.dropFirst(5))
+            .components(separatedBy: CharacterSet(charactersIn: "@#"))
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func appendTransform(_ transform: (pattern: String, replacement: String)?, to path: String) -> String {
@@ -114,6 +209,9 @@ struct JSONRuleExtractor {
 
     private func normalize(_ rule: String) -> String {
         var output = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        output = output
+            .replacingOccurrences(of: #"(?i)@put:\{[^}]*\}"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)@get:\{([^}]*)\}"#, with: "$1", options: .regularExpression)
         if output.hasPrefix("$.") {
             output.removeFirst(2)
         }
@@ -151,6 +249,79 @@ struct JSONRuleExtractor {
                 replacement: parts.dropFirst(2).joined(separator: "##")
             )
         )
+    }
+
+    private func unquote(_ value: String) -> String {
+        var output = value
+        if output.count >= 2,
+           let first = output.first,
+           let last = output.last,
+           (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+            output.removeFirst()
+            output.removeLast()
+        }
+        return output
+    }
+
+    private func splitTopLevel(_ value: String, separator: Character, maxSplits: Int = Int.max) -> [String] {
+        var output: [String] = []
+        var current = ""
+        var quote: Character?
+        var braceDepth = 0
+        var bracketDepth = 0
+        var parenDepth = 0
+        var splits = 0
+        var previous: Character?
+
+        for character in value {
+            if let activeQuote = quote {
+                current.append(character)
+                if character == activeQuote, previous != "\\" {
+                    quote = nil
+                }
+                previous = character
+                continue
+            }
+
+            switch character {
+            case "\"", "'":
+                quote = character
+                current.append(character)
+            case "{":
+                braceDepth += 1
+                current.append(character)
+            case "}":
+                braceDepth = max(0, braceDepth - 1)
+                current.append(character)
+            case "[":
+                bracketDepth += 1
+                current.append(character)
+            case "]":
+                bracketDepth = max(0, bracketDepth - 1)
+                current.append(character)
+            case "(":
+                parenDepth += 1
+                current.append(character)
+            case ")":
+                parenDepth = max(0, parenDepth - 1)
+                current.append(character)
+            default:
+                if character == separator,
+                   braceDepth == 0,
+                   bracketDepth == 0,
+                   parenDepth == 0,
+                   splits < maxSplits {
+                    output.append(current)
+                    current = ""
+                    splits += 1
+                } else {
+                    current.append(character)
+                }
+            }
+            previous = character
+        }
+        output.append(current)
+        return output
     }
 
     private func applyTransform(_ transform: (pattern: String, replacement: String)?, to value: Any) -> Any {

@@ -180,4 +180,53 @@ final class JSONRuleExtractorTests: XCTestCase {
 
         XCTAssertEqual(value, "A\nC\nB\nD")
     }
+
+    func testPutAndGetDirectivesShareJSONValuesAcrossRules() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "prefix": "book",
+                "book": [
+                    "title": "Title"
+                ]
+            ]
+        ]
+
+        _ = extractor.value(from: object, path: "@put:{key:$.data.prefix}$.data.prefix")
+        let value = extractor.value(from: object, path: "$.data.@get:{key}.title") as? String
+
+        XCTAssertEqual(value, "Title")
+    }
+
+    func testDirectGetDirectiveReturnsStoredJSONValue() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "items": [
+                    ["title": "A"],
+                    ["title": "B"]
+                ]
+            ]
+        ]
+
+        _ = extractor.value(from: object, path: "@put:{items:$.data.items}$.data.items")
+        let value = extractor.value(from: object, path: "@get:{items}") as? [[String: Any]]
+
+        XCTAssertEqual(value?.count, 2)
+        XCTAssertEqual(value?.first?["title"] as? String, "A")
+    }
+
+    func testPutDirectiveSplitsQuotedJSONRuleSafely() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "a,b:c": "Primary"
+            ]
+        ]
+
+        _ = extractor.value(from: object, path: #"@put:{"key":"$['data']['a,b:c']"}$.data"#)
+        let value = extractor.value(from: object, path: "@get:{key}") as? String
+
+        XCTAssertEqual(value, "Primary")
+    }
 }
