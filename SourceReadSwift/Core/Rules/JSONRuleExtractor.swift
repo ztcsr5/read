@@ -405,9 +405,13 @@ struct JSONRuleExtractor {
             "result": object
         ]
 
-        if let data = try? JSONSerialization.data(withJSONObject: object, options: []),
-           let jsonStr = String(data: data, encoding: .utf8) {
-            variables["html"] = jsonStr
+        if JSONSerialization.isValidJSONObject(object) {
+            if let data = try? JSONSerialization.data(withJSONObject: object, options: []),
+               let jsonStr = String(data: data, encoding: .utf8) {
+                variables["html"] = jsonStr
+            }
+        } else {
+            variables["html"] = stringify(object)
         }
 
         for (k, v) in extraVariables {

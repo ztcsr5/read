@@ -17,7 +17,25 @@ final class JSCoreRuntime {
 
     func evaluate(_ script: String, variables: [String: Any] = [:]) -> Result<String, SourceEngineError> {
         for (key, value) in variables {
-            context.setObject(value, forKeyedSubscript: key as NSString)
+            var jsCompatibleValue = value
+            if let source = value as? BookSource {
+                var map = source.raw
+                map["bookSourceName"] = source.bookSourceName
+                map["sourceName"] = source.bookSourceName
+                map["bookSourceUrl"] = source.bookSourceUrl
+                map["sourceUrl"] = source.bookSourceUrl
+                map["bookSourceGroup"] = source.bookSourceGroup ?? ""
+                map["sourceGroup"] = source.bookSourceGroup ?? ""
+                map["bookSourceType"] = String(source.bookSourceType)
+                map["weight"] = String(source.weight)
+                map["searchUrl"] = source.searchUrl ?? ""
+                map["exploreUrl"] = source.exploreUrl ?? ""
+                map["header"] = source.header ?? ""
+                map["customConfig"] = source.customConfig ?? ""
+                jsCompatibleValue = map
+            }
+            context.setObject(jsCompatibleValue, forKeyedSubscript: key as NSString)
+            
             if key == "chapter" {
                 let injectScript = """
                 if (typeof chapter !== 'undefined' && chapter !== null) {
