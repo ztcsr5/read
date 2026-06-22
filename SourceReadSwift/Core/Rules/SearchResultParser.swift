@@ -22,7 +22,7 @@ struct SearchResultParser {
         do {
             let elements = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: listRule)
             var books: [SearchBook] = []
-            for element in elements.array() {
+            for element in elements {
                 let name = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["name", "bookName"]), fallback: "a@text", baseUrl: response.url)
                 let bookUrl = try htmlExtractor.value(from: element, rule: firstRule(rule, keys: ["bookUrl", "url"]), fallback: "a@href", baseUrl: response.url)
                 guard !name.isEmpty, !bookUrl.isEmpty else { continue }
