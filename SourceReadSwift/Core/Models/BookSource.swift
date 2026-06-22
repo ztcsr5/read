@@ -115,6 +115,23 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             return defaultValue
         }
 
+        func bool(_ keys: [String], default defaultValue: Bool) -> Bool {
+            for key in keys {
+                if let value = try? container.decode(Bool.self, forKey: DynamicCodingKey(key)) {
+                    return value
+                }
+                if let text = string(key)?.lowercased() {
+                    if ["true", "1", "yes", "on"].contains(text) {
+                        return true
+                    }
+                    if ["false", "0", "no", "off"].contains(text) {
+                        return false
+                    }
+                }
+            }
+            return defaultValue
+        }
+
         func rule(_ key: String) -> SourceRule? {
             if let ruleText = string(key) {
                 return SourceRule(raw: ruleText)
@@ -133,7 +150,7 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             bookSourceUrl: url,
             bookSourceGroup: string("bookSourceGroup") ?? string("sourceGroup"),
             bookSourceType: int(["bookSourceType", "sourceType"]),
-            enabled: (try? container.decode(Bool.self, forKey: DynamicCodingKey("enabled"))) ?? true,
+            enabled: bool(["enabled", "enable"], default: true),
             weight: int(["weight"]),
             searchUrl: string("searchUrl") ?? string("searchURL"),
             exploreUrl: string("exploreUrl") ?? string("exploreURL"),

@@ -136,6 +136,7 @@ final class SourceStoreTests: XCTestCase {
             "bookSourceName": "Extended Source",
             "bookSourceUrl": "https://extended.example.com",
             "bookSourceType": 0,
+            "enabled": "false",
             "weight": 7,
             "searchUrl": "/search?q={{key}}",
             "exploreUrl": "/rank/{{page}}",
@@ -148,6 +149,7 @@ final class SourceStoreTests: XCTestCase {
 
         let source = try XCTUnwrap(store.sources.first)
         XCTAssertEqual(source.bookSourceType, 0)
+        XCTAssertFalse(source.enabled)
         XCTAssertEqual(source.weight, 7)
         XCTAssertEqual(source.exploreUrl, "/rank/{{page}}")
         XCTAssertEqual(source.ruleExplore?.fields["bookList"], "data.books")

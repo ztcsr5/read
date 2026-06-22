@@ -851,6 +851,8 @@ Completed since the initial audit:
 - Improved response preprocessing:
   - `bodyJs` / `bodyjs` from source raw fields or `customConfig` now runs before search/detail/TOC/content parsing.
   - Top-level `return` bodyJs scripts are wrapped automatically, matching common old Flutter/Legado compatibility behavior.
+- Improved source JSON import compatibility:
+  - Boolean source flags now accept Android/Legado-style string values such as `"false"`, `"0"`, `"true"`, and `"1"` instead of only strict JSON booleans.
 - Improved XPath compatibility:
   - Added a Swift-native translator for common XPath subsets used by old Legado sources: `//tag`, `@XPath:` / `xpath:` prefixes, `text()`, terminal attributes such as `@href/@src/@content`, id/class/attribute predicates, `contains(@class, ...)`, and final-node indexes including `last()`.
   - HTML value/list extraction and `java.getStringList` now route these XPath forms through SwiftSoup-backed extraction.
