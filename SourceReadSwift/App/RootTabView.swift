@@ -4,22 +4,28 @@ struct RootTabView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedTab = 0
     @State private var presentedBook: BookshelfBook?
+    @GestureState private var tabDragTranslation: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
             ZStack {
                 BookshelfView()
                     .opacity(selectedTab == 0 ? 1 : 0)
+                    .offset(x: pageOffset(for: 0))
                     .allowsHitTesting(selectedTab == 0)
 
                 DiscoverView()
                     .opacity(selectedTab == 1 ? 1 : 0)
+                    .offset(x: pageOffset(for: 1))
                     .allowsHitTesting(selectedTab == 1)
 
                 SettingsView()
                     .opacity(selectedTab == 2 ? 1 : 0)
+                    .offset(x: pageOffset(for: 2))
                     .allowsHitTesting(selectedTab == 2)
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(tabSwipeGesture)
 
             if !appState.isTabChromeHidden {
                 customTabBar
@@ -29,7 +35,7 @@ struct RootTabView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: appState.isTabChromeHidden)
-        .animation(.easeOut(duration: 0.16), value: selectedTab)
+        .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.9), value: selectedTab)
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
@@ -38,6 +44,31 @@ struct RootTabView: View {
                 BookshelfReaderGatewayView(book: book)
             }
         }
+    }
+
+    private var tabSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 28, coordinateSpace: .local)
+            .updating($tabDragTranslation) { value, state, _ in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.25 else { return }
+                state = value.translation.width
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                guard abs(horizontal) > abs(value.translation.height) * 1.25,
+                      abs(horizontal) > 70 else { return }
+                if horizontal < 0 {
+                    selectedTab = min(selectedTab + 1, 2)
+                } else {
+                    selectedTab = max(selectedTab - 1, 0)
+                }
+            }
+    }
+
+    private func pageOffset(for index: Int) -> CGFloat {
+        guard index == selectedTab else { return 0 }
+        let width = UIScreen.main.bounds.width
+        let clamped = min(max(tabDragTranslation, -width * 0.22), width * 0.22)
+        return clamped * 0.18
     }
 
     private var customTabBar: some View {
@@ -93,6 +124,7 @@ struct RootTabView: View {
             .background(.ultraThinMaterial)
         }
         .background(.ultraThinMaterial)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func miniCover(_ book: BookshelfBook) -> some View {
