@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct RootTabView: View {
+    @EnvironmentObject private var appState: AppState
     @State private var selectedTab = 0
+    @State private var presentedBook: BookshelfBook?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -22,12 +24,52 @@ struct RootTabView: View {
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
+        .sheet(item: $presentedBook) { book in
+            NavigationStack {
+                BookshelfReaderGatewayView(book: book)
+            }
+        }
     }
 
     private var customTabBar: some View {
         VStack(spacing: 0) {
+            if let currentBook = appState.bookshelfStore.recentBooks.first {
+                Button {
+                    presentedBook = currentBook
+                } label: {
+                    HStack(spacing: 12) {
+                        miniCover(currentBook)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(currentBook.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(currentBook.currentChapterTitle ?? "继续阅读")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .padding(8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("继续阅读 \(currentBook.title)")
+            }
+
             Divider()
-                .background(Color.secondary.opacity(0.15))
+                .background(Color.secondary.opacity(0.12))
 
             HStack {
                 tabButton(index: 0, title: "主页", systemImage: "house")
@@ -40,6 +82,33 @@ struct RootTabView: View {
             .padding(.top, 10)
             .padding(.bottom, 8)
             .background(.ultraThinMaterial)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    private func miniCover(_ book: BookshelfBook) -> some View {
+        Group {
+            if let coverURL = book.coverURL, let url = URL(string: coverURL) {
+                AsyncImage(url: url) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        miniCoverPlaceholder
+                    }
+                }
+            } else {
+                miniCoverPlaceholder
+            }
+        }
+        .frame(width: 48, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var miniCoverPlaceholder: some View {
+        ZStack {
+            AppTheme.accent.opacity(0.14)
+            Image(systemName: "book.closed.fill")
+                .foregroundStyle(AppTheme.accent)
         }
     }
 

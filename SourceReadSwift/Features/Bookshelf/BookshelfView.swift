@@ -22,7 +22,7 @@ struct BookshelfView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 34) {
+                LazyVStack(alignment: .leading, spacing: 30) {
                     PodcastLargeTitleBar(title: "主页") {
                         HStack(spacing: 18) {
                             Button {
@@ -79,34 +79,38 @@ struct BookshelfView: View {
     }
 
     private var readingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PodcastChevronSectionHeader(title: "正在阅读")
+        VStack(alignment: .leading, spacing: 12) {
+            collectionHeader(title: "正在阅读", books: recentBooks)
             if recentBooks.isEmpty {
-                CenterTextEmptyState("暂无阅读记录", minHeight: 240)
+                emptyImportCard
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    LazyHStack(spacing: 14) {
                         ForEach(recentBooks.prefix(8)) { book in
                             heroCard(book)
                         }
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 4)
                 }
             }
         }
     }
 
     private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                PodcastChevronSectionHeader(title: "最新更新")
+                collectionHeader(title: "最新更新", books: updatedBooks)
                 if isRefreshingBooks {
                     ProgressView()
                         .controlSize(.small)
                 }
             }
             if updatedBooks.isEmpty {
-                CenterTextEmptyState("暂无更新书籍", minHeight: 220)
+                compactEmptyState(
+                    icon: "sparkles",
+                    title: "暂无更新",
+                    message: allBooks.isEmpty ? "导入书籍后，更新会显示在这里" : "下拉即可检查书籍更新"
+                )
             } else {
                 LazyVStack(spacing: 16) {
                     ForEach(updatedBooks) { book in
@@ -119,9 +123,9 @@ struct BookshelfView: View {
 
     private var shelfSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PodcastChevronSectionHeader(title: "书架")
+            collectionHeader(title: "全部书架", books: allBooks)
             if allBooks.isEmpty {
-                CenterTextEmptyState("书架还是空的", minHeight: 140)
+                compactEmptyState(icon: "books.vertical", title: "书架还是空的", message: "支持 TXT、EPUB 与在线书源书籍")
             } else {
                 LazyVStack(spacing: 14) {
                     ForEach(allBooks) { book in
@@ -130,6 +134,90 @@ struct BookshelfView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func collectionHeader(title: String, books: [BookshelfBook]) -> some View {
+        if books.isEmpty {
+            Text(title)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.primary)
+                .accessibilityAddTraits(.isHeader)
+        } else {
+            NavigationLink {
+                BookshelfCollectionView(title: title, books: books)
+            } label: {
+                HStack(spacing: 7) {
+                    Text(title)
+                        .font(.system(size: 22, weight: .bold))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .foregroundStyle(.primary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var emptyImportCard: some View {
+        Button {
+            showFileImporter = true
+        } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(AppTheme.accent.opacity(0.14))
+                    Image(systemName: "book.badge.plus")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .frame(width: 64, height: 64)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("导入第一本书")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text("从文件中选择 TXT 或 EPUB，立即开始阅读")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func compactEmptyState(icon: String, title: String, message: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 44, height: 44)
+                .background(AppTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func importLocalBook(_ result: Result<[URL], Error>) {
@@ -209,10 +297,14 @@ struct BookshelfView: View {
         NavigationLink {
             BookshelfReaderGatewayView(book: book)
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                AsyncBookCover(urlString: book.coverURL, width: 72, height: 96)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Spacer()
+                    AsyncBookCover(urlString: book.coverURL, width: 154, height: 154)
+                    Spacer()
+                }
 
-                Text("已读 \(Int(book.readingProgress * 100))%")
+                Text(book.lastReadAt == nil ? "待开始" : "已读 \(Int(book.readingProgress * 100))%")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.72))
 
@@ -235,16 +327,15 @@ struct BookshelfView: View {
                         .foregroundStyle(.black)
                         .clipShape(Capsule())
                     Spacer()
+                    Image(systemName: "ellipsis")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.65))
                 }
             }
             .padding(18)
-            .frame(width: 295, height: 250, alignment: .topLeading)
+            .frame(width: 270, height: 350, alignment: .topLeading)
             .background(
-                LinearGradient(
-                    colors: [Color(red: 0.18, green: 0.21, blue: 0.34), Color(red: 0.27, green: 0.25, blue: 0.55)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                heroGradient(for: book)
             )
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
@@ -254,6 +345,16 @@ struct BookshelfView: View {
                 appState.bookshelfStore.remove(bookID: book.id)
             }
         }
+    }
+
+    private func heroGradient(for book: BookshelfBook) -> LinearGradient {
+        let palettes: [[Color]] = [
+            [Color(red: 0.10, green: 0.16, blue: 0.09), Color(red: 0.18, green: 0.24, blue: 0.14)],
+            [Color(red: 0.18, green: 0.14, blue: 0.12), Color(red: 0.30, green: 0.25, blue: 0.21)],
+            [Color(red: 0.16, green: 0.14, blue: 0.28), Color(red: 0.28, green: 0.22, blue: 0.44)]
+        ]
+        let index = Int(book.id.hashValue.magnitude % UInt(palettes.count))
+        return LinearGradient(colors: palettes[index], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private func updateRow(_ book: BookshelfBook) -> some View {
@@ -280,6 +381,8 @@ struct BookshelfView: View {
                 }
                 Spacer()
             }
+            .padding(12)
+            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -321,6 +424,58 @@ struct BookshelfView: View {
                 appState.bookshelfStore.remove(bookID: book.id)
             }
         }
+    }
+}
+
+private struct BookshelfCollectionView: View {
+    @EnvironmentObject private var appState: AppState
+    let title: String
+    let books: [BookshelfBook]
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(books) { book in
+                    NavigationLink {
+                        BookshelfReaderGatewayView(book: book)
+                    } label: {
+                        HStack(spacing: 14) {
+                            AsyncBookCover(urlString: book.coverURL, width: 58, height: 82)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(book.title)
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                Text(book.author)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Text(book.currentChapterTitle ?? book.latestChapterTitle ?? "尚未开始阅读")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(14)
+                        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("从书架删除", role: .destructive) {
+                            appState.bookshelfStore.remove(bookID: book.id)
+                        }
+                    }
+                }
+            }
+            .padding(AppTheme.pagePadding)
+        }
+        .pageBackground()
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.large)
     }
 }
 
