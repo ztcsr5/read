@@ -174,7 +174,8 @@ final class LightweightHTTPServer: ObservableObject {
     @Published var logMessages: [String] = []
     
     private var listener: NWListener?
-    private var connections: Set<NWConnection> = []
+    private var connections: [NWConnection] = []
+    private let lockQueue = DispatchQueue(label: "com.sourceread.server.lock")
     var onJSONReceived: ((String) -> Result<String, Error>)?
     
     init() {
@@ -220,19 +221,28 @@ final class LightweightHTTPServer: ObservableObject {
     func stop() {
         listener?.cancel()
         listener = nil
-        for connection in connections {
-            connection.cancel()
+        lockQueue.async { [weak self] in
+            guard let self = self else { return }
+            for connection in self.connections {
+                connection.cancel()
+            }
+            self.connections.removeAll()
         }
-        connections.removeAll()
         isRunning = false
     }
     
     private func handleNewConnection(_ connection: NWConnection) {
-        connections.insert(connection)
+        lockQueue.async { [weak self] in
+            self?.connections.append(connection)
+        }
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .failed, .cancelled:
-                self?.connections.remove(connection)
+                self?.lockQueue.async {
+                    if let index = self?.connections.firstIndex(where: { $0 === connection }) {
+                        self?.connections.remove(at: index)
+                    }
+                }
             default:
                 break
             }
