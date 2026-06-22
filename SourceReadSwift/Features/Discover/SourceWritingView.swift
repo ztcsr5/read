@@ -27,7 +27,7 @@ struct SourceWritingView: View {
                         Spacer()
                         
                         Toggle("", isOn: Binding(
-                            get: { server.isRunning },
+                            get: { server.isRunning || server.isStarting },
                             set: { newValue in
                                 if newValue {
                                     server.start()
@@ -45,12 +45,22 @@ struct SourceWritingView: View {
                         .foregroundStyle(.secondary)
                     
                     if server.isRunning {
-                        Text("http://\(server.localIP):\(server.port)")
-                            .font(.system(.title3, design: .monospaced))
-                            .fontWeight(.bold)
-                            .foregroundStyle(AppTheme.accent)
-                            .padding(.vertical, 8)
-                            .textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(server.localURLs, id: \.self) { url in
+                                Text(url)
+                                    .font(.system(.callout, design: .monospaced))
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(AppTheme.accent)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+
+                    if let lastError = server.lastError {
+                        Text(lastError)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.red)
                     }
                 }
                 .padding(20)
@@ -166,8 +176,11 @@ struct SourceWritingView: View {
 
 final class LightweightHTTPServer: ObservableObject {
     @Published var isRunning = false
+    @Published var isStarting = false
     @Published var port: UInt16 = 8080
     @Published var localIP: String = "127.0.0.1"
+    @Published var localURLs: [String] = []
+    @Published var lastError: String?
     @Published var logMessages: [String] = []
     
     private var listener: NWListener?
@@ -180,24 +193,35 @@ final class LightweightHTTPServer: ObservableObject {
     }
     
     func start() {
-        guard !isRunning else { return }
+        guard !isRunning, !isStarting else { return }
+        isStarting = true
+        lastError = nil
+        localIP = getLocalIPAddress() ?? "127.0.0.1"
         do {
             let parameters = NWParameters.tcp
-            let listenerPort = NWEndpoint.Port(rawValue: port) ?? 8080
-            listener = try NWListener(using: parameters, on: listenerPort)
+            let selectedPort = firstAvailablePort(preferred: port)
+            port = selectedPort
+            listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: selectedPort) ?? 8080)
             
             listener?.stateUpdateHandler = { [weak self] state in
                 guard let self = self else { return }
                 DispatchQueue.main.async {
                     switch state {
                     case .ready:
+                        self.isStarting = false
                         self.isRunning = true
+                        self.localIP = getLocalIPAddress() ?? self.localIP
+                        self.localURLs = self.webURLs()
                         self.log("服务器启动成功，正在监听端口 \(self.port)...")
                     case .failed(let error):
-                        self.log("服务器启动失败: \(error)")
+                        self.isStarting = false
+                        self.lastError = "服务器启动失败：\(error.localizedDescription)"
+                        self.log(self.lastError ?? "服务器启动失败")
                         self.stop()
                     case .cancelled:
+                        self.isStarting = false
                         self.isRunning = false
+                        self.localURLs = []
                         self.log("服务器已停止")
                     default:
                         break
@@ -211,7 +235,9 @@ final class LightweightHTTPServer: ObservableObject {
             
             listener?.start(queue: DispatchQueue.global(qos: .userInitiated))
         } catch {
-            log("无法创建 Listener: \(error)")
+            isStarting = false
+            lastError = "无法创建 Listener：\(error.localizedDescription)"
+            log(lastError ?? "无法创建 Listener")
         }
     }
     
@@ -226,6 +252,8 @@ final class LightweightHTTPServer: ObservableObject {
             self.connections.removeAll()
         }
         isRunning = false
+        isStarting = false
+        localURLs = []
     }
     
     private func handleNewConnection(_ connection: NWConnection) {
@@ -245,10 +273,10 @@ final class LightweightHTTPServer: ObservableObject {
             }
         }
         connection.start(queue: DispatchQueue.global(qos: .default))
-        receiveRequest(on: connection)
+        receiveRequest(on: connection, accumulated: Data())
     }
     
-    private func receiveRequest(on connection: NWConnection) {
+    private func receiveRequest(on connection: NWConnection, accumulated: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, context, isComplete, error in
             guard let self = self else { return }
             if let error = error {
@@ -261,12 +289,22 @@ final class LightweightHTTPServer: ObservableObject {
                 if isComplete {
                     connection.cancel()
                 } else {
-                    self.receiveRequest(on: connection)
+                    self.receiveRequest(on: connection, accumulated: accumulated)
                 }
                 return
             }
-            
-            self.handleHttpRequest(data: data, connection: connection)
+
+            var buffer = accumulated
+            buffer.append(data)
+            if buffer.count > 2_000_000 {
+                self.sendResponse(connection: connection, statusCode: 413, statusText: "Payload Too Large", contentType: "text/plain; charset=utf-8", body: "Payload too large")
+                return
+            }
+            if self.isCompleteHTTPRequest(buffer) {
+                self.handleHttpRequest(data: buffer, connection: connection)
+            } else {
+                self.receiveRequest(on: connection, accumulated: buffer)
+            }
         }
     }
     
@@ -291,9 +329,16 @@ final class LightweightHTTPServer: ObservableObject {
         let method = requestLineParts[0]
         let path = requestLineParts[1]
         
-        if method == "GET" && path == "/" {
+        if method == "OPTIONS" {
+            sendResponse(connection: connection, statusCode: 204, statusText: "No Content", contentType: "text/plain; charset=utf-8", body: "")
+        } else if method == "GET" && (path == "/" || path == "/index.html") {
             let html = getWebPageHtml()
             sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/html; charset=utf-8", body: html)
+        } else if method == "GET" && path == "/health" {
+            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: "SOURCE_READ_SWIFT_WEB_OK")
+        } else if method == "GET" && path == "/api/status" {
+            let body = #"{"ok":true,"service":"source-writing","port":\#(port)}"#
+            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "application/json; charset=utf-8", body: body)
         } else if method == "POST" && path == "/import" {
             let parts = requestString.components(separatedBy: "\r\n\r\n")
             let body = parts.dropFirst().joined(separator: "\r\n\r\n")
@@ -326,6 +371,9 @@ final class LightweightHTTPServer: ObservableObject {
         HTTP/1.1 \(statusCode) \(statusText)\r
         Content-Type: \(contentType)\r
         Content-Length: \(responseBodyData.count)\r
+        Access-Control-Allow-Origin: *\r
+        Access-Control-Allow-Methods: GET, POST, OPTIONS\r
+        Access-Control-Allow-Headers: Content-Type\r
         Connection: close\r
         \r
         """
@@ -347,7 +395,60 @@ final class LightweightHTTPServer: ObservableObject {
         let timeStr = formatter.string(from: Date())
         DispatchQueue.main.async {
             self.logMessages.insert("[\(timeStr)] \(message)", at: 0)
+            if self.logMessages.count > 80 {
+                self.logMessages.removeLast(self.logMessages.count - 80)
+            }
         }
+    }
+
+    private func isCompleteHTTPRequest(_ data: Data) -> Bool {
+        guard let text = String(data: data, encoding: .utf8),
+              let headerRange = text.range(of: "\r\n\r\n") else {
+            return false
+        }
+        let headerText = String(text[..<headerRange.lowerBound])
+        let contentLength = headerText
+            .components(separatedBy: "\r\n")
+            .first { $0.lowercased().hasPrefix("content-length:") }
+            .flatMap { line -> Int? in
+                let value = line.split(separator: ":", maxSplits: 1).dropFirst().first
+                return value.flatMap { Int(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+            } ?? 0
+        let bodyStart = text.distance(from: text.startIndex, to: headerRange.upperBound)
+        return data.count >= bodyStart + contentLength
+    }
+
+    private func webURLs() -> [String] {
+        var urls = ["http://\(localIP):\(port)"]
+        if localIP != "127.0.0.1" {
+            urls.append("http://127.0.0.1:\(port)")
+        }
+        return urls
+    }
+
+    private func firstAvailablePort(preferred: UInt16) -> UInt16 {
+        let candidates = [preferred] + Array(UInt16(1122)...UInt16(1132)).filter { $0 != preferred }
+        for candidate in candidates {
+            let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+            guard socketFD >= 0 else { continue }
+            var value: Int32 = 1
+            setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &value, socklen_t(MemoryLayout<Int32>.size))
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = candidate.bigEndian
+            addr.sin_addr = in_addr(s_addr: INADDR_ANY.bigEndian)
+            let canBind = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+                }
+            }
+            close(socketFD)
+            if canBind {
+                return candidate
+            }
+        }
+        return preferred
     }
     
     private func getWebPageHtml() -> String {
