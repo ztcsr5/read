@@ -186,6 +186,17 @@ final class JSCoreRuntime {
         java.SHA256 = java.sha256;
         java.timeFormat = function(timestamp, format) { return __native_timeFormat(Number(timestamp), String(format)); };
         java.getTime = function() { return Date.now(); };
+        java.currentTimeMillis = java.getTime;
+        java.now = java.getTime;
+        java.randomUUID = function() {
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
+        };
+        java.uuid = java.randomUUID;
+        java.androidId = function() { return 'sourcereadswift-ios'; };
         function __defaultHtml() {
           if (typeof result !== 'undefined') return String(result);
           if (typeof html !== 'undefined') return String(html);
@@ -240,6 +251,20 @@ final class JSCoreRuntime {
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
           return __asJavaList(out);
         };
+        java.getInt = function(input, fallback) {
+          var stored = java.getVar(input);
+          var value = stored !== '' ? stored : java.getString(input);
+          var parsed = parseInt(String(value), 10);
+          return isNaN(parsed) ? Number(fallback || 0) : parsed;
+        };
+        java.getLong = java.getInt;
+        java.getDouble = function(input, fallback) {
+          var stored = java.getVar(input);
+          var value = stored !== '' ? stored : java.getString(input);
+          var parsed = parseFloat(String(value));
+          return isNaN(parsed) ? Number(fallback || 0) : parsed;
+        };
+        java.getElement = function(rule) { return java.getString(rule); };
         function __bridgeString(value) {
           if (value === undefined || value === null) return '';
           if (typeof value === 'string') return value;
@@ -264,8 +289,10 @@ final class JSCoreRuntime {
           var key = String(url);
           var value = __bridgeStored(key);
           if (value && key.indexOf('://') < 0 && key.charAt(0) !== '/') return value;
+          if (key.indexOf('://') < 0 && key.charAt(0) !== '/') return '';
           return __bridgeResponse(__native_ajax(key, __bridgeString(headers || '')));
         };
+        java.fetch = function(url, options) { return java.get(url, options && options.headers ? options.headers : options); };
         java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || ''))); };
         function __makeConnect(url) {
           var target = String(url || '');
@@ -277,8 +304,20 @@ final class JSCoreRuntime {
             },
             headers: function(value) {
               if (value) {
-                for (var key in value) config.headers[String(key)] = String(value[key]);
+                var parsed = value;
+                if (typeof parsed === 'string') {
+                  try { parsed = JSON.parse(parsed); } catch (_) { parsed = {}; }
+                }
+                for (var key in parsed) config.headers[String(key)] = String(parsed[key]);
               }
+              return api;
+            },
+            cookie: function(value) {
+              if (value != null) config.headers['Cookie'] = String(value);
+              return api;
+            },
+            cookies: function(value) {
+              if (value != null) config.headers['Cookie'] = String(value);
               return api;
             },
             data: function(key, value) {
@@ -297,6 +336,9 @@ final class JSCoreRuntime {
             timeout: function(_) { return api; },
             ignoreContentType: function(_) { return api; },
             ignoreHttpErrors: function(_) { return api; },
+            followRedirects: function(_) { return api; },
+            raw: function() { return api; },
+            request: function() { return api; },
             userAgent: function(value) {
               config.headers['User-Agent'] = String(value);
               return api;
@@ -304,17 +346,82 @@ final class JSCoreRuntime {
             get: function() {
               return __bridgeResponse(__native_ajax(target, __bridgeString(config.headers)));
             },
-            post: function() {
+            post: function(body) {
+              if (arguments.length > 0) config.body = __bridgeString(body);
               return __bridgeResponse(__native_post(target, config.body || '', __bridgeString(config.headers)));
+            },
+            body: function() {
+              return config.body ? api.post() : api.get();
             },
             execute: function() {
               return config.body ? api.post() : api.get();
-            }
+            },
+            url: function() { return target; },
+            toString: function() { return target; }
           };
           return api;
         }
         java.connect = __makeConnect;
         java.log = function(value) { return String(value); };
+        java.toast = function(_) { return ''; };
+        java.longToast = function(_) { return ''; };
+        java.getCookie = function() { return String(typeof cookieHeader === 'undefined' ? '' : cookieHeader); };
+        java.getWebViewUA = function() { return 'Mozilla/5.0 SourceReadSwift iOS'; };
+        java.startBrowser = function() { return ''; };
+        java.startBrowserAwait = function() { return ''; };
+        java.webView = function() { return ''; };
+        var cookie = cookie || {};
+        cookie.getCookie = java.getCookie;
+        cookie.getKey = function(url, key) {
+          var name = String(key || '');
+          var header = java.getCookie();
+          var parts = header.split(';');
+          for (var i = 0; i < parts.length; i++) {
+            var item = parts[i].trim();
+            var pos = item.indexOf('=');
+            if (pos > 0 && item.substring(0, pos).trim() === name) return item.substring(pos + 1).trim();
+          }
+          return '';
+        };
+        cookie.setCookie = function(value) { cookieHeader = String(value || ''); return cookieHeader; };
+        cookie.removeCookie = function() { cookieHeader = ''; return true; };
+        function __installSourceAndBook() {
+          if (typeof source === 'undefined' || source === null) source = {};
+          source.getKey = function() { return source.key || source.bookSourceUrl || source.sourceUrl || ''; };
+          source.getVariable = function(key) {
+            if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('source.variable.' + String(key));
+            return source.variable || java.getVar('source.variable') || '';
+          };
+          source.setVariable = function(key, value) {
+            if (arguments.length > 1) return java.put('source.variable.' + String(key), value == null ? '' : String(value));
+            source.variable = key == null ? '' : String(key);
+            return java.put('source.variable', source.variable);
+          };
+          source.getVariableMap = function() {
+            var parsed = {};
+            try { parsed = JSON.parse(source.getVariable() || '{}'); } catch (_) {}
+            return { get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; } };
+          };
+          source.getLoginInfoMap = function() { return { get: function(k) { return java.getVar('source.login.' + String(k || '')); } }; };
+          source.putLoginHeader = function(k, v) { return java.put('source.loginHeader.' + String(k || ''), v == null ? '' : String(v)); };
+          source.getLoginHeader = function(k) { return java.getVar('source.loginHeader.' + String(k || '')); };
+          if (typeof book === 'undefined' || book === null) book = {};
+          book.getVariable = function(key) {
+            if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('book.variable.' + String(key));
+            return book.variable || java.getVar('book.variable') || '';
+          };
+          book.setVariable = function(key, value) {
+            if (arguments.length > 1) return java.put('book.variable.' + String(key), value == null ? '' : String(value));
+            book.variable = key == null ? '' : String(key);
+            return java.put('book.variable', book.variable);
+          };
+          if (typeof chapter === 'undefined' || chapter === null) chapter = {};
+          chapter.isVip = function() {
+            var title = String(chapter.title || chapter.name || '').toLowerCase();
+            return title.indexOf('vip') >= 0 || title.indexOf('订阅') >= 0 || title.indexOf('付费') >= 0;
+          };
+        }
+        __installSourceAndBook();
         function base64Encode(value) { return java.base64Encode(value); }
         function base64Decode(value) { return java.base64Decode(value); }
         function unbase64(value) { return java.base64Decode(value); }
@@ -387,6 +494,27 @@ final class JSCoreRuntime {
         Packages.org = Packages.org || {};
         Packages.org.jsoup = Packages.org.jsoup || {};
         Packages.java = Packages.java || {};
+        Packages.java.lang = Packages.java.lang || {};
+        Packages.java.lang.String = Packages.java.lang.String || function(value) { return new String(String(value || '')); };
+        Packages.java.lang.Thread = Packages.java.lang.Thread || { sleep: function(_) {} };
+        Packages.java.util = Packages.java.util || {};
+        Packages.java.util.UUID = Packages.java.util.UUID || { randomUUID: java.randomUUID };
+        Packages.java.util.Base64 = Packages.java.util.Base64 || {
+          encodeToString: function(value) { return java.base64Encode(value && value.join ? String.fromCharCode.apply(null, value) : String(value || '')); },
+          decode: function(value) {
+            var text = java.base64Decode(value);
+            var out = [];
+            for (var i = 0; i < text.length; i++) out.push(text.charCodeAt(i));
+            return out;
+          }
+        };
+        Packages.android = Packages.android || {};
+        Packages.android.os = Packages.android.os || { Build: { MODEL: 'iPhone', MANUFACTURER: 'Apple', BRAND: 'Apple' } };
+        Packages.android.text = Packages.android.text || { TextUtils: { isEmpty: function(value) { return value == null || String(value).length === 0; } } };
+        Packages.android.util = Packages.android.util || { Base64: Packages.java.util.Base64 };
+        Packages.util = Packages.java.util;
+        java.lang = Packages.java.lang;
+        java.util = Packages.java.util;
         var org = Packages.org;
         function __selectorWithIndex(selector, index) {
           if (index === undefined || index === null || isNaN(Number(index))) return String(selector || '');

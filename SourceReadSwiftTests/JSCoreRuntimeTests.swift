@@ -315,4 +315,67 @@ final class JSCoreRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(value, "true|true|true|true|true|abc")
     }
+
+    func testCommonLegadoJavaHelpersAreAvailable() throws {
+        let html = """
+        <html><body>
+          <span class="count">42</span>
+          <span class="score">3.5</span>
+        </body></html>
+        """
+        let script = """
+        java.put('stored.count', '7');
+        source.setVariable('token', 'abc');
+        book.setVariable('chapter', '12');
+        cookie.setCookie('sid=ok; theme=dark');
+        [
+          java.getInt('.count@text', 0),
+          java.getDouble('.score@text', 0),
+          java.getInt('stored.count', 0),
+          source.getVariable('token'),
+          book.getVariable('chapter'),
+          chapter.isVip(),
+          cookie.getKey('', 'sid'),
+          java.getCookie(),
+          java.getWebViewUA().contains('SourceReadSwift'),
+          java.toast('x'),
+          Packages.android.text.TextUtils.isEmpty(''),
+          java.util.UUID.randomUUID().length > 20
+        ].join('|')
+        """
+
+        let result = JSCoreRuntime().evaluate(
+            script,
+            variables: ["html": html, "chapter": ["title": "VIP章节"]]
+        )
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(value, "42|3.5|7|abc|12|true|ok|sid=ok; theme=dark|true||true|true")
+    }
+
+    func testConnectChainSupportsCookiesBodyAndExecuteAliases() throws {
+        let runtime = JSCoreRuntime { request in
+            request
+        }
+        let script = """
+        [
+          java.connect('https://example.com/a').cookie('sid=1').get().body(),
+          java.connect('https://example.com/b').headers({'X-Test':'1'}).post('q=1').text(),
+          java.connect('https://example.com/c').data('k', 'v').execute().toString(),
+          java.fetch('https://example.com/d', {'X-Fetch':'1'}).body()
+        ].join('\\n---\\n')
+        """
+
+        let result = runtime.evaluate(script)
+
+        guard case .success(let value) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertTrue(value.contains("https://example.com/a@Header:{\"Cookie\":\"sid=1\"}"))
+        XCTAssertTrue(value.contains("https://example.com/b@Header:{\"X-Test\":\"1\"}@Body:q=1"))
+        XCTAssertTrue(value.contains("https://example.com/c@Body:k=v"))
+        XCTAssertTrue(value.contains("https://example.com/d@Header:{\"X-Fetch\":\"1\"}"))
+    }
 }

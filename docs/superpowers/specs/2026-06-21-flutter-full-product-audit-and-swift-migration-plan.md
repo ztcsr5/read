@@ -845,6 +845,9 @@ Completed since the initial audit:
   - `java.getStringList` now reuses the enhanced HTML list selector path, so JS rules can use `||` fallback and `%%` interleaving for list extraction.
   - JSoup-style selections now support `.get(index)`, `.first()`, `.size()`, and `.isEmpty()` for common `java.getElements(...).get(i).text()` source rules.
   - Tests cover HTML fallback, HTML node/value merge, JSON quoted fallback, and JSON merge extraction.
+- Improved Legado JS helper compatibility:
+  - Added common Android/Legado-style helpers: `java.getInt/getLong/getDouble/getElement/fetch`, no-op `toast/longToast/startBrowser/webView`, UUID/time aliases, cookie helpers, source/book variable helpers, chapter VIP detection, and basic `Packages.java/android` shims.
+  - Expanded `java.connect(...)` chain compatibility with `cookie/cookies/followRedirects/raw/request/body/url/toString`, JSON string headers, and `post(body)`.
 - Improved XPath compatibility:
   - Added a Swift-native translator for common XPath subsets used by old Legado sources: `//tag`, `@XPath:` / `xpath:` prefixes, `text()`, terminal attributes such as `@href/@src/@content`, id/class/attribute predicates, `contains(@class, ...)`, and final-node indexes including `last()`.
   - HTML value/list extraction and `java.getStringList` now route these XPath forms through SwiftSoup-backed extraction.
