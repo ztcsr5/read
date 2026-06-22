@@ -61,9 +61,6 @@ struct BookshelfReaderGatewayView: View {
                                     .frame(width: 44, height: 44)
                             }
                         )
-                    },
-                    onRequestSourceSwitch: {
-                        showSourceSwitcher = true
                     }
                 )
             )
