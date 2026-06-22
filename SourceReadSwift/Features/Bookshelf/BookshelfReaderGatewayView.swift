@@ -17,10 +17,20 @@ struct BookshelfReaderGatewayView: View {
     }
 
     var body: some View {
-        Group {
-            if !localBookChapters.isEmpty {
-                localReader
-            } else if let localContent = book.localContent {
+        gatewayContent
+        .task {
+            await resumeReading()
+        }
+        .sheet(isPresented: $showSourceSwitcher) {
+            sourceSwitcherSheet
+        }
+    }
+
+    private var gatewayContent: AnyView {
+        if !localBookChapters.isEmpty {
+            return AnyView(localReader)
+        } else if let localContent = book.localContent {
+            return AnyView(
                 ReaderView(
                     bookID: book.id,
                     content: ChapterContent(
@@ -32,7 +42,9 @@ struct BookshelfReaderGatewayView: View {
                     chapterIndex: 0,
                     totalChapters: 1
                 )
-            } else if let selectedChapter {
+            )
+        } else if let selectedChapter {
+            return AnyView(
                 ChapterLoadingView(
                     bookID: book.id,
                     sourceUrl: currentBook.sourceURL,
@@ -54,19 +66,15 @@ struct BookshelfReaderGatewayView: View {
                         showSourceSwitcher = true
                     }
                 )
-            } else if let errorMessage {
-                readerRecoveryErrorView(errorMessage)
-            } else {
+            )
+        } else if let errorMessage {
+            return AnyView(readerRecoveryErrorView(errorMessage))
+        } else {
+            return AnyView(
                 ProgressView("正在恢复阅读进度")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .pageBackground()
-            }
-        }
-        .task {
-            await resumeReading()
-        }
-        .sheet(isPresented: $showSourceSwitcher) {
-            sourceSwitcherSheet
+            )
         }
     }
 
