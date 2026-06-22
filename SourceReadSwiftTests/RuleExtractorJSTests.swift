@@ -14,8 +14,8 @@ final class RuleExtractorJSTests: XCTestCase {
         let document = try SwiftSoup.parse(html)
         let extractor = HtmlRuleExtractor()
         
-        // 规则是一个以 @js: 开头的 JS 规则
-        let rule = "@js: result.replace('元', '')"
+        // 规则是一个以 @js: 开头的 JS 规则，需要剥离 outerHtml 的标签
+        let rule = "@js: result.replace('元', '').replace(/<[^>]+>/g, '')"
         let val = try extractor.value(from: document.select(".price").first!, rule: rule)
         XCTAssertEqual(val, "120")
     }

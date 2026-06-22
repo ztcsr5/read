@@ -164,16 +164,18 @@ final class JSCoreRuntime {
         }
         let getString: @convention(block) (String, String, String) -> String = { html, rule, baseUrl in
             do {
-                let document = try SwiftSoup.parse(html, baseUrl)
-                return try Self.extractString(from: document, rule: rule, baseUrl: URL(string: baseUrl))
+                let safeBaseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "http://localhost/" : baseUrl
+                let document = try SwiftSoup.parse(html, safeBaseUrl)
+                return try Self.extractString(from: document, rule: rule, baseUrl: URL(string: safeBaseUrl))
             } catch {
                 return ""
             }
         }
         let getStringList: @convention(block) (String, String, String) -> NSArray = { html, rule, baseUrl in
             do {
-                let document = try SwiftSoup.parse(html, baseUrl)
-                let values = try Self.extractStringList(from: document, rule: rule, baseUrl: URL(string: baseUrl))
+                let safeBaseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "http://localhost/" : baseUrl
+                let document = try SwiftSoup.parse(html, safeBaseUrl)
+                let values = try Self.extractStringList(from: document, rule: rule, baseUrl: URL(string: safeBaseUrl))
                 return values as NSArray
             } catch {
                 return [] as NSArray
@@ -181,8 +183,9 @@ final class JSCoreRuntime {
         }
         let countElements: @convention(block) (String, String, String) -> Int = { html, selector, baseUrl in
             do {
-                let document = try SwiftSoup.parse(html, baseUrl)
-                return try Self.countElements(in: document, selector: selector, baseUrl: URL(string: baseUrl))
+                let safeBaseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "http://localhost/" : baseUrl
+                let document = try SwiftSoup.parse(html, safeBaseUrl)
+                return try Self.countElements(in: document, selector: selector, baseUrl: URL(string: safeBaseUrl))
             } catch {
                 return 0
             }
@@ -215,7 +218,8 @@ final class JSCoreRuntime {
         }
         let getParents: @convention(block) (String, String, String) -> NSArray = { html, selector, baseUrl in
             do {
-                let doc = try SwiftSoup.parse(html, baseUrl)
+                let safeBaseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "http://localhost/" : baseUrl
+                let doc = try SwiftSoup.parse(html, safeBaseUrl)
                 let elements = try doc.select(selector)
                 var parentsHtml: [String] = []
                 for el in elements.array() {
