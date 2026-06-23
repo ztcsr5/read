@@ -487,11 +487,17 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         }
       },
       child: CupertinoPageScaffold(
-        backgroundColor: readerState.background == ReaderBackground.customImage
+        backgroundColor:
+            readerState.background == ReaderBackground.customImage ||
+                readerState.background == ReaderBackground.glass
             ? CupertinoColors.transparent
             : bgColor,
         child: Stack(
           children: [
+            if (readerState.background == ReaderBackground.glass)
+              Positioned.fill(
+                child: _buildGlassReaderBackground(brightness),
+              ),
             if (readerState.background == ReaderBackground.customImage &&
                 readerState.customWallpaperPath != null &&
                 File(readerState.customWallpaperPath!).existsSync()) ...[
@@ -647,6 +653,109 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  Widget _buildGlassReaderBackground(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final baseGradient = isDark
+        ? const [
+            Color(0xFF141416),
+            Color(0xFF211B2A),
+            Color(0xFF0E1015),
+          ]
+        : const [
+            Color(0xFFFFF8EA),
+            Color(0xFFF0E6D2),
+            Color(0xFFEDE5D9),
+          ];
+    final glowA = isDark
+        ? const Color(0xFF51406F)
+        : const Color(0xFFFFDFA6);
+    final glowB = isDark
+        ? const Color(0xFF1F4F5B)
+        : const Color(0xFFE8D5F2);
+    final veil = isDark
+        ? const Color(0xB0121214)
+        : const Color(0xDDF8F0DF);
+
+    return RepaintBoundary(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: baseGradient,
+              ),
+            ),
+          ),
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 44, sigmaY: 44),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned(
+                  top: -90,
+                  left: -80,
+                  child: _glassGlow(
+                    glowA.withOpacity(isDark ? 0.34 : 0.46),
+                    260,
+                  ),
+                ),
+                Positioned(
+                  right: -110,
+                  top: 120,
+                  child: _glassGlow(
+                    glowB.withOpacity(isDark ? 0.30 : 0.38),
+                    300,
+                  ),
+                ),
+                Positioned(
+                  left: 20,
+                  bottom: -150,
+                  child: _glassGlow(
+                    (isDark
+                            ? const Color(0xFF594326)
+                            : const Color(0xFFE2CBA4))
+                        .withOpacity(isDark ? 0.24 : 0.34),
+                    340,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: veil,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  (isDark ? CupertinoColors.black : CupertinoColors.white)
+                      .withOpacity(isDark ? 0.10 : 0.22),
+                  veil,
+                  (isDark ? CupertinoColors.black : CupertinoColors.white)
+                      .withOpacity(isDark ? 0.16 : 0.30),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _glassGlow(Color color, double size) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+      ),
+    );
+  }
+
   /// 构建阅读内容 — 核心无限滑动
   Widget _buildReadingContent(Color bgColor, Color textColor) {
     final readerState = ref.watch(readerViewModelProvider(widget.bookId));
@@ -784,11 +893,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       itemBuilder: (context, pageIndex) {
         final page = pages[pageIndex];
         final padding = _getSystemPadding();
+        final pageColor = readerState.background == ReaderBackground.glass
+            ? CupertinoColors.transparent
+            : bgColor;
         return _buildPageTurnWrapper(
           pageIndex: pageIndex,
           mode: readerState.mode,
           child: Container(
-            color: bgColor,
+            color: pageColor,
             child: Padding(
               padding: EdgeInsets.only(
                 top: padding.top + readerState.topPadding,

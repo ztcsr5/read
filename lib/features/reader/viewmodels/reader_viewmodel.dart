@@ -482,7 +482,8 @@ enum ReaderBackground {
   gray(Color(0xFF333333), '深灰'),
   black(Color(0xFF111111), '极黑'),
   custom(Color(0xFFF6F0E4), '自定义'),
-  customImage(Color(0xFFF6F0E4), '自定义壁纸');
+  customImage(Color(0xFFF6F0E4), '自定义壁纸'),
+  glass(Color(0xFFF5EEDC), '高斯玻璃');
 
   final Color color;
   final String label;
@@ -498,6 +499,7 @@ enum ReaderBackground {
       case ReaderBackground.pink:
       case ReaderBackground.custom:
       case ReaderBackground.customImage:
+      case ReaderBackground.glass:
         return const Color(0xFF2C2C2E);
       case ReaderBackground.gray:
         return const Color(0xFFEBEBF5);
@@ -525,6 +527,11 @@ extension ReaderBackgroundResolver on ReaderState {
       return brightness == Brightness.dark
           ? const Color(0xFF111111)
           : const Color(0xFFF9F9F9);
+    }
+    if (background == ReaderBackground.glass) {
+      return brightness == Brightness.dark
+          ? const Color(0xFF1C1C1E)
+          : const Color(0xFFF5EEDC);
     }
     return background.color;
   }

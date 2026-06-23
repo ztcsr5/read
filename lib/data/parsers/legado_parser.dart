@@ -2291,12 +2291,18 @@ class LegadoParser {
             'Title',
             'bookName',
             'BookName',
+            'bookname',
             'book_name',
             'bookTitle',
             'BookTitle',
+            'booktitle',
             'articleName',
+            'article_name',
+            'articlename',
             'novelName',
             'novel_name',
+            'novelname',
+            'caption',
             'original_title',
             'bName',
           ]),
@@ -2335,13 +2341,20 @@ class LegadoParser {
           _ruleOrKey(rule['coverUrl'], item, [
             'coverUrl',
             'CoverUrl',
+            'coverurl',
             'cover',
             'Cover',
             'cover_url',
             'picUrl',
+            'picurl',
             'pic',
+            'img',
             'imgUrl',
+            'imgurl',
+            'img_url',
             'imageUrl',
+            'imageurl',
+            'image_url',
             'thumb',
             'image',
             'coverPath',
@@ -2362,21 +2375,25 @@ class LegadoParser {
           _ruleOrKey(bookUrlRule, item, [
             'bookUrl',
             'BookUrl',
+            'bookurl',
             'url',
             'Url',
             'detailUrl',
+            'detailurl',
             'detail_url',
             'book_url',
             'tocUrl',
+            'tocurl',
             'catalogUrl',
+            'catalogurl',
             'bookId',
             'BookId',
             'book_id',
-            'book_id',
             'bookID',
-            'book_id',
+            'bid',
             'articleid',
             'articleId',
+            'article_id',
             'novelId',
             'novel_id',
             'nid',
@@ -2494,13 +2511,20 @@ class LegadoParser {
           _ruleOrKey(rule['coverUrl'], item, const [
             'coverUrl',
             'CoverUrl',
+            'coverurl',
             'cover',
             'Cover',
             'cover_url',
             'picUrl',
+            'picurl',
             'pic',
+            'img',
             'imgUrl',
+            'imgurl',
+            'img_url',
             'imageUrl',
+            'imageurl',
+            'image_url',
             'thumb',
             'image',
             'coverPath',
@@ -2522,21 +2546,25 @@ class LegadoParser {
           _ruleOrKey(bookUrlRule, item, const [
             'bookUrl',
             'BookUrl',
+            'bookurl',
             'url',
             'Url',
             'detailUrl',
+            'detailurl',
             'detail_url',
             'book_url',
             'tocUrl',
             'catalogUrl',
+            'tocurl',
+            'catalogurl',
             'bookId',
             'BookId',
             'book_id',
-            'book_id',
             'bookID',
-            'book_id',
+            'bid',
             'articleid',
             'articleId',
+            'article_id',
             'novelId',
             'novel_id',
             'nid',
@@ -6266,9 +6294,10 @@ class LegadoParser {
       final books = <Book>[];
       final seen = <String>{};
       for (final anchor in document.querySelectorAll('a[href]')) {
-        final title = anchor.text.trim().replaceAll(RegExp(r'\s+'), ' ');
         final href = anchor.attributes['href']?.trim() ?? '';
-        if (title.length < 2 || title.length > 80 || href.isEmpty) continue;
+        if (href.isEmpty) continue;
+        final title = _htmlFallbackTitleForAnchor(anchor, keyword);
+        if (title.length < 2 || title.length > 80) continue;
         if (_looksLikeNavigationLink(title, href)) continue;
 
         final normalizedTitle = _normalizeSearchComparable(title);
@@ -6295,18 +6324,20 @@ class LegadoParser {
           }
           cursor = cursor.parent;
         }
-        if (score < 10) continue;
+        if (score < 8) continue;
 
         final resolved = _resolveBookUrl(baseUrl, href);
         if (_isNonNavigableHref(resolved) || !seen.add('$title|$resolved')) {
           continue;
         }
+        final cover = _htmlFallbackCoverForAnchor(anchor, baseUrl);
         books.add(
           Book(
             title: title,
-            author: '',
+            author: _htmlFallbackAuthorForAnchor(anchor),
             filePath: resolved,
             fileType: 'online',
+            coverPath: cover.isEmpty ? null : cover,
             isFromSource: true,
             sourceUrl: source.id.toString(),
           ),
@@ -6317,6 +6348,143 @@ class LegadoParser {
     } catch (_) {
       return const [];
     }
+  }
+
+  static String _htmlFallbackTitleForAnchor(Element anchor, String keyword) {
+    final query = _normalizeSearchComparable(keyword);
+    final candidates = <String>[];
+
+    void add(String? value) {
+      final cleaned = _cleanHtmlFallbackTitle(value ?? '');
+      if (cleaned.length >= 2 && cleaned.length <= 80) {
+        candidates.add(cleaned);
+      }
+    }
+
+    add(anchor.text);
+    add(anchor.attributes['title']);
+    add(anchor.attributes['aria-label']);
+    for (final img in anchor.querySelectorAll('img')) {
+      add(img.attributes['alt']);
+      add(img.attributes['title']);
+    }
+
+    var cursor = anchor.parent;
+    for (var depth = 0; cursor != null && depth < 4; depth++) {
+      for (final selector in const [
+        '.bookname',
+        '.book-name',
+        '.bookTitle',
+        '.book-title',
+        '.novelname',
+        '.novel-name',
+        '.articleName',
+        '.article-name',
+        '.title',
+        '.name',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'dt',
+      ]) {
+        try {
+          for (final element in cursor.querySelectorAll(selector)) {
+            add(element.text);
+            add(element.attributes['title']);
+          }
+        } catch (_) {}
+      }
+      for (final img in cursor.querySelectorAll('img')) {
+        add(img.attributes['alt']);
+        add(img.attributes['title']);
+      }
+      cursor = cursor.parent;
+    }
+
+    if (candidates.isEmpty) return '';
+    var best = candidates.first;
+    var bestScore = -1;
+    for (final candidate in candidates) {
+      final normalized = _normalizeSearchComparable(candidate);
+      var score = 0;
+      if (normalized == query) score += 30;
+      if (normalized.contains(query) || query.contains(normalized)) {
+        score += 18;
+      }
+      if (candidate == anchor.text.trim()) score += 2;
+      score -= (candidate.length - keyword.length).abs().clamp(0, 20).toInt();
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  static String _cleanHtmlFallbackTitle(String value) {
+    var text = value
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'^[《<「\[]'), '')
+        .replaceAll(RegExp(r'[》>」\]]$'), '')
+        .trim();
+    text = text.replaceFirst(
+      RegExp(r'^(书名|小说|作品|标题)[:：]\s*'),
+      '',
+    );
+    return text.trim();
+  }
+
+  static String _htmlFallbackCoverForAnchor(Element anchor, String baseUrl) {
+    var cursor = anchor;
+    for (var depth = 0; cursor.parent != null && depth < 4; depth++) {
+      for (final img in cursor.querySelectorAll('img')) {
+        final raw =
+            img.attributes['data-src'] ??
+            img.attributes['data-original'] ??
+            img.attributes['src'] ??
+            '';
+        final value = raw.trim();
+        if (value.isNotEmpty && !_isNonNavigableHref(value)) {
+          return _resolveUrl(baseUrl, value);
+        }
+      }
+      cursor = cursor.parent!;
+    }
+    return '';
+  }
+
+  static String _htmlFallbackAuthorForAnchor(Element anchor) {
+    final candidates = <String>[];
+    var cursor = anchor.parent;
+    for (var depth = 0; cursor != null && depth < 3; depth++) {
+      for (final selector in const [
+        '.author',
+        '.writer',
+        '.book-author',
+        '.novel-author',
+        '[class*=author]',
+        '[class*=writer]',
+      ]) {
+        try {
+          candidates.addAll(
+            cursor.querySelectorAll(selector).map((e) => e.text),
+          );
+        } catch (_) {}
+      }
+      candidates.add(cursor.text);
+      cursor = cursor.parent;
+    }
+    for (final raw in candidates) {
+      final text = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+      final match = RegExp(
+        r'(作者|作\s*者|author|writer)[:：\s]+([^,，/| ]{1,30})',
+        caseSensitive: false,
+      )
+          .firstMatch(text);
+      if (match != null) return match.group(2)?.trim() ?? '';
+    }
+    return '';
   }
 
   static bool _looksLikeBookDetailHref(String href) {
@@ -7159,20 +7327,57 @@ class LegadoParser {
   }
 
   static bool _looksLikeBookMap(Map<dynamic, dynamic> item) {
-    return item.containsKey('title') ||
-        item.containsKey('bookName') ||
-        item.containsKey('book_name') ||
-        item.containsKey('bookTitle') ||
-        item.containsKey('articleName') ||
-        item.containsKey('novelName') ||
-        item.containsKey('name') ||
-        item.containsKey('bookId') ||
-        item.containsKey('book_id') ||
-        item.containsKey('novelId') ||
-        item.containsKey('cover') ||
-        item.containsKey('summary') ||
-        item.containsKey('intro') ||
-        item.containsKey('author');
+    if (item.isEmpty) return false;
+    final keys = item.keys.map((key) => key.toString().toLowerCase()).toSet();
+    bool has(String key) => keys.contains(key.toLowerCase());
+
+    final hasBookName =
+        has('title') ||
+        has('name') ||
+        has('bookname') ||
+        has('book_name') ||
+        has('booktitle') ||
+        has('book_title') ||
+        has('articlename') ||
+        has('article_name') ||
+        has('novelname') ||
+        has('novel_name') ||
+        has('caption');
+    final hasBookId =
+        has('id') ||
+        has('bid') ||
+        has('bookid') ||
+        has('book_id') ||
+        has('articleid') ||
+        has('article_id') ||
+        has('novelid') ||
+        has('novel_id') ||
+        has('nid');
+    final hasBookMeta =
+        has('author') ||
+        has('authorname') ||
+        has('author_name') ||
+        has('writer') ||
+        has('writername') ||
+        has('writer_name') ||
+        has('cover') ||
+        has('coverurl') ||
+        has('cover_url') ||
+        has('pic') ||
+        has('picurl') ||
+        has('img') ||
+        has('imgurl') ||
+        has('image') ||
+        has('imageurl') ||
+        has('thumb') ||
+        has('summary') ||
+        has('intro') ||
+        has('desc') ||
+        has('description') ||
+        has('lastchapter') ||
+        has('latestchapter');
+
+    return hasBookName || (hasBookId && hasBookMeta);
   }
 
   static bool _looksLikeChapterMap(Map<dynamic, dynamic> item) {
