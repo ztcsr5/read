@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -211,55 +210,6 @@ class _ReaderSettingsPanelState extends ConsumerState<ReaderSettingsPanel> {
                             size: 20,
                             color: CupertinoColors.systemGrey,
                           ),
-                  );
-                } else if (bg == ReaderBackground.glass) {
-                  childWidget = Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: isDark
-                            ? const [
-                                Color(0xFF3A342B),
-                                Color(0xFF171717),
-                                Color(0xFF30254A),
-                              ]
-                            : const [
-                                Color(0xFFFFF8E8),
-                                Color(0xFFE8E0D1),
-                                Color(0xFFF2E7CC),
-                              ],
-                      ),
-                      border: Border.all(
-                        color: isSelected
-                            ? AppColors.primaryPurple
-                            : (isDark
-                                  ? const Color(0xFF38383A)
-                                  : CupertinoColors.systemGrey5),
-                        width: isSelected ? 2.5 : 1.0,
-                      ),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                      child: Container(
-                        alignment: Alignment.center,
-                        color: (isDark
-                                ? CupertinoColors.black
-                                : CupertinoColors.white)
-                            .withOpacity(0.18),
-                        child: Icon(
-                          CupertinoIcons.circle_grid_3x3_fill,
-                          size: 18,
-                          color: isDark
-                              ? CupertinoColors.white.withOpacity(0.72)
-                              : CupertinoColors.black.withOpacity(0.58),
-                        ),
-                      ),
-                    ),
                   );
                 } else {
                   childWidget = Container(

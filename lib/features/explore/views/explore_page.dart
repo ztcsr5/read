@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'web_browser_page.dart';
@@ -7,6 +8,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/rss_source.dart';
 import '../../../widgets/book_cover.dart';
 import '../../../widgets/ios_navigation_bar.dart';
+import '../../../widgets/pressable_scale.dart';
 import '../viewmodels/explore_viewmodel.dart';
 
 class ExplorePage extends ConsumerWidget {
@@ -540,11 +542,12 @@ class ExplorePage extends ConsumerWidget {
     Book book,
     WidgetRef ref,
   ) {
-    return GestureDetector(
+    return PressableScale(
       onTap: () async {
+        HapticFeedback.lightImpact();
         final id = await ref
             .read(exploreViewModelProvider.notifier)
-            .addToBookshelf(book);
+            .openPreview(book);
         if (context.mounted) context.push('/reader/$id');
       },
       child: Container(
@@ -624,6 +627,7 @@ class ExplorePage extends ConsumerWidget {
             CupertinoButton(
               padding: EdgeInsets.zero,
               onPressed: () async {
+                HapticFeedback.lightImpact();
                 final id = await ref
                     .read(exploreViewModelProvider.notifier)
                     .addToBookshelf(book);

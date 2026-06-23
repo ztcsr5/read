@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -212,7 +212,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
           searchTotalSources: 0,
           searchedSources: 0,
           matchedSources: 0,
-          error: '没有可用书源，请先在设置里导入并启用书源',
+          error: '娌℃湁鍙敤涔︽簮锛岃鍏堝湪璁剧疆閲屽鍏ュ苟鍚敤涔︽簮',
         );
         return;
       }
@@ -264,7 +264,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                 _appendFailureSample(
                   failureSamples,
                   source,
-                  '解析到 ${books.length} 条，但被当前匹配模式过滤；可切换“模糊”重试。',
+                  '瑙ｆ瀽鍒?${books.length} 鏉★紝浣嗚褰撳墠鍖归厤妯″紡杩囨护锛涘彲鍒囨崲鈥滄ā绯娾€濋噸璇曘€?,
                 );
               }
               return filtered;
@@ -291,7 +291,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
 
         for (final list in resultsLists) {
           for (final book in list) {
-            if (book.title.trim().isEmpty || book.title == '未知') continue;
+            if (book.title.trim().isEmpty || book.title == '鏈煡') continue;
             final key = [
               book.title.trim().toLowerCase(),
               book.author.trim().toLowerCase(),
@@ -335,15 +335,33 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
             : '',
       );
     } catch (e) {
-      state = state.copyWith(isSearching: false, error: '搜索失败: $e');
+      state = state.copyWith(isSearching: false, error: '鎼滅储澶辫触: $e');
     }
   }
 
   Future<int> addToBookshelf(Book book) async {
+    return _prepareOnlineBook(book, favorite: true);
+  }
+
+  Future<int> openPreview(Book book) async {
+    final target = book
+      ..isFromSource = true
+      ..isFavorite = false
+      ..lastReadTime = null;
+    final source = await _sourceForBook(target);
+    if (source != null) {
+      target.sourceUrl = source.id.toString();
+    }
+    final id = await _repository.saveBook(target);
+    target.id = id;
+    return id;
+  }
+
+  Future<int> _prepareOnlineBook(Book book, {required bool favorite}) async {
     var target = book
       ..isFromSource = true
-      ..isFavorite = true
-      ..lastReadTime = DateTime.now();
+      ..isFavorite = favorite
+      ..lastReadTime = favorite ? DateTime.now() : null;
 
     final source = await _sourceForBook(target);
     if (source != null) {
@@ -352,9 +370,10 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
         target
           ..isFromSource = true
           ..sourceUrl = source.id.toString()
-          ..lastReadTime = DateTime.now();
+          ..isFavorite = favorite
+          ..lastReadTime = favorite ? DateTime.now() : null;
       } catch (_) {
-        // 搜索结果本身也可以直接加入书架。
+        // Search result can still be saved without parsed detail.
       }
     }
 
@@ -377,7 +396,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
           await _repository.saveBook(target);
         }
       } catch (_) {
-        // 目录失败不阻止收藏，阅读页会继续尝试解析。
+        // 鐩綍澶辫触涓嶉樆姝㈡敹钘忥紝闃呰椤典細缁х画灏濊瘯瑙ｆ瀽銆?
       }
     }
 
@@ -500,7 +519,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     final name = source.bookSourceName.trim().isEmpty
         ? source.bookSourceUrl
         : source.bookSourceName;
-    samples.add('$name：$message');
+    samples.add('$name锛?message');
   }
 
   String _compactError(Object error) {
@@ -516,14 +535,14 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     required int sourcesWithParsedResults,
     required List<String> failures,
   }) {
-    final buffer = StringBuffer('已搜索 $tried 个启用书源，暂时没有搜到书籍');
+    final buffer = StringBuffer('宸叉悳绱?$tried 涓惎鐢ㄤ功婧愶紝鏆傛椂娌℃湁鎼滃埌涔︾睄');
     if (sourcesWithParsedResults > 0) {
-      buffer.write('；其中 $sourcesWithParsedResults 个源解析到结果但被当前匹配模式过滤');
+      buffer.write('锛涘叾涓?$sourcesWithParsedResults 涓簮瑙ｆ瀽鍒扮粨鏋滀絾琚綋鍓嶅尮閰嶆ā寮忚繃婊?);
     }
     if (failures.isNotEmpty) {
       buffer
-        ..write('\n失败样例：')
-        ..write(failures.map((item) => '\n• $item').join());
+        ..write('\n澶辫触鏍蜂緥锛?)
+        ..write(failures.map((item) => '\n鈥?$item').join());
     }
     return buffer.toString();
   }

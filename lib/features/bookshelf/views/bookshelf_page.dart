@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -8,6 +9,8 @@ import '../viewmodels/bookshelf_viewmodel.dart';
 import '../../../data/models/book.dart';
 import '../../../widgets/book_cover.dart';
 import '../../settings/viewmodels/book_source_viewmodel.dart';
+import '../../../data/repositories/book_repository.dart';
+import '../../../widgets/pressable_scale.dart';
 
 class BookshelfPage extends ConsumerStatefulWidget {
   const BookshelfPage({super.key});
@@ -93,8 +96,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       }
     }
     final booksWithUpdates = state.allBooks.where((book) {
-      return book.totalChapters > (book.currentChapter + 1) &&
-          book.totalChapters > 0;
+      return _hasUnreadUpdate(book);
     }).toList();
 
     return CupertinoPageScaffold(
@@ -127,23 +129,6 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                     viewModel.importLocalBook();
                   },
                 ),
-                GestureDetector(
-                  onTap: () => _showProfileActions(context),
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 4, left: 16),
-                    width: 32,
-                    height: 32,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: CupertinoColors.systemGrey5,
-                    ),
-                    child: const Icon(
-                      CupertinoIcons.person_crop_circle,
-                      size: 32,
-                      color: CupertinoColors.systemGrey,
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -163,7 +148,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                     ),
                     child: CupertinoButton(
                       padding: EdgeInsets.zero,
-                      onPressed: () {},
+                      onPressed: () => context.push('/library'),
                       child: Row(
                         children: [
                           Text(
@@ -244,7 +229,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
               padding: const EdgeInsets.only(top: 32.0, bottom: 12.0),
               child: CupertinoButton(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                onPressed: () {},
+                onPressed: () => context.push('/library'),
                 child: Row(
                   children: [
                     Text(
@@ -394,8 +379,11 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       const Color(0xFF222C3C), // 藏青色
     ];
 
-    return GestureDetector(
-      onTap: () => context.push('/reader/${book.id}'),
+    return PressableScale(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        context.push('/reader/${book.id}');
+      },
       onLongPress: () => _showBookDeleteSheet(context, book),
       child:
           Container(
@@ -551,8 +539,12 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     int index,
     bool isDark,
   ) {
-    return GestureDetector(
-      onTap: () => context.push('/reader/${book.id}'),
+    return PressableScale(
+      onTap: () async {
+        HapticFeedback.lightImpact();
+        await _markUpdateSeen(book);
+        if (context.mounted) context.push('/reader/${book.id}');
+      },
       onLongPress: () => _showBookDeleteSheet(context, book),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,25 +567,26 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
                   iconSize: 30,
                 ),
               ),
-              Positioned(
-                top: -3,
-                right: -3,
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: const BoxDecoration(
-                    color: CupertinoColors.systemRed,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Color(0x1F000000),
-                        blurRadius: 2,
-                        spreadRadius: 1,
-                      ),
-                    ],
+              if (_hasUnreadUpdate(book))
+                Positioned(
+                  top: -3,
+                  right: -3,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: const BoxDecoration(
+                      color: CupertinoColors.systemRed,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x1F000000),
+                          blurRadius: 2,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           const SizedBox(width: 16),
@@ -646,6 +639,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     );
   }
 
+  // ignore: unused_element
   void _showProfileActions(BuildContext context) {
     showCupertinoModalPopup(
       context: context,
@@ -704,6 +698,7 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
     );
   }
 
+  // ignore: unused_element
   Future<void> _openBatchSourceCheck(BuildContext context) async {
     await ref.read(bookSourceViewModelProvider.notifier).loadSources();
     if (!mounted || !context.mounted) return;
@@ -736,6 +731,24 @@ class _BookshelfPageState extends ConsumerState<BookshelfPage> {
       return;
     }
     context.push('/source_batch_check', extra: sources);
+  }
+
+  bool _hasUnreadUpdate(Book book) {
+    if (book.totalChapters <= 0) return false;
+    final lastKnownIndex = book.totalChapters - 1;
+    if (book.currentChapter >= lastKnownIndex) return false;
+    return !book.tags.contains(_seenUpdateTag(book));
+  }
+
+  String _seenUpdateTag(Book book) => 'seenUpdate:${book.totalChapters}';
+
+  Future<void> _markUpdateSeen(Book book) async {
+    if (!_hasUnreadUpdate(book)) return;
+    final tags = book.tags.where((tag) => !tag.startsWith('seenUpdate:')).toList()
+      ..add(_seenUpdateTag(book));
+    final updated = book.copyWith(tags: tags);
+    await ref.read(bookRepositoryProvider).saveBook(updated);
+    await ref.read(bookshelfViewModelProvider.notifier).loadBooks();
   }
 }
 

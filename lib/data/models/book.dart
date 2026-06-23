@@ -71,6 +71,7 @@ class Book {
     DateTime? dateAdded,
     List<String>? tags,
     bool? isFavorite,
+    bool? isFromSource,
     String? sourceUrl,
     int? fileSize,
     int? groupId,

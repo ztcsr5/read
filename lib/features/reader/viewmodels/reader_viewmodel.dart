@@ -482,8 +482,7 @@ enum ReaderBackground {
   gray(Color(0xFF333333), '深灰'),
   black(Color(0xFF111111), '极黑'),
   custom(Color(0xFFF6F0E4), '自定义'),
-  customImage(Color(0xFFF6F0E4), '自定义壁纸'),
-  glass(Color(0xFFF5EEDC), '高斯玻璃');
+  customImage(Color(0xFFF6F0E4), '自定义壁纸');
 
   final Color color;
   final String label;
@@ -499,7 +498,6 @@ enum ReaderBackground {
       case ReaderBackground.pink:
       case ReaderBackground.custom:
       case ReaderBackground.customImage:
-      case ReaderBackground.glass:
         return const Color(0xFF2C2C2E);
       case ReaderBackground.gray:
         return const Color(0xFFEBEBF5);
@@ -527,11 +525,6 @@ extension ReaderBackgroundResolver on ReaderState {
       return brightness == Brightness.dark
           ? const Color(0xFF111111)
           : const Color(0xFFF9F9F9);
-    }
-    if (background == ReaderBackground.glass) {
-      return brightness == Brightness.dark
-          ? const Color(0xFF1C1C1E)
-          : const Color(0xFFF5EEDC);
     }
     return background.color;
   }
@@ -626,13 +619,15 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       final book = await _bookRepository.getBookById(id);
       if (book == null) throw Exception('书籍不存在');
 
-      book.lastReadTime = DateTime.now();
-      try {
-        await _bookRepository.saveBook(book);
-      } catch (e) {
-        debugPrint(
-          'Database Error saving book in loadBook: $e. Retaining in memory.',
-        );
+      if (book.isFavorite) {
+        book.lastReadTime = DateTime.now();
+        try {
+          await _bookRepository.saveBook(book);
+        } catch (e) {
+          debugPrint(
+            'Database Error saving book in loadBook: $e. Retaining in memory.',
+          );
+        }
       }
 
       List<Chapter> chapters = [];
@@ -740,8 +735,10 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
         ? prefs.getInt('reader.background.v2')
         : ((prefs.getInt('reader.background') ?? -1) + 1);
     final backgroundIndex =
-        (savedBackgroundIndex == null || savedBackgroundIndex < 0)
-        ? state.background.index
+        (savedBackgroundIndex == null ||
+            savedBackgroundIndex < 0 ||
+            savedBackgroundIndex >= ReaderBackground.values.length)
+        ? ReaderBackground.system.index
         : savedBackgroundIndex;
     final zones = zoneNames
         ?.map(
@@ -775,8 +772,7 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
       keepScreenOn: prefs.getBool('reader.keepScreenOn') ?? state.keepScreenOn,
       volumeKeyTurn:
           prefs.getBool('reader.volumeKeyTurn') ?? state.volumeKeyTurn,
-      background: ReaderBackground
-          .values[backgroundIndex.clamp(0, ReaderBackground.values.length - 1)],
+      background: ReaderBackground.values[backgroundIndex],
       customBackgroundColor: Color(
         prefs.getInt('reader.customBackgroundColor') ??
             state.customBackgroundColor.toARGB32(),
@@ -944,7 +940,9 @@ class ReaderViewModel extends StateNotifier<ReaderState> {
     book.currentChapter = chapterIndex;
     book.currentPosition = scrollPosition;
     book.readingProgress = progress;
-    book.lastReadTime = DateTime.now();
+    if (book.isFavorite) {
+      book.lastReadTime = DateTime.now();
+    }
 
     if (mounted) {
       state = state.copyWith(

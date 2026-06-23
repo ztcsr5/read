@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart'
@@ -575,6 +576,7 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
   }
 
   Future<void> _openBook(Book book) async {
+    HapticFeedback.lightImpact();
     showCupertinoDialog(
       context: context,
       barrierDismissible: false,
@@ -583,37 +585,15 @@ class _BookSourceExplorePageState extends ConsumerState<BookSourceExplorePage>
     );
 
     var target = book;
-    try {
-      target = await LegadoParser.parseBookInfo(widget.source, book);
-    } catch (_) {
-      target = book;
-    }
-
     target
       ..isFromSource = true
       ..sourceUrl = widget.source.id.toString()
-      ..isFavorite = true
-      ..lastReadTime = DateTime.now();
+      ..isFavorite = false
+      ..lastReadTime = null;
 
     final repo = ref.read(bookRepositoryProvider);
     final id = await repo.saveBook(target);
     target.id = id;
-
-    try {
-      final chapters = await LegadoParser.getChapterList(
-        widget.source,
-        target,
-      ).timeout(const Duration(seconds: 12));
-      if (chapters.isNotEmpty) {
-        for (final chapter in chapters) {
-          chapter.bookId = id;
-        }
-        await repo.deleteChaptersForBook(id);
-        await repo.saveChapters(chapters);
-        target.totalChapters = chapters.length;
-        await repo.saveBook(target);
-      }
-    } catch (_) {}
 
     if (!mounted) return;
     Navigator.pop(context); // Close loading indicator

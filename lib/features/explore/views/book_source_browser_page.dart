@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -270,41 +271,20 @@ class _BookSourceBrowserPageState extends ConsumerState<BookSourceBrowserPage> {
   }
 
   Future<void> _openBook(Book book) async {
+    HapticFeedback.lightImpact();
     setState(() {
       _isLoading = true;
-      _message = '正在解析书籍详情...';
+      _message = '正在打开...';
     });
     var target = book;
-    try {
-      target = await LegadoParser.parseBookInfo(widget.source, book);
-    } catch (_) {
-      target = book;
-    }
     target
       ..isFromSource = true
       ..sourceUrl = widget.source.id.toString()
-      ..isFavorite = true
-      ..lastReadTime = DateTime.now();
+      ..isFavorite = false
+      ..lastReadTime = null;
     final repo = ref.read(bookRepositoryProvider);
     final id = await repo.saveBook(target);
     target.id = id;
-    try {
-      final chapters = await LegadoParser.getChapterList(
-        widget.source,
-        target,
-      ).timeout(const Duration(seconds: 12));
-      if (chapters.isNotEmpty) {
-        for (final chapter in chapters) {
-          chapter.bookId = id;
-        }
-        await repo.deleteChaptersForBook(id);
-        await repo.saveChapters(chapters);
-        target.totalChapters = chapters.length;
-        await repo.saveBook(target);
-      }
-    } catch (_) {
-      // Reading page can retry chapter parsing; opening should not be blocked.
-    }
     if (!mounted) return;
     setState(() => _isLoading = false);
     context.push('/reader/$id');

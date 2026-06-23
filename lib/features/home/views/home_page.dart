@@ -1,15 +1,11 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme/colors.dart';
-import '../../../data/models/book.dart';
-import '../../../widgets/book_cover.dart';
 import '../../../widgets/ios_glass.dart';
-import '../../bookshelf/viewmodels/bookshelf_viewmodel.dart';
 
-class HomePage extends ConsumerWidget {
+class HomePage extends StatelessWidget {
   final StatefulNavigationShell navigationShell;
 
   const HomePage({super.key, required this.navigationShell});
@@ -23,12 +19,7 @@ class HomePage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bookshelfState = ref.watch(bookshelfViewModelProvider);
-    final currentBook = bookshelfState.recentBooks.isNotEmpty
-        ? bookshelfState.recentBooks.first
-        : null;
-
+  Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: Stack(
@@ -43,10 +34,6 @@ class HomePage extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (currentBook != null)
-                    _MiniReadingBar(book: currentBook)
-                  else
-                    const SizedBox.shrink(),
                   IOSGlassPanel(
                     borderRadius: BorderRadius.circular(28),
                     blur: 28,
@@ -147,98 +134,6 @@ class _GlassTabButton extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniReadingBar extends StatelessWidget {
-  final Book book;
-
-  const _MiniReadingBar({required this.book});
-
-  @override
-  Widget build(BuildContext context) {
-    final progress = (book.readingProgress * 100).clamp(0, 100).round();
-    final labelColor = CupertinoDynamicColor.resolve(
-      CupertinoColors.label,
-      context,
-    );
-    final secondaryLabelColor = CupertinoDynamicColor.resolve(
-      CupertinoColors.secondaryLabel,
-      context,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: IOSGlassPanel(
-        borderRadius: BorderRadius.circular(22),
-        blur: 26,
-        opacity: 0.74,
-        padding: const EdgeInsets.all(8),
-        child: CupertinoButton(
-          padding: EdgeInsets.zero,
-          minSize: 0,
-          onPressed: () {
-            HapticFeedback.lightImpact();
-            context.push('/reader/${book.id}');
-          },
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: BookCover(
-                  book: book,
-                  width: 44,
-                  height: 44,
-                  iconSize: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      book.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ).copyWith(color: labelColor),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      progress <= 0 ? '继续阅读' : '已读 $progress%',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: secondaryLabelColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppColors.primaryPurple.withOpacity(0.14),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  CupertinoIcons.play_arrow_solid,
-                  size: 17,
-                  color: AppColors.primaryPurple,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
