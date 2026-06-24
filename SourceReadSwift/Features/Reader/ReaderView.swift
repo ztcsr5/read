@@ -4,6 +4,7 @@ import UIKit
 
 struct ReaderView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
     let bookID: String
     let content: ChapterContent
     let chapterIndex: Int
@@ -152,7 +153,7 @@ struct ReaderView: View {
 
     var body: some View {
         ZStack {
-            background.color.ignoresSafeArea()
+            readerBackdrop
 
             readerContent
             .id(readerLayoutKey)
@@ -171,7 +172,12 @@ struct ReaderView: View {
 
             if showOverlay {
                 readerOverlay
-                    .transition(.opacity)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .center)),
+                            removal: .opacity
+                        )
+                    )
             }
 
             if let statusMessage {
@@ -185,6 +191,7 @@ struct ReaderView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showChapterList) {
             chapterListSheet
         }
@@ -223,6 +230,43 @@ struct ReaderView: View {
             speechController.stop()
             autoScrollTarget = initialAutoScrollTarget()
         }
+        .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showOverlay)
+        .animation(.spring(response: 0.3, dampingFraction: 0.88), value: showSettings)
+        .animation(.easeOut(duration: 0.18), value: statusMessage)
+    }
+
+    private var readerBackdrop: some View {
+        ZStack {
+            background.color
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(background == .dark ? 0.02 : 0.16),
+                    Color.clear,
+                    Color.black.opacity(background == .dark ? 0.28 : 0.05)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [
+                    AppTheme.accent.opacity(background == .dark ? 0.16 : 0.08),
+                    Color.clear
+                ],
+                center: .topTrailing,
+                startRadius: 20,
+                endRadius: 360
+            )
+            .blendMode(background == .dark ? .screen : .multiply)
+        }
+        .ignoresSafeArea()
+    }
+
+    private var chromeForeground: Color {
+        background == .dark ? .white.opacity(0.94) : .primary
+    }
+
+    private var chromeSecondaryForeground: Color {
+        background == .dark ? .white.opacity(0.62) : .secondary
     }
 
     @ViewBuilder
@@ -333,8 +377,12 @@ struct ReaderView: View {
             .background {
                 if readerMode == .cover {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(background.color)
-                        .shadow(color: .black.opacity(background == .dark ? 0.35 : 0.12), radius: 18, x: -6, y: 0)
+                        .fill(background.color.opacity(background == .dark ? 0.92 : 0.98))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(background == .dark ? 0.08 : 0.35), lineWidth: 0.8)
+                        }
+                        .shadow(color: .black.opacity(background == .dark ? 0.42 : 0.14), radius: 24, x: -8, y: 2)
                         .padding(.vertical, 8)
                         .padding(.horizontal, 4)
                 }
@@ -391,55 +439,55 @@ struct ReaderView: View {
     private var readerOverlay: some View {
         VStack {
             HStack {
-                Button {
+                chromeIconButton(systemName: "chevron.left") {
                     dismiss()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 44, height: 44)
                 }
 
-                Text(content.title)
-                    .font(.headline)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(content.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(chromeForeground)
+                        .lineLimit(1)
+                    Text(progressTitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(chromeSecondaryForeground)
+                        .lineLimit(1)
+                }
 
                 Spacer()
 
                 extraToolbarActions()
 
-                Button {
+                chromeIconButton(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark") {
                     toggleCurrentBookmark(openList: false)
-                } label: {
-                    Image(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 44, height: 44)
                 }
 
-                Button {
+                chromeIconButton(systemName: "ellipsis") {
                     showSettings = true
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 44, height: 44)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .background(.ultraThinMaterial)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .readerGlassPanel(background: background)
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
 
             Spacer()
 
-            VStack(spacing: 10) {
-                HStack {
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
                     toolButton(icon: "chevron.left", title: "上一章") {
                         selectRelativeChapter(offset: -1)
                     }
                     .disabled(!canSelectRelativeChapter(offset: -1))
 
                     Text(progressTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(chromeSecondaryForeground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
                         .frame(maxWidth: .infinity)
+                        .background(.thinMaterial, in: Capsule())
 
                     toolButton(icon: "chevron.right", title: "下一章") {
                         selectRelativeChapter(offset: 1)
@@ -447,7 +495,7 @@ struct ReaderView: View {
                     .disabled(!canSelectRelativeChapter(offset: 1))
                 }
 
-                HStack {
+                HStack(spacing: 10) {
 
                     toolButton(icon: "list.bullet", title: "目录") {
                         tocTab = 0
@@ -478,24 +526,44 @@ struct ReaderView: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 22)
-            .background(.ultraThinMaterial)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 18)
+            .readerGlassPanel(background: background)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(chromeForeground)
     }
 
     private func toolButton(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
             VStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                 Text(title)
-                    .font(.caption2)
+                    .font(.system(size: 10, weight: .medium))
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 54)
+            .frame(height: 50)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func chromeIconButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 40, height: 40)
+                .background(.thinMaterial, in: Circle())
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
     }
@@ -537,9 +605,12 @@ struct ReaderView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 500)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .shadow(color: .black.opacity(0.18), radius: 18, x: 0, y: -5)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.45), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 24, x: 0, y: -8)
         }
         .ignoresSafeArea(edges: .bottom)
     }
@@ -596,7 +667,11 @@ struct ReaderView: View {
             .foregroundStyle(background.textColor)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
+            .background(.regularMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.white.opacity(background == .dark ? 0.08 : 0.35), lineWidth: 0.8)
+            }
             .padding(.horizontal, 18)
             .padding(.top, 12)
 
@@ -1426,5 +1501,17 @@ private enum ReaderBackground: String, CaseIterable, Identifiable {
         case .dark: return .white.opacity(0.9)
         default: return .primary
         }
+    }
+}
+
+private extension View {
+    func readerGlassPanel(background: ReaderBackground) -> some View {
+        self
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(Color.white.opacity(background == .dark ? 0.09 : 0.42), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(background == .dark ? 0.42 : 0.14), radius: 24, x: 0, y: 10)
     }
 }

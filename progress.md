@@ -15,3 +15,22 @@
   - `docs/superpowers/specs/2026-06-24-swift-v2-lifetime-reader-design.md`: new Swift v2 lifetime-reader design contract and phased execution plan.
   - `progress.md`: new project progress log entry for this documentation task.
 - Rollback: delete the two files above, or revert the commit that contains this documentation milestone.
+
+## 2026-06-25 - Task: Phase 1 reader native visual shell
+
+### What was done
+- Upgraded the native Swift reader screen from a flat reading surface to a softer iOS-style reading shell.
+- Added a background gradient and accent glow that adapt to dark and light reading backgrounds.
+- Reworked the reading chrome into floating glass panels for the top toolbar, bottom controls, settings sheet, and status banner.
+- Added light haptic feedback to reader toolbar actions and smoother spring transitions for overlay/settings chrome.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Confirmed `project.yml` targets iOS 16.0, so the navigation toolbar hiding API used by this change is within the supported deployment target.
+- Windows cannot compile or launch the iOS app locally; final UI/runtime verification still requires Xcode or GitHub Actions at the next coherent milestone.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Reader/ReaderView.swift`: refined the reader visual shell, floating glass controls, adaptive chrome colors, haptics, and overlay transitions.
+  - `progress.md`: recorded this Phase 1 reader-shell milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Reader/ReaderView.swift`, or revert the commit that contains this milestone.
