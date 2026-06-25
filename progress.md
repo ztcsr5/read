@@ -297,3 +297,21 @@
   - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: reports an empty source-file selection instead of returning silently.
   - `progress.md`: recorded this import-picker reliability fix and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Shared/Import/UniversalDocumentPicker.swift`, `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`, and `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Root tab switching performance
+
+### What was done
+- Replaced the hand-written root tab ZStack/drag implementation with the native paged `TabView` container.
+- Kept the custom Podcasts-style glass bottom tab bar and keyboard bottom-ignore behavior.
+- Confirmed the app already has `CADisableMinimumFrameDurationOnPhone` enabled, so this change targets layout/rendering overhead instead of plist configuration.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed the root tab structure to confirm the old manual drag state and page offset calculations were removed.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/App/RootTabView.swift`: switched the root host to native paged `TabView` while preserving the custom tab chrome.
+  - `progress.md`: recorded this root-tab performance fix and verification limits.
+- Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/App/RootTabView.swift`, or revert the commit that contains this milestone.

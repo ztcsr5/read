@@ -3,28 +3,21 @@ import SwiftUI
 struct RootTabView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedTab = 0
-    @GestureState private var tabDragTranslation: CGFloat = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ZStack {
+            TabView(selection: $selectedTab) {
                 BookshelfView()
-                    .opacity(selectedTab == 0 ? 1 : 0)
-                    .offset(x: pageOffset(for: 0))
-                    .allowsHitTesting(selectedTab == 0)
+                    .tag(0)
 
                 DiscoverView()
-                    .opacity(selectedTab == 1 ? 1 : 0)
-                    .offset(x: pageOffset(for: 1))
-                    .allowsHitTesting(selectedTab == 1)
+                    .tag(1)
 
                 SettingsView()
-                    .opacity(selectedTab == 2 ? 1 : 0)
-                    .offset(x: pageOffset(for: 2))
-                    .allowsHitTesting(selectedTab == 2)
+                    .tag(2)
             }
-            .contentShape(Rectangle())
-            .simultaneousGesture(tabSwipeGesture)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea(.keyboard, edges: .bottom)
 
             if !appState.isTabChromeHidden {
                 customTabBar
@@ -38,31 +31,6 @@ struct RootTabView: View {
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
-    }
-
-    private var tabSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 28, coordinateSpace: .local)
-            .updating($tabDragTranslation) { value, state, _ in
-                guard abs(value.translation.width) > abs(value.translation.height) * 1.25 else { return }
-                state = value.translation.width
-            }
-            .onEnded { value in
-                let horizontal = value.translation.width
-                guard abs(horizontal) > abs(value.translation.height) * 1.25,
-                      abs(horizontal) > 70 else { return }
-                if horizontal < 0 {
-                    selectedTab = min(selectedTab + 1, 2)
-                } else {
-                    selectedTab = max(selectedTab - 1, 0)
-                }
-            }
-    }
-
-    private func pageOffset(for index: Int) -> CGFloat {
-        guard index == selectedTab else { return 0 }
-        let width = UIScreen.main.bounds.width
-        let clamped = min(max(tabDragTranslation, -width * 0.22), width * 0.22)
-        return clamped * 0.18
     }
 
     private var customTabBar: some View {
