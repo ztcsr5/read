@@ -2432,6 +2432,104 @@ function search(key, page, result) {
       expect(books.single.totalChapters, 9);
     });
 
+    test('parses imported js function toc results', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Toc'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function toc(result) {
+  return [
+    {name: "Chapter 1", url: "/chapter/1"},
+    {name: "Chapter 2", url: "/chapter/2"}
+  ];
+}
+''',
+        })
+        ..ruleToc = jsonEncode({
+          'chapterList': '<js>toc(result)</js>',
+          'chapterName': r'$.name',
+          'chapterUrl': r'$.url',
+        });
+      final book = Book(
+        title: 'Novel',
+        author: 'Author',
+        filePath: 'https://js.example.com/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '<html><body>ignored by js toc</body></html>',
+        requestOptions: RequestOptions(path: 'https://js.example.com/book/1'),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters, hasLength(2));
+      expect(chapters.first.title, 'Chapter 1');
+      expect(chapters.first.url, 'https://js.example.com/chapter/1');
+      expect(chapters.last.title, 'Chapter 2');
+    });
+
+    test('parses imported js function content results', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      server.listen((request) {
+        request.response
+          ..headers.contentType = ContentType.html
+          ..write('<html><body>ignored by js content</body></html>')
+          ..close();
+      });
+      final baseUrl = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Content'
+        ..bookSourceUrl = baseUrl
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function content(result) {
+  return ["First paragraph", "<p>Second paragraph</p>"];
+}
+''',
+        })
+        ..ruleContent = jsonEncode({'content': '<js>content(result)</js>'});
+      final book = Book(
+        title: 'Novel',
+        author: 'Author',
+        filePath: '$baseUrl/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final chapter = Chapter(
+        bookId: book.id,
+        title: 'Chapter 1',
+        index: 0,
+        url: '$baseUrl/chapter/1',
+        content: '$baseUrl/chapter/1',
+      );
+
+      final content = await LegadoParser.getChapterContent(
+        source,
+        '$baseUrl/chapter/1',
+        book: book,
+        chapter: chapter,
+      );
+
+      expect(content, contains('First paragraph'));
+      expect(content, contains('Second paragraph'));
+      expect(content, isNot(contains('<p>')));
+    });
+
     test('keeps multiline embedded request config as one book url', () async {
       final source = BookSource()
         ..bookSourceName = 'Embedded Config Search Source'

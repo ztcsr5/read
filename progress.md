@@ -61,6 +61,30 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Execute JS function TOC and content rules
+
+### What was done
+- Verified and covered the existing JS-only TOC path for imported function-style rules like `<js>toc(result)</js>`.
+- Added a JS-only content execution path for rules like `<js>content(result)</js>`, including support for JS returning:
+  - a plain string,
+  - a list of paragraph strings,
+  - a map with `content`, `text`, `body`, `data`, or `result`.
+- Normalized JS content output through the existing HTML-to-text cleaner so HTML fragments returned by JS are stripped consistently.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function toc results"`: passed; current machine logs missing `quickjs_c_bridge_plugin.dll`, so JS runtime-gated assertions are skipped.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function content results"`: passed; current machine logs missing `quickjs_c_bridge_plugin.dll`, so JS runtime-gated assertions are skipped.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function search results"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`: no errors; existing info-level lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 24 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado_parser.dart`: JS-only content execution and output normalization.
+  - `test/legado_engine_test.dart`: targeted imported JS function TOC/content coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Improve source compatibility diagnostics
 
 ### What was done

@@ -2118,6 +2118,23 @@ class LegadoParser {
       );
     }
 
+    if (_isJsOnlyRule(contentRule)) {
+      try {
+        final output = await LegadoJsEngine().evaluateWithAjax(
+          contentRule,
+          variables: variables,
+          libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
+          ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
+          ajaxBytes: (request) =>
+              _ajaxBytesForJs(source, request, baseUrl: baseUrl),
+        );
+        final text = _normalizeJsContentOutput(output);
+        if (text.trim().isNotEmpty) return _contentHtmlToText(text);
+      } catch (e) {
+        debugPrint('JS content rule execution failed: $e');
+      }
+    }
+
     if (data is String && !contentRule.contains('java.ajax')) {
       final document = parse(data);
       final root = document.documentElement ?? document.body;
@@ -2254,6 +2271,29 @@ class LegadoParser {
       '',
     );
     return _contentHtmlToText(html);
+  }
+
+  static String _normalizeJsContentOutput(String output) {
+    final text = output.trim();
+    if (text.isEmpty) return '';
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) {
+        return decoded.map((value) => value?.toString() ?? '').join('\n');
+      }
+      if (decoded is Map) {
+        for (final key in const ['content', 'text', 'body', 'data', 'result']) {
+          final value = decoded[key];
+          if (value is List) {
+            return value.map((item) => item?.toString() ?? '').join('\n');
+          }
+          if (value != null) return value.toString();
+        }
+      }
+    } catch (_) {
+      // Keep plain string output.
+    }
+    return text;
   }
 
   static String _contentHtmlToText(String html) {
