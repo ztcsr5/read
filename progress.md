@@ -200,3 +200,21 @@
   - `SourceReadSwiftTests/BookshelfStoreTests.swift`: added regression coverage for latest-update seen-state behavior.
   - `progress.md`: recorded this test coverage milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwiftTests/BookshelfStoreTests.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Search result list stability
+
+### What was done
+- Filtered empty-title search results before rendering.
+- Deduplicated search results by stable `SearchBook.id` while preserving first-seen ordering.
+- Kept matching behavior unchanged except that exact mode now runs after the same cleanup as fuzzy mode.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed the search aggregation path to confirm cleanup happens before assigning data to the SwiftUI result list.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Discover/DiscoverView.swift`: stabilized result filtering by removing empty and duplicate items before rendering.
+  - `progress.md`: recorded this search-result stability milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Features/Discover/DiscoverView.swift`, or revert the commit that contains this milestone.

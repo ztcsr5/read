@@ -432,12 +432,17 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     private func filtered(_ books: [SearchBook], keyword: String) -> [SearchBook] {
-        guard matchMode == .exact else { return books }
-        return books.filter {
-            $0.name.localizedCaseInsensitiveContains(keyword)
-                || ($0.author?.localizedCaseInsensitiveContains(keyword) ?? false)
-                || $0.sourceName.localizedCaseInsensitiveContains(keyword)
-                || $0.bookUrl.localizedCaseInsensitiveContains(keyword)
+        var seenIDs = Set<String>()
+        let uniqueBooks = books.filter { book in
+            let hasName = !book.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return hasName && seenIDs.insert(book.id).inserted
+        }
+        guard matchMode == .exact else { return uniqueBooks }
+        return uniqueBooks.filter { book in
+            book.name.localizedCaseInsensitiveContains(keyword)
+                || (book.author?.localizedCaseInsensitiveContains(keyword) ?? false)
+                || book.sourceName.localizedCaseInsensitiveContains(keyword)
+                || book.bookUrl.localizedCaseInsensitiveContains(keyword)
         }
     }
 }
