@@ -195,13 +195,9 @@ struct ChapterLoadingView: View {
                     }
                 )
             } else if let errorMessage {
-                EmptyStateCard(systemImage: "xmark.octagon", title: "正文加载失败", message: errorMessage)
-                    .padding(AppTheme.pagePadding)
-                    .pageBackground()
+                chapterLoadErrorView(errorMessage)
             } else {
-                ProgressView("正在加载正文")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .pageBackground()
+                chapterLoadingView
             }
         }
         .task {
@@ -285,13 +281,64 @@ struct ChapterLoadingView: View {
             }
         }
     }
+
+    private var chapterLoadingView: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .controlSize(.large)
+            VStack(spacing: 6) {
+                Text("正在加载正文")
+                    .font(.headline)
+                Text(effectiveChapter.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+        }
+        .padding(AppTheme.pagePadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .pageBackground()
+    }
+
+    private func chapterLoadErrorView(_ message: String) -> some View {
+        VStack(spacing: 14) {
+            EmptyStateCard(systemImage: "xmark.octagon", title: "正文加载失败", message: message)
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Task { await load(force: true) }
+            } label: {
+                Label("重试当前章节", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            if let onRequestSourceSwitch {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onRequestSourceSwitch()
+                } label: {
+                    Label("换源继续阅读", systemImage: "arrow.triangle.2.circlepath")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
+        }
+        .padding(AppTheme.pagePadding)
+        .pageBackground()
+    }
+
     init(
         bookID: String? = nil,
         sourceUrl: String,
         chapter: BookChapter,
         totalChapters: Int? = nil,
         chapters: [BookChapter] = [],
-        extraToolbarActions: @escaping () -> AnyView = { AnyView(EmptyView()) }
+        extraToolbarActions: @escaping () -> AnyView = { AnyView(EmptyView()) },
+        onRequestSourceSwitch: (() -> Void)? = nil
     ) {
         self.bookID = bookID
         self.sourceUrl = sourceUrl
@@ -299,5 +346,6 @@ struct ChapterLoadingView: View {
         self.totalChapters = totalChapters
         self.chapters = chapters
         self.extraToolbarActions = extraToolbarActions
+        self.onRequestSourceSwitch = onRequestSourceSwitch
     }
 }

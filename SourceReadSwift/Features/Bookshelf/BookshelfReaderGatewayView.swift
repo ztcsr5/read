@@ -54,6 +54,7 @@ struct BookshelfReaderGatewayView: View {
                     extraToolbarActions: {
                         AnyView(
                             Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 showSourceSwitcher = true
                             } label: {
                                 Image(systemName: "arrow.triangle.2.circlepath")
@@ -61,6 +62,10 @@ struct BookshelfReaderGatewayView: View {
                                     .frame(width: 44, height: 44)
                             }
                         )
+                    },
+                    onRequestSourceSwitch: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showSourceSwitcher = true
                     }
                 )
             )

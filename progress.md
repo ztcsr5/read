@@ -218,3 +218,43 @@
   - `SourceReadSwift/Features/Discover/DiscoverView.swift`: stabilized result filtering by removing empty and duplicate items before rendering.
   - `progress.md`: recorded this search-result stability milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Features/Discover/DiscoverView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Reader source switch and source-check feedback
+
+### What was done
+- Connected the reader source-switch callback through `ChapterLoadingView` so the in-reader source switch action opens the bookshelf source switcher instead of remaining a dead branch.
+- Added haptic feedback to source-switch and batch source-check entry points.
+- Added a visible PASS/WARN/FAIL summary row to the batch source-check sheet so users can quickly see whether enabled sources are usable.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warnings.
+- Reviewed the reader path to confirm `BookshelfReaderGatewayView` now passes `onRequestSourceSwitch` into `ChapterLoadingView`, which forwards it to `ReaderView`.
+- Reviewed the batch-check path to confirm summary counts derive from the existing persisted result list and do not change network/check execution behavior.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Discover/BookDetailView.swift`: added the missing source-switch callback parameter to `ChapterLoadingView`.
+  - `SourceReadSwift/Features/Bookshelf/BookshelfReaderGatewayView.swift`: wired the reader source-switch action to the existing bookshelf source switcher.
+  - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: improved batch-check feedback with haptics and PASS/WARN/FAIL summary counts.
+  - `progress.md`: recorded this reader/source-check usability fix and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/BookDetailView.swift`, `SourceReadSwift/Features/Bookshelf/BookshelfReaderGatewayView.swift`, and `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Chapter loading feedback and recovery
+
+### What was done
+- Replaced the bare chapter-loading spinner with a loading state that shows the current chapter title.
+- Added recovery actions when正文 loading fails: retry the current chapter and, when available, switch source from the reader path.
+- Kept the engine and network behavior unchanged; this only improves visible feedback and recovery from the reading flow.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warnings.
+- Reviewed the loading path to confirm retry clears the previous error via `load(force: true)` before requesting content again.
+- Reviewed the source-switch path to confirm it reuses the source switch callback connected in the previous milestone.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Discover/BookDetailView.swift`: added a richer chapter loading state and failure recovery actions.
+  - `progress.md`: recorded this chapter-loading UX fix and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/BookDetailView.swift`, or revert the commit that contains this milestone.

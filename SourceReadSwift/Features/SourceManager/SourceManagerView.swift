@@ -155,6 +155,7 @@ struct SourceManagerView: View {
             }
             HStack(spacing: 10) {
                 Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     let enabled = appState.sourceStore.sources.filter(\.enabled)
                     batchCheck = SourceBatchCheckState(sources: enabled)
                 } label: {
@@ -354,6 +355,7 @@ struct SourceManagerView: View {
                 .disabled(selectedBookSourceURLs.isEmpty)
 
                 Button("批量测试") {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     let selected = filteredBookSources.filter { selectedBookSourceURLs.contains($0.bookSourceUrl) }
                     batchCheck = SourceBatchCheckState(sources: selected)
                 }
@@ -774,6 +776,7 @@ struct SourceManagerView: View {
 
                 HStack {
                     Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         Task { await runBatchSourceCheck() }
                     } label: {
                         Label(batchCheck?.isRunning == true ? "测试中..." : "开始批量测试", systemImage: "play.circle")
@@ -783,6 +786,18 @@ struct SourceManagerView: View {
                     .disabled(batchCheck?.isRunning == true || state.sources.isEmpty)
 
                     if let current = batchCheck, current.isRunning {
+                        Text("\(current.checkedCount)/\(current.sources.count)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let current = batchCheck, current.hasResults {
+                    HStack(spacing: 8) {
+                        sourceCheckSummaryPill(title: "PASS", count: current.passedCount, color: .green)
+                        sourceCheckSummaryPill(title: "WARN", count: current.warningCount, color: .orange)
+                        sourceCheckSummaryPill(title: "FAIL", count: current.failedCount, color: .red)
+                        Spacer()
                         Text("\(current.checkedCount)/\(current.sources.count)")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.secondary)
@@ -831,6 +846,16 @@ struct SourceManagerView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func sourceCheckSummaryPill(title: String, count: Int, color: Color) -> some View {
+        Text("\(title) \(count)")
+            .font(.caption.weight(.bold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.12))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
     }
 
     private func importSources() {
@@ -1197,6 +1222,11 @@ private struct SourceBatchCheckState: Identifiable {
     var isRunning = false
     var checkedCount = 0
     var results: [SourceBatchCheckResult] = []
+
+    var hasResults: Bool { !results.isEmpty }
+    var passedCount: Int { results.filter { $0.status == .passed }.count }
+    var warningCount: Int { results.filter { $0.status == .warning }.count }
+    var failedCount: Int { results.filter { $0.status == .failed }.count }
 }
 
 private struct SourceBatchCheckResult: Identifiable {
@@ -1233,7 +1263,7 @@ private extension SourceHealthStatus {
     }
 }
 
-private enum SourceBatchCheckStatus {
+private enum SourceBatchCheckStatus: Equatable {
     case passed
     case warning
     case failed
