@@ -228,6 +228,7 @@ struct BookshelfView: View {
 
     private var emptyImportCard: some View {
         Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             showFileImporter = true
         } label: {
             HStack(spacing: 16) {

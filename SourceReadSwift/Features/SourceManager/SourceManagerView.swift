@@ -84,6 +84,7 @@ struct SourceManagerView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         showImportSheet = true
                     } label: {
                         Image(systemName: "plus")
@@ -592,8 +593,10 @@ struct SourceManagerView: View {
                     .buttonStyle(.bordered)
 
                     Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        importMessage = "正在打开文件选择器..."
                         showImportSheet = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                             showFileImporter = true
                         }
                     } label: {

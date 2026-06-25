@@ -90,3 +90,22 @@
   - `SourceReadSwift/Features/Settings/SettingsView.swift`: added haptic feedback and aligned the list background with the app visual shell.
   - `progress.md`: recorded this Phase 1 settings interaction polish milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Settings/SettingsView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Import entry interaction reliability polish
+
+### What was done
+- Added immediate haptic feedback to bookshelf local-book import entry and source-manager import entry so taps no longer feel dead.
+- Added a visible "opening file picker" status before transitioning from the source import sheet to the system document picker.
+- Increased the source import sheet-to-picker delay slightly to reduce SwiftUI modal transition races.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed the diff to confirm the change only affects import-entry feedback and picker presentation timing, not source parsing or storage behavior.
+- Windows cannot compile or launch the iOS app locally; final file-picker behavior still requires device or Xcode/GitHub Actions verification.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: added haptic feedback to the empty bookshelf import card.
+  - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: added haptic feedback and safer sheet-to-picker transition timing for local source import.
+  - `progress.md`: recorded this import interaction polish milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Bookshelf/BookshelfView.swift` and `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`, or revert the commit that contains this milestone.
