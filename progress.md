@@ -40,6 +40,27 @@
 - Existing untracked analysis artifacts (`graphify-out`, `.graphify_*`, `nul`, and `源阅_strings_analysis.txt`) were not touched.
 - Rollback: revert the three changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Execute JS function search book lists
+
+### What was done
+- Added a JS-only `bookList` execution path in `LegadoParser` for function-style sources imported as rules like `<js>search(key, page, result)</js>`.
+- The JS output is decoded as a list, common wrapper objects (`list`, `books`, `bookList`, `items`, `records`, `rows`, `result`, `results`, `data`) are supported, and each map is converted through the existing JSON-to-`Book` parser.
+- The same safe JS list path is available to explore parsing with an empty keyword, while normal CSS/JSON/regex rules continue through the old paths.
+- Added a targeted parser test for imported JS function search results. On the current Windows machine the test compiles and passes but the assertions are skipped because the QuickJS bridge DLL is unavailable; environments with JS runtime available will execute the full assertions.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function search results"`: passed; current machine logs missing `quickjs_c_bridge_plugin.dll`, so the JS runtime-gated assertions are skipped.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado_parser.dart`: no errors; existing info-level lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart`: 21 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "keeps response data when leading js block only defines rule vars"`: passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado_parser.dart`: JS-only list execution and decoding path for search/explore book lists.
+  - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Improve source compatibility diagnostics
 
 ### What was done

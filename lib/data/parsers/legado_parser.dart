@@ -784,7 +784,18 @@ class LegadoParser {
     final regexListRule = bookListRule == null
         ? null
         : _regexListRule(bookListRule);
-    if ((bookListRule == null || bookListRule.isEmpty) &&
+    if (bookListRule != null && _isJsOnlyRule(bookListRule)) {
+      final books = await _parseBooksByJsListRule(
+        source,
+        rule,
+        data,
+        bookListRule,
+        response.realUri.toString(),
+        keyword: '',
+        page: page,
+      );
+      results.addAll(reverseList ? books.reversed : books);
+    } else if ((bookListRule == null || bookListRule.isEmpty) &&
         _looksLikeJsonData(data, null)) {
       results.addAll(
         await _parseBooksByJsonFallback(
@@ -2632,6 +2643,105 @@ class LegadoParser {
     } catch (_) {
       return baseBook;
     }
+  }
+
+  static Future<List<Book>> _parseBooksByJsListRule(
+    BookSource source,
+    Map<String, dynamic> rule,
+    dynamic data,
+    String listRule,
+    String baseUrl, {
+    required String keyword,
+    required int page,
+  }) async {
+    try {
+      final dataText = data is String ? data : jsonEncode(data);
+      final output = await LegadoJsEngine().evaluateWithAjax(
+        listRule,
+        variables: _jsVariables(
+          source,
+          result: dataText,
+          baseUrl: baseUrl,
+          keyword: keyword,
+          page: page,
+        ),
+        libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
+        ajax: (request) =>
+            _ajaxForJs(source, request, baseUrl: baseUrl, keyword: keyword),
+        ajaxBytes: (request) => _ajaxBytesForJs(
+          source,
+          request,
+          baseUrl: baseUrl,
+          keyword: keyword,
+        ),
+      );
+      final nodes = _decodeJsBookList(output);
+      if (nodes.isEmpty) return const [];
+
+      final books = <Book>[];
+      for (final item in nodes) {
+        if (item is! Map) continue;
+        final book = await _parseBookFromJsonAsync(
+          _stringKeyMap(item),
+          rule,
+          source,
+          baseUrl: baseUrl,
+          keyword: keyword,
+        );
+        if (book.title.trim().isNotEmpty &&
+            !_isNonNavigableHref(book.filePath)) {
+          books.add(book);
+        }
+      }
+      return books;
+    } catch (e) {
+      debugPrint('JS search bookList execution failed: $e');
+      return const [];
+    }
+  }
+
+  static List<dynamic> _decodeJsBookList(String output) {
+    final text = output.trim();
+    if (text.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) return decoded;
+      if (decoded is Map) {
+        for (final key in const [
+          'list',
+          'books',
+          'bookList',
+          'items',
+          'records',
+          'rows',
+          'result',
+          'results',
+          'data',
+        ]) {
+          final value = decoded[key];
+          if (value is List) return value;
+          if (value is Map) {
+            for (final nestedKey in const [
+              'list',
+              'books',
+              'bookList',
+              'items',
+              'records',
+              'rows',
+              'result',
+              'results',
+            ]) {
+              final nested = value[nestedKey];
+              if (nested is List) return nested;
+            }
+          }
+        }
+        return [decoded];
+      }
+    } catch (_) {
+      return const [];
+    }
+    return const [];
   }
 
   static Future<String?> _resolveJsonAjaxFieldValue(
@@ -6428,10 +6538,7 @@ class LegadoParser {
         .replaceAll(RegExp(r'^[《<「\[]'), '')
         .replaceAll(RegExp(r'[》>」\]]$'), '')
         .trim();
-    text = text.replaceFirst(
-      RegExp(r'^(书名|小说|作品|标题)[:：]\s*'),
-      '',
-    );
+    text = text.replaceFirst(RegExp(r'^(书名|小说|作品|标题)[:：]\s*'), '');
     return text.trim();
   }
 
@@ -6480,8 +6587,7 @@ class LegadoParser {
       final match = RegExp(
         r'(作者|作\s*者|author|writer)[:：\s]+([^,，/| ]{1,30})',
         caseSensitive: false,
-      )
-          .firstMatch(text);
+      ).firstMatch(text);
       if (match != null) return match.group(2)?.trim() ?? '';
     }
     return '';

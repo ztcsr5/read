@@ -555,8 +555,8 @@ void main() {
       final value = LegadoRuleEvaluator.extractJsonValue(
         '{"Result":-3,"Message":"签名错误"}',
         'BookId\n'
-        '<js>java.base64Encode(result)</js>\n'
-        'data:bookId;base64,{{result}},{"type":"ywc"}',
+            '<js>java.base64Encode(result)</js>\n'
+            'data:bookId;base64,{{result}},{"type":"ywc"}',
       );
 
       expect(value, isEmpty);
@@ -1721,10 +1721,7 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
         preFetchedResponse: response,
       );
 
-      expect(
-        parsed.filePath,
-        'data:bookId;base64,MTIwOTk3Nw==,{"type":"ywc"}',
-      );
+      expect(parsed.filePath, 'data:bookId;base64,MTIwOTk3Nw==,{"type":"ywc"}');
     });
 
     test('repairs TOC alias fields and preserves editable source json', () {
@@ -2378,6 +2375,62 @@ body=urlEncode(params)
         expect(books.first.filePath, 'https://example.com/b/1');
       },
     );
+
+    test('parses imported js function search results', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Search'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..searchUrl = '/search?q={{key}}'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function search(key, page, result) {
+  return [
+    {
+      name: key + " One",
+      author: "Author A",
+      bookUrl: "/book/1",
+      coverUrl: "/cover/1.jpg",
+      intro: "Intro A",
+      kind: "Fantasy",
+      lastChapter: "Chapter 9"
+    }
+  ];
+}
+''',
+        })
+        ..ruleSearch = jsonEncode({
+          'bookList': '<js>search(key, page, result)</js>',
+          'name': r'$.name',
+          'author': r'$.author',
+          'bookUrl': r'$.bookUrl',
+          'coverUrl': r'$.coverUrl',
+          'intro': r'$.intro',
+          'kind': r'$.kind',
+          'lastChapter': r'$.lastChapter',
+        });
+      final response = Response<dynamic>(
+        data: '<html><body>ignored by js function source</body></html>',
+        requestOptions: RequestOptions(path: 'https://js.example.com/search'),
+        statusCode: 200,
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        'Novel',
+        preFetchedResponse: response,
+      );
+
+      expect(books, hasLength(1));
+      expect(books.single.title, 'Novel One');
+      expect(books.single.author, 'Author A');
+      expect(books.single.filePath, 'https://js.example.com/book/1');
+      expect(books.single.coverPath, 'https://js.example.com/cover/1.jpg');
+      expect(books.single.tags, contains('Fantasy'));
+      expect(books.single.totalChapters, 9);
+    });
 
     test('keeps multiline embedded request config as one book url', () async {
       final source = BookSource()
@@ -4624,10 +4677,14 @@ decrypt(result);
         ..bookSourceUrl = 'https://www.qbxsw.com';
       final url = await LegadoParser.buildSearchUrl(
         source
-          ..searchUrl = '@js:"https://www.qbxsw.com/search.html?searchkey=" + encodeURIComponent(key)',
+          ..searchUrl =
+              '@js:"https://www.qbxsw.com/search.html?searchkey=" + encodeURIComponent(key)',
         '斗破苍穹',
       );
-      expect(url, 'https://www.qbxsw.com/search.html?searchkey=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9');
+      expect(
+        url,
+        'https://www.qbxsw.com/search.html?searchkey=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9',
+      );
     });
 
     test('evaluates variable assignment and multiple statements', () async {
@@ -4646,7 +4703,10 @@ decrypt(result);
         '斗破苍穹',
         page: 2,
       );
-      expect(url, 'https://www.qbxsw.com/search.html?searchkey=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9&page=2');
+      expect(
+        url,
+        'https://www.qbxsw.com/search.html?searchkey=%E6%96%97%E7%A0%B4%E8%8B%8D%E7%A9%B9&page=2',
+      );
     });
 
     test('evaluates java.encodeURI with gbk and simple arithmetic', () async {
