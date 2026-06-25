@@ -230,6 +230,10 @@ struct ReaderView: View {
             speechController.stop()
             autoScrollTarget = initialAutoScrollTarget()
         }
+        .onChange(of: readerLayoutKey) { _ in
+            autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
+            persistReadingPosition()
+        }
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showOverlay)
         .animation(.spring(response: 0.3, dampingFraction: 0.88), value: showSettings)
         .animation(.easeOut(duration: 0.18), value: statusMessage)
@@ -634,6 +638,11 @@ struct ReaderView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             Slider(value: $fontSize, in: 14...32, step: 1)
+
+            Text("行距")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Slider(value: $lineSpacing, in: 2...18, step: 1)
 
             Text("背景颜色")
                 .font(.subheadline.weight(.semibold))

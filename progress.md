@@ -315,3 +315,21 @@
   - `SourceReadSwift/App/RootTabView.swift`: switched the root host to native paged `TabView` while preserving the custom tab chrome.
   - `progress.md`: recorded this root-tab performance fix and verification limits.
 - Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/App/RootTabView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Reader appearance live effect reliability
+
+### What was done
+- Added line-spacing control directly to the appearance panel so the most visible reading layout changes are available in one place.
+- Clamped the active reader page/paragraph target after appearance/layout changes so paged and cover modes do not keep an invalid page selection after recalculating layout.
+- Kept the existing reader settings keys and rendering pipeline unchanged.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed the reader appearance path to confirm font size, line spacing, background, and reader mode all participate in `readerLayoutKey`.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Reader/ReaderView.swift`: added line spacing to appearance and clamps active reading target after layout changes.
+  - `progress.md`: recorded this reader appearance reliability fix and verification limits.
+- Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Features/Reader/ReaderView.swift`, or revert the commit that contains this milestone.
