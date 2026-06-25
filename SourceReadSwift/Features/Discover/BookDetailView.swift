@@ -14,7 +14,7 @@ struct BookDetailView: View {
                 SearchBookRow(
                     book: book,
                     onAdd: {
-                        appState.bookshelfStore.addOrUpdate(book)
+                        addCurrentBookToShelf()
                     },
                     isInBookshelf: appState.bookshelfStore.contains(book)
                 )
@@ -87,6 +87,7 @@ struct BookDetailView: View {
             ForEach(Array(chapters.prefix(80))) { chapter in
                 NavigationLink {
                     ChapterLoadingView(
+                        bookID: appState.bookshelfStore.contains(book) ? book.id : nil,
                         sourceUrl: book.sourceUrl,
                         chapter: chapter,
                         totalChapters: chapters.count,
@@ -126,18 +127,31 @@ struct BookDetailView: View {
             switch await appState.engine.getChapterList(source: source, book: loadedDetail) {
             case .success(let loadedChapters):
                 chapters = loadedChapters
-                appState.bookshelfStore.addOrUpdate(book)
-                appState.bookshelfStore.updateDetails(
-                    bookID: book.id,
-                    latestChapterTitle: loadedDetail.latestChapter,
-                    intro: loadedDetail.intro,
-                    totalChapters: loadedChapters.count
-                )
+                if appState.bookshelfStore.contains(book) {
+                    appState.bookshelfStore.updateDetails(
+                        bookID: book.id,
+                        latestChapterTitle: loadedDetail.latestChapter,
+                        intro: loadedDetail.intro,
+                        totalChapters: loadedChapters.count
+                    )
+                }
             case .failure(let error):
                 errorMessage = "目录加载失败：\(error.displayMessage)"
             }
         case .failure(let error):
             errorMessage = error.displayMessage
+        }
+    }
+
+    private func addCurrentBookToShelf() {
+        appState.bookshelfStore.addOrUpdate(book)
+        if let detail {
+            appState.bookshelfStore.updateDetails(
+                bookID: book.id,
+                latestChapterTitle: detail.latestChapter,
+                intro: detail.intro,
+                totalChapters: chapters.count
+            )
         }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SearchBookRow: View {
     let book: SearchBook
@@ -41,7 +42,10 @@ struct SearchBookRow: View {
             Spacer(minLength: 0)
 
             if let onAdd {
-                Button(action: onAdd) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onAdd()
+                } label: {
                     Image(systemName: isInBookshelf ? "checkmark.circle.fill" : "plus.circle")
                         .font(.title2)
                         .foregroundStyle(isInBookshelf ? Color.green : AppTheme.accent)

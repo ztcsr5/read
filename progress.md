@@ -127,3 +127,23 @@
   - `SourceReadSwift/Features/Reader/ReaderView.swift`: added live appearance preview and background-selection haptics.
   - `progress.md`: recorded this reader appearance usability milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Reader/ReaderView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Search detail should not auto-add to bookshelf
+
+### What was done
+- Changed search book detail loading so viewing a search result no longer automatically adds the book to the bookshelf.
+- Kept explicit add behavior on the plus button and preserved detail metadata updates when the book is already in the bookshelf.
+- Made chapter reading from an unadded search detail use a temporary reader identity, so browsing a result does not write reading progress into the bookshelf.
+- Added haptic feedback to the search-row plus button.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Verified by code search that `BookDetailView` now calls `addOrUpdate(book)` only from the explicit add path, not from automatic detail loading.
+- Windows cannot compile or launch the iOS app locally; final navigation/runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Discover/BookDetailView.swift`: removed automatic bookshelf insertion from detail loading and kept explicit add behavior.
+  - `SourceReadSwift/Features/Discover/SearchBookRow.swift`: added haptic feedback to the plus button.
+  - `progress.md`: recorded this search-to-bookshelf product-logic fix and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/BookDetailView.swift` and `SourceReadSwift/Features/Discover/SearchBookRow.swift`, or revert the commit that contains this milestone.
