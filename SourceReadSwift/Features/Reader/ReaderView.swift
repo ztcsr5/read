@@ -617,6 +617,8 @@ struct ReaderView: View {
 
     private var appearanceSettings: some View {
         Group {
+            appearancePreview
+
             Text("翻页模式")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -639,6 +641,7 @@ struct ReaderView: View {
             HStack(spacing: 12) {
                 ForEach(ReaderBackground.allCases) { item in
                     Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         backgroundRawValue = item.rawValue
                     } label: {
                         Circle()
@@ -652,6 +655,27 @@ struct ReaderView: View {
                     .accessibilityLabel(item.title)
                 }
             }
+        }
+    }
+
+    private var appearancePreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("阅读预览")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(background.textColor.opacity(0.64))
+
+            Text("夜色沉下来以后，文字应该安静、清楚、耐看。调整外观时，这里会立刻跟随字号、行距和背景变化。")
+                .font(.system(size: min(fontSize, 24), weight: .regular, design: .serif))
+                .foregroundStyle(background.textColor)
+                .lineSpacing(lineSpacing)
+                .lineLimit(4)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(background.color, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(background == .dark ? 0.12 : 0.06), lineWidth: 0.8)
         }
     }
 

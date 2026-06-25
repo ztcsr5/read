@@ -109,3 +109,21 @@
   - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: added haptic feedback and safer sheet-to-picker transition timing for local source import.
   - `progress.md`: recorded this import interaction polish milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Bookshelf/BookshelfView.swift` and `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Reader appearance settings live preview
+
+### What was done
+- Added a live reading preview inside the reader appearance panel so font size, line spacing, and background changes are immediately visible.
+- Added haptic feedback to background color selection.
+- Kept the change limited to reader appearance usability; no reader persistence, chapter loading, or source behavior was changed.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed the diff to confirm the reader settings preview uses existing reader appearance state and does not introduce new storage keys.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this visual-shell milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Reader/ReaderView.swift`: added live appearance preview and background-selection haptics.
+  - `progress.md`: recorded this reader appearance usability milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Reader/ReaderView.swift`, or revert the commit that contains this milestone.
