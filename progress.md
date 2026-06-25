@@ -167,3 +167,20 @@
   - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: marks update rows as seen when opened.
   - `progress.md`: recorded this Latest Updates product-logic fix and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Core/Models/BookshelfModels.swift`, `SourceReadSwift/Core/Storage/BookshelfStore.swift`, and `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Show full chapter list in search detail
+
+### What was done
+- Removed the fixed 80-chapter cap from search book detail pages.
+- Kept the existing lazy chapter list so long novels can expose the full directory without eagerly rendering all rows at once.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Verified the detail page now iterates over `chapters` directly instead of `chapters.prefix(80)`.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Discover/BookDetailView.swift`: removed the artificial chapter-list cap.
+  - `progress.md`: recorded this directory completeness fix and verification limits.
+- Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Features/Discover/BookDetailView.swift`, or revert the commit that contains this milestone.

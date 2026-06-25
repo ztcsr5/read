@@ -84,7 +84,7 @@ struct BookDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(Array(chapters.prefix(80))) { chapter in
+            ForEach(chapters) { chapter in
                 NavigationLink {
                     ChapterLoadingView(
                         bookID: appState.bookshelfStore.contains(book) ? book.id : nil,
