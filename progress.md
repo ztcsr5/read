@@ -258,3 +258,22 @@
   - `SourceReadSwift/Features/Discover/BookDetailView.swift`: added a richer chapter loading state and failure recovery actions.
   - `progress.md`: recorded this chapter-loading UX fix and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/BookDetailView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Search and chapter entry tap feedback
+
+### What was done
+- Added light haptic feedback when opening a search result detail page.
+- Added light haptic feedback when opening a chapter from the book detail directory.
+- Kept navigation behavior unchanged; this only improves the perceived response of existing entry points.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warnings.
+- Reviewed both `NavigationLink` entry points to confirm the haptic runs alongside the existing navigation instead of replacing it.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Discover/DiscoverView.swift`: added tap feedback to search-result navigation.
+  - `SourceReadSwift/Features/Discover/BookDetailView.swift`: added tap feedback to chapter navigation.
+  - `progress.md`: recorded this interaction polish and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/DiscoverView.swift` and `SourceReadSwift/Features/Discover/BookDetailView.swift`, or revert the commit that contains this milestone.

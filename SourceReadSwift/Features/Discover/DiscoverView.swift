@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct DiscoverView: View {
     @EnvironmentObject private var appState: AppState
@@ -200,6 +201,9 @@ struct DiscoverView: View {
                         .podcastCard()
                 }
                 .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                })
             }
         }
     }

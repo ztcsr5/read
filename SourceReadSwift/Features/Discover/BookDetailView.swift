@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct BookDetailView: View {
     @EnvironmentObject private var appState: AppState
@@ -107,6 +108,9 @@ struct BookDetailView: View {
                     .podcastCard()
                 }
                 .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                })
             }
         }
     }
