@@ -184,3 +184,19 @@
   - `SourceReadSwift/Features/Discover/BookDetailView.swift`: removed the artificial chapter-list cap.
   - `progress.md`: recorded this directory completeness fix and verification limits.
 - Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Features/Discover/BookDetailView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Bookshelf latest-update regression tests
+
+### What was done
+- Added a unit test covering the new Latest Updates semantics: first detail sync is not an update, later chapter-count growth is an update, and marking updates seen clears it.
+- Extended the source-switch test to assert update-seen state resets to the switched source chapter count.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- XCTest was not executed locally because this Windows environment cannot run Xcode/iOS XCTest.
+
+### Notes
+- Changed files:
+  - `SourceReadSwiftTests/BookshelfStoreTests.swift`: added regression coverage for latest-update seen-state behavior.
+  - `progress.md`: recorded this test coverage milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwiftTests/BookshelfStoreTests.swift`, or revert the commit that contains this milestone.

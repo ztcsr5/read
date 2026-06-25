@@ -153,6 +153,33 @@ final class BookshelfStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testLatestUpdatesTrackSeenChapterCount() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = BookshelfStore(persistence: BookshelfPersistence(fileManager: .default, rootURL: root))
+        let book = SearchBook(
+            name: "Remote",
+            author: "Author",
+            coverUrl: nil,
+            bookUrl: "https://example.com/book",
+            sourceName: "Example",
+            sourceUrl: "https://example.com",
+            intro: nil
+        )
+        store.addOrUpdate(book)
+
+        store.updateDetails(bookID: book.id, latestChapterTitle: "Chapter 10", intro: nil, totalChapters: 10)
+        XCTAssertFalse(try XCTUnwrap(store.book(id: book.id)).hasUpdates)
+
+        store.updateDetails(bookID: book.id, latestChapterTitle: "Chapter 12", intro: nil, totalChapters: 12)
+        XCTAssertTrue(try XCTUnwrap(store.book(id: book.id)).hasUpdates)
+
+        store.markUpdatesSeen(bookID: book.id)
+        XCTAssertFalse(try XCTUnwrap(store.book(id: book.id)).hasUpdates)
+
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testSwitchSourceKeepsBookshelfIdentityAndResetsProgress() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -198,6 +225,7 @@ final class BookshelfStoreTests: XCTestCase {
         XCTAssertEqual(updated.currentChapterTitle, nil)
         XCTAssertEqual(updated.currentParagraphIndex, nil)
         XCTAssertEqual(updated.totalChapters, 30)
+        XCTAssertEqual(updated.seenTotalChapters, 30)
         XCTAssertEqual(updated.latestChapterTitle, "New Latest")
         XCTAssertEqual(updated.intro, "Loaded intro")
         XCTAssertEqual(updated.bookmarks, nil)
