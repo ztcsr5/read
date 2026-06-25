@@ -11,10 +11,10 @@ void main() {
     await vm.importFromJson(
       jsonEncode([
         {
-          'sourceName': 'Yiove 书源仓库',
+          'sourceName': 'Yiove catalog',
           'sourceUrl': 'https://shuyuan.yiove.com',
-          'sourceGroup': '书源',
-          'sourceComment': '官网：www.yiove.com',
+          'sourceGroup': 'Book sources',
+          'sourceComment': 'Official site',
         },
       ]),
       originalUrl: 'https://shuyuan.yiove.com/sub.json',
@@ -31,7 +31,7 @@ void main() {
     await vm.importFromJson(
       jsonEncode([
         {
-          'bookSourceName': '测试书源',
+          'bookSourceName': 'Test source',
           'bookSourceUrl': 'https://example.com',
           'searchUrl': '/search?key={{key}}&page={{page}}',
           'ruleSearch': {
@@ -84,7 +84,7 @@ page header
     "bookSourceName": "Nested CF source",
     "bookSourceUrl": "https://nested.example.com",
     "searchUrl": "/search?q={{key}}",
-    "exploreUrl": [{"title":"榜单","url":"/rank/{{page}}"}],
+    "exploreUrl": [{"title":"Rank","url":"/rank/{{page}}"}],
     "ruleSearch": {
       "bookList": "data.list",
       "name": "title",
@@ -177,7 +177,7 @@ page footer
       utf8.encode(
         jsonEncode([
           {
-            'bookSourceName': '本地文件书源',
+            'bookSourceName': 'Local file source',
             'bookSourceUrl': 'https://local.example.com',
             'searchUrl': '/search?q={{key}}',
             'ruleSearch': {
@@ -192,7 +192,7 @@ page footer
     );
 
     expect(vm.state.sources, hasLength(1));
-    expect(vm.state.sources.single.bookSourceName, '本地文件书源');
+    expect(vm.state.sources.single.bookSourceName, 'Local file source');
   });
 
   test('imports string typed enabled and weight fields', () async {
@@ -236,7 +236,7 @@ page footer
           'ruleContentUrl': 'tag.a@href',
           'ruleBookContent': 'class.content@tag.p@text',
           'ruleBookContentReplace': '#ad#',
-          'ruleContentUrlNext': 'text.下一页@href',
+          'ruleContentUrlNext': 'text.next@href',
           'enable': '1',
           'serialNumber': '7',
         },
@@ -270,7 +270,7 @@ page footer
       await vm.importFromJson(
         jsonEncode([
           {
-            'bookSourceName': '旧名字',
+            'bookSourceName': 'Duplicate old',
             'bookSourceUrl': 'https://dup.example.com',
             'searchUrl': '/old?q={{key}}',
             'ruleSearch': {'bookList': 'data.list', 'name': 'title'},
@@ -280,7 +280,7 @@ page footer
       await vm.importFromJson(
         jsonEncode([
           {
-            'bookSourceName': '新名字',
+            'bookSourceName': 'Duplicate new',
             'bookSourceUrl': 'https://dup.example.com',
             'searchUrl': '/new?q={{key}}',
             'ruleSearch': {'bookList': 'data.items', 'name': 'name'},
@@ -289,8 +289,114 @@ page footer
       );
 
       expect(vm.state.sources, hasLength(1));
-      expect(vm.state.sources.single.bookSourceName, '新名字');
+      expect(vm.state.sources.single.bookSourceName, 'Duplicate new');
       expect(vm.state.sources.single.searchUrl, '/new?q={{key}}');
     },
   );
+
+  test('imports sourceUrls recursively and deduplicates by url', () async {
+    final responses = {
+      'https://example.com/a.json': jsonEncode([
+        {
+          'bookSourceName': 'A old',
+          'bookSourceUrl': 'https://a.example',
+          'searchUrl': '/old?q={{key}}',
+          'ruleSearch': {'bookList': 'data.list', 'name': 'title'},
+        },
+      ]),
+      'https://example.com/b.json': jsonEncode({
+        'bookSourceName': 'A new',
+        'bookSourceUrl': 'https://a.example',
+        'searchUrl': '/new?q={{key}}',
+        'ruleSearch': {'bookList': 'data.items', 'name': 'name'},
+      }),
+    };
+
+    final vm = BookSourceViewModel(
+      BookRepository(null),
+      fetchText: (url, {bool withoutUserAgent = false}) async =>
+          responses[url]!,
+    );
+
+    await vm.importFromJson(
+      jsonEncode({
+        'sourceUrls': [
+          'https://example.com/a.json',
+          'https://example.com/b.json',
+        ],
+      }),
+    );
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    expect(vm.state.sources.single.bookSourceName, 'A new');
+    expect(vm.state.sources.single.searchUrl, '/new?q={{key}}');
+  });
+
+  test('passes requestWithoutUA flag while importing sourceUrls', () async {
+    var requestedWithoutUa = false;
+
+    final vm = BookSourceViewModel(
+      BookRepository(null),
+      fetchText: (url, {bool withoutUserAgent = false}) async {
+        requestedWithoutUa = withoutUserAgent;
+        return jsonEncode({
+          'bookSourceName': 'No UA',
+          'bookSourceUrl': 'https://noua.example',
+          'searchUrl': '/s?q={{key}}',
+          'ruleSearch': {'bookList': 'data.list', 'name': 'title'},
+        });
+      },
+    );
+
+    await vm.importFromJson(
+      jsonEncode({
+        'sourceUrls': ['https://example.com/no-ua.json#requestWithoutUA'],
+      }),
+    );
+
+    expect(vm.state.error, isNull);
+    expect(requestedWithoutUa, isTrue);
+    expect(vm.state.sources.single.bookSourceName, 'No UA');
+  });
+
+  test('imports js function source', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+
+    await vm.importFromJs(r'''
+// @name JS Test Source
+// @url https://js.example
+// @group JS Group
+// @searchUrl /search?q={{key}}&page={{page}}
+function search(key, page, result) {
+  return [{name: "A", bookUrl: "/a"}];
+}
+function toc(result) {
+  return [{name: "Chapter 1", url: "/1"}];
+}
+function content(result) {
+  return ["Body"];
+}
+''');
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    final source = vm.state.sources.single;
+    expect(source.bookSourceName, 'JS Test Source');
+    expect(source.bookSourceUrl, 'https://js.example');
+    expect(source.searchUrl, '/search?q={{key}}&page={{page}}');
+    expect(
+      jsonDecode(source.ruleSearch!)['bookList'],
+      '<js>search(key, page, result)</js>',
+    );
+    expect(jsonDecode(source.ruleToc!)['chapterList'], '<js>toc(result)</js>');
+    expect(
+      jsonDecode(source.ruleContent!)['content'],
+      '<js>content(result)</js>',
+    );
+    final config = jsonDecode(source.customConfig!) as Map;
+    expect(config['engine'], 'quickjs');
+    expect(config['sourceFormat'], 'js');
+    expect(config['jsLib'], contains('function search'));
+  });
 }

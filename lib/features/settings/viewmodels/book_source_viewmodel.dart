@@ -10,6 +10,9 @@ import '../../../data/models/source_catalog.dart';
 import '../../../data/parsers/source_import_link_parser.dart';
 import '../../../data/repositories/book_repository.dart';
 
+typedef SourceTextFetcher =
+    Future<String> Function(String url, {bool withoutUserAgent});
+
 class BookSourceState {
   final List<BookSource> sources;
   final List<RssSource> rssSources;
@@ -48,8 +51,11 @@ class BookSourceState {
 
 class BookSourceViewModel extends StateNotifier<BookSourceState> {
   final BookRepository _repository;
+  final SourceTextFetcher _fetchText;
 
-  BookSourceViewModel(this._repository) : super(BookSourceState()) {
+  BookSourceViewModel(this._repository, {SourceTextFetcher? fetchText})
+    : _fetchText = fetchText ?? _defaultFetchText,
+      super(BookSourceState()) {
     loadSources();
   }
 
@@ -88,6 +94,10 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
         );
         break;
       case SourceImportInputKind.unknown:
+        if (_looksLikeJsSource(parsed.value)) {
+          await importFromJs(parsed.value);
+          break;
+        }
         state = state.copyWith(
           isLoading: false,
           error: '没有识别到 JSON、HTTP 链接或阅读导入链接。请检查复制内容。',
@@ -100,19 +110,7 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
     final normalizedUrl = _normalizeImportUrl(url);
     state = state.copyWith(isLoading: true, error: null, message: null);
     try {
-      final response = await http.get(
-        Uri.parse(normalizedUrl),
-        headers: const {
-          'User-Agent':
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-          'Accept': 'application/json,text/plain,*/*',
-          'Accept-Language': 'zh-CN,zh;q=0.9',
-        },
-      );
-      final body = utf8.decode(response.bodyBytes, allowMalformed: true);
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
+      final body = await _fetchText(normalizedUrl);
       if (_looksLikeJson(body)) {
         await importFromJson(body, originalUrl: normalizedUrl);
         return;
@@ -140,39 +138,16 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
       }
 
       final parsed = jsonDecode(_normalizeImportJsonText(jsonString));
-      final list = _normalizeImportItems(parsed);
-
-      var bookCount = 0;
-      var rssCount = 0;
-      var catalogCount = 0;
-
-      for (final item in list) {
-        if (item is! Map) continue;
-        final map = item.map((key, value) => MapEntry(key.toString(), value));
-        switch (_detectImportKind(map)) {
-          case _ImportKind.bookSource:
-            await _repository.saveBookSource(BookSource.fromJson(map));
-            bookCount++;
-            break;
-          case _ImportKind.sourceCatalog:
-            await _repository.saveSourceCatalog(
-              SourceCatalog.fromJson(map, originalUrl: originalUrl),
-            );
-            catalogCount++;
-            break;
-          case _ImportKind.rssSource:
-            await _repository.saveRssSource(RssSource.fromJson(map));
-            rssCount++;
-            break;
-          case _ImportKind.unknown:
-            break;
-        }
-      }
+      final counts = await _importDecoded(
+        parsed,
+        originalUrl: originalUrl,
+        visitedUrls: <String>{},
+      );
 
       final summary = [
-        if (bookCount > 0) '书源 $bookCount 个',
-        if (catalogCount > 0) '仓库 $catalogCount 个',
-        if (rssCount > 0) 'RSS $rssCount 个',
+        if (counts.bookCount > 0) '书源 ${counts.bookCount} 个',
+        if (counts.catalogCount > 0) '仓库 ${counts.catalogCount} 个',
+        if (counts.rssCount > 0) 'RSS ${counts.rssCount} 个',
       ].join('，');
 
       await loadSources();
@@ -184,6 +159,88 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
     } catch (e) {
       state = state.copyWith(isLoading: false, error: '导入失败: $e');
     }
+  }
+
+  Future<void> importFromJs(String jsCode) async {
+    state = state.copyWith(isLoading: true, error: null, message: null);
+    try {
+      final source = _bookSourceFromJs(jsCode);
+      await _repository.saveBookSource(source);
+      await loadSources();
+      state = state.copyWith(message: '导入成功：JS 书源 1 个');
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: 'JS 书源导入失败: $e');
+    }
+  }
+
+  Future<_ImportSummary> _importDecoded(
+    dynamic parsed, {
+    String? originalUrl,
+    required Set<String> visitedUrls,
+  }) async {
+    final sourceUrls = parsed is Map ? parsed['sourceUrls'] : null;
+    if (sourceUrls is List) {
+      final total = _ImportSummary();
+      for (final value in sourceUrls) {
+        final url = value?.toString().trim() ?? '';
+        if (url.isEmpty) continue;
+        total.add(await _importFromSourceUrl(url, visitedUrls: visitedUrls));
+      }
+      return total;
+    }
+
+    final total = _ImportSummary();
+    final list = _normalizeImportItems(parsed);
+    for (final item in list) {
+      if (item is String && _isHttpUrl(item)) {
+        total.add(await _importFromSourceUrl(item, visitedUrls: visitedUrls));
+        continue;
+      }
+      if (item is! Map) continue;
+      final map = item.map((key, value) => MapEntry(key.toString(), value));
+      switch (_detectImportKind(map)) {
+        case _ImportKind.bookSource:
+          await _repository.saveBookSource(BookSource.fromJson(map));
+          total.bookCount++;
+          break;
+        case _ImportKind.sourceCatalog:
+          await _repository.saveSourceCatalog(
+            SourceCatalog.fromJson(map, originalUrl: originalUrl),
+          );
+          total.catalogCount++;
+          break;
+        case _ImportKind.rssSource:
+          await _repository.saveRssSource(RssSource.fromJson(map));
+          total.rssCount++;
+          break;
+        case _ImportKind.unknown:
+          break;
+      }
+    }
+    return total;
+  }
+
+  Future<_ImportSummary> _importFromSourceUrl(
+    String rawUrl, {
+    required Set<String> visitedUrls,
+  }) async {
+    final withoutUserAgent = rawUrl.endsWith('#requestWithoutUA');
+    final url = withoutUserAgent
+        ? rawUrl.substring(0, rawUrl.length - '#requestWithoutUA'.length)
+        : rawUrl;
+    final normalizedUrl = _normalizeImportUrl(url);
+    if (!visitedUrls.add(normalizedUrl)) return _ImportSummary();
+
+    final text = await _fetchText(
+      normalizedUrl,
+      withoutUserAgent: withoutUserAgent,
+    );
+    final parsed = jsonDecode(_normalizeImportJsonText(text));
+    return _importDecoded(
+      parsed,
+      originalUrl: normalizedUrl,
+      visitedUrls: visitedUrls,
+    );
   }
 
   Future<void> importFromFilePath(String filePath) async {
@@ -198,11 +255,15 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
 
   Future<void> importFromBytes(List<int> bytes, {String? originalUrl}) async {
     try {
-      final jsonString = _decodeJsonBytes(bytes);
-      if (!_looksLikeJson(jsonString)) {
+      final text = _decodeJsonBytes(bytes);
+      if (_looksLikeJsSource(text)) {
+        await importFromJs(text);
+        return;
+      }
+      if (!_looksLikeJson(text)) {
         throw Exception('文件内容不是 JSON，请选择 .json 书源文件。');
       }
-      await importFromJson(jsonString, originalUrl: originalUrl);
+      await importFromJson(text, originalUrl: originalUrl);
     } catch (e) {
       state = state.copyWith(isLoading: false, error: '文件导入失败: $e');
     }
@@ -470,9 +531,206 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
     }
     return _ImportKind.rssSource;
   }
+
+  BookSource _bookSourceFromJs(String jsCode) {
+    final code = jsCode.trim();
+    if (code.isEmpty) {
+      throw const FormatException('JS 书源内容为空');
+    }
+
+    final name =
+        _extractJsMeta(code, 'name') ??
+        _extractJsStringVar(code, 'bookSourceName') ??
+        _extractJsStringVar(code, 'sourceName') ??
+        _extractJsStringVar(code, 'name') ??
+        'JS书源_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    final url =
+        _extractJsMeta(code, 'url') ??
+        _extractJsMeta(code, 'bookSourceUrl') ??
+        _extractJsStringVar(code, 'bookSourceUrl') ??
+        _extractJsStringVar(code, 'sourceUrl') ??
+        _extractJsStringVar(code, 'url') ??
+        'js_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    final group =
+        _extractJsMeta(code, 'group') ??
+        _extractJsStringVar(code, 'bookSourceGroup') ??
+        _extractJsStringVar(code, 'sourceGroup') ??
+        'JS书源';
+    final searchUrl =
+        _extractJsMeta(code, 'searchUrl') ?? _extractJsVar(code, 'searchUrl');
+    final exploreUrl =
+        _extractJsMeta(code, 'exploreUrl') ?? _extractJsVar(code, 'exploreUrl');
+    final header =
+        _extractJsMeta(code, 'header') ?? _extractJsVar(code, 'header');
+
+    final hasSearch = RegExp(r'function\s+search\s*\(').hasMatch(code);
+    final hasExplore = RegExp(r'function\s+explore\s*\(').hasMatch(code);
+    final hasBookInfo = RegExp(r'function\s+bookInfo\s*\(').hasMatch(code);
+    final hasToc = RegExp(r'function\s+toc\s*\(').hasMatch(code);
+    final hasContent = RegExp(r'function\s+content\s*\(').hasMatch(code);
+    final hasNextTocUrl = RegExp(r'function\s+nextTocUrl\s*\(').hasMatch(code);
+    final hasNextContentUrl = RegExp(
+      r'function\s+nextContentUrl\s*\(',
+    ).hasMatch(code);
+
+    final source = BookSource.fromJson({
+      'bookSourceName': name,
+      'bookSourceUrl': url,
+      'bookSourceGroup': group,
+      'jsLib': code,
+      'engine': 'quickjs',
+      'sourceFormat': 'js',
+      if (header != null) 'header': header,
+      if (searchUrl != null) 'searchUrl': searchUrl,
+      if (exploreUrl != null) 'exploreUrl': exploreUrl,
+      if (hasSearch)
+        'ruleSearch': {
+          'bookList': '<js>search(key, page, result)</js>',
+          'name': r'$.name',
+          'author': r'$.author',
+          'bookUrl': r'$.bookUrl',
+          'coverUrl': r'$.coverUrl',
+          'kind': r'$.kind',
+          'lastChapter': r'$.lastChapter',
+          'intro': r'$.intro',
+        },
+      if (hasExplore)
+        'ruleExplore': {
+          'bookList': '<js>explore(baseUrl, result)</js>',
+          'name': r'$.name',
+          'author': r'$.author',
+          'bookUrl': r'$.bookUrl',
+          'coverUrl': r'$.coverUrl',
+          'kind': r'$.kind',
+          'lastChapter': r'$.lastChapter',
+          'intro': r'$.intro',
+        },
+      if (hasBookInfo)
+        'ruleBookInfo': {
+          'init': '<js>bookInfo(result)</js>',
+          'name': r'$.name',
+          'author': r'$.author',
+          'coverUrl': r'$.coverUrl',
+          'intro': r'$.intro',
+          'kind': r'$.kind',
+          'lastChapter': r'$.lastChapter',
+          'tocUrl': r'$.tocUrl',
+          'wordCount': r'$.wordCount',
+        },
+      if (hasToc)
+        'ruleToc': {
+          'chapterList': '<js>toc(result)</js>',
+          'chapterName': r'$.name',
+          'chapterUrl': r'$.url',
+          'isVolume': r'$.isVolume',
+          if (hasNextTocUrl) 'nextTocUrl': '<js>nextTocUrl(result)</js>',
+        },
+      if (hasContent)
+        'ruleContent': {
+          'content': '<js>content(result)</js>',
+          if (hasNextContentUrl)
+            'nextContentUrl': '<js>nextContentUrl(result)</js>',
+        },
+    });
+    return source;
+  }
+
+  bool _looksLikeJsSource(String text) {
+    final code = text.trim();
+    if (code.isEmpty || _looksLikeJson(code)) return false;
+    return RegExp(
+          r'(^|\n)\s*//\s*@(?:name|url|group|searchUrl|exploreUrl)\b',
+        ).hasMatch(code) ||
+        RegExp(
+          r'function\s+(?:search|explore|bookInfo|toc|content)\s*\(',
+        ).hasMatch(code);
+  }
+
+  String? _extractJsMeta(String code, String key) {
+    final lines = code.split('\n');
+    final buffer = StringBuffer();
+    var collecting = false;
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (!collecting) {
+        final match = RegExp(
+          '^//\\s*@${RegExp.escape(key)}\\s+(.+)\$',
+          caseSensitive: false,
+        ).firstMatch(trimmed);
+        if (match == null) continue;
+        collecting = true;
+        buffer.write(match.group(1)?.trim() ?? '');
+        continue;
+      }
+      if (!trimmed.startsWith('//')) break;
+      final content = trimmed.substring(2).trim();
+      if (RegExp(r'^@\w+').hasMatch(content)) break;
+      buffer
+        ..writeln()
+        ..write(content);
+    }
+    final result = buffer.toString().trim();
+    return result.isEmpty ? null : result;
+  }
+
+  String? _extractJsStringVar(String code, String key) {
+    final match = RegExp(
+      '''(?:var|let|const)\\s+${RegExp.escape(key)}\\s*=\\s*["']([^"']+)["']''',
+    ).firstMatch(code);
+    return match?.group(1);
+  }
+
+  String? _extractJsVar(String code, String key) {
+    final simple = _extractJsStringVar(code, key);
+    if (simple != null) return simple;
+    final match = RegExp(
+      '(?:var|let|const)\\s+${RegExp.escape(key)}\\s*=\\s*(.*?)(?=\\nvar\\s|\\nlet\\s|\\nconst\\s|\\nfunction\\s|\\n//\\s*@)',
+      dotAll: true,
+    ).firstMatch(code);
+    final value = match?.group(1)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return '@js:$value';
+  }
+
+  bool _isHttpUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+  }
+
+  static Future<String> _defaultFetchText(
+    String url, {
+    bool withoutUserAgent = false,
+  }) async {
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {
+        'User-Agent': withoutUserAgent
+            ? ''
+            : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'application/json,text/plain,*/*',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+      },
+    );
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}');
+    }
+    return utf8.decode(response.bodyBytes, allowMalformed: true);
+  }
 }
 
 enum _ImportKind { bookSource, sourceCatalog, rssSource, unknown }
+
+class _ImportSummary {
+  int bookCount = 0;
+  int catalogCount = 0;
+  int rssCount = 0;
+
+  void add(_ImportSummary other) {
+    bookCount += other.bookCount;
+    catalogCount += other.catalogCount;
+    rssCount += other.rssCount;
+  }
+}
 
 final bookSourceViewModelProvider =
     StateNotifierProvider<BookSourceViewModel, BookSourceState>((ref) {

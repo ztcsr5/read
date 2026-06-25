@@ -88,6 +88,8 @@ class BookSource {
       'loginUrl',
       'loginUi',
       'jsLib',
+      'engine',
+      'sourceFormat',
       'js',
       'webJs',
       'bodyJs',
