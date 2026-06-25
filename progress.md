@@ -72,3 +72,21 @@
   - `SourceReadSwift/App/RootTabView.swift`: removed the mini-player strip and refined the floating glass tab bar interaction.
   - `progress.md`: recorded this Phase 1 root-tab chrome milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/App/RootTabView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Phase 1 settings interaction polish
+
+### What was done
+- Improved Settings page interaction feedback for appearance switching and cache clearing with native haptics.
+- Aligned Settings page surface treatment with the app background instead of the default plain system list backdrop.
+- Kept the change limited to Settings interaction polish; no settings data model or navigation behavior was changed.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed the diff to confirm the change only affects haptic feedback and list/background presentation.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this visual-shell milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Settings/SettingsView.swift`: added haptic feedback and aligned the list background with the app visual shell.
+  - `progress.md`: recorded this Phase 1 settings interaction polish milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Settings/SettingsView.swift`, or revert the commit that contains this milestone.

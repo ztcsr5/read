@@ -16,6 +16,7 @@ struct SettingsView: View {
                 Section("外观") {
                     ForEach(ThemeMode.allCases) { mode in
                         Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             themeModeRawValue = mode.rawValue
                         } label: {
                             HStack {
@@ -59,6 +60,7 @@ struct SettingsView: View {
 
                 Section("通用") {
                     Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         appState.chapterContentCacheStore.removeAll()
                         updateCacheSummary()
                     } label: {
@@ -115,6 +117,9 @@ struct SettingsView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.background.ignoresSafeArea())
+            .listStyle(.insetGrouped)
             .navigationTitle("设置")
             .onAppear {
                 updateCacheSummary()
