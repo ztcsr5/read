@@ -277,3 +277,23 @@
   - `SourceReadSwift/Features/Discover/BookDetailView.swift`: added tap feedback to chapter navigation.
   - `progress.md`: recorded this interaction polish and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/DiscoverView.swift` and `SourceReadSwift/Features/Discover/BookDetailView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Local import picker reliability
+
+### What was done
+- Changed the shared document picker to pass both explicit file types and broad fallback types when opening all files, instead of relying only on `.item`.
+- Added visible empty-selection errors for local book import and source JSON import so picker failures do not silently disappear.
+- Kept parsing behavior unchanged; this only improves system file-picker compatibility and user feedback.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warnings.
+- Reviewed both import callers to confirm the shared picker change applies to bookshelf imports and source imports.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Shared/Import/UniversalDocumentPicker.swift`: uses explicit requested file types plus broad fallback types for all-file picking.
+  - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: reports an empty local-book selection instead of returning silently.
+  - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: reports an empty source-file selection instead of returning silently.
+  - `progress.md`: recorded this import-picker reliability fix and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Shared/Import/UniversalDocumentPicker.swift`, `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`, and `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`, or revert the commit that contains this milestone.

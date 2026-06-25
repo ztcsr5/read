@@ -290,7 +290,10 @@ struct BookshelfView: View {
 
     private func importLocalBook(_ result: Result<[URL], Error>) {
         do {
-            guard let url = try result.get().first else { return }
+            guard let url = try result.get().first else {
+                importMessage = "导入失败：没有选择文件。"
+                return
+            }
             let localURL = try PickedDocumentAccess.copiedURL(from: url)
             let parsed: LocalTextBook
             if localURL.pathExtension.localizedCaseInsensitiveCompare("epub") == .orderedSame {

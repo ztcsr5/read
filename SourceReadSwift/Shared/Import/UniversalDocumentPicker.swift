@@ -15,7 +15,7 @@ struct UniversalDocumentPicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         var pickerTypes: [UTType] = []
-        let requestedTypes = opensAllFiles ? [.item] : contentTypes + [.data, .content, .item]
+        let requestedTypes = opensAllFiles ? contentTypes + [.data, .content, .item] : contentTypes
         for type in requestedTypes where !pickerTypes.contains(type) {
             pickerTypes.append(type)
         }
