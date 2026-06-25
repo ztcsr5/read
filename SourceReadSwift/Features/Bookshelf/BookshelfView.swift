@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct BookshelfView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showFileImporter = false
     @State private var importMessage: String?
     @State private var isRefreshingBooks = false
@@ -26,24 +27,21 @@ struct BookshelfView: View {
                     PodcastLargeTitleBar(title: "主页") {
                         HStack(spacing: 18) {
                             Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 showFileImporter = true
                             } label: {
                                 Image(systemName: "folder.badge.plus")
-                                    .font(.system(size: 30, weight: .semibold))
+                                    .font(.system(size: 22, weight: .semibold))
                                     .foregroundStyle(AppTheme.accent)
-                                    .frame(width: 44, height: 44)
+                                    .frame(width: 46, height: 46)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .overlay {
+                                        Circle()
+                                            .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), lineWidth: 0.8)
+                                    }
                             }
+                            .buttonStyle(PressableScaleButtonStyle())
                             .accessibilityLabel("导入本地书籍")
-
-                            NavigationLink {
-                                ReaderProfileView()
-                            } label: {
-                                Image(systemName: "person.crop.circle.fill")
-                                    .font(.system(size: 38, weight: .regular))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 44, height: 44)
-                            }
-                            .accessibilityLabel("个人中心")
                         }
                     }
                     .padding(.top, 18)
@@ -58,7 +56,7 @@ struct BookshelfView: View {
             .refreshable {
                 await refreshBookshelf()
             }
-            .pageBackground()
+            .background(bookshelfBackdrop)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .alert("本地导入", isPresented: Binding(
@@ -88,6 +86,31 @@ struct BookshelfView: View {
                 .ignoresSafeArea()
             }
         }
+    }
+
+    private var bookshelfBackdrop: some View {
+        ZStack {
+            AppTheme.background
+            LinearGradient(
+                colors: [
+                    AppTheme.accent.opacity(colorScheme == .dark ? 0.16 : 0.08),
+                    Color.clear,
+                    Color.black.opacity(colorScheme == .dark ? 0.18 : 0.03)
+                ],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
+            )
+            RadialGradient(
+                colors: [
+                    Color.white.opacity(colorScheme == .dark ? 0.03 : 0.45),
+                    Color.clear
+                ],
+                center: .topLeading,
+                startRadius: 40,
+                endRadius: 420
+            )
+        }
+        .ignoresSafeArea()
     }
 
     private var readingSection: some View {
@@ -333,26 +356,30 @@ struct BookshelfView: View {
         NavigationLink {
             BookshelfReaderGatewayView(book: book)
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Spacer()
-                    AsyncBookCover(urlString: book.coverURL, width: 154, height: 154)
-                    Spacer()
+            VStack(spacing: 0) {
+                HStack(spacing: 16) {
+                    AsyncBookCover(urlString: book.coverURL, width: 78, height: 108)
+                        .shadow(color: .black.opacity(0.28), radius: 16, x: 0, y: 10)
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(book.lastReadAt == nil ? "待开始" : "已读 \(Int(book.readingProgress * 100))%")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+
+                        Text(book.title)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+
+                        Text(book.author)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Text(book.lastReadAt == nil ? "待开始" : "已读 \(Int(book.readingProgress * 100))%")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-
-                Text(book.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-
-                Text(book.author)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
+                Spacer(minLength: 14)
 
                 HStack {
                     Label("继续阅读", systemImage: "play.fill")
@@ -368,14 +395,22 @@ struct BookshelfView: View {
                         .foregroundStyle(.white.opacity(0.65))
                 }
             }
-            .padding(18)
-            .frame(width: 270, height: 350, alignment: .topLeading)
+            .padding(20)
+            .frame(width: 300, height: 236, alignment: .topLeading)
             .background(
                 heroGradient(for: book)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.32 : 0.13), radius: 22, x: 0, y: 14)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleButtonStyle())
+        .simultaneousGesture(TapGesture().onEnded {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        })
         .contextMenu {
             Button("从书架删除", role: .destructive) {
                 appState.bookshelfStore.remove(bookID: book.id)
@@ -515,81 +550,12 @@ private struct BookshelfCollectionView: View {
     }
 }
 
-private struct ReaderProfileView: View {
-    @EnvironmentObject private var appState: AppState
-
-    private var totalBooks: Int {
-        appState.bookshelfStore.books.count
-    }
-
-    private var localBooks: Int {
-        appState.bookshelfStore.books.filter { $0.sourceURL.hasPrefix("local://") }.count
-    }
-
-    private var bookmarkedBooks: Int {
-        appState.bookshelfStore.books.filter { !($0.bookmarks ?? []).isEmpty }.count
-    }
-
-    private var readBooks: Int {
-        appState.bookshelfStore.books.filter { $0.lastReadAt != nil }.count
-    }
-
-    var body: some View {
-        List {
-            Section {
-                HStack(spacing: 14) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 52))
-                        .foregroundStyle(AppTheme.accent)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("本地阅读")
-                            .font(.headline)
-                        Text("数据仅保存在当前设备")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 6)
-            }
-
-            Section("统计") {
-                profileMetric("书架书籍", value: totalBooks, icon: "books.vertical")
-                profileMetric("本地导入", value: localBooks, icon: "doc.text")
-                profileMetric("已阅读", value: readBooks, icon: "clock")
-                profileMetric("有书签", value: bookmarkedBooks, icon: "bookmark")
-            }
-
-            Section("数据") {
-                NavigationLink {
-                    ReadingHistoryView()
-                } label: {
-                    Label("阅读历史", systemImage: "clock.arrow.circlepath")
-                }
-
-                NavigationLink {
-                    ReadingStatsView()
-                } label: {
-                    Label("阅读统计", systemImage: "chart.bar.xaxis")
-                }
-
-                NavigationLink {
-                    SourceManagerView()
-                } label: {
-                    Label("书源管理", systemImage: "square.stack.3d.up")
-                }
-            }
-        }
-        .navigationTitle("个人中心")
-    }
-
-    private func profileMetric(_ title: String, value: Int, icon: String) -> some View {
-        HStack {
-            Label(title, systemImage: icon)
-            Spacer()
-            Text("\(value)")
-                .font(.headline)
-                .foregroundStyle(AppTheme.accent)
-        }
+private struct PressableScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(.spring(response: 0.18, dampingFraction: 0.78), value: configuration.isPressed)
     }
 }
 

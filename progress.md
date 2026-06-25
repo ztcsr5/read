@@ -34,3 +34,22 @@
   - `SourceReadSwift/Features/Reader/ReaderView.swift`: refined the reader visual shell, floating glass controls, adaptive chrome colors, haptics, and overlay transitions.
   - `progress.md`: recorded this Phase 1 reader-shell milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Reader/ReaderView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Phase 1 bookshelf native home shell
+
+### What was done
+- Moved the Swift bookshelf home closer to the Flutter baseline home structure: native large title, import action, horizontal immersive reading cards, update list, and shelf section.
+- Removed the home page personal/profile shortcut so the top-right area only keeps the requested import entry.
+- Added a subtle Podcasts-style background layer and glass import button instead of a flat grouped background.
+- Reworked the currently-reading hero card into a horizontal immersive card with cover, reading progress, title, author, continue-reading action, press feedback, and light haptics.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Confirmed there are no remaining `ReaderProfileView` references after removing the home profile entry.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this visual-shell milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: refined home page visual shell, removed profile entry, added press feedback, and adjusted currently-reading card layout.
+  - `progress.md`: recorded this Phase 1 bookshelf-home milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`, or revert the commit that contains this milestone.
