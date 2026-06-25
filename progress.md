@@ -147,3 +147,23 @@
   - `SourceReadSwift/Features/Discover/SearchBookRow.swift`: added haptic feedback to the plus button.
   - `progress.md`: recorded this search-to-bookshelf product-logic fix and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Discover/BookDetailView.swift` and `SourceReadSwift/Features/Discover/SearchBookRow.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Latest-updates state should clear after viewing
+
+### What was done
+- Changed bookshelf update detection from "book is not fully read" to "source refresh found more chapters than the user has seen".
+- Added local update-seen state so tapping an updated book clears it from the Latest Updates section without changing reading progress.
+- Preserved first-time detail sync behavior so newly added books do not immediately appear as updated.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Reviewed update-state paths: first detail sync initializes seen count, later refreshes can mark updates, and tapping an update row marks updates seen.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Core/Models/BookshelfModels.swift`: added optional update-seen chapter count and changed update detection semantics.
+  - `SourceReadSwift/Core/Storage/BookshelfStore.swift`: initialized, updated, and cleared update-seen state.
+  - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: marks update rows as seen when opened.
+  - `progress.md`: recorded this Latest Updates product-logic fix and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Core/Models/BookshelfModels.swift`, `SourceReadSwift/Core/Storage/BookshelfStore.swift`, and `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`, or revert the commit that contains this milestone.

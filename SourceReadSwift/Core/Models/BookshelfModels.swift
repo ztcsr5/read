@@ -13,6 +13,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     var localChapters: [LocalTextChapter]?
     var latestChapterTitle: String?
     var totalChapters: Int
+    var seenTotalChapters: Int?
     var currentChapterIndex: Int
     var currentChapterTitle: String?
     var currentParagraphIndex: Int?
@@ -29,7 +30,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     }
 
     var hasUpdates: Bool {
-        totalChapters > 0 && currentChapterIndex + 1 < totalChapters
+        totalChapters > max(seenTotalChapters ?? totalChapters, 0)
     }
 
     init(
@@ -45,6 +46,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         localChapters: [LocalTextChapter]? = nil,
         latestChapterTitle: String? = nil,
         totalChapters: Int = 0,
+        seenTotalChapters: Int? = nil,
         currentChapterIndex: Int = 0,
         currentChapterTitle: String? = nil,
         currentParagraphIndex: Int? = nil,
@@ -67,6 +69,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         self.localChapters = localChapters
         self.latestChapterTitle = latestChapterTitle
         self.totalChapters = totalChapters
+        self.seenTotalChapters = seenTotalChapters
         self.currentChapterIndex = currentChapterIndex
         self.currentChapterTitle = currentChapterTitle
         self.currentParagraphIndex = currentParagraphIndex
@@ -106,6 +109,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             localChapters: localTextBook.chapters,
             latestChapterTitle: localTextBook.chapters.last?.title ?? "全文",
             totalChapters: max(localTextBook.chapters.count, 1),
+            seenTotalChapters: max(localTextBook.chapters.count, 1),
             currentChapterIndex: 0,
             currentChapterTitle: localTextBook.chapters.first?.title ?? "全文"
         )

@@ -53,9 +53,21 @@ final class BookshelfStore: ObservableObject {
         totalChapters: Int
     ) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        let previousTotalChapters = books[index].totalChapters
+        if books[index].seenTotalChapters == nil {
+            books[index].seenTotalChapters = previousTotalChapters > 0
+                ? previousTotalChapters
+                : totalChapters
+        }
         books[index].latestChapterTitle = latestChapterTitle
         books[index].intro = intro ?? books[index].intro
         books[index].totalChapters = max(totalChapters, books[index].totalChapters)
+        persist()
+    }
+
+    func markUpdatesSeen(bookID: String) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].seenTotalChapters = books[index].totalChapters
         persist()
     }
 
@@ -76,6 +88,7 @@ final class BookshelfStore: ObservableObject {
         books[index].intro = intro ?? searchBook.intro ?? books[index].intro
         books[index].latestChapterTitle = latestChapterTitle
         books[index].totalChapters = max(totalChapters, 0)
+        books[index].seenTotalChapters = max(totalChapters, 0)
         books[index].currentChapterIndex = 0
         books[index].currentChapterTitle = nil
         books[index].currentParagraphIndex = nil
@@ -103,6 +116,10 @@ final class BookshelfStore: ObservableObject {
         books[index].currentChapterTitle = chapterTitle
         books[index].currentParagraphIndex = paragraphIndex.map { max(0, $0) }
         books[index].totalChapters = max(totalChapters, books[index].totalChapters)
+        books[index].seenTotalChapters = max(
+            books[index].seenTotalChapters ?? 0,
+            books[index].currentChapterIndex + 1
+        )
         books[index].lastReadAt = Date()
         moveToFront(index: index)
         persist()

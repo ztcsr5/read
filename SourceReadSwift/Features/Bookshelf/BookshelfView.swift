@@ -198,6 +198,9 @@ struct BookshelfView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {
+            appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
+        })
     }
 
     @ViewBuilder
