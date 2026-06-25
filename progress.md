@@ -39,3 +39,24 @@
   - `test/source_import_test.dart`: stabilizes the test fixture text and adds coverage for recursive repositories, no-UA imports, and JS function source import.
 - Existing untracked analysis artifacts (`graphify-out`, `.graphify_*`, `nul`, and `源阅_strings_analysis.txt`) were not touched.
 - Rollback: revert the three changed files listed above and remove this `progress.md` entry.
+
+## 2026-06-26 - Task: Improve source compatibility diagnostics
+
+### What was done
+- Extended `CompatibilityAnalyzer` to flag imported JS/function-style sources, QuickJS metadata, `jsLib`, `webJs`, `bodyJs`, WebView/browser requirements, login/Cookie state, and custom request headers.
+- Extended `SourceCheckClassifier` so sources that depend on JS runtime, browser/WebView, Cookie/header state, signing, throttling, or access control are classified as `blocked` instead of being incorrectly treated as dead/failed sources.
+- Kept UI unchanged and focused on the measurement layer needed for later large-scale source compatibility work.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\settings\services\source_check_classifier.dart test\source_check_classifier_test.dart test\compatibility_analyzer_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_check_classifier_test.dart test\compatibility_analyzer_test.dart`: 7 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\settings\services\source_check_classifier.dart test\source_check_classifier_test.dart test\compatibility_analyzer_test.dart`: no issues found.
+- Re-ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart`: 14 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/features/source_diagnostic/services/compatibility_analyzer.dart`: richer static runtime/access dependency detection.
+  - `lib/features/settings/services/source_check_classifier.dart`: fewer false `failed` classifications for runtime-dependent sources.
+  - `test/source_check_classifier_test.dart`: added JS function and browser/access-state cases.
+  - `test/compatibility_analyzer_test.dart`: added analyzer coverage for JS function and WebView/Cookie/header dependencies.
+- Rollback: revert the four changed files listed above and remove this `progress.md` entry.

@@ -91,12 +91,21 @@ bool sourceNeedsRuntimeOrAccess(BookSource source) {
 
   return joined.contains('@js') ||
       joined.contains('<js') ||
+      joined.contains('"engine":"quickjs"') ||
+      joined.contains('"engine": "quickjs"') ||
+      joined.contains('"sourceformat":"js"') ||
+      joined.contains('"sourceformat": "js"') ||
       joined.contains('java.ajax') ||
+      joined.contains('java.connect') ||
       joined.contains('java.get') ||
+      joined.contains('java.post') ||
       joined.contains('java.put') ||
+      joined.contains('java.startbrowser') ||
       joined.contains('jslib') ||
       joined.contains('bodyjs') ||
+      joined.contains('webjs') ||
       joined.contains('webview') ||
+      joined.contains('@webview') ||
       joined.contains('loginurl') ||
       joined.contains('loginui') ||
       joined.contains('logincheckjs') ||
@@ -113,12 +122,15 @@ bool sourceNeedsRuntimeOrAccess(BookSource source) {
 
 bool _looksLikeNetworkOrRuntimeBlock(String text) {
   return text.contains('quickjs') ||
+      (text.contains('sourceformat') && text.contains('js')) ||
       text.contains('node js fallback') ||
       text.contains('javaimporter') ||
       text.contains('packages.java') ||
       text.contains('packages.javax') ||
       text.contains('webview') ||
       text.contains('headless webview') ||
+      text.contains('startbrowser') ||
+      text.contains('@webview') ||
       text.contains('验证码') ||
       text.contains('安全验证') ||
       text.contains('需要跳验证') ||
@@ -128,6 +140,10 @@ bool _looksLikeNetworkOrRuntimeBlock(String text) {
       text.contains('签名失败') ||
       text.contains('invalid signature') ||
       text.contains('signature error') ||
+      text.contains('forbidden') ||
+      text.contains('access denied') ||
+      text.contains('too many requests') ||
+      text.contains('rate limit') ||
       text.contains('"retcode":2') ||
       text.contains("'retcode':2") ||
       text.contains('响应体为空') ||

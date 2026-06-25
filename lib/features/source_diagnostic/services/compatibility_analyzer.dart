@@ -40,7 +40,14 @@ class CompatibilityAnalyzer {
 
     if (text.contains('@js:') ||
         text.contains('<js>') ||
-        text.contains('@js')) {
+        text.contains('@js') ||
+        lower.contains('"engine":"quickjs"') ||
+        lower.contains('"engine": "quickjs"') ||
+        lower.contains('"sourceformat":"js"') ||
+        lower.contains('"sourceformat": "js"') ||
+        lower.contains('"jslib"') ||
+        lower.contains('"webjs"') ||
+        lower.contains('"bodyjs"')) {
       issues.add(
         DiagnosticIssue(
           stage: stage,
@@ -77,7 +84,10 @@ class CompatibilityAnalyzer {
       );
     }
 
-    if (RegExp(r'java\.(ajax|connect|post|startBrowser)\b').hasMatch(text)) {
+    if (RegExp(
+      r'java\.(ajax|connect|get|post|put|startBrowser)\b',
+      caseSensitive: false,
+    ).hasMatch(text)) {
       issues.add(
         DiagnosticIssue(
           stage: stage,
@@ -86,6 +96,56 @@ class CompatibilityAnalyzer {
           reason: '检测到 java.ajax/java.connect 等网络桥接',
           suggestion:
               'JS 引擎会自动转 async/await；若站点需要签名、Cookie 或跳验证，建议配合网络调试查看请求头和响应。',
+        ),
+      );
+    }
+
+    if (lower.contains('webview') ||
+        lower.contains('startbrowser') ||
+        lower.contains('@webview') ||
+        lower.contains('webjs')) {
+      issues.add(
+        DiagnosticIssue(
+          stage: stage,
+          field: field,
+          rule: text,
+          reason: '检测到 WebView/浏览器环境依赖',
+          suggestion:
+              '该源可能需要浏览器 Cookie、跳转验证或页面 JS 执行；测源失败时优先归为环境/访问阻断，不要直接判定规则失效。',
+        ),
+      );
+    }
+
+    if (lower.contains('loginurl') ||
+        lower.contains('loginui') ||
+        lower.contains('logincheckjs') ||
+        lower.contains('"cookie"') ||
+        lower.contains('cf_clearance')) {
+      issues.add(
+        DiagnosticIssue(
+          stage: stage,
+          field: field,
+          rule: text,
+          reason: '检测到登录、Cookie 或访问态依赖',
+          suggestion:
+              '该源可能需要先完成登录、验证码或 Cookie 同步；若搜索/目录为空，优先检查访问态而不是只改 CSS/JSON 规则。',
+        ),
+      );
+    }
+
+    if (lower.contains('"header"') ||
+        lower.contains('"headers"') ||
+        lower.contains('booksourceheader') ||
+        lower.contains('httpuseragent') ||
+        lower.contains('user-agent')) {
+      issues.add(
+        DiagnosticIssue(
+          stage: stage,
+          field: field,
+          rule: text,
+          reason: '检测到自定义请求头依赖',
+          suggestion:
+              '该源对 User-Agent、Referer、Cookie 或签名头可能敏感；导入后应在测源日志里核对最终请求头。',
         ),
       );
     }

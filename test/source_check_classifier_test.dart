@@ -102,10 +102,45 @@ void main() {
         SourceCheckFailureClass.blocked,
       );
       expect(
+        classifySourceCheckFailure(source, failStep: '请求搜索页', message: '响应体为空'),
+        SourceCheckFailureClass.blocked,
+      );
+    });
+
+    test('blocks imported js function sources as runtime dependent', () {
+      final source = BookSource()
+        ..bookSourceName = 'JS Function'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..searchUrl = '/search?q={{key}}'
+        ..ruleSearch = '{"bookList":"<js>search(key, page, result)</js>"}'
+        ..customConfig =
+            '{"engine":"quickjs","sourceFormat":"js","jsLib":"function search(){}"}';
+
+      expect(sourceNeedsRuntimeOrAccess(source), isTrue);
+      expect(
         classifySourceCheckFailure(
           source,
-          failStep: '请求搜索页',
-          message: '响应体为空',
+          failStep: 'search result',
+          message: 'empty result',
+        ),
+        SourceCheckFailureClass.blocked,
+      );
+    });
+
+    test('blocks browser, webjs and access state dependent sources', () {
+      final source = BookSource()
+        ..bookSourceName = 'Browser'
+        ..bookSourceUrl = 'https://browser.example.com'
+        ..ruleSearch = '@js:java.startBrowser(baseUrl)'
+        ..customConfig =
+            '{"webJs":"document.body.innerText","headers":{"Cookie":"sid=1"}}';
+
+      expect(sourceNeedsRuntimeOrAccess(source), isTrue);
+      expect(
+        classifySourceCheckFailure(
+          source,
+          failStep: 'content',
+          message: 'Access denied: rate limit',
         ),
         SourceCheckFailureClass.blocked,
       );
