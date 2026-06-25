@@ -53,3 +53,22 @@
   - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: refined home page visual shell, removed profile entry, added press feedback, and adjusted currently-reading card layout.
   - `progress.md`: recorded this Phase 1 bookshelf-home milestone and verification limits.
 - Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`, or revert the commit that contains this milestone.
+
+## 2026-06-25 - Task: Phase 1 root tab chrome cleanup
+
+### What was done
+- Removed the bottom continue-reading mini player from the global tab chrome so the home page no longer shows an unwanted playback strip.
+- Simplified the bottom navigation into a single floating Podcasts-style glass tab bar.
+- Added selected-tab capsule emphasis and press-scale feedback to improve perceived responsiveness.
+- Removed the now-unused mini-player state and cover helpers created by the old tab chrome.
+
+### Testing
+- Ran `git diff --check`; it passed with only the existing Windows LF-to-CRLF warning.
+- Confirmed `RootTabView.swift` has no remaining `presentedBook`, `miniCover`, `play.fill`, or `继续阅读` mini-player references.
+- Windows cannot compile or launch the iOS app locally; final runtime verification still requires Xcode or GitHub Actions when this visual-shell milestone is ready to package.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/App/RootTabView.swift`: removed the mini-player strip and refined the floating glass tab bar interaction.
+  - `progress.md`: recorded this Phase 1 root-tab chrome milestone and verification limits.
+- Rollback: revert this progress entry and the corresponding changes in `SourceReadSwift/App/RootTabView.swift`, or revert the commit that contains this milestone.

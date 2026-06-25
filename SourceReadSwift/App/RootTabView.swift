@@ -3,7 +3,6 @@ import SwiftUI
 struct RootTabView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedTab = 0
-    @State private var presentedBook: BookshelfBook?
     @GestureState private var tabDragTranslation: CGFloat = 0
 
     var body: some View {
@@ -39,11 +38,6 @@ struct RootTabView: View {
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
-        .sheet(item: $presentedBook) { book in
-            NavigationStack {
-                BookshelfReaderGatewayView(book: book)
-            }
-        }
     }
 
     private var tabSwipeGesture: some Gesture {
@@ -73,44 +67,6 @@ struct RootTabView: View {
 
     private var customTabBar: some View {
         VStack(spacing: 0) {
-            if let currentBook = appState.bookshelfStore.recentBooks.first {
-                Button {
-                    presentedBook = currentBook
-                } label: {
-                    HStack(spacing: 12) {
-                        miniCover(currentBook)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(currentBook.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(currentBook.currentChapterTitle ?? "继续阅读")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .padding(8)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("继续阅读 \(currentBook.title)")
-            }
-
-            Divider()
-                .background(Color.secondary.opacity(0.12))
-
             HStack {
                 tabButton(index: 0, title: "主页", systemImage: "house")
                 Spacer()
@@ -118,39 +74,18 @@ struct RootTabView: View {
                 Spacer()
                 tabButton(index: 2, title: "设置", systemImage: "gearshape")
             }
-            .padding(.horizontal, 40)
-            .padding(.top, 10)
-            .padding(.bottom, 8)
-            .background(.ultraThinMaterial)
-        }
-        .background(.ultraThinMaterial)
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-    }
-
-    private func miniCover(_ book: BookshelfBook) -> some View {
-        Group {
-            if let coverURL = book.coverURL, let url = URL(string: coverURL) {
-                AsyncImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        miniCoverPlaceholder
-                    }
-                }
-            } else {
-                miniCoverPlaceholder
+            .padding(.horizontal, 28)
+            .padding(.vertical, 9)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.8)
             }
+            .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 10)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
         }
-        .frame(width: 48, height: 48)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var miniCoverPlaceholder: some View {
-        ZStack {
-            AppTheme.accent.opacity(0.14)
-            Image(systemName: "book.closed.fill")
-                .foregroundStyle(AppTheme.accent)
-        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func tabButton(index: Int, title: String, systemImage: String) -> some View {
@@ -164,15 +99,22 @@ struct RootTabView: View {
                 Image(systemName: selectedTab == index ? "\(systemImage).fill" : systemImage)
                     .font(.system(size: 22, weight: selectedTab == index ? .bold : .medium))
                     .foregroundStyle(selectedTab == index ? AppTheme.accent : .secondary)
-                    .frame(width: 44, height: 26)
+                    .frame(width: 46, height: 28)
+                    .background {
+                        if selectedTab == index {
+                            Capsule()
+                                .fill(AppTheme.accent.opacity(0.14))
+                        }
+                    }
 
                 Text(title)
                     .font(.system(size: 11, weight: selectedTab == index ? .bold : .medium))
                     .foregroundStyle(selectedTab == index ? AppTheme.accent : .secondary)
             }
-            .frame(width: 60)
+            .frame(width: 64, height: 48)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RootTabPressableButtonStyle())
     }
 
     private func dismissKeyboard() {
@@ -182,5 +124,14 @@ struct RootTabView: View {
             from: nil,
             for: nil
         )
+    }
+}
+
+private struct RootTabPressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.spring(response: 0.18, dampingFraction: 0.8), value: configuration.isPressed)
     }
 }
