@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -264,7 +264,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                 _appendFailureSample(
                   failureSamples,
                   source,
-                  '瑙ｆ瀽鍒?${books.length} 鏉★紝浣嗚褰撳墠鍖归厤妯″紡杩囨护锛涘彲鍒囨崲鈥滄ā绯娾€濋噸璇曘€?,
+                  '解析到 ${books.length} 条结果，但被当前匹配模式过滤；可切换模糊模式重试。',
                 );
               }
               return filtered;
@@ -277,8 +277,8 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
                 verificationUrl = e is LegadoVerificationRequiredException
                     ? e.url
                     : (e is LegadoLoginRequiredException
-                        ? e.loginUrl
-                        : _sourceDefaultUrl(source));
+                          ? e.loginUrl
+                          : _sourceDefaultUrl(source));
               }
               _appendFailureSample(failureSamples, source, _compactError(e));
               debugPrint('Search Error from ${source.bookSourceName}: $e');
@@ -519,7 +519,7 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     final name = source.bookSourceName.trim().isEmpty
         ? source.bookSourceUrl
         : source.bookSourceName;
-    samples.add('$name锛?message');
+    samples.add('$name: $message');
   }
 
   String _compactError(Object error) {
@@ -535,14 +535,14 @@ class ExploreViewModel extends StateNotifier<ExploreState> {
     required int sourcesWithParsedResults,
     required List<String> failures,
   }) {
-    final buffer = StringBuffer('宸叉悳绱?$tried 涓惎鐢ㄤ功婧愶紝鏆傛椂娌℃湁鎼滃埌涔︾睄');
+    final buffer = StringBuffer('已搜索 $tried 个启用书源，暂时没有搜到书籍');
     if (sourcesWithParsedResults > 0) {
-      buffer.write('锛涘叾涓?$sourcesWithParsedResults 涓簮瑙ｆ瀽鍒扮粨鏋滀絾琚綋鍓嶅尮閰嶆ā寮忚繃婊?);
+      buffer.write('；其中 $sourcesWithParsedResults 个源解析到结果但被当前匹配模式过滤');
     }
     if (failures.isNotEmpty) {
       buffer
-        ..write('\n澶辫触鏍蜂緥锛?)
-        ..write(failures.map((item) => '\n鈥?$item').join());
+        ..write('\n失败样例：')
+        ..write(failures.map((item) => '\n- $item').join());
     }
     return buffer.toString();
   }

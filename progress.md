@@ -60,3 +60,27 @@
   - `test/source_check_classifier_test.dart`: added JS function and browser/access-state cases.
   - `test/compatibility_analyzer_test.dart`: added analyzer coverage for JS function and WebView/Cookie/header dependencies.
 - Rollback: revert the four changed files listed above and remove this `progress.md` entry.
+
+## 2026-06-26 - Task: Add actionable diagnostic report summary
+
+### What was done
+- Extended `DiagnosticReport` with backward-compatible summary fields:
+  - `primaryFailureStage`: first blocking stage (`search`, `detail`, `toc`, `content`, `compatibility`, or `none`).
+  - `nextAction`: the most relevant next repair action inferred from the first issue/stage.
+  - `stageSummaries`: compact per-stage status cards for search, detail, TOC, and content.
+- Added `DiagnosticStageSummary` model and JSON round-trip support while keeping old saved diagnostic history readable.
+- Fixed broken string literals in `ExploreViewModel` that were caused by mojibake and prevented broader tests from compiling.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\models\diagnostic_report.dart test\diagnostic_report_test.dart lib\features\explore\viewmodels\explore_viewmodel.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\diagnostic_report_test.dart test\source_check_classifier_test.dart test\compatibility_analyzer_test.dart`: 10 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\models\diagnostic_report.dart lib\features\source_diagnostic\services\source_diagnostic_service.dart lib\features\explore\viewmodels\explore_viewmodel.dart test\diagnostic_report_test.dart`: no issues found.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name CompatibilityAnalyzer`: 2 tests passed. The QuickJS DLL warning is an environment/runtime availability message and did not fail the tests.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\diagnostic_report_test.dart test\source_check_classifier_test.dart test\compatibility_analyzer_test.dart test\source_import_test.dart`: 24 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/models/diagnostic_report.dart`: report summary model, inference, JSON compatibility.
+  - `lib/features/explore/viewmodels/explore_viewmodel.dart`: fixed malformed user-facing search failure strings.
+  - `test/diagnostic_report_test.dart`: coverage for inferred summaries, backward compatibility, and JSON round-trip.
+- Rollback: revert the three changed files listed above and remove this `progress.md` entry.
