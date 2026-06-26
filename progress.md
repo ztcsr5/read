@@ -318,6 +318,30 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add ajaxAll/head/getStrResponse JS helpers
+
+### What was done
+- Added MR/Legado-compatible HTTP helper shims in QuickJS initialization, QuickJS AJAX trap, and Node fallback:
+  - `java.ajaxAll(urls)`
+  - `java.head(url, headers)`
+  - `java.getStrResponse(url, rule)`
+- `java.ajaxAll` returns response text arrays and supports both arrays and comma-separated URL strings.
+- `java.head` returns the same response wrapper shape as `java.fetch/java.connect`, including `body()`, `bodyString()`, `text()`, and `statusCode()`.
+- `java.getStrResponse` fetches text and optionally applies the existing HTML/JSON rule extraction path.
+- Added a local `data:` URL based test so Windows Node fallback can verify this without hitting the external network, while QuickJS can still exercise the same script through its AJAX callback trap.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java ajaxAll head and getStrResponse helpers"`: passed. Current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`; Legacy first rejects top-level `await`, then Node fallback passes.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: HTTP helper shims in QuickJS, trap, and Node fallback.
+  - `test/legado_engine_test.dart`: targeted helper coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add JS regex and utility compatibility aliases
 
 ### What was done

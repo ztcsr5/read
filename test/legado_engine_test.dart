@@ -1561,6 +1561,38 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(requests.single, contains('"X-Test":"1"'));
     });
 
+    test('supports java ajaxAll head and getStrResponse helpers', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        r'''@js:
+var all = await java.ajaxAll(["data:text/plain,A", "data:text/plain,B"]);
+var head = java.head("data:text/plain,meta-ok", {"X-Test":"1"});
+var headBody = await head.body();
+var title = await java.getStrResponse("data:text/html,%3Cdiv%3E%3Cspan%20class%3D%22title%22%3EBook%20Title%3C%2Fspan%3E%3C%2Fdiv%3E", ".title@text");
+JSON.stringify({
+  all: all,
+  headBody: headBody && typeof headBody.string === "function" ? headBody.string() : String(headBody),
+  status: head.statusCode(),
+  title: title
+})''',
+        ajax: (request) async {
+          if (request.contains('data:text/plain,A')) return 'A';
+          if (request.contains('data:text/plain,B')) return 'B';
+          if (request.contains('data:text/plain,meta-ok')) return 'meta-ok';
+          if (request.contains('data:text/html,')) {
+            return '<div><span class="title">Book Title</span></div>';
+          }
+          return '';
+        },
+      );
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['all'], ['A', 'B']);
+      expect(decoded['headBody'], 'meta-ok');
+      expect(decoded['status'], 200);
+      expect(decoded['title'], 'Book Title');
+    });
+
     test('resolves global fetch through ajax callback', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final requests = <String>[];

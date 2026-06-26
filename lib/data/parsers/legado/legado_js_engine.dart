@@ -1524,6 +1524,24 @@ class LegadoJsEngine {
         ajax: function(urlStr) {
           return sendMessage("java_ajax", String(urlStr || ""));
         },
+        ajaxAll: function(urls) {
+          var list = Array.isArray(urls) ? urls : String(urls || "").split(/\s*,\s*/);
+          return __arrayWithToArray(list.map(function(url) {
+            return java.ajax(String(url || ""));
+          }));
+        },
+        head: function(urlStr, headers) {
+          return __responseFromText(java.ajax(String(urlStr || "") + "," + JSON.stringify({
+            method: "HEAD",
+            headers: headers || {}
+          })));
+        },
+        getStrResponse: function(urlStr, ruleStr) {
+          var body = java.ajax(String(urlStr || ""));
+          return ruleStr == null || String(ruleStr || "") === ""
+            ? body
+            : java.getString(String(body || ""), String(ruleStr || ""));
+        },
         androidId: function() {
           return "legacy-evaluator-androidId";
         },
@@ -3961,6 +3979,19 @@ const java = {
     return java.put(key, JSON.stringify(value == null ? {} : value));
   },
   ajax: __ajax,
+  ajaxAll: async function(urls) {
+    const list = Array.isArray(urls) ? urls : __str(urls).split(/\s*,\s*/);
+    return Promise.all(list.filter(url => __str(url).trim()).map(url => __ajax(url)));
+  },
+  head: function(url, headers) {
+    return __responseProxy(url, { method: "HEAD", headers: headers || {} });
+  },
+  getStrResponse: async function(url, rule) {
+    const body = await __fetchText(url, { method: "GET" });
+    return rule == null || __str(rule) === ""
+      ? body
+      : java.getString(body, rule);
+  },
   post: function(url, body, headers) {
     return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} });
   },
@@ -4788,6 +4819,21 @@ async function __stringifyResult(value) {
       };
       java.post = function(urlStr, body, headers) {
         return java.ajax(__requestPayload(urlStr, { method: "POST", body: body || "", headers: headers || {} }));
+      };
+      java.ajaxAll = function(urls) {
+        var list = Array.isArray(urls) ? urls : String(urls || "").split(",").map(function(v) { return v.trim(); });
+        return list.map(function(url) {
+          return java.ajax(String(url || ""));
+        });
+      };
+      java.head = function(urlStr, headers) {
+        return __responseFromText(java.ajax(__requestPayload(urlStr, { method: "HEAD", headers: headers || {} })));
+      };
+      java.getStrResponse = function(urlStr, ruleStr) {
+        var body = java.ajax(__requestPayload(urlStr, { method: "GET" }));
+        return ruleStr == null || String(ruleStr || "") === ""
+          ? body
+          : java.getString(String(body || ""), String(ruleStr || ""));
       };
       java.fetch = function(urlStr, options) {
         return __responseFromText(java.ajax(__requestPayload(urlStr, options || {})));
