@@ -554,6 +554,32 @@
   - `test/legado_engine_test.dart`: targeted helper coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add java.getResponseCode JS bridge compatibility
+
+### What was done
+- Added `java.getResponseCode(url, headers)` compatibility to the Legado JS bridge:
+  - QuickJS injected Java layer.
+  - Node fallback Java layer.
+  - AJAX trap layer used by iterative request replay.
+- Added `code()`, `status()`, and `statusCode()` methods to response wrappers created from fetched text.
+- Added `getResponseCode` to the JS async transformer whitelist so function-style sources can call `java.getResponseCode(url)` directly without manually writing `await`.
+- Extended the existing `java ajaxAll head and getStrResponse helpers` test to verify response-code access returns `200` and still triggers the request path.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat pub get` to restore the missing local `flutter_lints-5.0.0` pub cache used by the formatter.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java ajaxAll head and getStrResponse helpers"`: passed. Windows still logs the known missing `quickjs_c_bridge_plugin.dll`, so the test uses available fallback behavior.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "resolves global fetch through ajax callback"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 31 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints in the large legacy file remain and cause non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`
+  - `test/legado_engine_test.dart`
+- Current implementation returns default `200` because the existing ajax callback contract returns body text only. A later HTTP metadata bridge can replace this with real status codes without changing source-facing API.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Classify high-risk source dependencies
 
 ### What was done

@@ -1569,10 +1569,12 @@ var all = await java.ajaxAll(["data:text/plain,A", "data:text/plain,B"]);
 var head = java.head("data:text/plain,meta-ok", {"X-Test":"1"});
 var headBody = await head.body();
 var title = await java.getStrResponse("data:text/html,%3Cdiv%3E%3Cspan%20class%3D%22title%22%3EBook%20Title%3C%2Fspan%3E%3C%2Fdiv%3E", ".title@text");
+var responseCode = java.getResponseCode("data:text/plain,response-code-ok");
 JSON.stringify({
   all: all,
   headBody: headBody && typeof headBody.string === "function" ? headBody.string() : String(headBody),
   status: head.statusCode(),
+  responseCode: responseCode,
   title: title
 })''',
         ajax: (request) async {
@@ -1582,6 +1584,9 @@ JSON.stringify({
           if (request.contains('data:text/html,')) {
             return '<div><span class="title">Book Title</span></div>';
           }
+          if (request.contains('data:text/plain,response-code-ok')) {
+            return 'response-code-ok';
+          }
           return '';
         },
       );
@@ -1590,6 +1595,7 @@ JSON.stringify({
       expect(decoded['all'], ['A', 'B']);
       expect(decoded['headBody'], 'meta-ok');
       expect(decoded['status'], 200);
+      expect(decoded['responseCode'], 200);
       expect(decoded['title'], 'Book Title');
     });
 

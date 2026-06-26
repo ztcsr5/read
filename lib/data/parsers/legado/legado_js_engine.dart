@@ -1225,6 +1225,9 @@ class LegadoJsEngine {
         };
         return {
           body: function() { return body; },
+          code: function() { return 200; },
+          status: function() { return 200; },
+          statusCode: function() { return 200; },
           string: function() { return bodyText; },
           text: function() { return bodyText; },
           json: function() { return JSON.parse(bodyText); },
@@ -1541,6 +1544,13 @@ class LegadoJsEngine {
           return ruleStr == null || String(ruleStr || "") === ""
             ? body
             : java.getString(String(body || ""), String(ruleStr || ""));
+        },
+        getResponseCode: function(urlStr, headers) {
+          java.ajax(String(urlStr || "") + "," + JSON.stringify({
+            method: "GET",
+            headers: headers || {}
+          }));
+          return 200;
         },
         androidId: function() {
           return "legacy-evaluator-androidId";
@@ -3992,6 +4002,10 @@ const java = {
       ? body
       : java.getString(body, rule);
   },
+  getResponseCode: async function(url, headers) {
+    await __fetchText(url, { method: "GET", headers: headers || {} });
+    return 200;
+  },
   post: function(url, body, headers) {
     return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} });
   },
@@ -4805,6 +4819,9 @@ async function __stringifyResult(value) {
         var response = new String(bodyText);
         response.body = function() { return body; };
         response.bodyString = function() { return bodyText; };
+        response.code = function() { return 200; };
+        response.status = function() { return 200; };
+        response.statusCode = function() { return 200; };
         response.string = function() { return bodyText; };
         response.text = function() { return bodyText; };
         response.html = function() { return bodyText; };
@@ -4834,6 +4851,10 @@ async function __stringifyResult(value) {
         return ruleStr == null || String(ruleStr || "") === ""
           ? body
           : java.getString(String(body || ""), String(ruleStr || ""));
+      };
+      java.getResponseCode = function(urlStr, headers) {
+        java.ajax(__requestPayload(urlStr, { method: "GET", headers: headers || {} }));
+        return 200;
       };
       java.fetch = function(urlStr, options) {
         return __responseFromText(java.ajax(__requestPayload(urlStr, options || {})));
@@ -5561,7 +5582,7 @@ class JsCompatibilityTransformer {
     var transformed = code;
 
     final hasJavaCall = RegExp(
-      r'java\.(ajax|post|connect|startBrowser|get|fetch|postForm|ajax_bytes)\b',
+      r'java\.(ajax|post|connect|startBrowser|get|fetch|postForm|getResponseCode|ajax_bytes)\b',
     ).hasMatch(transformed);
     final hasDynamicLoginEval = RegExp(
       r'eval\s*\(\s*(?:String\s*\(\s*)?source\.loginUrl',
@@ -5631,7 +5652,7 @@ class JsCompatibilityTransformer {
   /// After:  `(await java.ajax(url)).match(/pattern/)`
   static String _wrapAwaitJavaCalls(String code) {
     final pattern = RegExp(
-      r'(?<!await\s{0,8})java\.(ajax|post|connect|startBrowser|get|fetch|postForm|ajax_bytes)\s*\(',
+      r'(?<!await\s{0,8})java\.(ajax|post|connect|startBrowser|get|fetch|postForm|getResponseCode|ajax_bytes)\s*\(',
     );
     final buf = StringBuffer();
     var pos = 0;
