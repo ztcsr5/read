@@ -114,7 +114,8 @@ class LegadoJsEngine {
   final Set<String> _loadedLibraryKeys = <String>{};
   final Set<String> _loadedNodeLibraryKeys = <String>{};
   final List<String> _loadedNodeLibraries = <String>[];
-  Future<String> Function(String request)? _currentAjaxHandler;
+  static const String _ajaxMetaMarker = '__LEGADO_HTTP_META__';
+  Future<dynamic> Function(String request)? _currentAjaxHandler;
   Future<Uint8List> Function(String request)? _currentAjaxBytesHandler;
   final Map<String, dynamic> _javaStorage = <String, dynamic>{};
   final Map<String, Document> _jsoupDocuments = {};
@@ -1216,7 +1217,19 @@ class LegadoJsEngine {
       }
 
       function __responseFromText(text) {
-        var bodyText = String(text == null ? "" : text);
+        var marker = ${jsonEncode(_ajaxMetaMarker)};
+        var rawText = String(text == null ? "" : text);
+        var meta = { body: rawText, statusCode: 200, headers: {}, url: "" };
+        if (rawText.indexOf(marker) === 0) {
+          try {
+            var parsed = JSON.parse(rawText.substring(marker.length));
+            meta.body = String(parsed.body == null ? "" : parsed.body);
+            meta.statusCode = Number(parsed.statusCode || 200) || 200;
+            meta.headers = parsed.headers || {};
+            meta.url = String(parsed.url == null ? "" : parsed.url);
+          } catch(e) {}
+        }
+        var bodyText = String(meta.body == null ? "" : meta.body);
         var body = {
           string: function() { return bodyText; },
           text: function() { return bodyText; },
@@ -1225,9 +1238,14 @@ class LegadoJsEngine {
         };
         return {
           body: function() { return body; },
-          code: function() { return 200; },
-          status: function() { return 200; },
-          statusCode: function() { return 200; },
+          code: function() { return meta.statusCode; },
+          status: function() { return meta.statusCode; },
+          statusCode: function() { return meta.statusCode; },
+          headers: function() { return meta.headers || {}; },
+          header: function(name) {
+            var headers = meta.headers || {};
+            return headers[String(name || "")] || headers[String(name || "").toLowerCase()] || "";
+          },
           string: function() { return bodyText; },
           text: function() { return bodyText; },
           json: function() { return JSON.parse(bodyText); },
@@ -1559,11 +1577,10 @@ class LegadoJsEngine {
             : java.getString(String(body || ""), String(ruleStr || ""));
         },
         getResponseCode: function(urlStr, headers) {
-          java.ajax(String(urlStr || "") + "," + JSON.stringify({
+          return __responseFromText(java.ajax(String(urlStr || "") + "," + JSON.stringify({
             method: "GET",
             headers: headers || {}
-          }));
-          return 200;
+          }))).statusCode();
         },
         importScript: function(scriptOrUrl) {
           var value = String(scriptOrUrl || "");
@@ -2683,7 +2700,7 @@ class LegadoJsEngine {
     String jsCode, {
     Map<String, dynamic>? variables,
     Iterable<String> libraries = const [],
-    required Future<String> Function(String request) ajax,
+    required Future<dynamic> Function(String request) ajax,
     Future<Uint8List> Function(String request)? ajaxBytes,
     int maxRequests = 12,
   }) async {
@@ -2736,7 +2753,7 @@ class LegadoJsEngine {
     _injectVariables(variables);
     loadLibraries(libraries);
 
-    final cache = <String, String>{};
+    final cache = <String, dynamic>{};
     final prepared = _prepareCode(jsCode);
 
     try {
@@ -2750,7 +2767,7 @@ class LegadoJsEngine {
             if (ajaxReq != null) {
               JsEngineDiag().lastHitAjaxTrap = true;
               final resp = await ajax(ajaxReq);
-              cache[ajaxReq] = resp;
+              cache[ajaxReq] = _normalizeAjaxResponse(resp);
               continue;
             }
             throw Exception(errStr);
@@ -2764,7 +2781,7 @@ class LegadoJsEngine {
               if (ajaxReq != null) {
                 JsEngineDiag().lastHitAjaxTrap = true;
                 final resp = await ajax(ajaxReq);
-                cache[ajaxReq] = resp;
+                cache[ajaxReq] = _normalizeAjaxResponse(resp);
                 continue;
               }
               throw Exception(errStr);
@@ -2777,7 +2794,7 @@ class LegadoJsEngine {
           if (ajaxReq != null) {
             JsEngineDiag().lastHitAjaxTrap = true;
             final resp = await ajax(ajaxReq);
-            cache[ajaxReq] = resp;
+            cache[ajaxReq] = _normalizeAjaxResponse(resp);
             continue;
           }
           debugPrint('JS Eval with AJAX failed: $e');
@@ -2796,14 +2813,14 @@ class LegadoJsEngine {
     String jsCode, {
     Map<String, dynamic>? variables,
     Iterable<String> libraries = const [],
-    required Future<String> Function(String request) ajax,
+    required Future<dynamic> Function(String request) ajax,
     int maxRequests = 12,
   }) async {
     if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable)
       return null;
     if (Platform.environment['LEGADO_DISABLE_NATIVE_JSCORE'] == '1')
       return null;
-    final ajaxCache = <String, String>{};
+    final ajaxCache = <String, dynamic>{};
     final nativeCache = <String, String>{};
     final nativeVariables = _jsonSafeMap(_normalizedVariables(variables));
     final nativeLibraries = libraries
@@ -2848,7 +2865,9 @@ class LegadoJsEngine {
         if (ajaxRequest.isNotEmpty) {
           JsEngineDiag().lastHitAjaxTrap = true;
           JsEngineDiag().nativeJSCoreEverCalled = true;
-          ajaxCache[ajaxRequest] = await ajax(ajaxRequest);
+          ajaxCache[ajaxRequest] = _normalizeAjaxResponse(
+            await ajax(ajaxRequest),
+          );
           continue;
         }
         final loginRequest = response['loginRequest']?.toString().trim() ?? '';
@@ -3300,6 +3319,31 @@ class LegadoJsEngine {
     };
   }
 
+  dynamic _normalizeAjaxResponse(dynamic response) {
+    if (response == null) return '';
+    if (response is String) return response;
+    if (response is Map) {
+      final body = response['body']?.toString() ?? '';
+      final statusCode = (response['statusCode'] as num?)?.toInt() ?? 200;
+      final rawHeaders = response['headers'];
+      final headers = <String, String>{};
+      if (rawHeaders is Map) {
+        rawHeaders.forEach((key, value) {
+          if (key != null && value != null) {
+            headers[key.toString()] = value.toString();
+          }
+        });
+      }
+      return encodeAjaxResponse(
+        body: body,
+        statusCode: statusCode,
+        headers: headers,
+        url: response['url']?.toString(),
+      );
+    }
+    return response.toString();
+  }
+
   String _decodeNodeResult(int exitCode, dynamic stdout, dynamic stderr) {
     final output = stdout?.toString().trim() ?? '';
     if (exitCode != 0) {
@@ -3318,6 +3362,15 @@ class LegadoJsEngine {
         ..addAll(storage.map((key, value) => MapEntry(key.toString(), value)));
     }
     return decoded['result']?.toString() ?? '';
+  }
+
+  static String encodeAjaxResponse({
+    required String body,
+    int statusCode = 200,
+    Map<String, String>? headers,
+    String? url,
+  }) {
+    return '$_ajaxMetaMarker${jsonEncode({'body': body, 'statusCode': statusCode, 'headers': headers ?? const <String, String>{}, if (url != null) 'url': url})}';
   }
 
   String _ensureNodeScriptPath() {
@@ -3357,7 +3410,7 @@ class LegadoJsEngine {
   Future<String> _evaluateWithLegacyAsync(
     String code, {
     Map<String, dynamic>? variables,
-    required Future<String> Function(String request) ajax,
+    required Future<dynamic> Function(String request) ajax,
   }) async {
     var processed = code;
     final results = <String>[];
@@ -3405,6 +3458,7 @@ const { TextDecoder } = require("util");
 
 const payloadPath = process.argv[2];
 const payload = JSON.parse(fs.readFileSync(payloadPath || 0, "utf8") || "{}");
+const __ajaxMetaMarker = "__LEGADO_HTTP_META__";
 const __storage = Object.assign({}, payload.storage || {});
 const __vars = Object.assign({}, payload.variables || {});
 const __libraries = Array.isArray(payload.libraries) ? payload.libraries : [];
@@ -3871,6 +3925,53 @@ async function __fetchText(rawUrl, config) {
   }
 }
 
+async function __fetchMeta(rawUrl, config) {
+  const url = __resolveUrl(rawUrl);
+  if (url.startsWith("data:")) {
+    return {
+      body: await __fetchText(url, config),
+      statusCode: 200,
+      headers: { "content-type": "text/plain" },
+      url
+    };
+  }
+  config = config || {};
+  const headers = Object.assign({ "User-Agent": __ua }, config.headers || {});
+  if (globalThis.cookieHeader && !headers.Cookie && !headers.cookie) {
+    headers.Cookie = __str(globalThis.cookieHeader);
+  }
+  const method = __str(config.method || "GET").toUpperCase() || "GET";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(config.timeout || config.timeoutMs || 25000));
+  try {
+    const init = { method, headers, signal: controller.signal };
+    if (method !== "GET" && method !== "HEAD" && config.body != null) {
+      init.body = typeof config.body === "string" ? config.body : JSON.stringify(config.body);
+    }
+    const response = await fetch(url, init);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const responseHeaders = {};
+    response.headers.forEach((value, key) => { responseHeaders[String(key)] = String(value); });
+    const contentType = response.headers.get("content-type") || "";
+    const charsetMatch = /charset\s*=\s*([^;\s]+)/i.exec(contentType);
+    const charset = charsetMatch ? charsetMatch[1].toLowerCase() : "utf-8";
+    let body = "";
+    try {
+      body = new TextDecoder(charset).decode(buffer);
+    } catch (_) {
+      body = buffer.toString("utf8");
+    }
+    return {
+      body,
+      statusCode: response.status || 200,
+      headers: responseHeaders,
+      url: response.url || url
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function __ajax(request) {
   const parsed = __splitRequest(request);
   return __fetchText(parsed.url, parsed.config);
@@ -3878,19 +3979,65 @@ async function __ajax(request) {
 
 function __responseProxy(url, config) {
   let cached;
-  return {
-    body: async function() {
-      if (cached === undefined) cached = await __fetchText(url, config || {});
-      return cached;
+  async function ensureMeta() {
+    if (cached === undefined) cached = await __fetchMeta(url, config || {});
+    return cached;
+  }
+  function bodyObject(meta) {
+    const bodyText = String(meta && meta.body != null ? meta.body : "");
+    return {
+      string: function() { return bodyText; },
+      text: function() { return bodyText; },
+      html: function() { return bodyText; },
+      bytes: function() { return Array.from(Buffer.from(bodyText, "utf8")); },
+      toString: function() { return bodyText; },
+      valueOf: function() { return bodyText; }
+    };
+  }
+  function materialize(meta) {
+    return {
+      body: function() { return bodyObject(meta); },
+      text: function() { return meta.body; },
+      string: function() { return meta.body; },
+      json: function() { return JSON.parse(meta.body); },
+      code: function() { return meta.statusCode; },
+      status: function() { return meta.statusCode; },
+      statusCode: function() { return meta.statusCode; },
+      headers: function() { return meta.headers || {}; },
+      header: function(name) {
+        const headers = meta.headers || {};
+        return headers[__str(name)] || headers[__str(name).toLowerCase()] || "";
+      },
+      toString: function() { return String(meta.body || ""); }
+    };
+  }
+  const proxy = {
+    body: function() {
+      return cached !== undefined ? bodyObject(cached) : ensureMeta().then(bodyObject);
     },
-    text: async function() { return this.body(); },
-    string: async function() { return this.body(); },
-    json: async function() { return JSON.parse(await this.body()); },
-    code: function() { return 200; },
-    statusCode: function() { return 200; },
-    headers: function() { return {}; },
-    toString: function() { return cached == null ? "" : String(cached); }
+    text: function() {
+      return cached !== undefined ? cached.body : ensureMeta().then(meta => meta.body);
+    },
+    string: function() {
+      return cached !== undefined ? cached.body : ensureMeta().then(meta => meta.body);
+    },
+    json: async function() {
+      return JSON.parse(await (cached !== undefined ? cached.body : ensureMeta().then(meta => meta.body)));
+    },
+    code: function() { return cached == null ? 200 : cached.statusCode; },
+    status: function() { return cached == null ? 200 : cached.statusCode; },
+    statusCode: function() { return cached == null ? 200 : cached.statusCode; },
+    headers: function() { return cached == null ? {} : (cached.headers || {}); },
+    header: function(name) {
+      const headers = cached == null ? {} : (cached.headers || {});
+      return headers[__str(name)] || headers[__str(name).toLowerCase()] || "";
+    },
+    toString: function() { return cached == null ? "" : String(cached.body || ""); }
   };
+  proxy.__materialize = async function() {
+    return materialize(await ensureMeta());
+  };
+  return proxy;
 }
 
 function __base64Encode(value) {
@@ -4039,8 +4186,7 @@ const java = {
       : java.getString(body, rule);
   },
   getResponseCode: async function(url, headers) {
-    await __fetchText(url, { method: "GET", headers: headers || {} });
-    return 200;
+    return (await __fetchMeta(url, { method: "GET", headers: headers || {} })).statusCode || 200;
   },
   importScript: async function(scriptOrUrl) {
     let value = __str(scriptOrUrl);
@@ -4052,10 +4198,10 @@ const java = {
     return value;
   },
   post: function(url, body, headers) {
-    return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} });
+    return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} }).__materialize();
   },
   fetch: function(url, options) {
-    return __responseProxy(url, options || {});
+    return __responseProxy(url, options || {}).__materialize();
   },
   connect: function(url) {
     const config = { method: "GET", headers: {}, body: "" };
@@ -4826,14 +4972,32 @@ async function __stringifyResult(value) {
   }
 
   // ignore: unused_element
-  void _installAjaxTrap(Map<String, String> cache) {
+  void _installAjaxTrap(Map<String, dynamic> cache) {
     if (_runtime == null) return;
     _runtime!.evaluate('''
       var __legado_ajax_cache = ${jsonEncode(cache)};
+      var __legado_http_meta_marker = ${jsonEncode(_ajaxMetaMarker)};
+      function __parseAjaxResponse(raw) {
+        var text = String(raw == null ? "" : raw);
+        if (text.indexOf(__legado_http_meta_marker) !== 0) {
+          return { body: text, statusCode: 200, headers: {}, url: "" };
+        }
+        try {
+          var parsed = JSON.parse(text.substring(__legado_http_meta_marker.length));
+          return {
+            body: String(parsed.body == null ? "" : parsed.body),
+            statusCode: Number(parsed.statusCode || 200) || 200,
+            headers: parsed.headers || {},
+            url: String(parsed.url == null ? "" : parsed.url)
+          };
+        } catch(e) {
+          return { body: "", statusCode: 200, headers: {}, url: "" };
+        }
+      }
       java.ajax = function(urlStr) {
         var url = String(urlStr || "");
         if (Object.prototype.hasOwnProperty.call(__legado_ajax_cache, url)) {
-          return __legado_ajax_cache[url];
+          return __parseAjaxResponse(__legado_ajax_cache[url]).body;
         }
         throw new Error("__LEGADO_AJAX__" + url);
       };
@@ -4850,7 +5014,8 @@ async function __stringifyResult(value) {
           : u;
       }
       function __responseFromText(text) {
-        var bodyText = String(text == null ? "" : text);
+        var meta = __parseAjaxResponse(text);
+        var bodyText = String(meta.body == null ? "" : meta.body);
         var body = new String(bodyText);
         body.string = function() { return bodyText; };
         body.text = function() { return bodyText; };
@@ -4865,9 +5030,14 @@ async function __stringifyResult(value) {
         var response = new String(bodyText);
         response.body = function() { return body; };
         response.bodyString = function() { return bodyText; };
-        response.code = function() { return 200; };
-        response.status = function() { return 200; };
-        response.statusCode = function() { return 200; };
+        response.code = function() { return meta.statusCode; };
+        response.status = function() { return meta.statusCode; };
+        response.statusCode = function() { return meta.statusCode; };
+        response.headers = function() { return meta.headers || {}; };
+        response.header = function(name) {
+          var headers = meta.headers || {};
+          return headers[String(name || "")] || headers[String(name || "").toLowerCase()] || "";
+        };
         response.string = function() { return bodyText; };
         response.text = function() { return bodyText; };
         response.html = function() { return bodyText; };
@@ -4899,8 +5069,9 @@ async function __stringifyResult(value) {
           : java.getString(String(body || ""), String(ruleStr || ""));
       };
       java.getResponseCode = function(urlStr, headers) {
-        java.ajax(__requestPayload(urlStr, { method: "GET", headers: headers || {} }));
-        return 200;
+        var requestText = __requestPayload(urlStr, { method: "GET", headers: headers || {} });
+        java.ajax(requestText);
+        return __responseFromText(__legado_ajax_cache[requestText]).statusCode();
       };
       java.cacheFile = function(path, content) {
         return java.put("file:" + String(path || ""), content == null ? "" : String(content));

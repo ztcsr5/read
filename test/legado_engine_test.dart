@@ -1568,12 +1568,13 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
 var all = await java.ajaxAll(["data:text/plain,A", "data:text/plain,B"]);
 var head = java.head("data:text/plain,meta-ok", {"X-Test":"1"});
 var headBody = await head.body();
+var headStatus = head.statusCode();
 var title = await java.getStrResponse("data:text/html,%3Cdiv%3E%3Cspan%20class%3D%22title%22%3EBook%20Title%3C%2Fspan%3E%3C%2Fdiv%3E", ".title@text");
 var responseCode = java.getResponseCode("data:text/plain,response-code-ok");
 JSON.stringify({
   all: all,
   headBody: headBody && typeof headBody.string === "function" ? headBody.string() : String(headBody),
-  status: head.statusCode(),
+  status: headStatus,
   responseCode: responseCode,
   title: title
 })''',
@@ -1624,6 +1625,32 @@ JSON.stringify({before: before, removed: removed, after: after});
       expect(decoded['before'], 'abc123');
       expect(decoded['removed'], true);
       expect(decoded['after'], '');
+    });
+
+    test('supports ajax metadata status and headers', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.statusCode = HttpStatus.notFound;
+        request.response.headers.contentType = ContentType.text;
+        request.response.write('meta-body');
+        await request.response.close();
+      });
+      final baseUrl = 'http://${server.address.host}:${server.port}/meta';
+      final value = await LegadoJsEngine().evaluateWithAjax('''@js:
+var fetched = await java.fetch("$baseUrl");
+var fetchedBody = await fetched.body();
+JSON.stringify({
+  fetchedStatus: fetched.statusCode(),
+  body: fetchedBody.string(),
+  directCode: await java.getResponseCode("$baseUrl")
+})''', ajax: (request) async => '');
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['fetchedStatus'], 404);
+      expect(decoded['body'], 'meta-body');
+      expect(decoded['directCode'], 404);
     });
 
     test('resolves global fetch through ajax callback', () async {

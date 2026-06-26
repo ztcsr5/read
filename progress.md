@@ -554,6 +554,43 @@
   - `test/legado_engine_test.dart`: targeted helper coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Stabilize JS HTTP metadata bridging
+
+### What was done
+- Extended `evaluateWithAjax` so ajax callbacks can now return either:
+  - plain response body strings, or
+  - structured HTTP metadata envelopes via `LegadoJsEngine.encodeAjaxResponse(...)`.
+- Added a shared metadata envelope format covering:
+  - `body`
+  - `statusCode`
+  - `headers`
+  - `url`
+- Threaded the metadata format through the JS bridge layers:
+  - QuickJS ajax trap
+  - Native JSCore ajax cache path
+  - Node fallback bridge/runtime
+- Upgraded Node fallback networking so:
+  - `java.fetch(...)` can expose real response status/body through the bridged response object
+  - `java.getResponseCode(...)` now reads real status codes from `__fetchMeta(...)` instead of returning a fixed `200`
+- Added a focused regression test backed by a local `HttpServer` returning `404 + meta-body`, verifying:
+  - `fetched.statusCode()` returns `404`
+  - `fetched.body().string()` returns the actual body
+  - `java.getResponseCode(...)` returns `404`
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports ajax metadata status and headers"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "resolves java fetch response aliases through ajax callback"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 31 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`
+  - `test/legado_engine_test.dart`
+- Windows still logs the known missing `quickjs_c_bridge_plugin.dll`; these validations succeeded through the available fallback/runtime paths.
+- This checkpoint closes the earlier blocker where `java.getResponseCode(...)` stayed fixed at `200` in Node fallback.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add source-scoped JS file cache helpers
 
 ### What was done
