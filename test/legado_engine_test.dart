@@ -4716,6 +4716,30 @@ JSON.stringify({
       expect(decoded['ua'], isTrue);
     });
 
+    test('supports java jsoup namespace and content rule overloads', () {
+      if (!LegadoJsEngine().canEvaluate) return;
+      const html = '''
+<div class="book"><a href="/b1"><span class="title">Book One</span></a></div>
+<div class="book"><a href="/b2"><span class="title">Book Two</span></a></div>
+''';
+
+      final value = LegadoJsEngine().evaluate(
+        r'''@js:JSON.stringify({
+  title: java.jsoup.selectFirst(result, ".title"),
+  href: java.jsoup.getAttr(result, ".book a", "href"),
+  text: java.getString(result, ".book@text"),
+  links: java.getStringList(result, ".book a@href")
+})''',
+        variables: {'result': html},
+      );
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['title'], 'Book One');
+      expect(decoded['href'], '/b1');
+      expect(decoded['text'], 'Book One\nBook Two');
+      expect(decoded['links'], ['/b1', '/b2']);
+    });
+
     test('supports java.getElements bridge for html result rules', () {
       if (!LegadoJsEngine().isAvailable) return;
       final html = '<div id="content"><p>第一段</p><p data-id="2">第二段</p></div>';

@@ -1425,6 +1425,15 @@ class LegadoJsEngine {
           return value == null ? "" : value;
         },
         getString: function(key) {
+          if (arguments.length > 1) {
+            var sourceValue = key == null ? "" : String(key);
+            var ruleValue = String(arguments[1] || "");
+            if (__looksLikeHtmlInput(sourceValue) && __looksLikeHtmlRule(ruleValue)) {
+              return __extractHtmlRuleString(sourceValue, ruleValue);
+            }
+            var jsonValue = __jsonPathValue(sourceValue, ruleValue);
+            return jsonValue === "" && arguments.length > 2 ? String(arguments[2] || "") : jsonValue;
+          }
           var text = String(key || "");
           var stored = this.get(text);
           if (stored !== "") return String(stored);
@@ -1453,6 +1462,20 @@ class LegadoJsEngine {
           return isNaN(value) ? Number(def || 0) : value;
         },
         getStringList: function(key) {
+          if (arguments.length > 1) {
+            var sourceValue = key == null ? "" : String(key);
+            var ruleValue = String(arguments[1] || "");
+            if (__looksLikeHtmlInput(sourceValue) && __looksLikeHtmlRule(ruleValue)) {
+              return __extractHtmlRuleList(sourceValue, ruleValue);
+            }
+            var jsonValue = __jsonPathValue(sourceValue, ruleValue);
+            try {
+              var parsed = JSON.parse(jsonValue);
+              return __arrayWithToArray(Array.isArray(parsed) ? parsed : []);
+            } catch(e) {
+              return __arrayWithToArray(jsonValue ? String(jsonValue).split(",") : []);
+            }
+          }
           var text = String(key || "");
           if (typeof result !== "undefined" && __looksLikeHtmlInput(result) && __looksLikeHtmlRule(text)) {
             return __extractHtmlRuleList(result, text);
@@ -2472,6 +2495,14 @@ class LegadoJsEngine {
       function clean(html) {
         return java.htmlFormat(html);
       }
+
+      java.jsoup = java.jsoup || {
+        parse: function(html) { return org.jsoup.Jsoup.parse(html); },
+        select: function(html, selector) { return select(html, selector); },
+        selectFirst: function(html, selector) { return selectFirst(html, selector); },
+        getAttr: function(html, selector, attr) { return getAttr(html, selector, attr); },
+        clean: function(html) { return clean(html); }
+      };
 
       globalThis.select = select;
       globalThis.selectFirst = selectFirst;
@@ -3611,6 +3642,55 @@ function __jsonPathValue(sourceValue, path) {
   return typeof current === "object" ? JSON.stringify(current) : __str(current);
 }
 
+function __nodeLooksLikeHtmlInput(value) {
+  return /<[^>]+>/.test(__str(value));
+}
+
+function __nodeLooksLikeHtmlRule(rule) {
+  const text = __str(rule).trim();
+  return text.indexOf("@") >= 0 || /^[.#\[]/.test(text) || /^[a-zA-Z][\w-]*(?:[.#\[]|$)/.test(text);
+}
+
+function __nodeSplitHtmlRule(rule) {
+  const text = __str(rule).trim();
+  const at = text.lastIndexOf("@");
+  if (at < 0) return { selector: text || "body", attr: "text" };
+  return {
+    selector: text.slice(0, at).trim() || "body",
+    attr: text.slice(at + 1).trim() || "text"
+  };
+}
+
+function __nodeAttrValue(node, attr) {
+  let name = __str(attr || "text").trim();
+  const lower = name.toLowerCase();
+  if (lower === "text" || lower === "owntext") return node && node.text ? node.text() : "";
+  if (lower === "html" || lower === "innerhtml") return node && node.html ? node.html() : "";
+  if (lower === "outerhtml" || lower === "all") return node && node.outerHtml ? node.outerHtml() : "";
+  const attrFn = /^attr\(\s*([^)]+?)\s*\)$/i.exec(name);
+  if (attrFn) name = attrFn[1];
+  if (name.toLowerCase().startsWith("attr.")) name = name.slice(5);
+  return node && node.attr ? node.attr(name) : "";
+}
+
+function __nodeExtractHtmlRuleString(html, rule) {
+  const parsed = __nodeSplitHtmlRule(rule);
+  const nodes = __nodeJsoup.parse(__str(html)).select(parsed.selector).toArray();
+  if (!nodes.length) return "";
+  if (parsed.attr.toLowerCase() === "text" || parsed.attr.toLowerCase() === "owntext") {
+    return nodes.map(node => __nodeAttrValue(node, parsed.attr)).join("\n");
+  }
+  return __nodeAttrValue(nodes[0], parsed.attr);
+}
+
+function __nodeExtractHtmlRuleList(html, rule) {
+  const parsed = __nodeSplitHtmlRule(rule);
+  return __nodeJsoup.parse(__str(html))
+    .select(parsed.selector)
+    .toArray()
+    .map(node => __nodeAttrValue(node, parsed.attr));
+}
+
 function __resolveUrl(rawUrl) {
   const text = __str(rawUrl).trim();
   if (!text) return text;
@@ -3858,8 +3938,11 @@ const java = {
   },
   getString: function(path, sourceValue) {
     if (arguments.length > 1) {
-      const value = __jsonPathValue(sourceValue, path);
-      return value === "" ? __str(sourceValue) : value;
+      if (__nodeLooksLikeHtmlInput(path) && __nodeLooksLikeHtmlRule(sourceValue)) {
+        return __nodeExtractHtmlRuleString(path, sourceValue);
+      }
+      const value = __jsonPathValue(path, sourceValue);
+      return value === "" ? __str(path) : value;
     }
     const stored = java.get(path);
     if (stored !== "") return __str(stored);
@@ -3872,6 +3955,13 @@ const java = {
   getLong: function(path, def) { return java.getInt(path, def); },
   getDouble: function(path, def) { const n = parseFloat(java.getString(path, def == null ? "0" : def)); return Number.isNaN(n) ? Number(def || 0) : n; },
   getStringList: function(path) {
+    if (arguments.length > 1) {
+      if (__nodeLooksLikeHtmlInput(path) && __nodeLooksLikeHtmlRule(arguments[1])) {
+        return __nodeExtractHtmlRuleList(path, arguments[1]);
+      }
+      const value = __jsonPathValue(path, arguments[1]);
+      try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_) { return value ? __str(value).split(",") : []; }
+    }
     const value = java.getString(path, "[]");
     try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_) { return value ? __str(value).split(",") : []; }
   },
@@ -4120,6 +4210,13 @@ globalThis.base64Encode = globalThis.base64Encode || function() { return java.ba
 globalThis.base64Decode = globalThis.base64Decode || function() { return java.base64Decode.apply(java, arguments); };
 globalThis.md5Encode = globalThis.md5Encode || function() { return java.md5Encode.apply(java, arguments); };
 globalThis.sha256Encode = globalThis.sha256Encode || function() { return java.digestHex(arguments.length ? arguments[0] : "", "sha256"); };
+java.jsoup = java.jsoup || {
+  parse: function(html) { return __nodeJsoup.parse(__str(html)); },
+  select: function(html, selector) { return select(html, selector); },
+  selectFirst: function(html, selector) { return selectFirst(html, selector); },
+  getAttr: function(html, selector, attr) { return getAttr(html, selector, attr); },
+  clean: function(html) { return clean(html); }
+};
 __installSourceAndBook();
 
 async function __stringifyResult(value) {
