@@ -2478,6 +2478,19 @@ class LegadoJsEngine {
       globalThis.getAttr = getAttr;
       globalThis.clean = clean;
       globalThis.htmlFormat = java.htmlFormat;
+      globalThis.getString = function() { return java.getString.apply(java, arguments); };
+      globalThis.getStringList = function() { return java.getStringList.apply(java, arguments); };
+      globalThis.put = function() { return java.put.apply(java, arguments); };
+      globalThis.getStr = function(key, def) {
+        var value = java.get(key);
+        return value === "" && arguments.length > 1 ? String(def || "") : value;
+      };
+      globalThis.ajax = function() { return java.ajax.apply(java, arguments); };
+      globalThis.getWebViewUA = function() { return java.getWebViewUA(); };
+      globalThis.base64Encode = function() { return java.base64Encode.apply(java, arguments); };
+      globalThis.base64Decode = function() { return java.base64Decode.apply(java, arguments); };
+      globalThis.md5Encode = function() { return java.md5Encode.apply(java, arguments); };
+      globalThis.sha256Encode = function() { return java.sha256Encode.apply(java, arguments); };
     ''';
 
     if (_runtime == null) return;
@@ -4094,6 +4107,19 @@ globalThis.JavaImporter = function() {
 globalThis.importClass = function(value) { return value; };
 globalThis.importPackage = function(value) { return value; };
 globalThis.esoTools = { md5Encode: java.md5Encode, base64Encode: java.base64Encode, base64Decode: java.base64Decode };
+globalThis.getString = globalThis.getString || function() { return java.getString.apply(java, arguments); };
+globalThis.getStringList = globalThis.getStringList || function() { return java.getStringList.apply(java, arguments); };
+globalThis.put = globalThis.put || function() { return java.put.apply(java, arguments); };
+globalThis.getStr = globalThis.getStr || function(key, def) {
+  const value = java.get(key);
+  return value === "" && arguments.length > 1 ? __str(def) : value;
+};
+globalThis.ajax = globalThis.ajax || function() { return java.ajax.apply(java, arguments); };
+globalThis.getWebViewUA = globalThis.getWebViewUA || function() { return java.getWebViewUA(); };
+globalThis.base64Encode = globalThis.base64Encode || function() { return java.base64Encode.apply(java, arguments); };
+globalThis.base64Decode = globalThis.base64Decode || function() { return java.base64Decode.apply(java, arguments); };
+globalThis.md5Encode = globalThis.md5Encode || function() { return java.md5Encode.apply(java, arguments); };
+globalThis.sha256Encode = globalThis.sha256Encode || function() { return java.digestHex(arguments.length ? arguments[0] : "", "sha256"); };
 __installSourceAndBook();
 
 async function __stringifyResult(value) {

@@ -318,6 +318,36 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add MR-style global JS helper aliases
+
+### What was done
+- Added global shortcut aliases used by MR/轻悦-style function sources so scripts do not have to call everything through `java.*`:
+  - `getString(...)`
+  - `getStringList(...)`
+  - `put(...)`
+  - `getStr(...)`
+  - `ajax(...)`
+  - `getWebViewUA()`
+  - `base64Encode(...)`
+  - `base64Decode(...)`
+  - `md5Encode(...)`
+  - `sha256Encode(...)`
+- Implemented the aliases in both QuickJS initialization and Node fallback.
+- Added targeted coverage for direct storage, hash, base64, and UA shortcut calls.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports global MR style helper aliases"`: passed. Current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`; the test passed through available fallback execution.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports global html helper functions"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: QuickJS and Node fallback global shortcut aliases.
+  - `test/legado_engine_test.dart`: targeted alias coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add global HTML helpers for JS function sources
 
 ### What was done

@@ -4693,6 +4693,29 @@ result.toLowerCase()
       expect(decoded['cleaned'], 'A\nB');
     });
 
+    test('supports global MR style helper aliases', () {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final value = LegadoJsEngine().evaluate(r'''@js:
+put("token", "abc");
+JSON.stringify({
+  token: getStr("token"),
+  md5: md5Encode("abc"),
+  sha256: sha256Encode("abc"),
+  b64: base64Decode(base64Encode("hello")),
+  ua: getWebViewUA().indexOf("Mozilla") >= 0
+})''');
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['token'], 'abc');
+      expect(decoded['md5'], '900150983cd24fb0d6963f7d28e17f72');
+      expect(
+        decoded['sha256'],
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      );
+      expect(decoded['b64'], 'hello');
+      expect(decoded['ua'], isTrue);
+    });
+
     test('supports java.getElements bridge for html result rules', () {
       if (!LegadoJsEngine().isAvailable) return;
       final html = '<div id="content"><p>第一段</p><p data-id="2">第二段</p></div>';
