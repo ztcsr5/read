@@ -61,6 +61,29 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Support JS TOC chapter field aliases
+
+### What was done
+- Improved imported/function-style JS TOC parsing for chapter objects using modern or light-reader-style field names.
+- JS `toc(result)` chapter title detection now recognizes:
+  - `chapterTitle`, `chapter_title`, `text`, `label`, `ChapterTitle`
+- JS `toc(result)` chapter URL detection now recognizes:
+  - `href`, `path`, `contentUrl`, `content_url`, `readUrl`, `read_url`, `chapter_url`
+- This lets rules with only `chapterList: <js>toc(result)</js>` parse returned objects like `{chapterTitle:"...", href:"..."}` without needing explicit Legado field mappings.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function toc field aliases"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function toc container results"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`: no compile errors; existing info-level lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado_parser.dart`: JS TOC chapter title/url aliases.
+  - `test/legado_engine_test.dart`: targeted TOC field alias coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Support JS bookInfo TOC URL aliases
 
 ### What was done

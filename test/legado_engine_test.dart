@@ -2746,6 +2746,52 @@ function toc(result) {
       expect(chapters.last.title, 'Chapter B');
     });
 
+    test('parses imported js function toc field aliases', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Toc Aliases'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function toc(result) {
+  return {
+    list: [
+      {chapterTitle: "Alias Chapter 1", href: "/read/1"},
+      {text: "Alias Chapter 2", path: "/read/2"}
+    ]
+  };
+}
+''',
+        })
+        ..ruleToc = jsonEncode({'chapterList': '<js>toc(result)</js>'});
+      final book = Book(
+        title: 'Novel',
+        author: 'Author',
+        filePath: 'https://js.example.com/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '<html><body>ignored by js toc aliases</body></html>',
+        requestOptions: RequestOptions(path: 'https://js.example.com/book/1'),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters, hasLength(2));
+      expect(chapters.first.title, 'Alias Chapter 1');
+      expect(chapters.first.url, 'https://js.example.com/read/1');
+      expect(chapters.last.title, 'Alias Chapter 2');
+      expect(chapters.last.url, 'https://js.example.com/read/2');
+    });
+
     test('parses imported js function content results', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
