@@ -1780,6 +1780,56 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(parsed.filePath, 'https://example.com/book/159555/');
     });
 
+    test('uses imported js bookInfo chapter list url aliases', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'JS BookInfo Alias'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function bookInfo(result) {
+  return {
+    title: "Alias Book",
+    writer: "Alias Author",
+    chapterListUrl: "/book/1/catalog",
+    img: "/cover.jpg"
+  };
+}
+''',
+        })
+        ..ruleBookInfo = jsonEncode({
+          'init': '<js>bookInfo(result)</js>',
+          'name': r'$.title',
+          'author': r'$.writer',
+          'coverUrl': r'$.img',
+        });
+      final book = Book(
+        title: 'Original',
+        author: 'Unknown',
+        filePath: 'https://js.example.com/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '<html><body>ignored by js bookInfo</body></html>',
+        statusCode: 200,
+        requestOptions: RequestOptions(path: book.filePath),
+      );
+
+      final parsed = await LegadoParser.parseBookInfo(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(parsed.title, 'Alias Book');
+      expect(parsed.author, 'Alias Author');
+      expect(parsed.filePath, 'https://js.example.com/book/1/catalog');
+      expect(parsed.coverPath, 'https://js.example.com/cover.jpg');
+    });
+
     test('does not build data toc url from missing json book id', () async {
       final source = BookSource()
         ..bookSourceName = 'Missing Json Toc Id Source'

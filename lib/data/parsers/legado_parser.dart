@@ -2446,7 +2446,15 @@ class LegadoParser {
       ),
     );
     final bookUrlRule = isBookInfo
-        ? (rule['tocUrl'] ?? rule['catalogUrl'] ?? rule['bookUrl'])
+        ? (rule['tocUrl'] ??
+              rule['catalogUrl'] ??
+              rule['chapterUrl'] ??
+              rule['chapterListUrl'] ??
+              rule['chaptersUrl'] ??
+              rule['listUrl'] ??
+              rule['menuUrl'] ??
+              rule['readUrl'] ??
+              rule['bookUrl'])
         : (rule['bookUrl'] ?? rule['tocUrl'] ?? rule['catalogUrl']);
     final bookUrl = _cleanRuleOutput(
       _extractJsonValue(
@@ -2466,6 +2474,18 @@ class LegadoParser {
             'tocurl',
             'catalogUrl',
             'catalogurl',
+            'chapterUrl',
+            'chapterurl',
+            'chapterListUrl',
+            'chapterlisturl',
+            'chaptersUrl',
+            'chaptersurl',
+            'listUrl',
+            'listurl',
+            'menuUrl',
+            'menuurl',
+            'readUrl',
+            'readurl',
             'bookId',
             'BookId',
             'book_id',
@@ -2645,7 +2665,15 @@ class LegadoParser {
         book: contextBook,
       );
       final bookUrlRule = isBookInfo
-          ? (rule['tocUrl'] ?? rule['catalogUrl'] ?? rule['bookUrl'])
+          ? (rule['tocUrl'] ??
+                rule['catalogUrl'] ??
+                rule['chapterUrl'] ??
+                rule['chapterListUrl'] ??
+                rule['chaptersUrl'] ??
+                rule['listUrl'] ??
+                rule['menuUrl'] ??
+                rule['readUrl'] ??
+                rule['bookUrl'])
           : (rule['bookUrl'] ?? rule['tocUrl'] ?? rule['catalogUrl']);
       final bookUrl = await _resolveJsonAjaxFieldValue(
         source,
@@ -2665,6 +2693,18 @@ class LegadoParser {
             'catalogUrl',
             'tocurl',
             'catalogurl',
+            'chapterUrl',
+            'chapterurl',
+            'chapterListUrl',
+            'chapterlisturl',
+            'chaptersUrl',
+            'chaptersurl',
+            'listUrl',
+            'listurl',
+            'menuUrl',
+            'menuurl',
+            'readUrl',
+            'readurl',
             'bookId',
             'BookId',
             'book_id',

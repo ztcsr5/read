@@ -61,6 +61,29 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Support JS bookInfo TOC URL aliases
+
+### What was done
+- Improved `ruleBookInfo` / imported JS `bookInfo(result)` compatibility for detail pages that return directory entry fields under non-Legado names.
+- Book info URL extraction now recognizes additional TOC/catalog aliases:
+  - `chapterUrl`, `chapterListUrl`, `chaptersUrl`
+  - `listUrl`, `menuUrl`, `readUrl`
+- The aliases apply to both normal JSON parsing and async/ajax-resolved JSON fields.
+- This targets function-style sources where `bookInfo()` returns objects such as `{chapterListUrl: "/book/1/catalog"}` rather than `{tocUrl: "..."}`.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "uses imported js bookInfo chapter list url aliases"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "keeps original book url when book info has no tocUrl rule"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`: no compile errors; existing info-level lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado_parser.dart`: bookInfo TOC/catalog alias extraction.
+  - `test/legado_engine_test.dart`: JS bookInfo alias coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Map JS search field aliases into Book metadata
 
 ### What was done
