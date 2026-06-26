@@ -1460,6 +1460,44 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(value, '斗破苍穹|900150983cd24fb0d6963f7d28e17f72');
     });
 
+    test('injects source book and chapter convenience aliases', () {
+      final engine = LegadoJsEngine();
+      if (!engine.isAvailable) return;
+      final value = engine.evaluate(
+        [
+          'source.getName()',
+          'source.getSourceUrl()',
+          'book.getName()',
+          'book.getBookUrl()',
+          'book.getTocUrl()',
+          'chapter.getTitle()',
+          'chapter.getChapterUrl()',
+          'chapter.getChapterIndex()',
+        ].join(' + "|" + '),
+        variables: {
+          'source': {
+            'bookSourceName': 'Source A',
+            'bookSourceUrl': 'https://source.example',
+          },
+          'book': {
+            'name': 'Book A',
+            'bookUrl': 'https://source.example/book/1',
+            'tocUrl': 'https://source.example/book/1/toc',
+          },
+          'chapter': {
+            'title': 'Chapter A',
+            'chapterUrl': 'https://source.example/book/1/1.html',
+            'chapterIndex': 7,
+          },
+        },
+      );
+
+      expect(
+        value,
+        'Source A|https://source.example|Book A|https://source.example/book/1|https://source.example/book/1/toc|Chapter A|https://source.example/book/1/1.html|7',
+      );
+    });
+
     test('resolves ajax calls through Dart callback', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final value = await LegadoJsEngine().evaluateWithAjax(

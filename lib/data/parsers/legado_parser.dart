@@ -3835,7 +3835,9 @@ class LegadoParser {
           : LegadoSessionStore.userAgentFor(sourceUri) ?? '',
       'source': {
         'key': sourceUrl,
+        'sourceUrl': sourceUrl,
         'bookSourceUrl': sourceUrl,
+        'sourceName': source.bookSourceName,
         'bookSourceName': source.bookSourceName,
         'bookSourceGroup': source.bookSourceGroup ?? '',
         'bookSourceType': source.bookSourceType,
@@ -3883,6 +3885,7 @@ class LegadoParser {
       'author': book.author,
       'bookUrl': book.filePath,
       'url': book.filePath,
+      'filePath': book.filePath,
       'origin': origin ?? '',
       'bookSourceUrl': origin ?? '',
       'coverUrl': book.coverPath ?? '',
@@ -3901,8 +3904,11 @@ class LegadoParser {
       'title': chapter?.title ?? '',
       'name': chapter?.title ?? '',
       'url': chapter?.url ?? chapter?.content ?? fallbackUrl ?? '',
+      'chapterUrl': chapter?.url ?? chapter?.content ?? fallbackUrl ?? '',
       'index': chapter?.index ?? 0,
+      'chapterIndex': chapter?.index ?? 0,
       'content': chapter?.content ?? '',
+      'isVolume': false,
       'variable': '',
     };
   }

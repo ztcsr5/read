@@ -3865,6 +3865,11 @@ const cookie = {
 function __installSourceAndBook() {
   if (globalThis.source == null || typeof globalThis.source !== "object") globalThis.source = {};
   source.getKey = function() { return source.key || source.bookSourceUrl || source.bookSourceUrlName || ""; };
+  source.sourceUrl = source.sourceUrl || source.bookSourceUrl || source.key || "";
+  source.sourceName = source.sourceName || source.bookSourceName || "";
+  source.getName = function() { return source.bookSourceName || source.sourceName || ""; };
+  source.getUrl = function() { return source.bookSourceUrl || source.sourceUrl || source.key || ""; };
+  source.getSourceUrl = source.getUrl;
   source.getVariable = function(key) {
     if (arguments.length > 0 && key != null && __str(key) !== "") return java.get("source.variable." + __str(key));
     return source.variable || java.get("source.variable") || "";
@@ -3886,7 +3891,20 @@ function __installSourceAndBook() {
   source.getLoginInfoMap = function() { return { get: function(k) { return java.get("source.login." + __str(k)); } }; };
   source.putLoginHeader = function(k, v) { return java.put("source.loginHeader." + __str(k || ""), v == null ? "" : __str(v)); };
   source.getLoginHeader = function(k) { return java.get("source.loginHeader." + __str(k || "")); };
+  source.putVariable = source.setVariable;
   if (globalThis.book == null || typeof globalThis.book !== "object") globalThis.book = {};
+  book.name = book.name || book.title || "";
+  book.title = book.title || book.name || "";
+  book.bookUrl = book.bookUrl || book.url || book.filePath || "";
+  book.url = book.url || book.bookUrl || book.filePath || "";
+  book.tocUrl = book.tocUrl || book.bookUrl || book.url || "";
+  book.getName = function() { return book.name || book.title || ""; };
+  book.getTitle = book.getName;
+  book.getAuthor = function() { return book.author || ""; };
+  book.getBookUrl = function() { return book.bookUrl || book.url || ""; };
+  book.getUrl = book.getBookUrl;
+  book.getTocUrl = function() { return book.tocUrl || book.bookUrl || book.url || ""; };
+  book.getOrigin = function() { return book.origin || book.bookSourceUrl || ""; };
   book.getVariable = function(key) {
     if (arguments.length > 0 && key != null && __str(key) !== "") return java.get("book.variable." + __str(key));
     return book.variable || java.get("book.variable") || "";
@@ -3897,7 +3915,20 @@ function __installSourceAndBook() {
     java.put("book.variable", book.variable);
     return book.variable;
   };
+  book.putVariable = book.setVariable;
   if (globalThis.chapter == null || typeof globalThis.chapter !== "object") globalThis.chapter = {};
+  chapter.name = chapter.name || chapter.title || "";
+  chapter.title = chapter.title || chapter.name || "";
+  chapter.chapterUrl = chapter.chapterUrl || chapter.url || chapter.content || "";
+  chapter.url = chapter.url || chapter.chapterUrl || chapter.content || "";
+  chapter.chapterIndex = chapter.chapterIndex == null ? (chapter.index || 0) : chapter.chapterIndex;
+  chapter.index = chapter.index == null ? chapter.chapterIndex : chapter.index;
+  chapter.getName = function() { return chapter.name || chapter.title || ""; };
+  chapter.getTitle = chapter.getName;
+  chapter.getUrl = function() { return chapter.url || chapter.chapterUrl || ""; };
+  chapter.getChapterUrl = chapter.getUrl;
+  chapter.getIndex = function() { return chapter.index || chapter.chapterIndex || 0; };
+  chapter.getChapterIndex = chapter.getIndex;
   chapter.isVip = function() {
     const title = String(chapter.title || chapter.name || "").toLowerCase();
     return title.indexOf("vip") >= 0 || title.indexOf("订阅") >= 0 || title.indexOf("付费") >= 0;
@@ -4041,6 +4072,11 @@ async function __stringifyResult(value) {
         }
         if (typeof source !== 'undefined' && source !== null) {
           source.getKey = function() { return source.key || source.bookSourceUrl || ""; };
+          source.sourceUrl = source.sourceUrl || source.bookSourceUrl || source.key || "";
+          source.sourceName = source.sourceName || source.bookSourceName || "";
+          source.getName = function() { return source.bookSourceName || source.sourceName || ""; };
+          source.getUrl = function() { return source.bookSourceUrl || source.sourceUrl || source.key || ""; };
+          source.getSourceUrl = source.getUrl;
           source.getVariable = function(key) {
             if (arguments.length > 0 && key != null && String(key) !== "") {
               return java.get("source.variable." + String(key)) || "";
@@ -4086,11 +4122,24 @@ async function __stringifyResult(value) {
           source.getLoginHeader = function(k) {
             return java.get("source.loginHeader." + String(k || "")) || "";
           };
+          source.putVariable = source.setVariable;
           source.loginUrl = source.loginUrl || "";
         }
         if (typeof book === 'undefined' || book === null) {
           var book = {};
         }
+        book.name = book.name || book.title || "";
+        book.title = book.title || book.name || "";
+        book.bookUrl = book.bookUrl || book.url || book.filePath || "";
+        book.url = book.url || book.bookUrl || book.filePath || "";
+        book.tocUrl = book.tocUrl || book.bookUrl || book.url || "";
+        book.getName = function() { return book.name || book.title || ""; };
+        book.getTitle = book.getName;
+        book.getAuthor = function() { return book.author || ""; };
+        book.getBookUrl = function() { return book.bookUrl || book.url || ""; };
+        book.getUrl = book.getBookUrl;
+        book.getTocUrl = function() { return book.tocUrl || book.bookUrl || book.url || ""; };
+        book.getOrigin = function() { return book.origin || book.bookSourceUrl || ""; };
         book.getVariable = function(key) {
           if (arguments.length > 0 && key != null && String(key) !== "") {
             return java.get("book.variable." + String(key)) || "";
@@ -4108,9 +4157,22 @@ async function __stringifyResult(value) {
           java.put("book.variable", book.variable);
           return book.variable;
         };
+        book.putVariable = book.setVariable;
         if (typeof chapter === 'undefined' || chapter === null) {
           var chapter = {};
         }
+        chapter.name = chapter.name || chapter.title || "";
+        chapter.title = chapter.title || chapter.name || "";
+        chapter.chapterUrl = chapter.chapterUrl || chapter.url || chapter.content || "";
+        chapter.url = chapter.url || chapter.chapterUrl || chapter.content || "";
+        chapter.chapterIndex = chapter.chapterIndex == null ? (chapter.index || 0) : chapter.chapterIndex;
+        chapter.index = chapter.index == null ? chapter.chapterIndex : chapter.index;
+        chapter.getName = function() { return chapter.name || chapter.title || ""; };
+        chapter.getTitle = chapter.getName;
+        chapter.getUrl = function() { return chapter.url || chapter.chapterUrl || ""; };
+        chapter.getChapterUrl = chapter.getUrl;
+        chapter.getIndex = function() { return chapter.index || chapter.chapterIndex || 0; };
+        chapter.getChapterIndex = chapter.getIndex;
         chapter.isVip = function() {
           var title = String(chapter.title || chapter.name || "").toLowerCase();
           return title.indexOf("vip") >= 0 || title.indexOf("订阅") >= 0 || title.indexOf("付费") >= 0;

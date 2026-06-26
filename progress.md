@@ -61,6 +61,39 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add JS source/book/chapter context aliases
+
+### What was done
+- Extended JS runtime context compatibility for Legado / iOS-compatible / function-style sources.
+- Added source aliases and helpers:
+  - `source.sourceUrl`, `source.sourceName`
+  - `source.getName()`, `source.getUrl()`, `source.getSourceUrl()`
+  - `source.putVariable()` as an alias of `source.setVariable()`
+- Added book aliases and helpers:
+  - normalized `book.name/title`, `book.bookUrl/url/filePath`, `book.tocUrl`
+  - `book.getName()`, `book.getTitle()`, `book.getAuthor()`, `book.getBookUrl()`, `book.getUrl()`, `book.getTocUrl()`, `book.getOrigin()`
+  - `book.putVariable()` as an alias of `book.setVariable()`
+- Added chapter aliases and helpers:
+  - `chapter.chapterUrl`, `chapter.chapterIndex`, `chapter.isVolume`
+  - `chapter.getName()`, `chapter.getTitle()`, `chapter.getUrl()`, `chapter.getChapterUrl()`, `chapter.getIndex()`, `chapter.getChapterIndex()`
+- Updated parser-side JS variable maps so generated `source`, `book`, and `chapter` objects expose the same common field names before JS methods are injected.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "injects source book and chapter convenience aliases"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran parser context regression tests:
+  - `uses book and chapter context variables for content rules`: passed.
+  - `uses book context variables for detail toc url templates`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 24 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: runtime source/book/chapter helper aliases.
+  - `lib/data/parsers/legado_parser.dart`: parser-side context field aliases.
+  - `test/legado_engine_test.dart`: targeted context alias coverage.
+- Rollback: revert the three changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add fetch/request JS bridge aliases
 
 ### What was done
