@@ -258,7 +258,10 @@ class LegacyJsEvaluator {
   }
 
   /// 求值一个 JS 表达式(无 declaration/if)。
-  static dynamic evaluateExpression(String expr, {Map<String, dynamic>? variables}) {
+  static dynamic evaluateExpression(
+    String expr, {
+    Map<String, dynamic>? variables,
+  }) {
     final cleanExpr = _stripComments(expr);
     final stripped = _stripCommentsAndStrings(cleanExpr);
     if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
@@ -332,7 +335,10 @@ class LegacyJsEvaluator {
 
   // ============== statement 求值 ==============
 
-  static dynamic _evaluateStatement(String stmt, Map<String, dynamic> variables) {
+  static dynamic _evaluateStatement(
+    String stmt,
+    Map<String, dynamic> variables,
+  ) {
     var s = stmt.trim();
     if (s.isEmpty) return null;
 
@@ -453,7 +459,9 @@ class LegacyJsEvaluator {
     final inside = s.substring(parenStart + 1, parenEnd).trim();
 
     // 判断 for-in 形式: for (var x in list)
-    final forInMatch = RegExp(r'^\s*(?:var|let|const)?\s*([a-zA-Z_\$][\w\$]*)\s+in\s+(.+)$').firstMatch(inside);
+    final forInMatch = RegExp(
+      r'^\s*(?:var|let|const)?\s*([a-zA-Z_\$][\w\$]*)\s+in\s+(.+)$',
+    ).firstMatch(inside);
     if (forInMatch != null) {
       final varName = forInMatch.group(1)!;
       final listExpr = forInMatch.group(2)!;
@@ -516,7 +524,9 @@ class LegacyJsEvaluator {
   }
 
   static void _executeIncrement(String incr, Map<String, dynamic> variables) {
-    final m = RegExp(r'^([a-zA-Z_\$][a-zA-Z0-9_\$]*)\s*(\+\+|--)\s*$').firstMatch(incr.trim());
+    final m = RegExp(
+      r'^([a-zA-Z_\$][a-zA-Z0-9_\$]*)\s*(\+\+|--)\s*$',
+    ).firstMatch(incr.trim());
     if (m != null) {
       final name = m.group(1)!;
       final op = m.group(2)!;
@@ -636,11 +646,15 @@ class LegacyJsEvaluator {
       if (c == 0x7d) braceDepth--;
       if (c == 0x5b) bracketDepth++;
       if (c == 0x5d) bracketDepth--;
-      if (c == 0x3d && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0) {
+      if (c == 0x3d &&
+          parenDepth == 0 &&
+          braceDepth == 0 &&
+          bracketDepth == 0) {
         // != / == / === / !==
         if (i > 0) {
           final prev = stmt.codeUnitAt(i - 1);
-          if (prev == 0x21 || prev == 0x3d || prev == 0x3c || prev == 0x3e) continue;
+          if (prev == 0x21 || prev == 0x3d || prev == 0x3c || prev == 0x3e)
+            continue;
         }
         if (i + 1 < stmt.length) {
           final next = stmt.codeUnitAt(i + 1);
@@ -648,16 +662,20 @@ class LegacyJsEvaluator {
         }
         final left = stmt.substring(0, i).trim();
         final right = stmt.substring(i + 1).trim();
-        
+
         var realLeft = left;
         var op = '';
-        if (left.endsWith('+') || left.endsWith('-') || left.endsWith('*') || left.endsWith('/')) {
+        if (left.endsWith('+') ||
+            left.endsWith('-') ||
+            left.endsWith('*') ||
+            left.endsWith('/')) {
           op = left.substring(left.length - 1);
           realLeft = left.substring(0, left.length - 1).trim();
         }
-        
-        final leftClean =
-            realLeft.replaceFirst(RegExp(r'^(var|let|const)\s+'), '').trim();
+
+        final leftClean = realLeft
+            .replaceFirst(RegExp(r'^(var|let|const)\s+'), '')
+            .trim();
         if (RegExp(r'^[a-zA-Z_\$][a-zA-Z0-9_\$]*$').hasMatch(leftClean)) {
           if (op.isNotEmpty) {
             return (leftClean, '$leftClean $op ($right)');
@@ -726,7 +744,9 @@ class LegacyJsEvaluator {
       final p1 = arrowMatch.group(1);
       final p2 = arrowMatch.group(2);
       if (p1 != null) {
-        paramsList.addAll(p1.split(',').map((p) => p.trim()).where((p) => p.isNotEmpty));
+        paramsList.addAll(
+          p1.split(',').map((p) => p.trim()).where((p) => p.isNotEmpty),
+        );
       } else if (p2 != null && p2.isNotEmpty) {
         paramsList.add(p2.trim());
       }
@@ -767,10 +787,7 @@ class LegacyJsEvaluator {
     // 括号
     if (e.startsWith('(') && e.endsWith(')')) {
       if (_hasMatchingOuterParens(e)) {
-        return _evaluateExpressionPart(
-          e.substring(1, e.length - 1),
-          variables,
-        );
+        return _evaluateExpressionPart(e.substring(1, e.length - 1), variables);
       }
     }
 
@@ -877,7 +894,10 @@ class LegacyJsEvaluator {
 
   /// 解析 a.b.c(args).d.e 链式表达式,从左到右。
   /// 返回最终结果。失败返回 null。
-  static ({dynamic value})? _tryParseChain(String e, Map<String, dynamic> variables) {
+  static ({dynamic value})? _tryParseChain(
+    String e,
+    Map<String, dynamic> variables,
+  ) {
     // 找到第一个 "(" 或 "[" 或 "." 分割的入口
     // 形式: BASE(.MEMBER | [INDEX] | (ARGS))*
     var i = 0;
@@ -896,7 +916,8 @@ class LegacyJsEvaluator {
 
     if (head.$2 == null) {
       // 单纯是字面量或变量
-      final isNamespace = head.$1 == 'CryptoJS' ||
+      final isNamespace =
+          head.$1 == 'CryptoJS' ||
           head.$1 == 'java' ||
           head.$1 == 'Math' ||
           head.$1 == 'String' ||
@@ -1137,11 +1158,7 @@ class LegacyJsEvaluator {
 
   // ============== 函数调用 ==============
 
-  static dynamic _callMethod(
-    dynamic obj,
-    String method,
-    List<dynamic> args,
-  ) {
+  static dynamic _callMethod(dynamic obj, String method, List<dynamic> args) {
     if (obj is _JsObject) {
       // .toString() / .toString(encoding) — CryptoJS 兼容
       if (method == 'toString') {
@@ -1255,8 +1272,12 @@ class LegacyJsEvaluator {
         if (args.isEmpty) return str;
         final start = args.length > 0 ? _toInt(args[0]) : 0;
         final end = args.length > 1 ? _toInt(args[1]) : str.length;
-        final s = start < 0 ? (str.length + start).clamp(0, str.length) : start.clamp(0, str.length);
-        final e = end < 0 ? (str.length + end).clamp(0, str.length) : end.clamp(0, str.length);
+        final s = start < 0
+            ? (str.length + start).clamp(0, str.length)
+            : start.clamp(0, str.length);
+        final e = end < 0
+            ? (str.length + end).clamp(0, str.length)
+            : end.clamp(0, str.length);
         return e >= s ? str.substring(s, e) : '';
       case 'charAt':
         if (args.isEmpty) return '';
@@ -1324,8 +1345,12 @@ class LegacyJsEvaluator {
         if (args.isEmpty) return list;
         final start = args.length > 0 ? _toInt(args[0]) : 0;
         final end = args.length > 1 ? _toInt(args[1]) : list.length;
-        final s = start < 0 ? (list.length + start).clamp(0, list.length) : start.clamp(0, list.length);
-        final e = end < 0 ? (list.length + end).clamp(0, list.length) : end.clamp(0, list.length);
+        final s = start < 0
+            ? (list.length + start).clamp(0, list.length)
+            : start.clamp(0, list.length);
+        final e = end < 0
+            ? (list.length + end).clamp(0, list.length)
+            : end.clamp(0, list.length);
         return list.sublist(s, e);
       case 'concat':
         return [...list, ...args];
@@ -1425,7 +1450,9 @@ class LegacyJsEvaluator {
     if (args.isEmpty) return null;
     final fn = args[0];
     if (!_isCallable(fn)) return null;
-    dynamic acc = args.length > 1 ? args[1] : (list.isNotEmpty ? list[0] : null);
+    dynamic acc = args.length > 1
+        ? args[1]
+        : (list.isNotEmpty ? list[0] : null);
     final startIdx = args.length > 1 ? 0 : 1;
     for (var i = startIdx; i < list.length; i++) {
       try {
@@ -1479,7 +1506,10 @@ class LegacyJsEvaluator {
       final body = pattern.substring(1, lastSlash);
       final flags = pattern.substring(lastSlash + 1);
       final global = flags.contains('g');
-      return (regex: RegExp(body, caseSensitive: !flags.contains('i')), global: global);
+      return (
+        regex: RegExp(body, caseSensitive: !flags.contains('i')),
+        global: global,
+      );
     } catch (_) {
       return null;
     }
@@ -1566,7 +1596,8 @@ class LegacyJsEvaluator {
         return DateTime.now().millisecondsSinceEpoch;
       case 'Date.parse':
         if (args.isEmpty) return 0;
-        return DateTime.tryParse(args[0].toString())?.millisecondsSinceEpoch ?? 0;
+        return DateTime.tryParse(args[0].toString())?.millisecondsSinceEpoch ??
+            0;
       case 'Date.UTC':
         if (args.isEmpty) return 0;
         return DateTime.utc(
@@ -1590,7 +1621,7 @@ class LegacyJsEvaluator {
           sign = -1;
           s = s.substring(1);
         }
-        
+
         if (args.length > 1) {
           base = _toInt(args[1]);
         } else {
@@ -1598,13 +1629,13 @@ class LegacyJsEvaluator {
             base = 16;
           }
         }
-        
+
         if (base < 2 || base > 36) return 0;
-        
+
         if (base == 16 && (s.startsWith('0x') || s.startsWith('0X'))) {
           s = s.substring(2);
         }
-        
+
         final buffer = StringBuffer();
         for (var i = 0; i < s.length; i++) {
           final char = s[i].toLowerCase();
@@ -1623,22 +1654,22 @@ class LegacyJsEvaluator {
             break;
           }
         }
-        
+
         if (buffer.isEmpty) return 0;
         return (int.tryParse(buffer.toString(), radix: base) ?? 0) * sign;
 
       case 'parseFloat':
         if (args.isEmpty) return 0;
         final str = args[0].toString().trim();
-        final match = RegExp(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?').stringMatch(str);
+        final match = RegExp(
+          r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?',
+        ).stringMatch(str);
         if (match == null) return 0.0;
         return double.tryParse(match) ?? 0.0;
       case 'isNaN':
         return args.isEmpty ? true : (args[0] is num && args[0].isNaN);
       case 'isFinite':
-        return args.isEmpty
-            ? false
-            : (args[0] is num && args[0].isFinite);
+        return args.isEmpty ? false : (args[0] is num && args[0].isFinite);
 
       case 'encodeURI':
         if (args.isEmpty) return '';
@@ -1676,13 +1707,19 @@ class LegacyJsEvaluator {
 
       case 'MD5':
         if (args.isEmpty) return '';
-        return crypto_pkg.md5.convert(utf8.encode(args[0].toString())).toString();
+        return crypto_pkg.md5
+            .convert(utf8.encode(args[0].toString()))
+            .toString();
       case 'SHA1':
         if (args.isEmpty) return '';
-        return crypto_pkg.sha1.convert(utf8.encode(args[0].toString())).toString();
+        return crypto_pkg.sha1
+            .convert(utf8.encode(args[0].toString()))
+            .toString();
       case 'SHA256':
         if (args.isEmpty) return '';
-        return crypto_pkg.sha256.convert(utf8.encode(args[0].toString())).toString();
+        return crypto_pkg.sha256
+            .convert(utf8.encode(args[0].toString()))
+            .toString();
 
       case 'JSON.parse':
         if (args.isEmpty) return null;
@@ -1694,6 +1731,9 @@ class LegacyJsEvaluator {
       case 'JSON.stringify':
         if (args.isEmpty) return '';
         return jsonEncode(args[0]);
+
+      case 'importScript':
+        return args.isEmpty ? '' : args[0].toString();
 
       case 'Number':
         if (args.isEmpty) return 0;
@@ -1712,7 +1752,9 @@ class LegacyJsEvaluator {
           final code = args[0]?.toString() ?? '';
           final cleanCode = _stripComments(code);
           final stripped = _stripCommentsAndStrings(cleanCode);
-          if (RegExp(r'\b(async|await|with|class|yield)\b').hasMatch(stripped)) {
+          if (RegExp(
+            r'\b(async|await|with|class|yield)\b',
+          ).hasMatch(stripped)) {
             throw LegacyJsEvalError('Unsupported keyword in eval: $code');
           }
           // 关键:不复制 variables map,直接 splitStatements → evaluateStatement
@@ -1747,7 +1789,9 @@ class LegacyJsEvaluator {
         return <dynamic>[];
       case 'Object.assign':
         if (args.length < 2) return args.isNotEmpty ? args[0] : null;
-        final target = args[0] is Map ? Map<String, dynamic>.from(args[0] as Map) : <String, dynamic>{};
+        final target = args[0] is Map
+            ? Map<String, dynamic>.from(args[0] as Map)
+            : <String, dynamic>{};
         for (var i = 1; i < args.length; i++) {
           final src = args[i];
           if (src is Map) {
@@ -1782,7 +1826,13 @@ class LegacyJsEvaluator {
       case 'ajax':
       case 'post':
       case 'connect':
-        throw LegacyJsEvalError('Network request not supported in LegacyJsEvaluator');
+        throw LegacyJsEvalError(
+          'Network request not supported in LegacyJsEvaluator',
+        );
+      case 'getResponseCode':
+        return 200;
+      case 'importScript':
+        return args.isEmpty ? '' : args[0].toString();
       case 'get':
         if (args.isEmpty) return '';
         final key = args[0].toString();
@@ -1816,7 +1866,9 @@ class LegacyJsEvaluator {
         return args.length > 1 ? args[1]?.toString() ?? '' : '';
       case 'md5Encode':
         if (args.isEmpty) return '';
-        return crypto_pkg.md5.convert(utf8.encode(args[0].toString())).toString();
+        return crypto_pkg.md5
+            .convert(utf8.encode(args[0].toString()))
+            .toString();
       case 'base64Encode':
         if (args.isEmpty) return '';
         return base64.encode(utf8.encode(args[0].toString()));
@@ -1898,7 +1950,8 @@ class LegacyJsEvaluator {
         final charset = args.length > 1
             ? args[1].toString().replaceAll(RegExp("[\"']"), '')
             : 'utf-8';
-        if (charset.toLowerCase() == 'gbk' || charset.toLowerCase() == 'gb2312') {
+        if (charset.toLowerCase() == 'gbk' ||
+            charset.toLowerCase() == 'gb2312') {
           // fast_gbk 顶层暴露 gbk.encode,失败时回退 utf8.encode
           List<int> bytes;
           try {
@@ -1907,26 +1960,38 @@ class LegacyJsEvaluator {
             bytes = utf8.encode(str);
           }
           return bytes
-              .map((b) =>
-                  '%' + b.toRadixString(16).padLeft(2, '0').toUpperCase())
+              .map(
+                (b) => '%' + b.toRadixString(16).padLeft(2, '0').toUpperCase(),
+              )
               .join();
         }
         return Uri.encodeComponent(str);
       case 'hmacHex':
       case 'HMacHex':
         if (args.length < 3) return '';
-        return _hmacHex(args[0].toString(), args[1].toString(), args[2].toString());
+        return _hmacHex(
+          args[0].toString(),
+          args[1].toString(),
+          args[2].toString(),
+        );
       case 'hmacBase64':
       case 'HMacBase64':
         if (args.length < 3) return '';
-        return _hmacBase64(args[0].toString(), args[1].toString(), args[2].toString());
+        return _hmacBase64(
+          args[0].toString(),
+          args[1].toString(),
+          args[2].toString(),
+        );
       case 'decodeURI':
         if (args.isEmpty) return '';
         return Uri.decodeComponent(args[0].toString());
       case 'digestHex':
         if (args.length < 2) return '';
         final val = args[0].toString();
-        final alg = args[1].toString().toLowerCase().replaceAll(RegExp(r'^sha-?'), 'sha');
+        final alg = args[1].toString().toLowerCase().replaceAll(
+          RegExp(r'^sha-?'),
+          'sha',
+        );
         if (alg == 'md5') {
           return crypto_pkg.md5.convert(utf8.encode(val)).toString();
         } else if (alg == 'sha1') {
@@ -1947,8 +2012,17 @@ class LegacyJsEvaluator {
         final keyAes = args[1].toString();
         final thirdAes = args.length > 2 ? args[2] : null;
         final fourthAes = args.length > 3 ? args[3] : null;
-        final normAes = _normalizeTransformation(thirdAes, fourthAes, 'AES/CBC/PKCS5Padding');
-        return _cipherBase64Encode(valueAes, keyAes, normAes.iv, normAes.transformation);
+        final normAes = _normalizeTransformation(
+          thirdAes,
+          fourthAes,
+          'AES/CBC/PKCS5Padding',
+        );
+        return _cipherBase64Encode(
+          valueAes,
+          keyAes,
+          normAes.iv,
+          normAes.transformation,
+        );
       case 'desEncodeToBase64String':
       case 'desEncodeToBase64':
         if (args.length < 2) return '';
@@ -1956,25 +2030,52 @@ class LegacyJsEvaluator {
         final keyDes = args[1].toString();
         final thirdDes = args.length > 2 ? args[2] : null;
         final fourthDes = args.length > 3 ? args[3] : null;
-        final normDes = _normalizeTransformation(thirdDes, fourthDes, 'DES/CBC/PKCS5Padding');
-        return _cipherBase64Encode(valueDes, keyDes, normDes.iv, normDes.transformation);
+        final normDes = _normalizeTransformation(
+          thirdDes,
+          fourthDes,
+          'DES/CBC/PKCS5Padding',
+        );
+        return _cipherBase64Encode(
+          valueDes,
+          keyDes,
+          normDes.iv,
+          normDes.transformation,
+        );
       case 'tripleDESEncodeBase64Str':
         if (args.length < 2) return '';
         final valueTriple = args[0].toString();
         final keyTriple = args[1].toString();
-        final modeTriple = args.length > 2 ? args[2]?.toString() ?? 'CBC' : 'CBC';
-        final paddingTriple = args.length > 3 ? args[3]?.toString() ?? 'PKCS5Padding' : 'PKCS5Padding';
+        final modeTriple = args.length > 2
+            ? args[2]?.toString() ?? 'CBC'
+            : 'CBC';
+        final paddingTriple = args.length > 3
+            ? args[3]?.toString() ?? 'PKCS5Padding'
+            : 'PKCS5Padding';
         final ivTriple = args.length > 4 ? args[4]?.toString() ?? '' : '';
         final transformationTriple = 'DESede/$modeTriple/$paddingTriple';
-        return _cipherBase64Encode(valueTriple, keyTriple, ivTriple, transformationTriple);
+        return _cipherBase64Encode(
+          valueTriple,
+          keyTriple,
+          ivTriple,
+          transformationTriple,
+        );
       case 'cipherEncodeToBase64String':
         if (args.length < 2) return '';
         final valueCipher = args[0].toString();
         final keyCipher = args[1].toString();
         final thirdCipher = args.length > 2 ? args[2] : null;
         final fourthCipher = args.length > 3 ? args[3] : null;
-        final normCipher = _normalizeTransformation(thirdCipher, fourthCipher, 'AES/CBC/PKCS5Padding');
-        return _cipherBase64Encode(valueCipher, keyCipher, normCipher.iv, normCipher.transformation);
+        final normCipher = _normalizeTransformation(
+          thirdCipher,
+          fourthCipher,
+          'AES/CBC/PKCS5Padding',
+        );
+        return _cipherBase64Encode(
+          valueCipher,
+          keyCipher,
+          normCipher.iv,
+          normCipher.transformation,
+        );
     }
     throw LegacyJsEvalError('Unsupported java method: $method');
   }
@@ -1992,19 +2093,28 @@ class LegacyJsEvaluator {
         if (parts.length == 1) {
           // CryptoJS.MD5(s) → _JsObject{ toString: () => hex }
           final s = args.isNotEmpty ? args[0].toString() : '';
-          return _JsObject({'__toString': () => crypto_pkg.md5.convert(utf8.encode(s)).toString()});
+          return _JsObject({
+            '__toString': () =>
+                crypto_pkg.md5.convert(utf8.encode(s)).toString(),
+          });
         }
         return null;
       case 'SHA1':
         if (parts.length == 1) {
           final s = args.isNotEmpty ? args[0].toString() : '';
-          return _JsObject({'__toString': () => crypto_pkg.sha1.convert(utf8.encode(s)).toString()});
+          return _JsObject({
+            '__toString': () =>
+                crypto_pkg.sha1.convert(utf8.encode(s)).toString(),
+          });
         }
         return null;
       case 'SHA256':
         if (parts.length == 1) {
           final s = args.isNotEmpty ? args[0].toString() : '';
-          return _JsObject({'__toString': () => crypto_pkg.sha256.convert(utf8.encode(s)).toString()});
+          return _JsObject({
+            '__toString': () =>
+                crypto_pkg.sha256.convert(utf8.encode(s)).toString(),
+          });
         }
         return null;
       case 'HmacSHA256':
@@ -2014,10 +2124,9 @@ class LegacyJsEvaluator {
           final key = args.length > 1 ? args[1].toString() : '';
           return _JsObject({
             '__toString': () {
-              final hmac = crypto_pkg.Hmac(
-                  crypto_pkg.sha256, utf8.encode(key));
+              final hmac = crypto_pkg.Hmac(crypto_pkg.sha256, utf8.encode(key));
               return hmac.convert(utf8.encode(msg)).toString();
-            }
+            },
           });
         }
         return null;
@@ -2062,17 +2171,11 @@ class LegacyJsEvaluator {
           }
           if (t == 'Hex' && parts.length >= 3 && parts[2] == 'parse') {
             final s = args.isNotEmpty ? args[0].toString() : '';
-            return _JsObject({
-              'words': s.codeUnits,
-              '__toString': () => s,
-            });
+            return _JsObject({'words': s.codeUnits, '__toString': () => s});
           }
           if (t == 'Base64' && parts.length >= 3 && parts[2] == 'parse') {
             final s = args.isNotEmpty ? args[0].toString() : '';
-            return _JsObject({
-              'words': s.codeUnits,
-              '__toString': () => s,
-            });
+            return _JsObject({'words': s.codeUnits, '__toString': () => s});
           }
         }
         return null;
@@ -2096,7 +2199,8 @@ class LegacyJsEvaluator {
       final ivStr = (cfg['iv'] is String) ? cfg['iv'] : '';
       final mode = (cfg['mode'] is String) ? cfg['mode'].toString() : 'CBC';
       final padding = _normalizePadding(
-          (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7');
+        (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7',
+      );
       Uint8List keyBytes = _toKeyBytes(key);
       Uint8List ivBytes = ivStr.isNotEmpty
           ? _toKeyBytes(ivStr).sublist(0, 16)
@@ -2105,17 +2209,29 @@ class LegacyJsEvaluator {
         // pointycastle 3.9.1: PaddedBlockCipher factory 用 algorithm name 注册创建
         final impl = pc.PaddedBlockCipher('AES/ECB/${padding}');
         if (impl == null) return '';
-        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.KeyParameter?>(
-            pc.KeyParameter(keyBytes), null));
+        impl.init(
+          true,
+          pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.KeyParameter?>(
+            pc.KeyParameter(keyBytes),
+            null,
+          ),
+        );
         final padded = _padPKCS7(utf8.encode(msg), 16);
         final out = impl.process(Uint8List.fromList(padded));
         return base64.encode(out);
       } else {
         final impl = pc.PaddedBlockCipher('AES/CBC/${padding}');
         if (impl == null) return '';
-        impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
+        impl.init(
+          true,
+          pc.PaddedBlockCipherParameters<
+            pc.KeyParameter,
+            pc.ParametersWithIV<pc.KeyParameter>
+          >(
             pc.KeyParameter(keyBytes),
-            pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
+            pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes),
+          ),
+        );
         final out = impl.process(Uint8List.fromList(utf8.encode(msg)));
         return base64.encode(out);
       }
@@ -2129,7 +2245,8 @@ class LegacyJsEvaluator {
       final ivStr = (cfg['iv'] is String) ? cfg['iv'] : '';
       final mode = (cfg['mode'] is String) ? cfg['mode'].toString() : 'CBC';
       final padding = _normalizePadding(
-          (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7');
+        (cfg['padding'] is String) ? cfg['padding'].toString() : 'Pkcs7',
+      );
       Uint8List keyBytes = _toKeyBytes(key);
       Uint8List ivBytes = ivStr.isNotEmpty
           ? _toKeyBytes(ivStr).sublist(0, 16)
@@ -2143,16 +2260,28 @@ class LegacyJsEvaluator {
       if (mode == 'ECB') {
         final impl = pc.PaddedBlockCipher('AES/ECB/${padding}');
         if (impl == null) return '';
-        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.KeyParameter?>(
-            pc.KeyParameter(keyBytes), null));
+        impl.init(
+          false,
+          pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.KeyParameter?>(
+            pc.KeyParameter(keyBytes),
+            null,
+          ),
+        );
         final out = impl.process(ctBytes);
         return utf8.decode(out, allowMalformed: true);
       } else {
         final impl = pc.PaddedBlockCipher('AES/CBC/${padding}');
         if (impl == null) return '';
-        impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
+        impl.init(
+          false,
+          pc.PaddedBlockCipherParameters<
+            pc.KeyParameter,
+            pc.ParametersWithIV<pc.KeyParameter>
+          >(
             pc.KeyParameter(keyBytes),
-            pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
+            pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes),
+          ),
+        );
         final out = impl.process(ctBytes);
         return utf8.decode(out, allowMalformed: true);
       }
@@ -2169,13 +2298,17 @@ class LegacyJsEvaluator {
           : Uint8List(16);
       final impl = pc.PaddedBlockCipher('AES/CBC/PKCS7');
       if (impl == null) return '';
-      impl.init(false, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
+      impl.init(
+        false,
+        pc.PaddedBlockCipherParameters<
+          pc.KeyParameter,
+          pc.ParametersWithIV<pc.KeyParameter>
+        >(
           pc.KeyParameter(keyBytes),
-          pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
-      return utf8.decode(
-        impl.process(base64.decode(ct)),
-        allowMalformed: true,
+          pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes),
+        ),
       );
+      return utf8.decode(impl.process(base64.decode(ct)), allowMalformed: true);
     } catch (_) {
       return '';
     }
@@ -2189,9 +2322,16 @@ class LegacyJsEvaluator {
           : Uint8List(16);
       final impl = pc.PaddedBlockCipher('AES/CBC/PKCS7');
       if (impl == null) return '';
-      impl.init(true, pc.PaddedBlockCipherParameters<pc.KeyParameter, pc.ParametersWithIV<pc.KeyParameter>>(
+      impl.init(
+        true,
+        pc.PaddedBlockCipherParameters<
+          pc.KeyParameter,
+          pc.ParametersWithIV<pc.KeyParameter>
+        >(
           pc.KeyParameter(keyBytes),
-          pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes)));
+          pc.ParametersWithIV<pc.KeyParameter>(null, ivBytes),
+        ),
+      );
       return base64.encode(impl.process(Uint8List.fromList(utf8.encode(msg))));
     } catch (_) {
       return '';
@@ -2227,9 +2367,7 @@ class LegacyJsEvaluator {
         if (args.isEmpty) return 0;
         return _toNum(args[0]).abs() == 0
             ? 0
-            : (_toNum(args[0]) > 0
-                ? _sqrtPositive(_toNum(args[0]))
-                : 0);
+            : (_toNum(args[0]) > 0 ? _sqrtPositive(_toNum(args[0])) : 0);
       case 'log':
         if (args.isEmpty) return 0;
         return _toNum(args[0]) == 0 ? 0 : _log(_toNum(args[0]));
@@ -2300,7 +2438,10 @@ class LegacyJsEvaluator {
       if (c == 0x7d) braceDepth--;
       if (c == 0x5b) bracketDepth++;
       if (c == 0x5d) bracketDepth--;
-      if (c == 0x2c && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0) {
+      if (c == 0x2c &&
+          parenDepth == 0 &&
+          braceDepth == 0 &&
+          bracketDepth == 0) {
         final a = current.toString().trim();
         if (a.isNotEmpty) args.add(_evaluateExpressionPart(a, variables));
         current.clear();
@@ -2521,7 +2662,10 @@ class LegacyJsEvaluator {
       if (c == 0x7d) braceDepth--;
       if (c == 0x5b) bracketDepth++;
       if (c == 0x5d) bracketDepth--;
-      if (c == 0x2c && parenDepth == 0 && braceDepth == 0 && bracketDepth == 0) {
+      if (c == 0x2c &&
+          parenDepth == 0 &&
+          braceDepth == 0 &&
+          bracketDepth == 0) {
         final a = current.toString().trim();
         if (a.isNotEmpty) entries.add(a);
         current.clear();
@@ -2544,7 +2688,9 @@ class LegacyJsEvaluator {
       if (colonIdx < 0) continue;
       final key = _unquote(entry.substring(0, colonIdx).trim());
       final val = _evaluateExpressionPart(
-          entry.substring(colonIdx + 1).trim(), variables);
+        entry.substring(colonIdx + 1).trim(),
+        variables,
+      );
       result[key] = val;
     }
     return result;
@@ -2593,7 +2739,12 @@ class LegacyJsEvaluator {
     return s;
   }
 
-  static int _findMatchingClose(String s, int openIdx, int openCode, int closeCode) {
+  static int _findMatchingClose(
+    String s,
+    int openIdx,
+    int openCode,
+    int closeCode,
+  ) {
     var depth = 0;
     var quote = 0;
     var escaped = false;
@@ -2702,7 +2853,8 @@ class LegacyJsEvaluator {
     return (cc >= 0x30 && cc <= 0x39) || // 0-9
         (cc >= 0x41 && cc <= 0x5a) || // A-Z
         (cc >= 0x61 && cc <= 0x7a) || // a-z
-        cc == 0x5f || cc == 0x24; // _ $
+        cc == 0x5f ||
+        cc == 0x24; // _ $
   }
 
   static String _decodeString(String s) {
@@ -2895,7 +3047,8 @@ class LegacyJsEvaluator {
     Map<String, dynamic> variables,
   ) {
     final isSource = map.containsKey('bookSourceUrl') || map.containsKey('key');
-    final isBook = !isSource && (map.containsKey('name') || map.containsKey('title'));
+    final isBook =
+        !isSource && (map.containsKey('name') || map.containsKey('title'));
     final type = isSource ? 'source' : 'book';
 
     switch (method) {
@@ -2924,7 +3077,8 @@ class LegacyJsEvaluator {
         }
         return '';
       case 'getVariableMap':
-        final variableStr = variables['$type.variable'] ?? map['variable'] ?? '';
+        final variableStr =
+            variables['$type.variable'] ?? map['variable'] ?? '';
         Map<String, dynamic> parsed = {};
         try {
           parsed = jsonDecode(variableStr.toString());
@@ -2933,24 +3087,26 @@ class LegacyJsEvaluator {
           'get': (List<dynamic> args2) {
             if (args2.isEmpty) return '';
             return parsed[args2[0]?.toString()] ?? '';
-          }
+          },
         });
       case 'getLoginInfoMap':
         return _JsObject({
           'get': (List<dynamic> args2) {
             if (args2.isEmpty) return '';
             return variables['source.login.${args2[0]?.toString()}'] ?? '';
-          }
+          },
         });
       case 'putLoginHeader':
         if (args.length >= 2) {
-          variables['source.loginHeader.${args[0]?.toString() ?? ''}'] = args[1];
+          variables['source.loginHeader.${args[0]?.toString() ?? ''}'] =
+              args[1];
           return args[1];
         }
         return '';
       case 'getLoginHeader':
         if (args.isNotEmpty) {
-          return variables['source.loginHeader.${args[0]?.toString() ?? ''}'] ?? '';
+          return variables['source.loginHeader.${args[0]?.toString() ?? ''}'] ??
+              '';
         }
         return '';
     }
@@ -2963,8 +3119,15 @@ class LegacyJsEvaluator {
     String fallback,
   ) {
     final t = third?.toString() ?? '';
-    if (t.contains('/') || RegExp(r'^(AES|DES|DESede|TripleDES)', caseSensitive: false).hasMatch(t)) {
-      return (transformation: t.isEmpty ? fallback : t, iv: fourth?.toString() ?? '');
+    if (t.contains('/') ||
+        RegExp(
+          r'^(AES|DES|DESede|TripleDES)',
+          caseSensitive: false,
+        ).hasMatch(t)) {
+      return (
+        transformation: t.isEmpty ? fallback : t,
+        iv: fourth?.toString() ?? '',
+      );
     }
     return (transformation: fourth?.toString() ?? fallback, iv: t);
   }
@@ -2979,26 +3142,35 @@ class LegacyJsEvaluator {
       final upper = transformation.toUpperCase();
       final isDes = upper.contains('DES');
       final mode = upper.contains('/ECB/') ? 'ecb' : 'cbc';
-      
+
       final keyBytes = Uint8List.fromList(utf8.encode(key));
       final ivBytes = Uint8List.fromList(utf8.encode(iv));
-      
+
       final pc.BlockCipher engine = isDes ? pc.DESedeEngine() : pc.AESEngine();
       final blockSize = engine.blockSize;
-      
+
       Uint8List normalizedKeyBytes;
       if (isDes) {
         if (keyBytes.length == 24) {
           normalizedKeyBytes = keyBytes;
         } else if (keyBytes.length == 16) {
-          normalizedKeyBytes = Uint8List.fromList([...keyBytes, ...keyBytes.sublist(0, 8)]);
+          normalizedKeyBytes = Uint8List.fromList([
+            ...keyBytes,
+            ...keyBytes.sublist(0, 8),
+          ]);
         } else if (keyBytes.length == 8) {
-          normalizedKeyBytes = Uint8List.fromList([...keyBytes, ...keyBytes, ...keyBytes]);
+          normalizedKeyBytes = Uint8List.fromList([
+            ...keyBytes,
+            ...keyBytes,
+            ...keyBytes,
+          ]);
         } else {
           normalizedKeyBytes = Uint8List(24);
         }
       } else {
-        if (keyBytes.length != 16 && keyBytes.length != 24 && keyBytes.length != 32) {
+        if (keyBytes.length != 16 &&
+            keyBytes.length != 24 &&
+            keyBytes.length != 32) {
           final list = Uint8List(16);
           for (var i = 0; i < 16; i++) {
             list[i] = i < keyBytes.length ? keyBytes[i] : 0;
@@ -3008,20 +3180,23 @@ class LegacyJsEvaluator {
           normalizedKeyBytes = keyBytes;
         }
       }
-      
+
       final keyParam = isDes
           ? pc.DESedeParameters(normalizedKeyBytes)
           : pc.KeyParameter(normalizedKeyBytes);
-          
+
       final cipher = pc.PaddedBlockCipherImpl(
         pc.PKCS7Padding(),
         mode == 'ecb' ? pc.ECBBlockCipher(engine) : pc.CBCBlockCipher(engine),
       );
-      
+
       if (mode == 'ecb') {
         cipher.init(
           true,
-          pc.PaddedBlockCipherParameters<pc.CipherParameters, Null>(keyParam, null),
+          pc.PaddedBlockCipherParameters<pc.CipherParameters, Null>(
+            keyParam,
+            null,
+          ),
         );
       } else {
         var normalizedIvBytes = ivBytes;
@@ -3034,13 +3209,19 @@ class LegacyJsEvaluator {
         }
         cipher.init(
           true,
-          pc.PaddedBlockCipherParameters<pc.ParametersWithIV<pc.CipherParameters>, Null>(
-            pc.ParametersWithIV<pc.CipherParameters>(keyParam, normalizedIvBytes),
+          pc.PaddedBlockCipherParameters<
+            pc.ParametersWithIV<pc.CipherParameters>,
+            Null
+          >(
+            pc.ParametersWithIV<pc.CipherParameters>(
+              keyParam,
+              normalizedIvBytes,
+            ),
             null,
           ),
         );
       }
-      
+
       final out = cipher.process(Uint8List.fromList(utf8.encode(value)));
       return base64.encode(out);
     } catch (_) {

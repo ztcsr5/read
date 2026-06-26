@@ -554,6 +554,27 @@
   - `test/legado_engine_test.dart`: targeted helper coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Quiet legacy fallback for response-code and importScript helpers
+
+### What was done
+- Added lightweight LegacyJsEvaluator stubs for:
+  - global `importScript(...)`
+  - `java.importScript(...)`
+  - `java.getResponseCode(...)`
+- This keeps the legacy first-pass fallback from misclassifying these helpers as totally unsupported before the Node / QuickJS path handles real execution.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legacy_js_evaluator.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java importScript helper aliases"`: passed. Legacy still cannot execute functions defined by imported scripts, so real dynamic script execution remains handled by Node fallback / QuickJS.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java ajaxAll head and getStrResponse helpers"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 31 tests passed.
+
+### Notes
+- Changed file:
+  - `lib/data/parsers/legado/legacy_js_evaluator.dart`
+- `dart format` rewrote parts of this large legacy file, so this checkpoint is intentionally isolated from the main `importScript` bridge commit.
+- Rollback: revert this checkpoint if the formatting diff is considered too noisy; runtime compatibility falls back to Node / QuickJS for dynamic script execution.
+
 ## 2026-06-26 - Task: Add java.importScript JS bridge compatibility
 
 ### What was done
