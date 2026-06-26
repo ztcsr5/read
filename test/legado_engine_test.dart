@@ -2552,6 +2552,54 @@ function search(key, page, result) {
       expect(books.single.totalChapters, 9);
     });
 
+    test('parses imported js function search field aliases', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Search Aliases'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..searchUrl = '/search?q={{key}}'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function search(key, page, result) {
+  return {
+    books: [{
+      title: key + " Alias",
+      writer: "Alias Author",
+      url: "/book/alias",
+      img: "/cover/alias.jpg",
+      category: "Fantasy,Hot",
+      latest: "Chapter 12"
+    }]
+  };
+}
+''',
+        })
+        ..ruleSearch = jsonEncode({
+          'bookList': '<js>search(key, page, result)</js>',
+        });
+      final response = Response<dynamic>(
+        data: '<html><body>ignored by js function source aliases</body></html>',
+        requestOptions: RequestOptions(path: 'https://js.example.com/search'),
+        statusCode: 200,
+      );
+
+      final books = await LegadoParser.searchBooks(
+        source,
+        'Novel',
+        preFetchedResponse: response,
+      );
+
+      expect(books, hasLength(1));
+      expect(books.single.title, 'Novel Alias');
+      expect(books.single.author, 'Alias Author');
+      expect(books.single.filePath, 'https://js.example.com/book/alias');
+      expect(books.single.coverPath, 'https://js.example.com/cover/alias.jpg');
+      expect(books.single.tags, containsAll(['Fantasy', 'Hot']));
+      expect(books.single.totalChapters, 12);
+    });
+
     test('parses imported js function toc results', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final source = BookSource()

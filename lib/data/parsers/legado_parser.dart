@@ -2520,6 +2520,33 @@ class LegadoParser {
             'last_chapter',
             'lastChapterName',
             'latestChapter',
+            'latest',
+            'latestChapterName',
+            'update',
+            'updateChapter',
+            'newest',
+          ]),
+          source,
+          book: contextBook,
+        ),
+        variables: fieldVariables,
+      ),
+    );
+    final kind = _cleanRuleOutput(
+      _extractJsonValue(
+        item,
+        _sourceScopedRule(
+          _ruleOrKey(rule['kind'] ?? rule['category'] ?? rule['tags'], item, [
+            'kind',
+            'category',
+            'categoryName',
+            'cat',
+            'class',
+            'className',
+            'tag',
+            'tags',
+            'type',
+            'genre',
           ]),
           source,
           book: contextBook,
@@ -2561,6 +2588,7 @@ class LegadoParser {
       sourceUrl: source.id.toString(),
       totalChapters: totalChapters,
       fileSize: wordCount,
+      tags: _splitBookTags(kind),
     );
   }
 
@@ -2688,6 +2716,11 @@ class LegadoParser {
             'last_chapter',
             'lastChapterName',
             'latestChapter',
+            'latest',
+            'latestChapterName',
+            'update',
+            'updateChapter',
+            'newest',
           ]),
           source,
           book: contextBook,

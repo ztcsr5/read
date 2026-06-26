@@ -61,6 +61,31 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Map JS search field aliases into Book metadata
+
+### What was done
+- Improved JSON/JS search result field alias handling for function-style sources.
+- Search/book JSON parsing now maps common modern source fields:
+  - title/name aliases were already supported.
+  - URL aliases such as `url` remain supported.
+  - cover aliases such as `img` remain supported.
+  - category/tag aliases now populate `Book.tags` through `_splitBookTags`.
+  - latest chapter aliases now include `latest`, `latestChapterName`, `update`, `updateChapter`, and `newest`.
+- This helps light-reader style JS sources that return objects like `{title,url,img,category,latest}` instead of Legado's `{name,bookUrl,coverUrl,kind,lastChapter}`.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function search field aliases"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function search results"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`: no compile errors; existing info-level lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado_parser.dart`: search result metadata aliases.
+  - `test/legado_engine_test.dart`: function-style search alias coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Decode JS function TOC/content container outputs
 
 ### What was done
