@@ -7,6 +7,7 @@ class CompatibilityAnalyzer {
 
     _analyzeText(source.searchUrl, 'search', 'searchUrl', issues);
     _analyzeText(source.ruleSearch, 'search', 'ruleSearch', issues);
+    _analyzeText(source.ruleExplore, 'explore', 'ruleExplore', issues);
     _analyzeText(source.ruleBookInfo, 'detail', 'ruleBookInfo', issues);
     _analyzeText(source.ruleToc, 'toc', 'ruleToc', issues);
     _analyzeText(source.ruleContent, 'content', 'ruleContent', issues);

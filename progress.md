@@ -318,6 +318,34 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add batch compatibility analyzer
+
+### What was done
+- Extended `CompatibilityAnalyzer` to scan `ruleExplore`, so JS/WebView/header/login risks in discover/explore rules are no longer missed.
+- Added `SourceCompatibilityBatchAnalyzer`, a pure Dart batch summarizer for imported source sets.
+- The batch report now provides:
+  - total source count,
+  - risky source count and ratio,
+  - source format distribution (`js-function`, `legado-json`, `legado-mixed`, `unknown`),
+  - dependency distribution (`javascript`, `http-js-bridge`, `webview`, `login`, `headers-cookie`, `non-utf8`, `jsoup`, `xpath`),
+  - issue stage counts,
+  - top issue reasons,
+  - per-source items with detected format, dependencies, and diagnostic issues.
+- This creates a reproducible way to import a real source pack later and immediately identify the next API/compatibility gaps to implement.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart test\compatibility_analyzer_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart`: 5 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 29 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart test\compatibility_analyzer_test.dart`: no issues found.
+
+### Notes
+- Changed files:
+  - `lib/features/source_diagnostic/services/compatibility_analyzer.dart`: includes `ruleExplore`.
+  - `lib/features/source_diagnostic/services/source_compatibility_batch_analyzer.dart`: new batch analyzer.
+  - `test/compatibility_analyzer_test.dart`: explore scan and batch summary coverage.
+- Rollback: revert the three changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Cover JS function explore parsing
 
 ### What was done
