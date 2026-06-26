@@ -1610,6 +1610,22 @@ fromJavaImport() + "|" + fromGlobalImport();
       expect(value, 'java-import|global-import');
     });
 
+    test('supports source scoped file cache helpers', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final value = await LegadoJsEngine().evaluateWithAjax(r'''@js:
+java.cacheFile("token.txt", "abc123");
+var before = java.readTxtFile("token.txt");
+var removed = java.deleteFile("token.txt");
+var after = java.readFile("token.txt");
+JSON.stringify({before: before, removed: removed, after: after});
+''', ajax: (request) async => '');
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['before'], 'abc123');
+      expect(decoded['removed'], true);
+      expect(decoded['after'], '');
+    });
+
     test('resolves global fetch through ajax callback', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final requests = <String>[];

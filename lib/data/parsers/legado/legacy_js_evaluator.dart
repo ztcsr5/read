@@ -1833,6 +1833,18 @@ class LegacyJsEvaluator {
         return 200;
       case 'importScript':
         return args.isEmpty ? '' : args[0].toString();
+      case 'cacheFile':
+        if (args.length >= 2) {
+          variables['file:${args[0]}'] = args[1]?.toString() ?? '';
+        }
+        return args.length >= 2 ? args[1]?.toString() ?? '' : '';
+      case 'readFile':
+      case 'readTxtFile':
+        if (args.isEmpty) return '';
+        return variables['file:${args[0]}']?.toString() ?? '';
+      case 'deleteFile':
+        if (args.isNotEmpty) variables.remove('file:${args[0]}');
+        return true;
       case 'get':
         if (args.isEmpty) return '';
         final key = args[0].toString();

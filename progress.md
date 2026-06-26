@@ -554,6 +554,36 @@
   - `test/legado_engine_test.dart`: targeted helper coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add source-scoped JS file cache helpers
+
+### What was done
+- Added safe, source-scoped cache/file helper compatibility:
+  - `java.cacheFile(path, content)`
+  - `java.readFile(path)`
+  - `java.readTxtFile(path)`
+  - `java.deleteFile(path)`
+- Implemented the helpers without touching the real device filesystem:
+  - QuickJS stores under `file:<path>` through existing `java.put/java.get`.
+  - Node fallback stores under `file:<path>` in payload storage.
+  - AJAX trap layer mirrors the same source-scoped storage behavior.
+  - Legacy fallback maps the same helpers into its in-memory variables map.
+- Added a targeted test that writes, reads, deletes, then confirms an empty read.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports source scoped file cache helpers"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java importScript helper aliases"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 31 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart lib\data\parsers\legado\legacy_js_evaluator.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`
+  - `lib/data/parsers/legado/legacy_js_evaluator.dart`
+  - `test/legado_engine_test.dart`
+- This intentionally does not expose unrestricted filesystem access. It emulates the common source cache use case while staying App Store-safe and sandbox-friendly.
+- Rollback: revert the three changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Quiet legacy fallback for response-code and importScript helpers
 
 ### What was done

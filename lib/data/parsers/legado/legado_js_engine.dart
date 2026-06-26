@@ -1437,6 +1437,19 @@ class LegadoJsEngine {
         putJson: function(key, value) {
           return java.put(key, JSON.stringify(value == null ? {} : value));
         },
+        cacheFile: function(path, content) {
+          return java.put("file:" + String(path || ""), content == null ? "" : String(content));
+        },
+        readFile: function(path) {
+          return java.get("file:" + String(path || ""));
+        },
+        readTxtFile: function(path) {
+          return java.readFile(path);
+        },
+        deleteFile: function(path) {
+          java.put("file:" + String(path || ""), "");
+          return true;
+        },
         getString: function(key) {
           if (arguments.length > 1) {
             var sourceValue = key == null ? "" : String(key);
@@ -3998,6 +4011,19 @@ const java = {
   putJson: function(key, value) {
     return java.put(key, JSON.stringify(value == null ? {} : value));
   },
+  cacheFile: function(path, content) {
+    return java.put("file:" + __str(path), content == null ? "" : __str(content));
+  },
+  readFile: function(path) {
+    return java.get("file:" + __str(path));
+  },
+  readTxtFile: function(path) {
+    return java.readFile(path);
+  },
+  deleteFile: function(path) {
+    delete __storage["file:" + __str(path)];
+    return true;
+  },
   ajax: __ajax,
   ajaxAll: async function(urls) {
     const list = Array.isArray(urls) ? urls : __str(urls).split(/\s*,\s*/);
@@ -4875,6 +4901,19 @@ async function __stringifyResult(value) {
       java.getResponseCode = function(urlStr, headers) {
         java.ajax(__requestPayload(urlStr, { method: "GET", headers: headers || {} }));
         return 200;
+      };
+      java.cacheFile = function(path, content) {
+        return java.put("file:" + String(path || ""), content == null ? "" : String(content));
+      };
+      java.readFile = function(path) {
+        return java.get("file:" + String(path || ""));
+      };
+      java.readTxtFile = function(path) {
+        return java.readFile(path);
+      };
+      java.deleteFile = function(path) {
+        java.put("file:" + String(path || ""), "");
+        return true;
       };
       java.importScript = function(scriptOrUrl) {
         var value = String(scriptOrUrl || "");
