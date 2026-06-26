@@ -1424,6 +1424,16 @@ class LegadoJsEngine {
           var value = sendMessage("java_get", String(key));
           return value == null ? "" : value;
         },
+        getStr: function(key, def) {
+          var value = java.get(key);
+          return value === "" && arguments.length > 1 ? String(def || "") : value;
+        },
+        getJson: function(value) {
+          try { return JSON.parse(String(value || "{}")); } catch(e) { return {}; }
+        },
+        putJson: function(key, value) {
+          return java.put(key, JSON.stringify(value == null ? {} : value));
+        },
         getString: function(key) {
           if (arguments.length > 1) {
             var sourceValue = key == null ? "" : String(key);
@@ -1643,12 +1653,18 @@ class LegadoJsEngine {
             value: String(value || "")
           }));
         },
+        digestBase64Str: function(value, algorithm) {
+          return java.base64Encode(java.digestHex(value, algorithm));
+        },
         HMacHex: function(value, algorithm, key) {
           return sendMessage("java_hmac_hex", JSON.stringify({
             value: String(value || ""),
             algorithm: String(algorithm || "HmacSHA1"),
             key: String(key || "")
           }));
+        },
+        hmacSHA256: function(value, key) {
+          return java.HMacHex(value, "HmacSHA256", key);
         },
         HMacBase64: function(value, algorithm, key) {
           return sendMessage("java_hmac_base64", JSON.stringify({
@@ -1745,6 +1761,40 @@ class LegadoJsEngine {
             out += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
           }
           try { return decodeURIComponent(escape(out)); } catch(e) { return out; }
+        },
+        hexEncodeToString: function(input) {
+          var text = String(input || "");
+          var out = "";
+          for (var i = 0; i < text.length; i++) {
+            var h = text.charCodeAt(i).toString(16);
+            out += h.length === 1 ? "0" + h : h;
+          }
+          return out;
+        },
+        strToBytes: function(input) {
+          return __bytesFromString(input, "utf-8");
+        },
+        bytesToStr: function(input) {
+          return __bytesToString(input, "utf-8");
+        },
+        regex: {
+          match: function(input, pattern) {
+            var m = String(input || "").match(new RegExp(String(pattern || "")));
+            return m ? String(m[0] || "") : "";
+          },
+          matchAll: function(input, pattern) {
+            var re = new RegExp(String(pattern || ""), "g");
+            var out = [];
+            var m;
+            while ((m = re.exec(String(input || ""))) !== null) out.push(String(m[0] || ""));
+            return __arrayWithToArray(out);
+          },
+          replace: function(input, pattern, repl) {
+            return String(input || "").replace(new RegExp(String(pattern || ""), "g"), String(repl || ""));
+          },
+          test: function(input, pattern) {
+            return new RegExp(String(pattern || "")).test(String(input || ""));
+          }
         },
         queryTTF: function(str, opts) {
           if (str == null) return null;
@@ -3900,6 +3950,16 @@ const java = {
     const value = __storage[k];
     return value == null ? "" : value;
   },
+  getStr: function(key, def) {
+    const value = java.get(key);
+    return value === "" && arguments.length > 1 ? __str(def) : value;
+  },
+  getJson: function(value) {
+    try { return JSON.parse(__str(value || "{}")); } catch (_) { return {}; }
+  },
+  putJson: function(key, value) {
+    return java.put(key, JSON.stringify(value == null ? {} : value));
+  },
   ajax: __ajax,
   post: function(url, body, headers) {
     return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} });
@@ -3971,7 +4031,11 @@ const java = {
   md5Encode: function(value) { return __hash("md5", value); },
   md5: function(value) { return __hash("md5", value); },
   digestHex: function(value, algorithm) { return __hash(algorithm || "sha256", value); },
+  digestBase64Str: function(value, algorithm) {
+    return crypto.createHash(__str(algorithm || "sha256").toLowerCase().replace(/^sha-/, "sha")).update(__str(value)).digest("base64");
+  },
   HMacHex: function(value, algorithm, key) { return __hmacHex(value, algorithm, key); },
+  hmacSHA256: function(value, key) { return __hmacHex(value, "HmacSHA256", key); },
   HMacBase64: function(value, algorithm, key) {
     let alg = __str(algorithm || "HmacSHA1").toLowerCase().replace(/^hmac-?/, "");
     return crypto.createHmac(alg, __str(key)).update(__str(value)).digest("base64");
@@ -3995,7 +4059,29 @@ const java = {
   base64Encode: __base64Encode,
   base64Decode: __base64Decode,
   base64DecodeToString: __base64Decode,
+  hexEncodeToString: function(value) { return Buffer.from(__str(value), "utf8").toString("hex"); },
   hexDecodeToString: __hexDecode,
+  strToBytes: function(value) { return Array.from(Buffer.from(__str(value), "utf8")); },
+  bytesToStr: function(value) { return Buffer.from(Array.isArray(value) ? value : __nodeBytes(value)).toString("utf8"); },
+  regex: {
+    match: function(input, pattern) {
+      const m = __str(input).match(new RegExp(__str(pattern)));
+      return m ? __str(m[0]) : "";
+    },
+    matchAll: function(input, pattern) {
+      const re = new RegExp(__str(pattern), "g");
+      const out = [];
+      let m;
+      while ((m = re.exec(__str(input))) !== null) out.push(__str(m[0]));
+      return out;
+    },
+    replace: function(input, pattern, repl) {
+      return __str(input).replace(new RegExp(__str(pattern), "g"), __str(repl));
+    },
+    test: function(input, pattern) {
+      return new RegExp(__str(pattern)).test(__str(input));
+    }
+  },
   encodeURI: function(value, charset) {
     if (charset && (charset.toLowerCase() === "gbk" || charset.toLowerCase() === "gb2312")) {
       return __encodeGBK(__str(value));

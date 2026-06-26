@@ -4740,6 +4740,33 @@ JSON.stringify({
       expect(decoded['links'], ['/b1', '/b2']);
     });
 
+    test('supports java regex and utility aliases', () {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final value = LegadoJsEngine().evaluate(r'''@js:
+var data = java.getJson('{"a":1}');
+java.putJson("json", {b:2});
+JSON.stringify({
+  a: data.a,
+  stored: java.getStr("json"),
+  hex: java.hexDecodeToString(java.hexEncodeToString("abc")),
+  bytes: java.bytesToStr(java.strToBytes("abc")),
+  replaced: java.regex.replace("A12B34", "\\d+", "#"),
+  matches: java.regex.matchAll("A12B34", "\\d+"),
+  tested: java.regex.test("A12", "\\d+"),
+  hmac: java.hmacSHA256("abc", "key")
+})''');
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['a'], 1);
+      expect(decoded['stored'], '{"b":2}');
+      expect(decoded['hex'], 'abc');
+      expect(decoded['bytes'], 'abc');
+      expect(decoded['replaced'], 'A#B#');
+      expect(decoded['matches'], ['12', '34']);
+      expect(decoded['tested'], isTrue);
+      expect(decoded['hmac'], isNotEmpty);
+    });
+
     test('supports java.getElements bridge for html result rules', () {
       if (!LegadoJsEngine().isAvailable) return;
       final html = '<div id="content"><p>第一段</p><p data-id="2">第二段</p></div>';

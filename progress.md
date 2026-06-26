@@ -318,6 +318,39 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add JS regex and utility compatibility aliases
+
+### What was done
+- Added MR/轻悦-style utility bridge methods in QuickJS and Node fallback:
+  - `java.getStr(key, defaultValue)`
+  - `java.getJson(value)`
+  - `java.putJson(key, value)`
+  - `java.hexEncodeToString(value)`
+  - `java.hexDecodeToString(value)`
+  - `java.strToBytes(value)`
+  - `java.bytesToStr(bytes)`
+  - `java.digestBase64Str(value, algorithm)`
+  - `java.hmacSHA256(value, key)`
+- Added `java.regex` helpers:
+  - `match(input, pattern)`
+  - `matchAll(input, pattern)`
+  - `replace(input, pattern, replacement)`
+  - `test(input, pattern)`
+- Kept these as compatibility shims only; no UI changes.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java regex and utility aliases"`: passed. Current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`; the test passed through available fallback execution.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java jsoup namespace and content rule overloads"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: utility and regex compatibility shims.
+  - `test/legado_engine_test.dart`: targeted utility coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Support java.jsoup helpers and two-argument content rules
 
 ### What was done
