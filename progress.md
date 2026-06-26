@@ -554,6 +554,41 @@
   - `test/legado_engine_test.dart`: targeted helper coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Classify high-risk source dependencies
+
+### What was done
+- Extended `CompatibilityAnalyzer` to identify high-risk source dependencies before runtime implementation work:
+  - `java.createAsymmetricCrypto` / `java.createSign`
+  - `java.getResponseCode`
+  - `java.readFile` / `java.readTxtFile` / `java.deleteFile` / `java.cacheFile`
+  - `java.unzipFile` / `java.un7zFile` / `java.unrarFile`
+  - `java.importScript`
+  - `java.getVerificationCode`
+  - signature/asymmetric crypto keywords and heavy AES/DES/HMAC helpers.
+- Extended `SourceCompatibilityBatchAnalyzer` dependency buckets and recommendations:
+  - `crypto-signature`
+  - `crypto-heavy`
+  - `asymmetric-crypto`
+  - `file-system`
+  - `archive`
+  - `response-code`
+  - `verification-code`
+  - `dynamic-script`
+- Added tests for high-risk API detection and batch compatibility summary output.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart test\compatibility_analyzer_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart`: 7 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart test\compatibility_analyzer_test.dart`: no issues found.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 31 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/features/source_diagnostic/services/compatibility_analyzer.dart`
+  - `lib/features/source_diagnostic/services/source_compatibility_batch_analyzer.dart`
+  - `test/compatibility_analyzer_test.dart`
+- Rollback: revert the three changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Execute JS function TOC and content rules
 
 ### What was done

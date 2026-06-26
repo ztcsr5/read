@@ -145,5 +145,64 @@ void main() {
       expect(json['items'], isA<List>());
       expect((json['items'] as List).first['issueCount'], isA<int>());
     });
+
+    test('detects unsupported high risk java api dependencies', () {
+      final source = BookSource()
+        ..bookSourceName = 'High Risk APIs'
+        ..bookSourceUrl = 'https://risk.example.com'
+        ..ruleSearch = r'''
+@js:
+var signer = java.createSign("SHA256withRSA");
+var cipher = java.createAsymmetricCrypto("RSA/ECB/PKCS1Padding");
+var code = java.getResponseCode("https://risk.example.com/api");
+java.cacheFile("token", "abc");
+java.unzipFile("payload.zip", "out");
+java.importScript("https://risk.example.com/lib.js");
+java.getVerificationCode("img");
+CryptoJS.AES.decrypt(body, key);
+''';
+
+      final issues = CompatibilityAnalyzer.analyze(source);
+      final reasons = issues.map((issue) => issue.reason).join('\n');
+
+      expect(reasons, contains('asymmetric crypto/signature'));
+      expect(reasons, contains('response-code'));
+      expect(reasons, contains('file-system'));
+      expect(reasons, contains('archive'));
+      expect(reasons, contains('dynamic script'));
+      expect(reasons, contains('verification-code'));
+      expect(reasons, contains('heavy crypto'));
+    });
+
+    test('summarizes high risk dependencies in batch', () {
+      final source = BookSource()
+        ..bookSourceName = 'High Risk Batch'
+        ..bookSourceUrl = 'https://risk.example.com'
+        ..ruleSearch = r'''
+@js:
+java.createSign("SHA256withRSA");
+java.getResponseCode(baseUrl);
+java.readTxtFile("cache.txt");
+java.unrarFile("payload.rar", "out");
+java.importScript("https://risk.example.com/lib.js");
+java.getVerificationCode("captcha");
+CryptoJS.HmacSHA256(url, key);
+''';
+
+      final report = SourceCompatibilityBatchAnalyzer.analyze([source]);
+
+      expect(report.dependencyCounts['asymmetric-crypto'], 1);
+      expect(report.dependencyCounts['crypto-signature'], 1);
+      expect(report.dependencyCounts['crypto-heavy'], 1);
+      expect(report.dependencyCounts['response-code'], 1);
+      expect(report.dependencyCounts['file-system'], 1);
+      expect(report.dependencyCounts['archive'], 1);
+      expect(report.dependencyCounts['dynamic-script'], 1);
+      expect(report.dependencyCounts['verification-code'], 1);
+      expect(
+        report.recommendedFocus(20).join('\n'),
+        contains('java.createAsymmetricCrypto/createSign'),
+      );
+    });
   });
 }

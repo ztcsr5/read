@@ -61,6 +61,9 @@ class CompatibilityAnalyzer {
       );
     }
 
+    _detectHighRiskJavaApis(text, stage, field, issues);
+    _detectCryptoRisks(text, stage, field, issues);
+
     if (text.contains('@get:') || text.contains('@get{')) {
       issues.add(
         DiagnosticIssue(
@@ -221,6 +224,124 @@ class CompatibilityAnalyzer {
           reason: '疑似 XPath 规则未声明 @xpath 前缀',
           suggestion: '如果这是 XPath，请加上 @xpath: 前缀；否则可能被 CSS 解析器误判。',
         ),
+      );
+    }
+  }
+
+  static void _detectHighRiskJavaApis(
+    String text,
+    String stage,
+    String field,
+    List<DiagnosticIssue> issues,
+  ) {
+    void add(String reason, String suggestion) {
+      issues.add(
+        DiagnosticIssue(
+          stage: stage,
+          field: field,
+          rule: text,
+          reason: reason,
+          suggestion: suggestion,
+        ),
+      );
+    }
+
+    if (RegExp(
+      r'\bjava\.(?:createAsymmetricCrypto|createSign)\s*\(',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected asymmetric crypto/signature Java API dependency',
+        'This source may require RSA/DSA/ECDSA signing compatibility. Treat it as a high-risk runtime dependency before judging parser rules.',
+      );
+    }
+
+    if (RegExp(
+      r'\bjava\.getResponseCode\s*\(',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected HTTP response-code Java API dependency',
+        'This source may branch on status code instead of response body. The JS HTTP bridge must expose response metadata.',
+      );
+    }
+
+    if (RegExp(
+      r'\bjava\.(?:readFile|readTxtFile|deleteFile|cacheFile)\s*\(',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected file-system Java API dependency',
+        'This source depends on local cache/file APIs. Keep it sandboxed and emulate only source-scoped storage.',
+      );
+    }
+
+    if (RegExp(
+      r'\bjava\.(?:unzipFile|un7zFile|unrarFile)\s*\(',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected archive Java API dependency',
+        'This source expects archive extraction. Validate whether the payload is book metadata, chapter text, or an anti-scraping package.',
+      );
+    }
+
+    if (RegExp(
+      r'\bjava\.importScript\s*\(',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected dynamic script import dependency',
+        'This source loads extra JavaScript at runtime. Capture and cache imported scripts before assuming the main rule is complete.',
+      );
+    }
+
+    if (RegExp(
+      r'\bjava\.getVerificationCode\s*\(',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected verification-code Java API dependency',
+        'This source may need OCR/manual verification flow. Separate it from ordinary parser failure in batch checks.',
+      );
+    }
+  }
+
+  static void _detectCryptoRisks(
+    String text,
+    String stage,
+    String field,
+    List<DiagnosticIssue> issues,
+  ) {
+    void add(String reason, String suggestion) {
+      issues.add(
+        DiagnosticIssue(
+          stage: stage,
+          field: field,
+          rule: text,
+          reason: reason,
+          suggestion: suggestion,
+        ),
+      );
+    }
+
+    if (RegExp(
+      r'\b(?:RSA|DSA|ECDSA|Signature|CryptoJS\.RSA)\b',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected signature/asymmetric crypto keyword dependency',
+        'This source likely signs requests or decrypts keys. Prioritize crypto bridge coverage and fixture-based verification.',
+      );
+    }
+
+    if (RegExp(
+      r'\b(?:CryptoJS\.)?(?:AES|DES|TripleDES|DESede|HmacSHA1|HmacSHA256|HmacMD5|HMacHex)\b',
+      caseSensitive: false,
+    ).hasMatch(text)) {
+      add(
+        'Detected heavy crypto helper dependency',
+        'This source uses symmetric crypto or HMAC helpers. Verify existing AES/DES/HMAC shims against real source fixtures.',
       );
     }
   }

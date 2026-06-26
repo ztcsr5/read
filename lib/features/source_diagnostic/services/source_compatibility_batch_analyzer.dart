@@ -75,6 +75,22 @@ class SourceCompatibilityBatchReport {
         return 'jsoup:$count - compare org.jsoup/java.jsoup helper coverage with source scripts';
       case 'xpath':
         return 'xpath:$count - normalize XPath-prefixed rules before CSS parsing';
+      case 'crypto-signature':
+        return 'crypto-signature:$count - prioritize RSA/signature bridge fixtures before parser tuning';
+      case 'crypto-heavy':
+        return 'crypto-heavy:$count - verify AES/DES/HMAC helper parity against real source fixtures';
+      case 'asymmetric-crypto':
+        return 'asymmetric-crypto:$count - implement or explicitly gate java.createAsymmetricCrypto/createSign support';
+      case 'file-system':
+        return 'file-system:$count - emulate only source-scoped cache/file APIs and avoid unrestricted storage access';
+      case 'archive':
+        return 'archive:$count - inspect zip/7z/rar payload role before adding extraction support';
+      case 'response-code':
+        return 'response-code:$count - expose HTTP status and headers through the JS bridge';
+      case 'verification-code':
+        return 'verification-code:$count - separate captcha/OCR/manual verification sources from parser failures';
+      case 'dynamic-script':
+        return 'dynamic-script:$count - capture and cache imported scripts for deterministic compatibility tests';
       default:
         return '$dependency:$count - inspect representative sources';
     }
@@ -248,6 +264,39 @@ class SourceCompatibilityBatchAnalyzer {
       issues.any((issue) => issue.reason.toLowerCase().contains('xpath')),
       'xpath',
     );
+    addIf(
+      text.contains('java.createasymmetriccrypto') ||
+          text.contains('java.createsign'),
+      'asymmetric-crypto',
+    );
+    addIf(
+      RegExp(r'\b(?:rsa|dsa|ecdsa|signature|cryptojs\.rsa)\b').hasMatch(text) ||
+          text.contains('java.createasymmetriccrypto') ||
+          text.contains('java.createsign'),
+      'crypto-signature',
+    );
+    addIf(
+      RegExp(
+        r'\b(?:cryptojs\.)?(?:aes|des|tripledes|desede|hmacsha1|hmacsha256|hmacmd5|hmachex)\b',
+      ).hasMatch(text),
+      'crypto-heavy',
+    );
+    addIf(text.contains('java.getresponsecode'), 'response-code');
+    addIf(
+      text.contains('java.readfile') ||
+          text.contains('java.readtxtfile') ||
+          text.contains('java.deletefile') ||
+          text.contains('java.cachefile'),
+      'file-system',
+    );
+    addIf(
+      text.contains('java.unzipfile') ||
+          text.contains('java.un7zfile') ||
+          text.contains('java.unrarfile'),
+      'archive',
+    );
+    addIf(text.contains('java.importscript'), 'dynamic-script');
+    addIf(text.contains('java.getverificationcode'), 'verification-code');
     return values.toList(growable: false)..sort();
   }
 
