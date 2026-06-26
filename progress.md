@@ -318,6 +318,32 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add global HTML helpers for JS function sources
+
+### What was done
+- Added global JS helper aliases commonly used by modern function-style sources and MR/轻悦-style templates:
+  - `select(html, selector)`
+  - `selectFirst(html, selector)`
+  - `getAttr(html, selector, attr)`
+  - `clean(html)`
+  - `htmlFormat(html)`
+- Implemented the helpers in both QuickJS initialization and Node fallback so Windows development fallback behavior matches the runtime bridge as closely as possible.
+- Added targeted coverage for selecting nodes, first text extraction, attribute extraction, and HTML cleanup.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports global html helper functions"`: passed. Current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`; the new test passed through available fallback execution.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java.getElements bridge for html result rules"`: passed; same QuickJS DLL limitation applies.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports getStringList toArray and setContent in js bridge"`: passed; same QuickJS DLL limitation applies.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: QuickJS and Node fallback global HTML helper aliases.
+  - `test/legado_engine_test.dart`: targeted helper coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Execute JS function TOC and content rules
 
 ### What was done

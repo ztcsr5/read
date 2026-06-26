@@ -2446,6 +2446,38 @@ class LegadoJsEngine {
       java.md5 = function(string) {
         return this.md5Encode(string);
       };
+
+      function select(html, selector) {
+        var nodes = __selectFromHtml(String(html || ""), String(selector || "")).toArray();
+        return __arrayWithToArray(nodes.map(function(node) {
+          return String(node.outerHtml || node.html || node.text || "");
+        }));
+      }
+
+      function selectFirst(html, selector) {
+        var nodes = __selectFromHtml(String(html || ""), String(selector || "")).toArray();
+        if (!nodes.length) return "";
+        return String(nodes[0].text || "");
+      }
+
+      function getAttr(html, selector, attr) {
+        var selectorText = String(selector || "").trim();
+        var attrText = String(attr || "").trim();
+        if (!attrText) return "";
+        var nodes = __selectFromHtml(String(html || ""), selectorText || "body").toArray();
+        if (!nodes.length) return "";
+        return __nodeValueByAttr(nodes[0], attrText);
+      }
+
+      function clean(html) {
+        return java.htmlFormat(html);
+      }
+
+      globalThis.select = select;
+      globalThis.selectFirst = selectFirst;
+      globalThis.getAttr = getAttr;
+      globalThis.clean = clean;
+      globalThis.htmlFormat = java.htmlFormat;
     ''';
 
     if (_runtime == null) return;
@@ -3460,6 +3492,53 @@ try {
 function __str(value) {
   return value == null ? "" : String(value);
 }
+
+function select(html, selector) {
+  return __nodeJsoup
+    .parse(__str(html))
+    .select(__str(selector))
+    .toArray()
+    .map(node => node.outerHtml ? node.outerHtml() : __str(node));
+}
+
+function selectFirst(html, selector) {
+  const node = __nodeJsoup.parse(__str(html)).select(__str(selector)).first();
+  return node && node.text ? node.text() : "";
+}
+
+function getAttr(html, selector, attr) {
+  const attrName = __str(attr).trim();
+  if (!attrName) return "";
+  const node = __nodeJsoup
+    .parse(__str(html))
+    .select(__str(selector || "body"))
+    .first();
+  return node && node.attr ? node.attr(attrName) : "";
+}
+
+function clean(html) {
+  return __str(html)
+    .replace(/<\/?(?:br|p|div|section|article|li|tr|h[1-6])[^>]*>/gi, "\n")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+globalThis.select = globalThis.select || select;
+globalThis.selectFirst = globalThis.selectFirst || selectFirst;
+globalThis.getAttr = globalThis.getAttr || getAttr;
+globalThis.clean = globalThis.clean || clean;
+globalThis.htmlFormat = globalThis.htmlFormat || clean;
 
 function __looseLegadoJs(code) {
   return __str(code)

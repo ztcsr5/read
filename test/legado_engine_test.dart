@@ -4669,6 +4669,30 @@ result.toLowerCase()
       );
     });
 
+    test('supports global html helper functions', () {
+      if (!LegadoJsEngine().canEvaluate) return;
+      const html = '''
+<div class="book"><a href="/b1"><span class="title">Book One</span></a></div>
+<div class="book"><a href="/b2"><span class="title">Book Two</span></a></div>
+''';
+
+      final value = LegadoJsEngine().evaluate(
+        r'''@js:JSON.stringify({
+  count: select(result, ".book").length,
+  firstTitle: selectFirst(result, ".title"),
+  href: getAttr(result, ".book a", "href"),
+  cleaned: clean("<p>A</p><p>B</p>")
+})''',
+        variables: {'result': html},
+      );
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+
+      expect(decoded['count'], 2);
+      expect(decoded['firstTitle'], 'Book One');
+      expect(decoded['href'], '/b1');
+      expect(decoded['cleaned'], 'A\nB');
+    });
+
     test('supports java.getElements bridge for html result rules', () {
       if (!LegadoJsEngine().isAvailable) return;
       final html = '<div id="content"><p>第一段</p><p data-id="2">第二段</p></div>';
