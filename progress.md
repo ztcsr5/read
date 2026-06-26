@@ -61,6 +61,30 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Improve JS connect ajax bridge
+
+### What was done
+- Extended the Legado JS bridge for function-style sources that call `java.connect(url)` as a request builder.
+- Added response-object compatibility for common JS source patterns:
+  - `java.connect(url).get().body()`
+  - `java.connect(url).post(body).body()`
+  - `java.connect(url).execute().body()`
+  - response aliases: `body()`, `bodyString()`, `text()`, `html()`, `string()`, `parse()`, and `toString()`.
+- Preserved the existing direct `java.connect(url).body()` path so older rules continue to work.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "resolves java.connect get body through ajax callback"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "resolves java.connect post body through ajax callback"`: passed; same QuickJS DLL limitation applies.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 24 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: `java.connect` request/response bridge.
+  - `test/legado_engine_test.dart`: targeted get/post callback coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Execute JS function TOC and content rules
 
 ### What was done

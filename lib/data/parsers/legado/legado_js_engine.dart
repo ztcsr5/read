@@ -27,26 +27,37 @@ class JsEngineDiag {
 
   /// 当前请求中使用的引擎名称: native_jscore / quickjs / legacy / node / 无
   String lastEngine = '';
+
   /// Native JSCore 是否可用(channel 是否注册)
   bool nativeJSCoreAvailable = true;
+
   /// Native JSCore 是否在本轮中被调用过
   bool nativeJSCoreEverCalled = false;
+
   /// Native JSCore 最后一次失败原因
   String lastNativeJSCoreError = '';
+
   /// 是否 fallback 到 QuickJS
   bool lastFallbackToQuickJS = false;
+
   /// 是否 fallback 到 Legacy
   bool lastFallbackToLegacy = false;
+
   /// 是否命中 __LEGADO_AJAX__
   bool lastHitAjaxTrap = false;
+
   /// 是否命中 __LEGADO_NATIVE__
   bool lastHitNativeRequest = false;
+
   /// 最近一次 JS 代码片段(前 200 字符)
   String lastJsSnippet = '';
+
   /// 诊断时间戳
   String lastTimestamp = '';
+
   /// 同步 evaluate() 是否被调用过(同步路径无法走 Native JSCore)
   bool syncEvaluateUsed = false;
+
   /// Native JSCore 连续失败计数(超过阈值才禁用)
   int _nativeJSCoreFailCount = 0;
   static const int _maxFailCount = 3;
@@ -98,7 +109,8 @@ class LegadoJsEngine {
   factory LegadoJsEngine() => _instance;
 
   JavascriptRuntime? _runtime;
-  String? _initErrorMessage; // 一次性修补:把 getJavascriptRuntime 失败原因记下来,让 report 能看到
+  String?
+  _initErrorMessage; // 一次性修补:把 getJavascriptRuntime 失败原因记下来,让 report 能看到
   final Set<String> _loadedLibraryKeys = <String>{};
   final Set<String> _loadedNodeLibraryKeys = <String>{};
   final List<String> _loadedNodeLibraries = <String>[];
@@ -118,8 +130,9 @@ class LegadoJsEngine {
       'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '
       'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 '
       'Mobile/15E148 Safari/604.1';
-  static const MethodChannel _nativeJSCoreChannel =
-      MethodChannel('read/legado_jscore');
+  static const MethodChannel _nativeJSCoreChannel = MethodChannel(
+    'read/legado_jscore',
+  );
   static bool _nativeJSCoreUnavailable = false;
 
   bool? _nodeFallbackAvailableCache;
@@ -2448,8 +2461,9 @@ class LegadoJsEngine {
 
   String evaluate(String jsCode, {Map<String, dynamic>? variables}) {
     JsEngineDiag().syncEvaluateUsed = true;
-    JsEngineDiag().lastJsSnippet =
-        jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
+    JsEngineDiag().lastJsSnippet = jsCode.length > 200
+        ? '${jsCode.substring(0, 200)}...'
+        : jsCode;
 
     // 注意: 同步 evaluate() 无法调用 Native JSCore,因为 MethodChannel.invokeMethod
     // 是异步的,没有同步版本。SwiftSoup 注入只在异步路径(evaluateWithAjax)生效。
@@ -2496,8 +2510,9 @@ class LegadoJsEngine {
     Future<Uint8List> Function(String request)? ajaxBytes,
     int maxRequests = 12,
   }) async {
-    JsEngineDiag().lastJsSnippet =
-        jsCode.length > 200 ? '${jsCode.substring(0, 200)}...' : jsCode;
+    JsEngineDiag().lastJsSnippet = jsCode.length > 200
+        ? '${jsCode.substring(0, 200)}...'
+        : jsCode;
     final nativeResult = await _evaluateWithNativeJSCore(
       jsCode,
       variables: variables,
@@ -2607,8 +2622,10 @@ class LegadoJsEngine {
     required Future<String> Function(String request) ajax,
     int maxRequests = 12,
   }) async {
-    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable) return null;
-    if (Platform.environment['LEGADO_DISABLE_NATIVE_JSCORE'] == '1') return null;
+    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable)
+      return null;
+    if (Platform.environment['LEGADO_DISABLE_NATIVE_JSCORE'] == '1')
+      return null;
     final ajaxCache = <String, String>{};
     final nativeCache = <String, String>{};
     final nativeVariables = _jsonSafeMap(_normalizedVariables(variables));
@@ -2618,22 +2635,23 @@ class LegadoJsEngine {
         .toList(growable: false);
     for (var attempt = 0; attempt < maxRequests; attempt++) {
       try {
-        final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
-          'evaluate',
-          <String, dynamic>{
-            'code': _unwrapJsRule(jsCode),
-            'variables': nativeVariables,
-            'libraries': nativeLibraries,
-            'ajaxCache': ajaxCache,
-            'nativeCache': nativeCache,
-            'wrapScript': true,
-          },
-        ).timeout(const Duration(seconds: 8));
+        final response = await _nativeJSCoreChannel
+            .invokeMapMethod<String, dynamic>('evaluate', <String, dynamic>{
+              'code': _unwrapJsRule(jsCode),
+              'variables': nativeVariables,
+              'libraries': nativeLibraries,
+              'ajaxCache': ajaxCache,
+              'nativeCache': nativeCache,
+              'wrapScript': true,
+            })
+            .timeout(const Duration(seconds: 8));
         if (response == null) return null;
         if (response['ok'] == true) {
           JsEngineDiag().nativeJSCoreEverCalled = true;
-          final cookieHeader = response['cookieHeader']?.toString().trim() ?? '';
-          final baseUrl = nativeVariables['baseUrl']?.toString() ??
+          final cookieHeader =
+              response['cookieHeader']?.toString().trim() ?? '';
+          final baseUrl =
+              nativeVariables['baseUrl']?.toString() ??
               nativeVariables['url']?.toString() ??
               '';
           final uri = Uri.tryParse(baseUrl);
@@ -2643,7 +2661,9 @@ class LegadoJsEngine {
           }
           final storage = response['storage'];
           if (storage is Map) {
-            storage.forEach((key, value) => putStoredValue(key.toString(), value));
+            storage.forEach(
+              (key, value) => putStoredValue(key.toString(), value),
+            );
           }
           return response['result']?.toString() ?? '';
         }
@@ -2666,18 +2686,27 @@ class LegadoJsEngine {
           }
           continue;
         }
-        final nativeRequest = response['nativeRequest']?.toString().trim() ?? '';
+        final nativeRequest =
+            response['nativeRequest']?.toString().trim() ?? '';
         if (nativeRequest.isNotEmpty) {
           JsEngineDiag().lastHitNativeRequest = true;
           JsEngineDiag().nativeJSCoreEverCalled = true;
-          nativeCache[nativeRequest] = _handleNativeJSCoreRequest(nativeRequest);
+          nativeCache[nativeRequest] = _handleNativeJSCoreRequest(
+            nativeRequest,
+          );
           continue;
         }
-        debugPrint('Native JSCore eval failed: ${response['error'] ?? 'unknown'}');
-        JsEngineDiag().recordNativeJSCoreFailure(response['error']?.toString() ?? 'unknown');
+        debugPrint(
+          'Native JSCore eval failed: ${response['error'] ?? 'unknown'}',
+        );
+        JsEngineDiag().recordNativeJSCoreFailure(
+          response['error']?.toString() ?? 'unknown',
+        );
         return null;
       } on MissingPluginException catch (e) {
-        JsEngineDiag().recordNativeJSCoreFailure('MissingPluginException: channel 未注册');
+        JsEngineDiag().recordNativeJSCoreFailure(
+          'MissingPluginException: channel 未注册',
+        );
         debugPrint('Native JSCore channel unavailable: $e');
         return null;
       } on TimeoutException catch (e) {
@@ -2685,7 +2714,9 @@ class LegadoJsEngine {
         debugPrint('Native JSCore eval timed out: $e');
         return null;
       } on PlatformException catch (e) {
-        JsEngineDiag().recordNativeJSCoreFailure('PlatformException: ${e.message ?? e.code}');
+        JsEngineDiag().recordNativeJSCoreFailure(
+          'PlatformException: ${e.message ?? e.code}',
+        );
         debugPrint('Native JSCore platform error: ${e.message ?? e.code}');
         return null;
       } catch (e) {
@@ -2709,8 +2740,8 @@ class LegadoJsEngine {
       payload = decoded is Map<String, dynamic>
           ? decoded
           : decoded is Map
-              ? decoded.map((key, value) => MapEntry(key.toString(), value))
-              : <String, dynamic>{};
+          ? decoded.map((key, value) => MapEntry(key.toString(), value))
+          : <String, dynamic>{};
     } catch (_) {
       payload = <String, dynamic>{};
     }
@@ -2742,16 +2773,24 @@ class LegadoJsEngine {
         final selector = payload['selector']?.toString() ?? '';
         if (selector.trim().isEmpty) return '[]';
         return jsonEncode(
-          document.querySelectorAll(selector).map(_serializeJsoupElement).toList(),
+          document
+              .querySelectorAll(selector)
+              .map(_serializeJsoupElement)
+              .toList(),
         );
       case 'children':
         final fragment = parseFragment(html);
         return jsonEncode(
-          fragment.nodes.whereType<Element>().map(_serializeJsoupElement).toList(),
+          fragment.nodes
+              .whereType<Element>()
+              .map(_serializeJsoupElement)
+              .toList(),
         );
       case 'body':
         final body = document.body ?? document.documentElement;
-        return jsonEncode(body == null ? <String, dynamic>{} : _serializeJsoupElement(body));
+        return jsonEncode(
+          body == null ? <String, dynamic>{} : _serializeJsoupElement(body),
+        );
       case 'text':
         return (document.body ?? document.documentElement)?.text.trim() ?? '';
       default:
@@ -2767,7 +2806,8 @@ class LegadoJsEngine {
     final iv = payload['iv']?.toString() ?? '';
     var transformation = payload['transformation']?.toString() ?? '';
     if (transformation.isEmpty) transformation = '$kind/CBC/PKCS5Padding';
-    if (op == 'encrypt') return _cipherBase64Encode(value, key, iv, transformation);
+    if (op == 'encrypt')
+      return _cipherBase64Encode(value, key, iv, transformation);
     return _aesBase64Decode(value, key, iv, transformation);
   }
 
@@ -2801,7 +2841,8 @@ class LegadoJsEngine {
     try {
       final decoded = jsonDecode(args?.toString() ?? '{}');
       if (decoded is Map<String, dynamic>) return decoded;
-      if (decoded is Map) return decoded.map((key, value) => MapEntry(key.toString(), value));
+      if (decoded is Map)
+        return decoded.map((key, value) => MapEntry(key.toString(), value));
     } catch (_) {}
     return <String, dynamic>{};
   }
@@ -2817,12 +2858,13 @@ class LegadoJsEngine {
   }
 
   Future<String> _openNativeLoginWebView(String url) async {
-    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable) return '';
+    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable)
+      return '';
     try {
-      final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
-        'openLogin',
-        <String, dynamic>{'url': url},
-      );
+      final response = await _nativeJSCoreChannel
+          .invokeMapMethod<String, dynamic>('openLogin', <String, dynamic>{
+            'url': url,
+          });
       final cookieHeader = response?['cookieHeader']?.toString().trim() ?? '';
       final uri = Uri.tryParse(url);
       if (uri != null && cookieHeader.isNotEmpty) {
@@ -2837,12 +2879,13 @@ class LegadoJsEngine {
   }
 
   Future<String> nativeCookiesForUrl(String url) async {
-    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable) return '';
+    if (kIsWeb || !Platform.isIOS || !JsEngineDiag().nativeJSCoreAvailable)
+      return '';
     try {
-      final response = await _nativeJSCoreChannel.invokeMapMethod<String, dynamic>(
-        'cookiesForUrl',
-        <String, dynamic>{'url': url},
-      );
+      final response = await _nativeJSCoreChannel
+          .invokeMapMethod<String, dynamic>('cookiesForUrl', <String, dynamic>{
+            'url': url,
+          });
       final cookieHeader = response?['cookieHeader']?.toString().trim() ?? '';
       final uri = Uri.tryParse(url);
       if (uri != null && cookieHeader.isNotEmpty) {
@@ -2861,11 +2904,15 @@ class LegadoJsEngine {
   }
 
   dynamic _jsonSafeValue(dynamic value) {
-    if (value == null || value is String || value is num || value is bool) return value;
+    if (value == null || value is String || value is num || value is bool)
+      return value;
     if (value is Map) {
-      return value.map((key, child) => MapEntry(key.toString(), _jsonSafeValue(child)));
+      return value.map(
+        (key, child) => MapEntry(key.toString(), _jsonSafeValue(child)),
+      );
     }
-    if (value is Iterable) return value.map(_jsonSafeValue).toList(growable: false);
+    if (value is Iterable)
+      return value.map(_jsonSafeValue).toList(growable: false);
     return value.toString();
   }
 
@@ -3150,10 +3197,7 @@ class LegadoJsEngine {
       String response;
       try {
         // 构造 legado ajax 协议:{url,method,headers,body} 序列化
-        final req = jsonEncode({
-          'url': url,
-          'method': 'GET',
-        });
+        final req = jsonEncode({'url': url, 'method': 'GET'});
         response = await ajax(req);
       } catch (e) {
         response = '';
@@ -3161,7 +3205,9 @@ class LegadoJsEngine {
       results.insert(0, response);
       final placeholder = '__LEGACY_AJAX_RESULT_${i}__';
       processed =
-          processed.substring(0, m.start) + placeholder + processed.substring(m.end);
+          processed.substring(0, m.start) +
+          placeholder +
+          processed.substring(m.end);
     }
 
     // 2) 注入 ajax 结果到 variables
@@ -4249,7 +4295,9 @@ async function __stringifyResult(value) {
     if (trimmedPrefix.isEmpty || trimmedSuffix.isEmpty) return false;
 
     // Suffix starts with continuation operator
-    final suffixStart = RegExp(r'^(\+|\-|\*|\/|\.|\?|\:|&&|\|\||\?\?|\,|===|==|!==|!=|<=|>=|>|<)');
+    final suffixStart = RegExp(
+      r'^(\+|\-|\*|\/|\.|\?|\:|&&|\|\||\?\?|\,|===|==|!==|!=|<=|>=|>|<)',
+    );
     if (suffixStart.hasMatch(trimmedSuffix)) {
       if (trimmedSuffix.startsWith('++') || trimmedSuffix.startsWith('--')) {
         return false;
@@ -4355,6 +4403,23 @@ async function __stringifyResult(value) {
       java.connect = function(urlStr) {
         var u = String(urlStr || "");
         var config = { method: "GET", headers: {} };
+        function payload() {
+          return Object.keys(config.headers).length || config.method !== "GET" || config.body
+            ? u + "," + JSON.stringify(config)
+            : u;
+        }
+        function responseObject() {
+          var text = java.ajax(payload());
+          return {
+            body: function() { return text; },
+            bodyString: function() { return text; },
+            text: function() { return text; },
+            html: function() { return text; },
+            string: function() { return text; },
+            parse: function() { return text; },
+            toString: function() { return text; }
+          };
+        }
         var chain = {
           header: function(k, v) {
             if (k != null) config.headers[String(k)] = String(v == null ? "" : v);
@@ -4380,19 +4445,16 @@ async function __stringifyResult(value) {
           timeout: function() { return chain; },
           ignoreContentType: function() { return chain; },
           followRedirects: function() { return chain; },
-          get: function() { config.method = "GET"; return chain; },
-          post: function(body) { config.method = "POST"; config.body = body == null ? "" : String(body); return chain; },
+          get: function() { config.method = "GET"; return responseObject(); },
+          post: function(body) { config.method = "POST"; config.body = body == null ? "" : String(body); return responseObject(); },
           data: function(body) { config.body = body == null ? "" : String(body); return chain; },
           requestBody: function(body) { config.body = body == null ? "" : String(body); return chain; },
           raw: function() { return chain; },
           request: function() { return chain; },
           body: function() {
-            var payload = Object.keys(config.headers).length || config.method !== "GET" || config.body
-              ? u + "," + JSON.stringify(config)
-              : u;
-            return java.ajax(payload);
+            return java.ajax(payload());
           },
-          execute: function() { return chain.body(); },
+          execute: function() { return responseObject(); },
           url: function() { return u; },
           toString: function() { return u; }
         };
@@ -4792,7 +4854,9 @@ async function __stringifyResult(value) {
           ? Uint8List.fromList(utf8.encode(value))
           : Uint8List.fromList(_bestEffortBytes(value));
       final output = engine.process(input);
-      return forEncryption ? base64Encode(output) : utf8.decode(output, allowMalformed: true);
+      return forEncryption
+          ? base64Encode(output)
+          : utf8.decode(output, allowMalformed: true);
     } catch (e) {
       debugPrint('RSA $op failed: $e');
       return '';
@@ -4813,13 +4877,15 @@ async function __stringifyResult(value) {
         if (direct != null) return PrivateKeyParameter<RSAPrivateKey>(direct);
         final nested = _nestedOctetSequence(top);
         final nestedKey = nested == null ? null : _parsePrivateRsaKey(nested);
-        if (nestedKey != null) return PrivateKeyParameter<RSAPrivateKey>(nestedKey);
+        if (nestedKey != null)
+          return PrivateKeyParameter<RSAPrivateKey>(nestedKey);
       } else {
         final direct = _parsePublicRsaKey(top);
         if (direct != null) return PublicKeyParameter<RSAPublicKey>(direct);
         final nested = _nestedBitSequence(top);
         final nestedKey = nested == null ? null : _parsePublicRsaKey(nested);
-        if (nestedKey != null) return PublicKeyParameter<RSAPublicKey>(nestedKey);
+        if (nestedKey != null)
+          return PublicKeyParameter<RSAPublicKey>(nestedKey);
       }
     } catch (e) {
       debugPrint('RSA key parse failed: $e');

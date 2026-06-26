@@ -1475,6 +1475,39 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect((jsonDecode(value) as List).first['title'], 'A');
     });
 
+    test('resolves java.connect get body through ajax callback', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final requests = <String>[];
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>var body = java.connect("https://example.com/books").get().body(); JSON.parse(body).title;</js>',
+        ajax: (request) async {
+          requests.add(request);
+          return jsonEncode({'title': 'Connected'});
+        },
+      );
+
+      expect(value, 'Connected');
+      expect(requests.single, 'https://example.com/books');
+    });
+
+    test('resolves java.connect post body through ajax callback', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final requests = <String>[];
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>var body = java.connect("https://example.com/books").header("X-Test","1").post("a=1").body(); JSON.parse(body).ok;</js>',
+        ajax: (request) async {
+          requests.add(request);
+          return jsonEncode({'ok': true});
+        },
+      );
+
+      expect(value, 'true');
+      expect(requests.single, contains('https://example.com/books,'));
+      expect(requests.single, contains('"method":"POST"'));
+      expect(requests.single, contains('"body":"a=1"'));
+      expect(requests.single, contains('"X-Test":"1"'));
+    });
+
     test('wraps top-level java.ajax snippets as async iife', () {
       final code = JsCompatibilityTransformer.transform(
         'var data = JSON.parse(java.ajax("https://example.com/books")); data.list;',
