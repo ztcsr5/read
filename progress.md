@@ -318,6 +318,26 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Surface compatibility summary in batch source check
+
+### What was done
+- Integrated `SourceCompatibilityBatchAnalyzer` into the existing batch source check page.
+- The batch check header now shows a compact compatibility summary after checking finishes:
+  - top dependency buckets, such as `javascript`, `http-js-bridge`, `webview`, and `headers-cookie`,
+  - the highest-priority repair recommendations.
+- The copied batch report now includes the same compatibility dependency distribution and recommendations, so a failed batch can be shared/reviewed without re-running analysis.
+- The actual source checking flow, concurrency, and disable-failed-source behavior were not changed.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\settings\views\source_batch_check_page.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\settings\views\source_batch_check_page.dart lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart`: no issues found.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart`: 11 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/features/settings/views/source_batch_check_page.dart`: compatibility summary UI and copy-report section.
+- Rollback: revert the changed file and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Export batch compatibility recommendations
 
 ### What was done

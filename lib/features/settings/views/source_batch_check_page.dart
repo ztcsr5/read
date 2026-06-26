@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../../data/models/book_source.dart';
 import '../../../data/parsers/legado_parser.dart';
 import '../../../data/repositories/book_repository.dart';
+import '../../source_diagnostic/services/source_compatibility_batch_analyzer.dart';
 import '../services/source_check_classifier.dart';
 import '../viewmodels/book_source_viewmodel.dart';
 
@@ -43,8 +44,7 @@ class SourceCheckResult {
   });
 
   bool get canDisable =>
-      !isSuccess && !isBlocked && !isSkipped &&
-      !isNeedsLogin && !isNeedsVerify;
+      !isSuccess && !isBlocked && !isSkipped && !isNeedsLogin && !isNeedsVerify;
 }
 
 enum SourceCheckFilter {
@@ -146,7 +146,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         // 优先识别"需登录"和"需验证"状态,避免被计入成功或普通失败
         needsLogin = report.hasNeedsLogin;
         needsVerify = report.hasNeedsVerify;
-        skipped = report.steps.isNotEmpty &&
+        skipped =
+            report.steps.isNotEmpty &&
             report.steps.every((s) => s.status == LegadoStepStatus.skip);
         success = !report.hasFailure && !skipped && !needsLogin && !needsVerify;
         if (success) {
@@ -169,14 +170,16 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
           errorMessage = '${failStep.title}：${failStep.message}';
           failSample = failStep.sample;
           failLogs = failStep.logs;
-          stageTrail = report.steps.map((s) {
-            final mark = s.status == LegadoStepStatus.ok
-                ? '✓'
-                : s.status == LegadoStepStatus.fail
-                ? '✗'
-                : '–';
-            return '$mark${s.title}';
-          }).join(' · ');
+          stageTrail = report.steps
+              .map((s) {
+                final mark = s.status == LegadoStepStatus.ok
+                    ? '✓'
+                    : s.status == LegadoStepStatus.fail
+                    ? '✗'
+                    : '–';
+                return '$mark${s.title}';
+              })
+              .join(' · ');
           blocked = sourceCheckFailureIsBlocked(
             source,
             failStep: failStepTitle,
@@ -242,6 +245,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   }
 
   Future<void> _copyReport() async {
+    final compatibilityReport = SourceCompatibilityBatchAnalyzer.analyze(
+      widget.sources,
+    );
     final buffer = StringBuffer()
       ..writeln('# 书源批量检测报告')
       ..writeln()
@@ -256,6 +262,15 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
       ..writeln('- 说明: 单源规则配置了 checkKeyWord 时会自动覆盖默认关键词')
       ..writeln()
       ..writeln('## 失败阶段统计');
+    buffer.writeln('## 兼容风险建议');
+    for (final entry in compatibilityReport.topDependencies()) {
+      buffer.writeln('- ${entry.key}: ${entry.value}');
+    }
+    for (final item in compatibilityReport.recommendedFocus()) {
+      buffer.writeln('- $item');
+    }
+    buffer.writeln();
+
     final counts = _failureStepCounts();
     if (counts.isEmpty) {
       buffer.writeln('_无_');
@@ -290,8 +305,9 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
         }
         if (result.failSample != null && result.failSample!.trim().isNotEmpty) {
           final sample = result.failSample!.trim().replaceAll('\n', ' ');
-          final clipped =
-              sample.length > 200 ? '${sample.substring(0, 200)}…' : sample;
+          final clipped = sample.length > 200
+              ? '${sample.substring(0, 200)}…'
+              : sample;
           buffer.writeln('    抓到的内容样本: $clipped');
         }
         if (result.failLogs.isNotEmpty) {
@@ -384,7 +400,8 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
   Widget build(BuildContext context) {
     final bgColor = CupertinoTheme.of(context).scaffoldBackgroundColor;
     final total = widget.sources.length;
-    final checked = _successCount +
+    final checked =
+        _successCount +
         _failCount +
         _blockedCount +
         _skippedCount +
@@ -597,10 +614,72 @@ class _SourceBatchCheckPageState extends ConsumerState<SourceBatchCheckPage> {
             ],
           ),
           if (!_isChecking &&
-              (_failCount + _blockedCount + _needsLoginCount + _needsVerifyCount) >
+              (_failCount +
+                      _blockedCount +
+                      _needsLoginCount +
+                      _needsVerifyCount) >
                   0) ...[
             const SizedBox(height: 12),
             _buildFailureStepSummary(),
+          ],
+          if (!_isChecking) ...[
+            const SizedBox(height: 12),
+            _buildCompatibilitySummary(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompatibilitySummary() {
+    final report = SourceCompatibilityBatchAnalyzer.analyze(widget.sources);
+    final dependencies = report.topDependencies(4);
+    if (dependencies.isEmpty) return const SizedBox.shrink();
+    final recommendations = report.recommendedFocus(2);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '兼容风险建议',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: dependencies.map((entry) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: CupertinoColors.systemBackground,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${entry.key} ${entry.value}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: CupertinoColors.secondaryLabel,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          if (recommendations.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              recommendations.join('\n'),
+              style: const TextStyle(
+                fontSize: 12,
+                color: CupertinoColors.secondaryLabel,
+              ),
+            ),
           ],
         ],
       ),
