@@ -1599,6 +1599,17 @@ JSON.stringify({
       expect(decoded['title'], 'Book Title');
     });
 
+    test('supports java importScript helper aliases', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final value = await LegadoJsEngine().evaluateWithAjax(r'''@js:
+java.importScript("data:text/javascript,function%20fromJavaImport()%20%7B%20return%20%22java-import%22%3B%20%7D");
+importScript("data:text/javascript,function%20fromGlobalImport()%20%7B%20return%20%22global-import%22%3B%20%7D");
+fromJavaImport() + "|" + fromGlobalImport();
+''', ajax: (request) async => '');
+
+      expect(value, 'java-import|global-import');
+    });
+
     test('resolves global fetch through ajax callback', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final requests = <String>[];

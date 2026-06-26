@@ -1552,6 +1552,15 @@ class LegadoJsEngine {
           }));
           return 200;
         },
+        importScript: function(scriptOrUrl) {
+          var value = String(scriptOrUrl || "");
+          if (/^(?:https?:|data:)/i.test(value)) {
+            value = java.ajax(value);
+          }
+          if (!value.trim()) return "";
+          (0, eval)(String(value));
+          return value;
+        },
         androidId: function() {
           return "legacy-evaluator-androidId";
         },
@@ -2595,6 +2604,7 @@ class LegadoJsEngine {
         return value === "" && arguments.length > 1 ? String(def || "") : value;
       };
       globalThis.ajax = function() { return java.ajax.apply(java, arguments); };
+      globalThis.importScript = function() { return java.importScript.apply(java, arguments); };
       globalThis.getWebViewUA = function() { return java.getWebViewUA(); };
       globalThis.base64Encode = function() { return java.base64Encode.apply(java, arguments); };
       globalThis.base64Decode = function() { return java.base64Decode.apply(java, arguments); };
@@ -4006,6 +4016,15 @@ const java = {
     await __fetchText(url, { method: "GET", headers: headers || {} });
     return 200;
   },
+  importScript: async function(scriptOrUrl) {
+    let value = __str(scriptOrUrl);
+    if (/^(?:https?:|data:)/i.test(value)) {
+      value = await __fetchText(value, { method: "GET" });
+    }
+    if (!value.trim()) return "";
+    (0, eval)(__looseLegadoJs(value));
+    return value;
+  },
   post: function(url, body, headers) {
     return __responseProxy(url, { method: "POST", body: body == null ? "" : __str(body), headers: headers || {} });
   },
@@ -4336,6 +4355,7 @@ globalThis.getStr = globalThis.getStr || function(key, def) {
   return value === "" && arguments.length > 1 ? __str(def) : value;
 };
 globalThis.ajax = globalThis.ajax || function() { return java.ajax.apply(java, arguments); };
+globalThis.importScript = globalThis.importScript || function() { return java.importScript.apply(java, arguments); };
 globalThis.getWebViewUA = globalThis.getWebViewUA || function() { return java.getWebViewUA(); };
 globalThis.base64Encode = globalThis.base64Encode || function() { return java.base64Encode.apply(java, arguments); };
 globalThis.base64Decode = globalThis.base64Decode || function() { return java.base64Decode.apply(java, arguments); };
@@ -4855,6 +4875,15 @@ async function __stringifyResult(value) {
       java.getResponseCode = function(urlStr, headers) {
         java.ajax(__requestPayload(urlStr, { method: "GET", headers: headers || {} }));
         return 200;
+      };
+      java.importScript = function(scriptOrUrl) {
+        var value = String(scriptOrUrl || "");
+        if (/^(?:https?:|data:)/i.test(value)) {
+          value = java.ajax(__requestPayload(value, { method: "GET" }));
+        }
+        if (!value.trim()) return "";
+        (0, eval)(String(value));
+        return value;
       };
       java.fetch = function(urlStr, options) {
         return __responseFromText(java.ajax(__requestPayload(urlStr, options || {})));
@@ -5582,12 +5611,15 @@ class JsCompatibilityTransformer {
     var transformed = code;
 
     final hasJavaCall = RegExp(
-      r'java\.(ajax|post|connect|startBrowser|get|fetch|postForm|getResponseCode|ajax_bytes)\b',
+      r'java\.(ajax|post|connect|startBrowser|get|fetch|postForm|getResponseCode|importScript|ajax_bytes)\b',
     ).hasMatch(transformed);
     final hasDynamicLoginEval = RegExp(
       r'eval\s*\(\s*(?:String\s*\(\s*)?source\.loginUrl',
     ).hasMatch(transformed);
-    if (!hasJavaCall && !hasDynamicLoginEval) {
+    final hasGlobalImportScriptCall = RegExp(
+      r'(^|[^\w$.])importScript\s*\(',
+    ).hasMatch(transformed);
+    if (!hasJavaCall && !hasDynamicLoginEval && !hasGlobalImportScriptCall) {
       return transformed;
     }
 
@@ -5630,6 +5662,7 @@ class JsCompatibilityTransformer {
     );
 
     transformed = _wrapAwaitJavaCalls(transformed);
+    transformed = _awaitKnownFunctionCalls(transformed, const ['importScript']);
 
     if (hasDynamicLoginEval) {
       transformed = _awaitKnownFunctionCalls(transformed, const ['login']);
@@ -5652,7 +5685,7 @@ class JsCompatibilityTransformer {
   /// After:  `(await java.ajax(url)).match(/pattern/)`
   static String _wrapAwaitJavaCalls(String code) {
     final pattern = RegExp(
-      r'(?<!await\s{0,8})java\.(ajax|post|connect|startBrowser|get|fetch|postForm|getResponseCode|ajax_bytes)\s*\(',
+      r'(?<!await\s{0,8})java\.(ajax|post|connect|startBrowser|get|fetch|postForm|getResponseCode|importScript|ajax_bytes)\s*\(',
     );
     final buf = StringBuffer();
     var pos = 0;

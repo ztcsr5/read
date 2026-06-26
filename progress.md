@@ -554,6 +554,33 @@
   - `test/legado_engine_test.dart`: targeted helper coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add java.importScript JS bridge compatibility
+
+### What was done
+- Added `java.importScript(scriptOrUrl)` compatibility to:
+  - QuickJS injected Java layer.
+  - Node fallback Java layer.
+  - AJAX trap layer used by iterative request replay.
+- Added global `importScript(...)` alias for MR / light functional source style.
+- Added `importScript` to the JS async transformer:
+  - `java.importScript(...)` is wrapped like other async Java bridge calls.
+  - global `importScript(...)` is awaited when used directly.
+- Added a targeted test that imports helper functions from `data:text/javascript,...` through both `java.importScript(...)` and global `importScript(...)`.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java importScript helper aliases"`: passed. Windows still logs the known missing `quickjs_c_bridge_plugin.dll`; legacy first-pass logs unsupported `importScript`, then Node fallback succeeds.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java ajaxAll head and getStrResponse helpers"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 31 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints in the large legacy file remain and cause non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`
+  - `test/legado_engine_test.dart`
+- Legacy Dart evaluator still logs unsupported `importScript`; this is acceptable for this checkpoint because dynamic script evaluation is handled by Node fallback / QuickJS paths. A later cleanup can make legacy silently return script text if needed.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add java.getResponseCode JS bridge compatibility
 
 ### What was done
