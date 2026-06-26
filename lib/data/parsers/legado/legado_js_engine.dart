@@ -4545,7 +4545,7 @@ async function __stringifyResult(value) {
           raw: function() { return chain; },
           request: function() { return chain; },
           body: function() {
-            return java.ajax(payload());
+            return responseObject().body();
           },
           execute: function() { return responseObject(); },
           url: function() { return u; },

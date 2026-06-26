@@ -61,6 +61,29 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Support java.connect direct body response aliases
+
+### What was done
+- Improved the ajax-backed `java.connect(url)` bridge for function-style JS sources.
+- `java.connect(url).body()` now returns the same string-like body object as `java.connect(url).get().body()`, so both forms work:
+  - `JSON.parse(java.connect(url).body())`
+  - `java.connect(url).body().string()`
+  - `java.connect(url).body().text()`
+- Existing `get()`, `post()`, and `execute()` response behavior is preserved.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "resolves java.connect direct body string alias"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "resolves java.connect get body through ajax callback"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: direct `java.connect().body()` response alias.
+  - `test/legado_engine_test.dart`: targeted connect body alias coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Support JS TOC chapter field aliases
 
 ### What was done

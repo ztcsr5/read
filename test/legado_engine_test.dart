@@ -1528,6 +1528,21 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(requests.single, 'https://example.com/books');
     });
 
+    test('resolves java.connect direct body string alias', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final requests = <String>[];
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>java.connect("https://example.com/books").body().string();</js>',
+        ajax: (request) async {
+          requests.add(request);
+          return jsonEncode({'title': 'DirectBody'});
+        },
+      );
+
+      expect(value, '{"title":"DirectBody"}');
+      expect(requests.single, 'https://example.com/books');
+    });
+
     test('resolves java.connect post body through ajax callback', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final requests = <String>[];
