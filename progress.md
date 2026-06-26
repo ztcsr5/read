@@ -318,6 +318,29 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Export batch compatibility recommendations
+
+### What was done
+- Extended `SourceCompatibilityBatchReport` with JSON export so batch scan results can be saved to logs, files, or a future UI page.
+- Added `recommendedFocus()` to translate dependency counts into practical next repair directions, such as:
+  - expand JS runtime/function compatibility,
+  - verify `java.ajax/connect/fetch/request` bridges,
+  - separate WebView/Cookie/login requirements from real parser failures,
+  - validate non-UTF8 decoding and Jsoup helper coverage.
+- Added per-source JSON output with format, dependencies, issue count, and issue details.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart test\compatibility_analyzer_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart`: 5 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\source_diagnostic\services\source_compatibility_batch_analyzer.dart test\compatibility_analyzer_test.dart`: no issues found.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 29 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/features/source_diagnostic/services/source_compatibility_batch_analyzer.dart`: JSON export and recommendations.
+  - `test/compatibility_analyzer_test.dart`: export/recommendation assertions.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add batch compatibility analyzer
 
 ### What was done

@@ -133,7 +133,17 @@ void main() {
       expect(report.dependencyCounts['webview'], 1);
       expect(report.dependencyCounts['headers-cookie'], 1);
       expect(report.topDependencies().first.key, 'javascript');
+      expect(
+        report.recommendedFocus().first,
+        contains('expand JS runtime/function compatibility'),
+      );
       expect(report.stageCounts.keys, contains('search'));
+
+      final json = report.toJson();
+      expect(json['totalSources'], 3);
+      expect(json['recommendedFocus'], isA<List>());
+      expect(json['items'], isA<List>());
+      expect((json['items'] as List).first['issueCount'], isA<int>());
     });
   });
 }

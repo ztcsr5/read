@@ -29,6 +29,25 @@ class SourceCompatibilityBatchReport {
   List<MapEntry<String, int>> topDependencies([int limit = 8]) =>
       _sorted(dependencyCounts).take(limit).toList(growable: false);
 
+  List<String> recommendedFocus([int limit = 5]) => topDependencies(limit)
+      .map((entry) => _recommendationForDependency(entry.key, entry.value))
+      .toList(growable: false);
+
+  Map<String, dynamic> toJson() => {
+    'totalSources': totalSources,
+    'riskySources': riskySources,
+    'riskyRatio': riskyRatio,
+    'formatCounts': formatCounts,
+    'dependencyCounts': dependencyCounts,
+    'stageCounts': stageCounts,
+    'reasonCounts': reasonCounts,
+    'topReasons': topReasons()
+        .map((entry) => {'reason': entry.key, 'count': entry.value})
+        .toList(growable: false),
+    'recommendedFocus': recommendedFocus(),
+    'items': items.map((item) => item.toJson()).toList(growable: false),
+  };
+
   static List<MapEntry<String, int>> _sorted(Map<String, int> map) {
     final entries = map.entries.toList();
     entries.sort((a, b) {
@@ -36,6 +55,29 @@ class SourceCompatibilityBatchReport {
       return byCount != 0 ? byCount : a.key.compareTo(b.key);
     });
     return entries;
+  }
+
+  static String _recommendationForDependency(String dependency, int count) {
+    switch (dependency) {
+      case 'javascript':
+        return 'javascript:$count - expand JS runtime/function compatibility first';
+      case 'http-js-bridge':
+        return 'http-js-bridge:$count - verify java.ajax/connect/fetch/request bridges and request config parsing';
+      case 'webview':
+        return 'webview:$count - prioritize Cookie/WebView verification flow instead of treating sources as dead';
+      case 'headers-cookie':
+        return 'headers-cookie:$count - inspect final headers, Cookie persistence, Referer and User-Agent behavior';
+      case 'login':
+        return 'login:$count - separate login-required sources from parser failures';
+      case 'non-utf8':
+        return 'non-utf8:$count - validate GBK/GB2312/GB18030 decoding path';
+      case 'jsoup':
+        return 'jsoup:$count - compare org.jsoup/java.jsoup helper coverage with source scripts';
+      case 'xpath':
+        return 'xpath:$count - normalize XPath-prefixed rules before CSS parsing';
+      default:
+        return '$dependency:$count - inspect representative sources';
+    }
   }
 }
 
@@ -55,6 +97,15 @@ class SourceCompatibilityBatchItem {
   });
 
   bool get hasRisk => issues.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'url': url,
+    'format': format,
+    'dependencies': dependencies,
+    'issueCount': issues.length,
+    'issues': issues.map((issue) => issue.toJson()).toList(growable: false),
+  };
 }
 
 class SourceCompatibilityBatchAnalyzer {
