@@ -2697,6 +2697,58 @@ function search(key, page, result) {
       expect(books.single.totalChapters, 12);
     });
 
+    test('parses imported js function explore results', () async {
+      if (!LegadoJsEngine().canEvaluate) return;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.html;
+        request.response.write('<html><body>explore seed</body></html>');
+        await request.response.close();
+      });
+      final baseUrl = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Explore Source'
+        ..bookSourceUrl = baseUrl
+        ..exploreUrl = '/rank/{{page}}'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function explore(baseUrl, result) {
+  return {
+    data: {
+      items: [{
+        title: "Explore Book",
+        writer: "Explore Author",
+        url: "/books/explore",
+        img: "/covers/explore.jpg",
+        latest: "Chapter 9",
+        category: "Fantasy"
+      }]
+    }
+  };
+}
+''',
+        })
+        ..ruleExplore = jsonEncode({
+          'bookList': '<js>explore(baseUrl, result)</js>',
+        });
+
+      final books = await LegadoParser.parseExploreBooks(
+        source,
+        '$baseUrl/rank/1',
+        page: 1,
+      );
+
+      expect(books, hasLength(1));
+      expect(books.single.title, 'Explore Book');
+      expect(books.single.author, 'Explore Author');
+      expect(books.single.filePath, '$baseUrl/books/explore');
+      expect(books.single.coverPath, '$baseUrl/covers/explore.jpg');
+      expect(books.single.tags, contains('Fantasy'));
+    });
+
     test('parses imported js function toc results', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final source = BookSource()

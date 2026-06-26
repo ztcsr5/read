@@ -318,6 +318,31 @@
   - `test/legado_engine_test.dart`: targeted get/post callback coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Cover JS function explore parsing
+
+### What was done
+- Added targeted coverage for `ruleExplore.bookList = <js>explore(baseUrl, result)</js>`.
+- The test verifies that function-style explore results can return nested containers such as `{data:{items:[...]}}`.
+- The test also covers modern field aliases from MR/轻悦-style scripts:
+  - `title`
+  - `writer`
+  - `url`
+  - `img`
+  - `category`
+- No production parser change was required because explore already reuses the JS book-list parser; this checkpoint locks that behavior against future regressions.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function explore results"`: passed. Current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`; Legacy first rejects the unknown `explore` call, then Node fallback passes.
+- Re-ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "supports java ajaxAll head and getStrResponse helpers"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+
+### Notes
+- Changed files:
+  - `test/legado_engine_test.dart`: targeted JS explore coverage.
+- Rollback: revert the changed test file and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add ajaxAll/head/getStrResponse JS helpers
 
 ### What was done
