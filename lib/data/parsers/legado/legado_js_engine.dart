@@ -4396,29 +4396,60 @@ async function __stringifyResult(value) {
         }
         throw new Error("__LEGADO_AJAX__" + url);
       };
-      java.post = function(urlStr, body) {
-        var payload = String(urlStr || "") + "," + JSON.stringify({ method: "POST", body: body || "" });
-        return java.ajax(payload);
+      function __requestPayload(urlStr, options) {
+        var u = String(urlStr || "");
+        var config = options || {};
+        var method = String(config.method || config.type || "GET").toUpperCase();
+        var headers = config.headers || config.header || {};
+        var body = config.body == null ? config.data : config.body;
+        var normalized = { method: method, headers: headers || {} };
+        if (body != null) normalized.body = String(body);
+        return Object.keys(normalized.headers).length || method !== "GET" || body != null
+          ? u + "," + JSON.stringify(normalized)
+          : u;
+      }
+      function __responseFromText(text) {
+        var bodyText = String(text == null ? "" : text);
+        var body = new String(bodyText);
+        body.string = function() { return bodyText; };
+        body.text = function() { return bodyText; };
+        body.html = function() { return bodyText; };
+        body.bytes = function() {
+          var bytes = [];
+          for (var i = 0; i < bodyText.length; i++) bytes.push(bodyText.charCodeAt(i) & 255);
+          return bytes;
+        };
+        body.toString = function() { return bodyText; };
+        body.valueOf = function() { return bodyText; };
+        var response = new String(bodyText);
+        response.body = function() { return body; };
+        response.bodyString = function() { return bodyText; };
+        response.string = function() { return bodyText; };
+        response.text = function() { return bodyText; };
+        response.html = function() { return bodyText; };
+        response.json = function() { return JSON.parse(bodyText); };
+        response.parse = function() { return bodyText; };
+        response.toString = function() { return bodyText; };
+        response.valueOf = function() { return bodyText; };
+        return response;
+      }
+      java.get = function(urlStr, headers) {
+        return java.ajax(__requestPayload(urlStr, { method: "GET", headers: headers || {} }));
+      };
+      java.post = function(urlStr, body, headers) {
+        return java.ajax(__requestPayload(urlStr, { method: "POST", body: body || "", headers: headers || {} }));
+      };
+      java.fetch = function(urlStr, options) {
+        return __responseFromText(java.ajax(__requestPayload(urlStr, options || {})));
       };
       java.connect = function(urlStr) {
         var u = String(urlStr || "");
         var config = { method: "GET", headers: {} };
         function payload() {
-          return Object.keys(config.headers).length || config.method !== "GET" || config.body
-            ? u + "," + JSON.stringify(config)
-            : u;
+          return __requestPayload(u, config);
         }
         function responseObject() {
-          var text = java.ajax(payload());
-          return {
-            body: function() { return text; },
-            bodyString: function() { return text; },
-            text: function() { return text; },
-            html: function() { return text; },
-            string: function() { return text; },
-            parse: function() { return text; },
-            toString: function() { return text; }
-          };
+          return __responseFromText(java.ajax(payload()));
         }
         var chain = {
           header: function(k, v) {
@@ -4460,6 +4491,16 @@ async function __stringifyResult(value) {
         };
         return chain;
       };
+      if (typeof globalThis.fetch === "undefined") {
+        globalThis.fetch = function(input, init) {
+          return java.fetch(input, init || {});
+        };
+      }
+      if (typeof globalThis.request === "undefined") {
+        globalThis.request = function(input, init) {
+          return java.fetch(input, init || {});
+        };
+      }
     ''');
   }
 

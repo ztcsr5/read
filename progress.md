@@ -61,6 +61,35 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Add fetch/request JS bridge aliases
+
+### What was done
+- Extended the ajax-backed JS runtime bridge for modern function-style sources inspired by mr / light-reader style rules.
+- Added `java.get(url, headers)`, `java.post(url, body, headers)`, and `java.fetch(url, options)` in the `evaluateWithAjax` trap.
+- Added global `fetch(url, options)` and `request(url, options)` aliases so JS/HTML function sources can use browser-like request code without rewriting everything to `java.ajax`.
+- The returned response is a string-like object, so both forms work:
+  - `fetch(url).match(...)`
+  - `fetch(url).body().string()`
+  - `fetch(url).json()`
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`.
+- Ran targeted JS bridge tests:
+  - `resolves global fetch through ajax callback`: passed.
+  - `resolves request post options through ajax callback`: passed.
+  - `resolves java fetch response aliases through ajax callback`: passed.
+  - `resolves java.connect get body through ajax callback`: passed.
+  - `resolves java.connect post body through ajax callback`: passed.
+- Current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado\legado_js_engine.dart test\legado_engine_test.dart`: no compile errors; existing warning/info lints remain and cause a non-zero analyzer exit.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 24 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado/legado_js_engine.dart`: ajax-backed HTTP bridge aliases and string-like response object.
+  - `test/legado_engine_test.dart`: targeted coverage for global fetch/request/java.fetch aliases.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Improve JS connect ajax bridge
 
 ### What was done

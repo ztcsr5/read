@@ -1508,6 +1508,55 @@ result=""+result.match(/>([^<]+)<\/a>/)[1];
       expect(requests.single, contains('"X-Test":"1"'));
     });
 
+    test('resolves global fetch through ajax callback', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final requests = <String>[];
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>var html = fetch("https://example.com/page"); html.match(/<h1>(.*?)<\\/h1>/)[1];</js>',
+        ajax: (request) async {
+          requests.add(request);
+          return '<h1>Fetched</h1>';
+        },
+      );
+
+      expect(value, 'Fetched');
+      expect(requests.single, 'https://example.com/page');
+    });
+
+    test('resolves request post options through ajax callback', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final requests = <String>[];
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>var res = request("https://example.com/api", {method:"post", body:"q=1", headers:{"X-App":"reader"}}); res.json().ok;</js>',
+        ajax: (request) async {
+          requests.add(request);
+          return jsonEncode({'ok': true});
+        },
+      );
+
+      expect(value, 'true');
+      expect(requests.single, contains('https://example.com/api,'));
+      expect(requests.single, contains('"method":"POST"'));
+      expect(requests.single, contains('"body":"q=1"'));
+      expect(requests.single, contains('"X-App":"reader"'));
+    });
+
+    test('resolves java fetch response aliases through ajax callback', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final requests = <String>[];
+      final value = await LegadoJsEngine().evaluateWithAjax(
+        '<js>java.fetch("https://example.com/api", {method:"post", body:"a=1"}).body().string();</js>',
+        ajax: (request) async {
+          requests.add(request);
+          return '{"ok":true}';
+        },
+      );
+
+      expect(value, '{"ok":true}');
+      expect(requests.single, contains('"method":"POST"'));
+      expect(requests.single, contains('"body":"a=1"'));
+    });
+
     test('wraps top-level java.ajax snippets as async iife', () {
       final code = JsCompatibilityTransformer.transform(
         'var data = JSON.parse(java.ajax("https://example.com/books")); data.list;',
