@@ -399,4 +399,40 @@ function content(result) {
     expect(config['sourceFormat'], 'js');
     expect(config['jsLib'], contains('function search'));
   });
+
+  test('imports modern js function source declarations', () async {
+    final vm = BookSourceViewModel(BookRepository(null));
+
+    await vm.importFromJs(r'''
+// @name Modern JS Source
+// @url https://modern-js.example
+// @searchUrl /search?q={{key}}
+async function search(key, page, result) {
+  return [{name: "A", bookUrl: "/a"}];
+}
+const explore = (baseUrl, result) => [{name: "B", bookUrl: "/b"}];
+let bookInfo = function(result) {
+  return {name: "Book", tocUrl: "/toc"};
+};
+const toc = async (result) => [{name: "C1", url: "/1"}];
+var content = function(result) {
+  return "Body";
+};
+const nextContentUrl = () => "";
+''');
+
+    expect(vm.state.error, isNull);
+    expect(vm.state.sources, hasLength(1));
+    final source = vm.state.sources.single;
+    expect(source.bookSourceName, 'Modern JS Source');
+    expect(jsonDecode(source.ruleSearch!)['bookList'], contains('search('));
+    expect(jsonDecode(source.ruleExplore!)['bookList'], contains('explore('));
+    expect(jsonDecode(source.ruleBookInfo!)['init'], contains('bookInfo('));
+    expect(jsonDecode(source.ruleToc!)['chapterList'], contains('toc('));
+    expect(jsonDecode(source.ruleContent!)['content'], contains('content('));
+    expect(
+      jsonDecode(source.ruleContent!)['nextContentUrl'],
+      contains('nextContentUrl('),
+    );
+  });
 }

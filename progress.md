@@ -61,6 +61,32 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Import modern JS function-style sources
+
+### What was done
+- Extended JS source import detection beyond classic `function name(...)` declarations.
+- Function-style source import now recognizes:
+  - `async function search(...)`
+  - `const explore = (...) => ...`
+  - `let bookInfo = function(...) { ... }`
+  - `const toc = async (...) => ...`
+  - `var content = function(...) { ... }`
+- This keeps the existing conversion target unchanged: imported JS functions are still stored as `jsLib` plus Legado-compatible `<js>functionName(...)</js>` rules.
+- Scope stayed import-only; no UI changes and no parser architecture rewrite.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\settings\viewmodels\book_source_viewmodel.dart test\source_import_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart --plain-name "imports modern js function source declarations"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart`: 15 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\settings\viewmodels\book_source_viewmodel.dart test\source_import_test.dart`: no issues found.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 10 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/features/settings/viewmodels/book_source_viewmodel.dart`: modern JS function declaration detection.
+  - `test/source_import_test.dart`: import coverage for async/function/arrow declarations.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Add JS source/book/chapter context aliases
 
 ### What was done

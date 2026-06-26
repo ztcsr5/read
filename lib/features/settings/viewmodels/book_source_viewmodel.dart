@@ -563,15 +563,13 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
     final header =
         _extractJsMeta(code, 'header') ?? _extractJsVar(code, 'header');
 
-    final hasSearch = RegExp(r'function\s+search\s*\(').hasMatch(code);
-    final hasExplore = RegExp(r'function\s+explore\s*\(').hasMatch(code);
-    final hasBookInfo = RegExp(r'function\s+bookInfo\s*\(').hasMatch(code);
-    final hasToc = RegExp(r'function\s+toc\s*\(').hasMatch(code);
-    final hasContent = RegExp(r'function\s+content\s*\(').hasMatch(code);
-    final hasNextTocUrl = RegExp(r'function\s+nextTocUrl\s*\(').hasMatch(code);
-    final hasNextContentUrl = RegExp(
-      r'function\s+nextContentUrl\s*\(',
-    ).hasMatch(code);
+    final hasSearch = _hasJsFunctionLike(code, 'search');
+    final hasExplore = _hasJsFunctionLike(code, 'explore');
+    final hasBookInfo = _hasJsFunctionLike(code, 'bookInfo');
+    final hasToc = _hasJsFunctionLike(code, 'toc');
+    final hasContent = _hasJsFunctionLike(code, 'content');
+    final hasNextTocUrl = _hasJsFunctionLike(code, 'nextTocUrl');
+    final hasNextContentUrl = _hasJsFunctionLike(code, 'nextContentUrl');
 
     final source = BookSource.fromJson({
       'bookSourceName': name,
@@ -642,7 +640,20 @@ class BookSourceViewModel extends StateNotifier<BookSourceState> {
           r'(^|\n)\s*//\s*@(?:name|url|group|searchUrl|exploreUrl)\b',
         ).hasMatch(code) ||
         RegExp(
-          r'function\s+(?:search|explore|bookInfo|toc|content)\s*\(',
+          r'(?:(?:async\s+)?function\s+(?:search|explore|bookInfo|toc|content)\s*\(|(?:var|let|const)\s+(?:search|explore|bookInfo|toc|content)\s*=)',
+        ).hasMatch(code);
+  }
+
+  bool _hasJsFunctionLike(String code, String name) {
+    final escaped = RegExp.escape(name);
+    return RegExp(
+          '(?:^|[\\n;])\\s*(?:async\\s+)?function\\s+$escaped\\s*\\(',
+        ).hasMatch(code) ||
+        RegExp(
+          '(?:^|[\\n;])\\s*(?:var|let|const)\\s+$escaped\\s*=\\s*(?:async\\s*)?(?:function\\s*)?\\(',
+        ).hasMatch(code) ||
+        RegExp(
+          '(?:^|[\\n;])\\s*(?:var|let|const)\\s+$escaped\\s*=\\s*async\\s+function\\s*\\(',
         ).hasMatch(code);
   }
 
