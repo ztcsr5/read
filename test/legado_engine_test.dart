@@ -2599,6 +2599,55 @@ function toc(result) {
       expect(chapters.last.title, 'Chapter 2');
     });
 
+    test('parses imported js function toc container results', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Toc Container'
+        ..bookSourceUrl = 'https://js.example.com'
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function toc(result) {
+  return {
+    chapters: [
+      {title: "Chapter A", chapterUrl: "/chapter/a"},
+      {title: "Chapter B", chapterUrl: "/chapter/b"}
+    ]
+  };
+}
+''',
+        })
+        ..ruleToc = jsonEncode({
+          'chapterList': '<js>toc(result)</js>',
+          'chapterName': r'$.title',
+          'chapterUrl': r'$.chapterUrl',
+        });
+      final book = Book(
+        title: 'Novel',
+        author: 'Author',
+        filePath: 'https://js.example.com/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final response = Response<dynamic>(
+        data: '<html><body>ignored by js toc</body></html>',
+        requestOptions: RequestOptions(path: 'https://js.example.com/book/1'),
+        statusCode: 200,
+      );
+
+      final chapters = await LegadoParser.getChapterList(
+        source,
+        book,
+        preFetchedResponse: response,
+      );
+
+      expect(chapters, hasLength(2));
+      expect(chapters.first.title, 'Chapter A');
+      expect(chapters.first.url, 'https://js.example.com/chapter/a');
+      expect(chapters.last.title, 'Chapter B');
+    });
+
     test('parses imported js function content results', () async {
       if (!LegadoJsEngine().isAvailable) return;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -2647,6 +2696,57 @@ function content(result) {
 
       expect(content, contains('First paragraph'));
       expect(content, contains('Second paragraph'));
+      expect(content, isNot(contains('<p>')));
+    });
+
+    test('parses imported js function nested content results', () async {
+      if (!LegadoJsEngine().isAvailable) return;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      server.listen((request) {
+        request.response
+          ..headers.contentType = ContentType.html
+          ..write('<html><body>ignored by nested js content</body></html>')
+          ..close();
+      });
+      final baseUrl = 'http://${server.address.host}:${server.port}';
+      final source = BookSource()
+        ..bookSourceName = 'JS Function Nested Content'
+        ..bookSourceUrl = baseUrl
+        ..customConfig = jsonEncode({
+          'engine': 'quickjs',
+          'sourceFormat': 'js',
+          'jsLib': r'''
+function content(result) {
+  return {data: {paragraphs: ["Nested first", "<p>Nested second</p>"]}};
+}
+''',
+        })
+        ..ruleContent = jsonEncode({'content': '<js>content(result)</js>'});
+      final book = Book(
+        title: 'Novel',
+        author: 'Author',
+        filePath: '$baseUrl/book/1',
+        fileType: 'online',
+        isFromSource: true,
+      );
+      final chapter = Chapter(
+        bookId: book.id,
+        title: 'Chapter 1',
+        index: 0,
+        url: '$baseUrl/chapter/1',
+        content: '$baseUrl/chapter/1',
+      );
+
+      final content = await LegadoParser.getChapterContent(
+        source,
+        '$baseUrl/chapter/1',
+        book: book,
+        chapter: chapter,
+      );
+
+      expect(content, contains('Nested first'));
+      expect(content, contains('Nested second'));
       expect(content, isNot(contains('<p>')));
     });
 

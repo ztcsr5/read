@@ -61,6 +61,35 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Decode JS function TOC/content container outputs
+
+### What was done
+- Improved function-style source execution for JS `toc(result)` outputs that return container objects instead of a raw array.
+- Added JS chapter list decoding for common containers:
+  - `list`, `chapters`, `chapterList`, `toc`, `items`, `rows`, `result`, `results`, `data`
+  - one-level nested containers such as `{data:{chapters:[...]}}`
+- Improved JS `content(result)` normalization for nested content containers:
+  - `{data:{paragraphs:[...]}}`
+  - `{chapter:{content:"..."}}`
+  - nested `content/text/body/html/paragraphs/lines/data/result/chapter`
+- This targets light-reader / modern function-style sources that do not always return a bare list/string.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function toc container results"`: passed; current Windows machine still logs missing `quickjs_c_bridge_plugin.dll`, so runtime-gated assertions are skipped locally.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\legado_engine_test.dart --plain-name "parses imported js function nested content results"`: passed; same QuickJS DLL limitation applies.
+- Ran existing JS function regression tests:
+  - `parses imported js function toc results`: passed.
+  - `parses imported js function content results`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\data\parsers\legado_parser.dart test\legado_engine_test.dart`: no compile errors; existing info-level lints remain.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_import_test.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 27 tests passed.
+
+### Notes
+- Changed files:
+  - `lib/data/parsers/legado_parser.dart`: JS TOC/content container output decoding.
+  - `test/legado_engine_test.dart`: targeted TOC/content container coverage.
+- Rollback: revert the two changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Classify fetch/request JS sources as runtime dependent
 
 ### What was done

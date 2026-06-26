@@ -2287,6 +2287,10 @@ class LegadoParser {
           if (value is List) {
             return value.map((item) => item?.toString() ?? '').join('\n');
           }
+          if (value is Map) {
+            final nested = _normalizeJsContentMap(value);
+            if (nested.trim().isNotEmpty) return nested;
+          }
           if (value != null) return value.toString();
         }
       }
@@ -2294,6 +2298,31 @@ class LegadoParser {
       // Keep plain string output.
     }
     return text;
+  }
+
+  static String _normalizeJsContentMap(Map<dynamic, dynamic> value) {
+    for (final key in const [
+      'content',
+      'text',
+      'body',
+      'html',
+      'paragraphs',
+      'lines',
+      'data',
+      'result',
+      'chapter',
+    ]) {
+      final nested = value[key];
+      if (nested is List) {
+        return nested.map((item) => item?.toString() ?? '').join('\n');
+      }
+      if (nested is Map) {
+        final text = _normalizeJsContentMap(nested);
+        if (text.trim().isNotEmpty) return text;
+      }
+      if (nested != null) return nested.toString();
+    }
+    return '';
   }
 
   static String _contentHtmlToText(String html) {
@@ -6710,10 +6739,7 @@ class LegadoParser {
         libraries: await _sourceLibraryCodes(source, baseUrl: baseUrl),
         ajax: (request) => _ajaxForJs(source, request, baseUrl: baseUrl),
       );
-      final trimmed = output.trim();
-      if (trimmed.isEmpty) return const [];
-      final decoded = jsonDecode(trimmed);
-      final nodes = decoded is List ? decoded : <dynamic>[decoded];
+      final nodes = _decodeJsChapterList(output);
       if (nodes.isEmpty) return const [];
 
       final isVolumeRule = _firstRule(rule, const ['isVolume']);
@@ -6802,6 +6828,49 @@ class LegadoParser {
       debugPrint('JS chapterList execution failed: $e');
       return const [];
     }
+  }
+
+  static List<dynamic> _decodeJsChapterList(String output) {
+    final text = output.trim();
+    if (text.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) return decoded;
+      if (decoded is Map) {
+        for (final key in const [
+          'list',
+          'chapters',
+          'chapterList',
+          'toc',
+          'items',
+          'rows',
+          'result',
+          'results',
+          'data',
+        ]) {
+          final value = decoded[key];
+          if (value is List) return value;
+          if (value is Map) {
+            for (final nestedKey in const [
+              'list',
+              'chapters',
+              'chapterList',
+              'items',
+              'rows',
+              'result',
+              'results',
+            ]) {
+              final nested = value[nestedKey];
+              if (nested is List) return nested;
+            }
+          }
+        }
+        return [decoded];
+      }
+    } catch (_) {
+      return const [];
+    }
+    return const [];
   }
 
   static List<Chapter> _parseChaptersByHtmlFallback(
