@@ -127,6 +127,24 @@ void main() {
       );
     });
 
+    test('blocks fetch and request function sources as runtime dependent', () {
+      final source = BookSource()
+        ..bookSourceName = 'Fetch Function'
+        ..bookSourceUrl = 'https://fetch.example.com'
+        ..ruleSearch =
+            '{"bookList":"<js>const html = fetch(source.getUrl()); request(source.getUrl() + \\"/api\\"); search(key, page, html)</js>"}';
+
+      expect(sourceNeedsRuntimeOrAccess(source), isTrue);
+      expect(
+        classifySourceCheckFailure(
+          source,
+          failStep: 'search result',
+          message: 'empty result',
+        ),
+        SourceCheckFailureClass.blocked,
+      );
+    });
+
     test('blocks browser, webjs and access state dependent sources', () {
       final source = BookSource()
         ..bookSourceName = 'Browser'

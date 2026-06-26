@@ -47,5 +47,22 @@ void main() {
       expect(reasons, contains('Cookie'));
       expect(reasons, contains('请求头'));
     });
+
+    test('detects fetch and request bridge dependencies', () {
+      final source = BookSource()
+        ..bookSourceName = 'Fetch'
+        ..bookSourceUrl = 'https://fetch.example.com'
+        ..ruleSearch = jsonEncode({
+          'bookList':
+              '<js>const html = fetch(source.getUrl() + "/api"); request("/next"); search(key, page, html)</js>',
+        });
+
+      final reasons = CompatibilityAnalyzer.analyze(
+        source,
+      ).map((issue) => issue.reason).join('\n');
+
+      expect(reasons, contains('JavaScript'));
+      expect(reasons, contains('java.ajax'));
+    });
   });
 }

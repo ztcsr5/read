@@ -85,7 +85,7 @@ class CompatibilityAnalyzer {
     }
 
     if (RegExp(
-      r'java\.(ajax|connect|get|post|put|startBrowser)\b',
+      r'(?:java\.(ajax|connect|get|post|fetch|put|startBrowser)\b|\b(?:fetch|request)\s*\()',
       caseSensitive: false,
     ).hasMatch(text)) {
       issues.add(

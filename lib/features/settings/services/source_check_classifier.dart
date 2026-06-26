@@ -75,6 +75,16 @@ bool sourceCheckFailureIsBlocked(
     return true;
   }
 
+  final normalizedFailStep = (failStep ?? '').toLowerCase();
+  if ((normalizedFailStep.contains('search') ||
+          normalizedFailStep.contains('result') ||
+          normalizedFailStep.contains('toc') ||
+          normalizedFailStep.contains('chapter') ||
+          normalizedFailStep.contains('content')) &&
+      sourceNeedsRuntimeOrAccess(source)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -99,8 +109,11 @@ bool sourceNeedsRuntimeOrAccess(BookSource source) {
       joined.contains('java.connect') ||
       joined.contains('java.get') ||
       joined.contains('java.post') ||
+      joined.contains('java.fetch') ||
       joined.contains('java.put') ||
       joined.contains('java.startbrowser') ||
+      RegExp(r'\bfetch\s*\(').hasMatch(joined) ||
+      RegExp(r'\brequest\s*\(').hasMatch(joined) ||
       joined.contains('jslib') ||
       joined.contains('bodyjs') ||
       joined.contains('webjs') ||
@@ -164,5 +177,7 @@ bool _looksLikeNetworkOrRuntimeBlock(String text) {
       text.contains('future not complete') ||
       text.contains('desencodetobase64string') ||
       text.contains('aesbase64') ||
+      text.contains('fetch(') ||
+      text.contains('request(') ||
       text.contains('is not a function') && text.contains('java.');
 }

@@ -61,6 +61,28 @@
   - `test/legado_engine_test.dart`: targeted JS function search parser coverage.
 - Rollback: revert the two changed files listed above and remove this `progress.md` entry.
 
+## 2026-06-26 - Task: Classify fetch/request JS sources as runtime dependent
+
+### What was done
+- Updated source compatibility diagnostics so JS rules using browser-style `fetch(...)`, `request(...)`, or `java.fetch(...)` are treated as HTTP bridge/runtime dependencies.
+- Updated source check failure classification so fetch/request-based function sources are not misclassified as ordinary CSS/JSON rule failures when search/detail/toc/content returns empty.
+- Added English/common fail-step aliases (`search`, `result`, `toc`, `chapter`, `content`) to the runtime-dependent blocked classification path. This keeps diagnostic behavior correct when UI logs or tests use English step names.
+
+### Testing
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat format lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\settings\services\source_check_classifier.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart`.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart --plain-name "detects fetch and request bridge dependencies"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\source_check_classifier_test.dart --plain-name "blocks fetch and request function sources as runtime dependent"`: passed.
+- Ran `D:\Gemini反重力\flutter\bin\flutter.bat test test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart test\diagnostic_report_test.dart`: 12 tests passed.
+- Ran `D:\Gemini反重力\flutter\bin\dart.bat analyze lib\features\source_diagnostic\services\compatibility_analyzer.dart lib\features\settings\services\source_check_classifier.dart test\compatibility_analyzer_test.dart test\source_check_classifier_test.dart`: no issues found.
+
+### Notes
+- Changed files:
+  - `lib/features/source_diagnostic/services/compatibility_analyzer.dart`: fetch/request bridge detection.
+  - `lib/features/settings/services/source_check_classifier.dart`: runtime-dependent classification for fetch/request and English step aliases.
+  - `test/compatibility_analyzer_test.dart`: diagnostic coverage.
+  - `test/source_check_classifier_test.dart`: classification coverage.
+- Rollback: revert the four changed files listed above and remove this `progress.md` entry.
+
 ## 2026-06-26 - Task: Import modern JS function-style sources
 
 ### What was done
