@@ -28,7 +28,8 @@ struct ContentParser {
         }
 
         do {
-            let root = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: "html").first
+            let rootRule = htmlExtractor.firstRule(source.ruleContent, keys: ["init"]) ?? "html"
+            let root = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: rootRule).first
             guard let root else { return .failure(.empty("正文 HTML 为空")) }
             let chapterMap: [String: Any] = [
                 "title": chapter.title,
@@ -80,8 +81,15 @@ struct ContentParser {
             "source": source,
             "chapter": chapterMap
         ]
+        let rootObject: Any
+        if let initRule = htmlExtractor.firstRule(rule, keys: ["init"]),
+           let initialized = jsonExtractor.value(from: object, path: initRule, variables: variables) {
+            rootObject = initialized
+        } else {
+            rootObject = object
+        }
         let content: String?
-        if let dict = object as? [String: Any] {
+        if let dict = rootObject as? [String: Any] {
             content = jsonExtractor.string(
                 from: dict,
                 rule: contentRule,
@@ -93,7 +101,7 @@ struct ContentParser {
         }
         let paragraphs = splitParagraphs(applyContentTransforms(content ?? "", rule: rule, globalPurifyRules: globalPurifyRules))
         let next: String?
-        if let dict = object as? [String: Any] {
+        if let dict = rootObject as? [String: Any] {
             next = jsonExtractor.string(
                 from: dict,
                 rule: htmlExtractor.firstRule(rule, keys: ["nextContentUrl"]),

@@ -82,7 +82,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     }
 
     func getChapterList(source: BookSource, book: BookDetail) async -> Result<[BookChapter], SourceEngineError> {
-        let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
+        let tocURL = book.tocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? book.bookUrl
+        let request = requestBuilder.buildPageRequest(source: source, urlText: tocURL)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
             let transformedResponse = transformBodyIfNeeded(response, source: source)

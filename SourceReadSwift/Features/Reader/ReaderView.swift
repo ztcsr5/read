@@ -29,6 +29,8 @@ struct ReaderView: View {
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var positionPersistTask: Task<Void, Never>?
     @State private var paragraphJumpRequest: ParagraphJumpRequest?
+    @State private var pagedBlocksCache: [ReaderPageBlock] = []
+    @State private var pagedBlocksCacheKey = ""
     @State private var sessionStartedAt = Date()
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
@@ -133,7 +135,20 @@ struct ReaderView: View {
     }
 
     private var pagedBlocks: [ReaderPageBlock] {
+        if pagedBlocksCacheKey == readerPageCacheKey, !pagedBlocksCache.isEmpty {
+            return pagedBlocksCache
+        }
         buildReaderPageBlocks()
+    }
+
+    private var readerPageCacheKey: String {
+        [
+            readerLayoutKey,
+            content.title,
+            String(content.paragraphs.count),
+            String(content.paragraphs.first?.hashValue ?? 0),
+            String(content.paragraphs.last?.hashValue ?? 0)
+        ].joined(separator: "|")
     }
 
     private var readerLayoutKey: String {
@@ -158,7 +173,7 @@ struct ReaderView: View {
             readerContent
             .id(readerLayoutKey)
             .contentShape(Rectangle())
-            .gesture(
+            .simultaneousGesture(
                 SpatialTapGesture()
                     .onEnded { value in
                         handleReaderTap(at: value.location)
@@ -192,6 +207,7 @@ struct ReaderView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .preferredColorScheme(background == .dark ? .dark : .light)
         .sheet(isPresented: $showChapterList) {
             chapterListSheet
         }
@@ -201,6 +217,7 @@ struct ReaderView: View {
         .onAppear {
             appState.isTabChromeHidden = true
             sessionStartedAt = Date()
+            rebuildPagedBlocksCache()
             autoScrollTarget = initialAutoScrollTarget()
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             applyIdleTimerPreference()
@@ -226,11 +243,13 @@ struct ReaderView: View {
             persistReadingPosition()
         }
         .onChange(of: readerModeRawValue) { _ in
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             stopAutoScroll()
             speechController.stop()
             autoScrollTarget = initialAutoScrollTarget()
         }
-        .onChange(of: readerLayoutKey) { _ in
+        .onChange(of: readerPageCacheKey) { _ in
+            rebuildPagedBlocksCache()
             autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
             persistReadingPosition()
         }
@@ -339,38 +358,82 @@ struct ReaderView: View {
         }
     }
 
+    @ViewBuilder
     private var pagedReaderContent: some View {
+        if readerMode == .cover {
+            coverPagedReaderContent
+        } else {
+            horizontalPagedReaderContent
+        }
+    }
+
+    private var horizontalPagedReaderContent: some View {
         TabView(selection: $autoScrollTarget) {
             ForEach(pagedBlocks) { page in
-                pageSurface {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
-                            if page.includesTitle {
-                                Text(content.title)
-                                    .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
-                                    .foregroundStyle(background.textColor)
-                                    .padding(.bottom, CGFloat(titleSpacing))
-                                    .textSelection(.enabled)
-                            }
-
-                            ForEach(page.paragraphs, id: \.index) { entry in
-                                paragraphText(entry.text, index: entry.index)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+                readerPage(for: page)
                 .tag(page.id)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .animation(readerMode == .cover ? .easeInOut(duration: 0.2) : nil, value: autoScrollTarget)
         .onChange(of: autoScrollTarget) { target in
             updatePagedVisibleParagraph(pageIndex: target)
         }
         .onChange(of: speechController.currentParagraphIndex) { target in
             guard target >= 0 else { return }
             autoScrollTarget = pageIndex(containingParagraph: target)
+        }
+    }
+
+    private var coverPagedReaderContent: some View {
+        let safeIndex = min(max(autoScrollTarget, 0), max(pagedBlocks.count - 1, 0))
+        return ZStack {
+            if pagedBlocks.indices.contains(safeIndex) {
+                readerPage(for: pagedBlocks[safeIndex])
+                    .id(pagedBlocks[safeIndex].id)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { value in
+                    if value.translation.width < -42 {
+                        moveReaderTarget(to: autoScrollTarget + 1)
+                    } else if value.translation.width > 42 {
+                        moveReaderTarget(to: autoScrollTarget - 1)
+                    }
+                }
+        )
+        .animation(.easeInOut(duration: 0.22), value: autoScrollTarget)
+        .onChange(of: autoScrollTarget) { target in
+            updatePagedVisibleParagraph(pageIndex: target)
+        }
+        .onChange(of: speechController.currentParagraphIndex) { target in
+            guard target >= 0 else { return }
+            autoScrollTarget = pageIndex(containingParagraph: target)
+        }
+    }
+
+    private func readerPage(for page: ReaderPageBlock) -> some View {
+        pageSurface {
+            ScrollView {
+                VStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
+                    if page.includesTitle {
+                        Text(content.title)
+                            .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
+                            .foregroundStyle(background.textColor)
+                            .padding(.bottom, CGFloat(titleSpacing))
+                            .textSelection(.enabled)
+                    }
+
+                    ForEach(page.paragraphs, id: \.index) { entry in
+                        paragraphText(entry.text, index: entry.index)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -1351,6 +1414,11 @@ struct ReaderView: View {
             return match.id
         }
         return min(max(safeParagraph, 0), pages.count - 1)
+    }
+
+    private func rebuildPagedBlocksCache() {
+        pagedBlocksCache = buildReaderPageBlocks()
+        pagedBlocksCacheKey = readerPageCacheKey
     }
 
     private func buildReaderPageBlocks() -> [ReaderPageBlock] {

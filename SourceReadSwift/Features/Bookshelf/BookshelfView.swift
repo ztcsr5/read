@@ -7,6 +7,7 @@ struct BookshelfView: View {
     @State private var showFileImporter = false
     @State private var importMessage: String?
     @State private var isRefreshingBooks = false
+    @AppStorage("settings.themeMode") private var themeModeRawValue = ThemeMode.system.rawValue
 
     private var recentBooks: [BookshelfBook] {
         appState.bookshelfStore.recentBooks
@@ -75,6 +76,8 @@ struct BookshelfView: View {
                         .data,
                         .content,
                         .item,
+                        UTType(filenameExtension: "txt") ?? .plainText,
+                        UTType(filenameExtension: "text") ?? .text,
                         UTType(filenameExtension: "epub") ?? UTType(importedAs: "org.idpf.epub-container")
                     ],
                     onPick: { urls in
@@ -89,7 +92,8 @@ struct BookshelfView: View {
     }
 
     private var bookshelfBackdrop: some View {
-        ZStack {
+        _ = themeModeRawValue
+        return ZStack {
             AppTheme.background
             LinearGradient(
                 colors: [
@@ -198,9 +202,6 @@ struct BookshelfView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture().onEnded {
-            appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
-        })
     }
 
     @ViewBuilder
@@ -317,10 +318,12 @@ struct BookshelfView: View {
         var refreshed = 0
         var failed = 0
         let books = appState.bookshelfStore.books
-        for book in books where !book.sourceURL.hasPrefix("local://") {
+        let engine = appState.engine
+        let candidates: [BookshelfRefreshCandidate] = books.compactMap { book in
+            guard !book.sourceURL.hasPrefix("local://") else { return nil }
             guard let source = appState.sourceStore.source(for: book.sourceURL), source.enabled else {
                 failed += 1
-                continue
+                return nil
             }
             let searchBook = SearchBook(
                 name: book.title,
@@ -331,24 +334,47 @@ struct BookshelfView: View {
                 sourceUrl: book.sourceURL,
                 intro: book.intro
             )
-            switch await appState.engine.getBookDetail(source: source, book: searchBook) {
-            case .success(let detail):
-                switch await appState.engine.getChapterList(source: source, book: detail) {
-                case .success(let chapters):
-                    appState.bookshelfStore.updateDetails(
-                        bookID: book.id,
-                        latestChapterTitle: detail.latestChapter ?? chapters.last?.title,
-                        intro: detail.intro,
-                        totalChapters: chapters.count
-                    )
-                    refreshed += 1
-                case .failure(let error):
-                    appState.bookshelfStore.markRefreshFailure(bookID: book.id, message: error.displayMessage)
-                    failed += 1
+            return BookshelfRefreshCandidate(bookID: book.id, source: source, book: searchBook)
+        }
+
+        for batch in candidates.chunked(into: 4) {
+            await withTaskGroup(of: BookshelfRefreshResult.self) { group in
+                for candidate in batch {
+                    group.addTask {
+                        switch await engine.getBookDetail(source: candidate.source, book: candidate.book) {
+                        case .success(let detail):
+                            switch await engine.getChapterList(source: candidate.source, book: detail) {
+                            case .success(let chapters):
+                                return .success(
+                                    bookID: candidate.bookID,
+                                    latestChapterTitle: detail.latestChapter ?? chapters.last?.title,
+                                    intro: detail.intro,
+                                    totalChapters: chapters.count
+                                )
+                            case .failure(let error):
+                                return .failure(bookID: candidate.bookID, message: error.displayMessage)
+                            }
+                        case .failure(let error):
+                            return .failure(bookID: candidate.bookID, message: error.displayMessage)
+                        }
+                    }
                 }
-            case .failure(let error):
-                appState.bookshelfStore.markRefreshFailure(bookID: book.id, message: error.displayMessage)
-                failed += 1
+
+                for await result in group {
+                    switch result {
+                    case .success(let bookID, let latestChapterTitle, let intro, let totalChapters):
+                        appState.bookshelfStore.updateDetails(
+                            bookID: bookID,
+                            latestChapterTitle: latestChapterTitle,
+                            intro: intro,
+                            totalChapters: totalChapters
+                        )
+                        refreshed += 1
+                    case .failure(let bookID, let message):
+                        appState.bookshelfStore.markRefreshFailure(bookID: bookID, message: message)
+                        failed += 1
+                    }
+                }
             }
         }
 
@@ -389,7 +415,7 @@ struct BookshelfView: View {
                 Spacer(minLength: 14)
 
                 HStack {
-                    Label("继续阅读", systemImage: "play.fill")
+                    Label("继续阅读", systemImage: "book.fill")
                         .font(.subheadline.weight(.bold))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -462,7 +488,11 @@ struct BookshelfView: View {
             .padding(12)
             .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleButtonStyle())
+        .simultaneousGesture(TapGesture().onEnded {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
+        })
     }
 
     private func bookshelfRow(_ book: BookshelfBook) -> some View {
@@ -496,13 +526,27 @@ struct BookshelfView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleButtonStyle())
+        .simultaneousGesture(TapGesture().onEnded {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        })
         .contextMenu {
             Button("从书架删除", role: .destructive) {
                 appState.bookshelfStore.remove(bookID: book.id)
             }
         }
     }
+}
+
+private struct BookshelfRefreshCandidate: Sendable {
+    let bookID: String
+    let source: BookSource
+    let book: SearchBook
+}
+
+private enum BookshelfRefreshResult: Sendable {
+    case success(bookID: String, latestChapterTitle: String?, intro: String?, totalChapters: Int)
+    case failure(bookID: String, message: String)
 }
 
 private struct BookshelfCollectionView: View {
@@ -541,7 +585,11 @@ private struct BookshelfCollectionView: View {
                         .padding(14)
                         .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableScaleButtonStyle())
+                    .simultaneousGesture(TapGesture().onEnded {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
+                    })
                     .contextMenu {
                         Button("从书架删除", role: .destructive) {
                             appState.bookshelfStore.remove(bookID: book.id)
@@ -554,6 +602,15 @@ private struct BookshelfCollectionView: View {
         .pageBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }
 

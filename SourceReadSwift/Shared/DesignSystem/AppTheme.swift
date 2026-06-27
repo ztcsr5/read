@@ -20,7 +20,7 @@ enum AppTheme {
 
 extension View {
     func pageBackground() -> some View {
-        background(AppTheme.background.ignoresSafeArea())
+        modifier(PageBackgroundModifier())
     }
 
     func podcastCard() -> some View {
@@ -28,6 +28,15 @@ extension View {
             .background(AppTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous))
             .shadow(color: .black.opacity(0.05), radius: 18, x: 0, y: 10)
+    }
+}
+
+private struct PageBackgroundModifier: ViewModifier {
+    @AppStorage("settings.themeMode") private var themeModeRawValue = ThemeMode.system.rawValue
+
+    func body(content: Content) -> some View {
+        _ = themeModeRawValue
+        return content.background(AppTheme.background.ignoresSafeArea())
     }
 }
 

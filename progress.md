@@ -1,3 +1,30 @@
+## 2026-06-27 - Task: Restart Swift against Flutter product baseline
+
+### What was done
+- Locked the Swift direction back to the Flutter product baseline: `D:\Gemini反重力\read` is the only UI, navigation, page-inventory, and user-facing behavior baseline.
+- Clarified that the old Flutter source engine should not be copied into Swift; it is only a field-map, fixture, diagnostic, and compatibility-reference corpus.
+- Added a dedicated Flutter-to-Swift parity ledger covering app shell, home/bookshelf, discover/search, reader, settings, and source-compatibility boundaries.
+- Replaced the Swift root paged `TabView` shell with a persistent indexed `ZStack` shell to better match Flutter's indexed branch behavior and reduce tab/keyboard/scroll gesture competition.
+- Fixed a bookshelf compile/logic regression where the shelf header tried to mark updates seen with an out-of-scope `book.id`.
+- Added press feedback and haptics to bookshelf rows and collection rows, and made update rows clear update state when opened.
+- Split reader cover mode away from the horizontal paged `TabView` so page-turn and cover modes no longer feel identical.
+- Added reader-mode haptic feedback and made theme page backgrounds react to settings changes.
+- Changed source local-file import from a fixed modal-delay race to a state-driven picker launch after the import sheet dismisses.
+- Separated Discover search result browsing from the add-to-bookshelf button so tapping plus does not ride inside the row navigation link.
+
+### Testing
+- Ran `git diff --check`; it passed with only existing Windows LF-to-CRLF warnings.
+- Confirmed the app shell no longer uses a paged root `TabView`; remaining `TabView.page` usage is inside reader page mode.
+- Windows cannot compile or launch the iOS app locally; device-level smoothness and keyboard behavior still require Xcode/GitHub Actions and iPhone testing.
+
+### Notes
+- Changed files:
+  - `docs/superpowers/specs/2026-06-24-swift-v2-lifetime-reader-design.md`: added the locked baseline and source-engine boundary decisions.
+  - `docs/superpowers/specs/2026-06-27-flutter-to-swift-parity-ledger.md`: new parity ledger for future implementation.
+  - `SourceReadSwift/App/RootTabView.swift`: changed root tab shell from paged `TabView` to persistent indexed content.
+  - `progress.md`: recorded this restart checkpoint.
+- Rollback: revert this progress entry, delete the new parity ledger, and revert the `RootTabView.swift` shell change.
+
 ## 2026-06-24 - Task: Swift v2 lifetime reader restart specification
 
 ### What was done
@@ -333,3 +360,49 @@
   - `SourceReadSwift/Features/Reader/ReaderView.swift`: added line spacing to appearance and clamps active reading target after layout changes.
   - `progress.md`: recorded this reader appearance reliability fix and verification limits.
 - Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Features/Reader/ReaderView.swift`, or revert the commit that contains this milestone.
+## 2026-06-27 - Task: Swift v2 product hardening pass
+
+### What was done
+- Kept the native Swift rebuild on branch `codex/swift-v2-lifetime-reader` and continued from the Flutter parity baseline instead of restarting.
+- Changed root tab hosting to a persistent indexed shell with lightweight end-of-drag tab swiping. This keeps the three main pages alive, avoids keyboard/page-TabView conflicts, and preserves the custom Podcasts-style glass tab bar.
+- Added confirmation before adding search results to the bookshelf. Opening a search result now previews details/reading first; after returning from a chapter preview, the detail page prompts whether to add the book.
+- Cleared update badges when a bookshelf book is opened, and changed the hero action icon away from a playback-style symbol.
+- Made reader chrome prefer a matching light/dark system scheme from the selected reader background so status/system chrome follows the reading background.
+- Added batch source deep-check mode: after search succeeds, batch diagnostics can verify the first result through detail, table of contents, and content parsing.
+- Reduced default source request timeout from 20 seconds to 12 seconds to reduce stuck refresh/search behavior on bad sources.
+- Made Settings use the shared theme-aware page background modifier so global appearance changes redraw consistently.
+- Added legacy Legado JSON field normalization in `BookSource`: old `ruleSearchUrl`, `ruleSearchList`, `ruleBookName`, `ruleChapterList`, `ruleContentUrl`, `ruleBookContent`, `ruleBookContentReplace`, `ruleFind*`, JSON-string rule objects, `name/url/group`, `serialNumber/customOrder`, and `y/n/enable/disable` booleans now map into the Swift engine's modern model fields.
+- Added `httpUserAgent` as a User-Agent alias in request building.
+- Added unit-test coverage for legacy Legado field decoding, JSON-string rule decoding, and structured `ruleBookContent` preservation.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Parsed `SourceReadSwift/App/Info.plist` with Python `plistlib` and confirmed `CADisableMinimumFrameDurationOnPhone` is enabled and local-network permission text is valid UTF-8.
+- Windows cannot compile or run iOS locally; final verification still requires GitHub Actions/Xcode/iPhone when this milestone is ready to package.
+
+### Notes
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- This is still an in-progress hardening milestone; no push has been made for this pass yet.
+
+## 2026-06-27 - Task: Swift v2 morning IPA test node hardening
+
+### What was done
+- Fixed a core source-chain gap where legacy sources can expose a separate table-of-contents URL. `BookDetail` now carries `tocUrl`, detail parsing reads `tocUrl/chapterUrl/catalogUrl/chapterListUrl`, and chapter-list loading uses that URL before falling back to the detail URL.
+- Added parser support for Legado-style `init` rules across search, detail, chapter list, and content parsing. This lets rules crop to the intended container before extracting list/detail/content fields instead of scraping the whole response.
+- Made URL directive charset options effective. Converted legacy URLs such as `|charset=gbk` now feed `expectedCharset`, improving GBK source search/detail decoding.
+- Changed the root tab swipe gesture and reader tap/cover gestures to simultaneous gestures so they no longer monopolize ScrollView and button interaction.
+- Added a reader page-block cache keyed by content and layout settings, reducing repeated long-chapter pagination work during overlay/settings/progress redraws.
+- Changed bookshelf refresh from fully serial source checks to four-wide concurrent batches, reducing the "pull to refresh never returns" feeling when one source is slow or broken.
+- Broadened explicit local import UTTypes for TXT/TEXT/EPUB and JSON/TXT/TEXT to improve iOS document picker behavior for files received from QQ/WeChat or other share providers.
+- Updated Web 写源 local-network display to list all available IPv4 addresses plus loopback, instead of guessing a single interface. This makes the page easier to find when Wi-Fi, hotspot, or virtual adapters are involved.
+- Added regression tests for detail `tocUrl`, chapter-list URL selection, `init` parsing, URL directive charset, and legacy source-field normalization.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Confirmed `SourceReadSwift/App/Info.plist` still enables `CADisableMinimumFrameDurationOnPhone`, keeps local-network permission text, and declares document types.
+- Confirmed this Windows host still has no local `swift`, `xcodebuild`, or `xcodegen`, so compile/runtime validation must be performed by GitHub Actions/Xcode/iPhone.
+
+### Notes
+- Changed files include source engine/model/rule/network layers, bookshelf/discover/reader/source-manager UI, tests, and parity docs.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the commit that contains the Swift v2 morning IPA test-node hardening changes.

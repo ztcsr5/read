@@ -19,6 +19,7 @@ struct BookshelfReaderGatewayView: View {
     var body: some View {
         gatewayContent
         .task {
+            appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
             await resumeReading()
         }
         .sheet(isPresented: $showSourceSwitcher) {

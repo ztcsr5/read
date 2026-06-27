@@ -12,6 +12,7 @@ struct SourceManagerView: View {
     @State private var importMessage: String?
     @State private var showFileImporter = false
     @State private var showImportSheet = false
+    @State private var openFileImporterAfterSheetDismiss = false
     @State private var sourceJSONEditor: SourceJSONEditorState?
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
@@ -95,6 +96,13 @@ struct SourceManagerView: View {
             .sheet(isPresented: $showImportSheet) {
                 importSheet
             }
+            .onChange(of: showImportSheet) { isPresented in
+                guard !isPresented, openFileImporterAfterSheetDismiss else { return }
+                openFileImporterAfterSheetDismiss = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    showFileImporter = true
+                }
+            }
             .sheet(item: $sourceJSONEditor) { editor in
                 sourceJSONEditorSheet(editor)
             }
@@ -124,7 +132,17 @@ struct SourceManagerView: View {
             }
             .sheet(isPresented: $showFileImporter) {
                 UniversalDocumentPicker(
-                    contentTypes: [.json, .plainText, .text, .data, .content, .item],
+                    contentTypes: [
+                        .json,
+                        .plainText,
+                        .text,
+                        .data,
+                        .content,
+                        .item,
+                        UTType(filenameExtension: "json") ?? .json,
+                        UTType(filenameExtension: "txt") ?? .plainText,
+                        UTType(filenameExtension: "text") ?? .text
+                    ],
                     onPick: { urls in
                         showFileImporter = false
                         importFile(.success(urls))
@@ -597,10 +615,8 @@ struct SourceManagerView: View {
                     Button {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         importMessage = "正在打开文件选择器..."
+                        openFileImporterAfterSheetDismiss = true
                         showImportSheet = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-                            showFileImporter = true
-                        }
                     } label: {
                         Label("选择本地 JSON 文件", systemImage: "doc.badge.plus")
                             .frame(maxWidth: .infinity)
@@ -773,6 +789,12 @@ struct SourceManagerView: View {
                 ))
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
+
+                Toggle("搜索通过后深测首条结果", isOn: Binding(
+                    get: { batchCheck?.deepCheckFirstResult ?? state.deepCheckFirstResult },
+                    set: { batchCheck?.deepCheckFirstResult = $0 }
+                ))
+                .font(.subheadline.weight(.semibold))
 
                 HStack {
                     Button {
@@ -993,10 +1015,15 @@ struct SourceManagerView: View {
             latest.checkedCount += 1
             switch result {
             case .success(let books):
-                let status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
-                let message = books.isEmpty
+                var status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
+                var message = books.isEmpty
                     ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
                     : "搜索通过：\(books.count) 条结果。"
+                if state.deepCheckFirstResult, let first = books.first {
+                    let deep = await batchDeepCheckFirstResult(source: source, book: first)
+                    status = deep.status
+                    message += " \(deep.message)"
+                }
                 latest.results.append(
                     SourceBatchCheckResult(
                         sourceName: source.bookSourceName,
@@ -1093,6 +1120,31 @@ struct SourceManagerView: View {
             return "重点看 ruleContent.content、正文净化 replaceRegex，以及章节 URL 是否需要 Referer。"
         default:
             return "按当前失败阶段检查对应规则和请求配置。"
+        }
+    }
+
+    private func batchDeepCheckFirstResult(source: BookSource, book: SearchBook) async -> (status: SourceBatchCheckStatus, message: String) {
+        switch await appState.engine.getBookDetail(source: source, book: book) {
+        case .success(let detail):
+            switch await appState.engine.getChapterList(source: source, book: detail) {
+            case .success(let chapters):
+                guard let firstChapter = chapters.first else {
+                    return (.warning, "深测：详情通过，但目录为空。")
+                }
+                switch await appState.engine.getContent(source: source, chapter: firstChapter) {
+                case .success(let content):
+                    if content.paragraphs.isEmpty {
+                        return (.warning, "深测：详情/目录通过，但正文为空。")
+                    }
+                    return (.passed, "深测通过：详情/目录/正文均可用，正文 \(content.paragraphs.count) 段。")
+                case .failure(let error):
+                    return (.failed, "深测正文失败：\(error.displayMessage)")
+                }
+            case .failure(let error):
+                return (.failed, "深测目录失败：\(error.displayMessage)")
+            }
+        case .failure(let error):
+            return (.failed, "深测详情失败：\(error.displayMessage)")
         }
     }
 
@@ -1223,6 +1275,7 @@ private struct SourceBatchCheckState: Identifiable {
     let id = UUID()
     let sources: [BookSource]
     var keyword = "斗破苍穹"
+    var deepCheckFirstResult = true
     var isRunning = false
     var checkedCount = 0
     var results: [SourceBatchCheckResult] = []

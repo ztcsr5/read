@@ -118,7 +118,7 @@ struct SettingsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .scrollContentBackground(.hidden)
-            .background(AppTheme.background.ignoresSafeArea())
+            .pageBackground()
             .listStyle(.insetGrouped)
             .navigationTitle("设置")
             .onAppear {

@@ -5,12 +5,20 @@ struct SourceURLDirective: Equatable {
     var method: SourceHTTPMethod
     var headers: [String: String]
     var body: Data?
+    var expectedCharset: String?
 
-    init(urlText: String, method: SourceHTTPMethod = .get, headers: [String: String] = [:], body: Data? = nil) {
+    init(
+        urlText: String,
+        method: SourceHTTPMethod = .get,
+        headers: [String: String] = [:],
+        body: Data? = nil,
+        expectedCharset: String? = nil
+    ) {
         self.urlText = urlText
         self.method = method
         self.headers = headers
         self.body = body
+        self.expectedCharset = expectedCharset
     }
 }
 
@@ -20,6 +28,7 @@ struct SourceURLDirectiveParser {
         var headers: [String: String] = [:]
         var method: SourceHTTPMethod = .get
         var body: Data?
+        var expectedCharset: String?
 
         let directives = splitURLAndTrailingDirectives(working)
         working = directives.url
@@ -45,9 +54,12 @@ struct SourceURLDirectiveParser {
                 body = encodeBodyOption(bodyOption, headers: headers)
                 method = .post
             }
+            expectedCharset = firstString(in: options, keys: ["charset", "encoding", "encode"])?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty
         }
 
-        return SourceURLDirective(urlText: working, method: method, headers: headers, body: body)
+        return SourceURLDirective(urlText: working, method: method, headers: headers, body: body, expectedCharset: expectedCharset)
     }
 
     private func splitURLAndTrailingDirectives(_ text: String) -> (url: String, header: String?, body: String?) {

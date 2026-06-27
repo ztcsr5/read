@@ -8,6 +8,9 @@ struct BookDetailView: View {
     @State private var chapters: [BookChapter] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var didOpenReader = false
+    @State private var hasPromptedAddAfterPreview = false
+    @State private var showAddAfterPreviewPrompt = false
 
     var body: some View {
         ScrollView {
@@ -48,6 +51,22 @@ struct BookDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await load()
+        }
+        .onAppear {
+            promptToAddAfterPreviewIfNeeded()
+        }
+        .confirmationDialog(
+            "加入书架？",
+            isPresented: $showAddAfterPreviewPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("加入书架") {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                addCurrentBookToShelf()
+            }
+            Button("暂不加入", role: .cancel) {}
+        } message: {
+            Text("如果这本书符合预期，可以加入书架，后续会记录阅读进度和更新状态。")
         }
     }
 
@@ -110,6 +129,7 @@ struct BookDetailView: View {
                 .buttonStyle(.plain)
                 .simultaneousGesture(TapGesture().onEnded {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    didOpenReader = true
                 })
             }
         }
@@ -156,6 +176,17 @@ struct BookDetailView: View {
                 intro: detail.intro,
                 totalChapters: chapters.count
             )
+        }
+    }
+
+    private func promptToAddAfterPreviewIfNeeded() {
+        guard didOpenReader else { return }
+        didOpenReader = false
+        guard !hasPromptedAddAfterPreview,
+              !appState.bookshelfStore.contains(book) else { return }
+        hasPromptedAddAfterPreview = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            showAddAfterPreviewPrompt = true
         }
     }
 }

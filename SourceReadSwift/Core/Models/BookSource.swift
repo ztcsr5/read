@@ -117,10 +117,10 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
                     return value
                 }
                 if let text = string(key)?.lowercased() {
-                    if ["true", "1", "yes", "on"].contains(text) {
+                    if ["true", "1", "yes", "y", "on", "enable", "enabled"].contains(text) {
                         return true
                     }
-                    if ["false", "0", "no", "off"].contains(text) {
+                    if ["false", "0", "no", "n", "off", "disable", "disabled"].contains(text) {
                         return false
                     }
                 }
@@ -138,23 +138,83 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             return nil
         }
 
-        let name = string("bookSourceName") ?? string("sourceName") ?? "\u{672a}\u{547d}\u{540d}\u{4e66}\u{6e90}"
-        let url = string("bookSourceUrl") ?? string("sourceUrl") ?? UUID().uuidString
+        func legacyRuleMap(_ fields: [String: String]) -> SourceRule? {
+            var mapped: [String: String] = [:]
+            for item in fields {
+                guard let value = legadoLegacyRule(string(item.value)), !value.isEmpty else { continue }
+                mapped[item.key] = value
+            }
+            return mapped.isEmpty ? nil : SourceRule(fields: mapped)
+        }
+
+        func legacyContentRuleMap() -> SourceRule? {
+            var mapped: [String: String] = [:]
+            if var content = legadoLegacyRule(string("ruleBookContent")), !content.isEmpty {
+                if content.hasPrefix("$"), !content.hasPrefix("$.") {
+                    content.removeFirst()
+                }
+                mapped["content"] = content
+            }
+            if let replaceRegex = legadoLegacyRule(string("ruleBookContentReplace")), !replaceRegex.isEmpty {
+                mapped["replaceRegex"] = replaceRegex
+            }
+            if let nextContentUrl = legadoLegacyRule(string("ruleContentUrlNext")), !nextContentUrl.isEmpty {
+                mapped["nextContentUrl"] = nextContentUrl
+            }
+            return mapped.isEmpty ? nil : SourceRule(fields: mapped)
+        }
+
+        let name = string("bookSourceName") ?? string("sourceName") ?? string("name") ?? "\u{672a}\u{547d}\u{540d}\u{4e66}\u{6e90}"
+        let url = string("bookSourceUrl") ?? string("sourceUrl") ?? string("url") ?? UUID().uuidString
+        let ruleBookContent = rule("ruleBookContent")
+        let structuredRuleBookContent = ruleBookContent?.fields.isEmpty == false ? ruleBookContent : nil
 
         self.init(
             bookSourceName: name,
             bookSourceUrl: url,
-            bookSourceGroup: string("bookSourceGroup") ?? string("sourceGroup"),
+            bookSourceGroup: string("bookSourceGroup") ?? string("sourceGroup") ?? string("group"),
             bookSourceType: int(["bookSourceType", "sourceType"]),
             enabled: bool(["enabled", "enable"], default: true),
-            weight: int(["weight"]),
-            searchUrl: string("searchUrl") ?? string("searchURL"),
-            exploreUrl: string("exploreUrl") ?? string("exploreURL"),
-            ruleSearch: rule("ruleSearch") ?? rule("rulesSearch"),
-            ruleBookInfo: rule("ruleBookInfo") ?? rule("rulesBookInfo") ?? rule("ruleBook"),
-            ruleToc: rule("ruleToc") ?? rule("rulesToc"),
-            ruleContent: rule("ruleContent") ?? rule("ruleBookContent") ?? rule("rulesContent"),
-            ruleExplore: rule("ruleExplore") ?? rule("rulesExplore"),
+            weight: int(["weight", "serialNumber", "customOrder"]),
+            searchUrl: string("searchUrl") ?? string("searchURL") ?? legadoLegacyURL(string("ruleSearchUrl")),
+            exploreUrl: string("exploreUrl") ?? string("exploreURL") ?? legadoLegacyURLs(string("ruleFindUrl")),
+            ruleSearch: rule("ruleSearch") ?? rule("rulesSearch") ?? legacyRuleMap([
+                "bookList": "ruleSearchList",
+                "name": "ruleSearchName",
+                "author": "ruleSearchAuthor",
+                "intro": "ruleSearchIntroduce",
+                "kind": "ruleSearchKind",
+                "bookUrl": "ruleSearchNoteUrl",
+                "coverUrl": "ruleSearchCoverUrl",
+                "lastChapter": "ruleSearchLastChapter"
+            ]),
+            ruleBookInfo: rule("ruleBookInfo") ?? rule("rulesBookInfo") ?? rule("ruleBook") ?? legacyRuleMap([
+                "init": "ruleBookInfoInit",
+                "name": "ruleBookName",
+                "author": "ruleBookAuthor",
+                "intro": "ruleIntroduce",
+                "kind": "ruleBookKind",
+                "coverUrl": "ruleCoverUrl",
+                "lastChapter": "ruleBookLastChapter",
+                "tocUrl": "ruleChapterUrl"
+            ]),
+            ruleToc: rule("ruleToc") ?? rule("rulesToc") ?? legacyRuleMap([
+                "chapterList": "ruleChapterList",
+                "chapterName": "ruleChapterName",
+                "chapterUrl": "ruleContentUrl",
+                "nextTocUrl": "ruleChapterUrlNext"
+            ]),
+            ruleContent: rule("ruleContent") ?? rule("rulesContent") ?? structuredRuleBookContent ?? legacyContentRuleMap() ?? ruleBookContent,
+            ruleExplore: rule("ruleExplore") ?? rule("rulesExplore") ?? legacyRuleMap([
+                "bookList": "ruleFindList",
+                "name": "ruleFindName",
+                "author": "ruleFindAuthor",
+                "intro": "ruleFindIntroduce",
+                "kind": "ruleFindKind",
+                "bookUrl": "ruleFindNoteUrl",
+                "coverUrl": "ruleFindCoverUrl",
+                "lastChapter": "ruleFindLastChapter"
+            ]),
             header: string("header") ?? string("headers") ?? string("bookSourceHeader"),
             loginUrl: string("loginUrl"),
             loginCheckJs: string("loginCheckJs"),
@@ -223,6 +283,14 @@ struct SourceRule: Codable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         if let single = try? decoder.singleValueContainer(),
            let value = try? single.decode(String.self) {
+            if let data = value.data(using: .utf8),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let fields = object.reduce(into: [String: String]()) { result, item in
+                    result[item.key] = String(describing: item.value)
+                }
+                self.init(fields: fields)
+                return
+            }
             self.init(raw: value)
             return
         }
@@ -247,6 +315,159 @@ struct SourceRule: Codable, Hashable, Sendable {
             try container.encode(item.value, forKey: DynamicCodingKey(item.key))
         }
     }
+}
+
+private func legadoLegacyRule(_ oldRule: String?) -> String? {
+    guard var newRule = oldRule?.trimmingCharacters(in: .whitespacesAndNewlines), !newRule.isEmpty else {
+        return nil
+    }
+    var reverse = false
+    var allInOne = false
+    if newRule.hasPrefix("-") {
+        reverse = true
+        newRule.removeFirst()
+    }
+    if newRule.hasPrefix("+") {
+        allInOne = true
+        newRule.removeFirst()
+    }
+    let lower = newRule.lowercased()
+    let shouldConvertSeparators = !lower.hasPrefix("@css:")
+        && !lower.hasPrefix("@xpath:")
+        && !newRule.hasPrefix("//")
+        && !newRule.hasPrefix("##")
+        && !newRule.hasPrefix(":")
+        && !lower.contains("@js:")
+        && !lower.contains("<js>")
+    if shouldConvertSeparators {
+        if newRule.contains("#"), !newRule.contains("##") {
+            newRule = newRule.replacingOccurrences(of: "#", with: "##")
+        }
+        if newRule.contains("|"), !newRule.contains("||") {
+            if newRule.contains("##") {
+                var parts = newRule.components(separatedBy: "##")
+                if let first = parts.first {
+                    parts[0] = first.replacingOccurrences(of: "|", with: "||")
+                    newRule = parts.joined(separator: "##")
+                }
+            } else {
+                newRule = newRule.replacingOccurrences(of: "|", with: "||")
+            }
+        }
+        if newRule.contains("&"),
+           !newRule.contains("&&"),
+           !newRule.contains("http"),
+           !newRule.hasPrefix("/") {
+            newRule = newRule.replacingOccurrences(of: "&", with: "&&")
+        }
+    }
+    if allInOne {
+        newRule = "+\(newRule)"
+    }
+    if reverse {
+        newRule = "-\(newRule)"
+    }
+    return newRule
+}
+
+private func legadoLegacyURLs(_ oldURLs: String?) -> String? {
+    guard let text = oldURLs?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+        return nil
+    }
+    if text.hasPrefix("@js:") || text.hasPrefix("<js>") {
+        return text
+    }
+    if !text.contains("\n"), !text.contains("&&") {
+        return legadoLegacyURL(text)
+    }
+    let parts = text
+        .components(separatedBy: CharacterSet.newlines)
+        .flatMap { $0.components(separatedBy: "&&") }
+        .compactMap { legadoLegacyURL($0)?.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression) }
+        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: "\n")
+}
+
+private func legadoLegacyURL(_ oldURL: String?) -> String? {
+    guard var url = oldURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else {
+        return nil
+    }
+    if url.lowercased().hasPrefix("<js>") {
+        return url
+            .replacingOccurrences(of: "=searchKey", with: "={{key}}")
+            .replacingOccurrences(of: "=searchPage", with: "={{page}}")
+    }
+
+    var options: [String: Any] = [:]
+    if let range = url.range(of: #"@Header:\{.+?\}"#, options: [.regularExpression, .caseInsensitive]) {
+        let headerDirective = String(url[range])
+        url.removeSubrange(range)
+        options["headers"] = String(headerDirective.dropFirst(8))
+    }
+
+    let charsetParts = url.components(separatedBy: "|")
+    url = charsetParts.first ?? url
+    if charsetParts.count > 1 {
+        let charsetText = charsetParts[1]
+        if !charsetText.isEmpty,
+           let separator = charsetText.firstIndex(of: "="),
+           separator < charsetText.index(before: charsetText.endIndex) {
+            options["charset"] = String(charsetText[charsetText.index(after: separator)...])
+        }
+    }
+
+    var scripts: [String] = []
+    url = replaceMatches(in: url, pattern: #"\{\{.+?\}\}"#) { match in
+        scripts.append(match)
+        return "$\(scripts.count - 1)"
+    }
+    url = url
+        .replacingOccurrences(of: "{", with: "<")
+        .replacingOccurrences(of: "}", with: ">")
+        .replacingOccurrences(of: "searchKey", with: "{{key}}")
+    url = replaceMatches(in: url, pattern: #"<searchPage([-+]\d+)>"#) { match in
+        let delta = match
+            .replacingOccurrences(of: "<searchPage", with: "")
+            .replacingOccurrences(of: ">", with: "")
+        return "{{page\(delta)}}"
+    }
+    url = replaceMatches(in: url, pattern: #"searchPage([-+]\d+)"#) { match in
+        let delta = match.replacingOccurrences(of: "searchPage", with: "")
+        return "{{page\(delta)}}"
+    }
+    url = url.replacingOccurrences(of: "searchPage", with: "{{page}}")
+    for index in scripts.indices {
+        let script = scripts[index]
+            .replacingOccurrences(of: "searchKey", with: "key")
+            .replacingOccurrences(of: "searchPage", with: "page")
+        url = url.replacingOccurrences(of: "$\(index)", with: script)
+    }
+
+    let bodyParts = url.components(separatedBy: "@")
+    url = bodyParts.first ?? url
+    if bodyParts.count > 1 {
+        options["method"] = "POST"
+        options["body"] = bodyParts.dropFirst().joined(separator: "@")
+    }
+
+    guard !options.isEmpty,
+          JSONSerialization.isValidJSONObject(options),
+          let data = try? JSONSerialization.data(withJSONObject: options, options: [.sortedKeys]),
+          let json = String(data: data, encoding: .utf8) else {
+        return url
+    }
+    return "\(url),\(json)"
+}
+
+private func replaceMatches(in text: String, pattern: String, transform: (String) -> String) -> String {
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+    var output = text
+    let matches = regex.matches(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text))
+    for match in matches.reversed() {
+        guard let range = Range(match.range(at: 0), in: output) else { continue }
+        output.replaceSubrange(range, with: transform(String(output[range])))
+    }
+    return output
 }
 
 struct DynamicCodingKey: CodingKey {

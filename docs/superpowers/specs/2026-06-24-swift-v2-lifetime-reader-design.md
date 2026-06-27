@@ -204,6 +204,21 @@ Flutter is the product baseline for:
 
 Swift is allowed to improve visual taste and native feel, but not remove required behavior.
 
+The locked baseline decision is A:
+
+- `D:\Gemini反重力\read` is the only product baseline for UI structure, navigation, page inventory, and user-facing behavior.
+- Swift may improve animation quality, native touch response, blur, haptics, typography, and long-session smoothness.
+- Swift may not invent a different product flow when the Flutter product already defines the flow.
+- Every Swift screen must have a parity checklist against the Flutter screen before it is treated as complete.
+- A control that exists in Flutter must either work in Swift or be explicitly deferred in the execution checklist.
+
+The source-engine decision is different:
+
+- The old Flutter source engine is not the implementation baseline.
+- Flutter source code is used as a compatibility reference, fixture provider, field-map reference, and regression corpus.
+- Swift source compatibility should be rebuilt around a clean runtime: normalized source model, URL directives, HTTP/cookie/cache bridge, rule extractors, diagnostics, and WKWebView/JS host when needed.
+- Broken behavior in Flutter source compatibility should not be copied into Swift.
+
 The visual target is:
 
 - Apple Podcasts-like depth where appropriate.
@@ -397,8 +412,9 @@ The product is not done until all of these are true:
 
 After user approval of this spec, start Phase 1:
 
-1. Produce a visual companion screen comparing the Swift v2 reader/home direction.
-2. Pick the reader visual baseline.
-3. Implement the visual shell only after approval.
-4. Verify tap response, keyboard behavior, and reader scroll basics before adding deeper features.
-
+1. Audit Flutter page inventory and write a Swift parity ledger.
+2. Fix the Swift app shell to match Flutter's product navigation model before polishing page interiors.
+3. Produce visual companion screens only for layout or style choices that benefit from side-by-side comparison.
+4. Implement the reader, home, discover, settings, and source-manager surfaces against the parity ledger.
+5. Keep source-engine work separate from UI parity: import formats and fixtures may be absorbed, but the old engine is not copied.
+6. Verify tap response, keyboard behavior, reader scroll/page behavior, local import, and search/detail/reader entry before calling any milestone testable.

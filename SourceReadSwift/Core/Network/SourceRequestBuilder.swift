@@ -20,7 +20,7 @@ struct SourceRequestBuilder {
         let directive = directiveParser.parse(resolvedText)
         let url = resolveURL(directive.urlText, base: source.bookSourceUrl)
         let sourceOptions = requestOptions(source, keyword: keyword, page: page)
-        let charset = sourceCharset(source)
+        let charset = directive.expectedCharset ?? sourceCharset(source)
 
         var headers = sourceHeaders(source)
         headers.merge(sourceOptions.headers, uniquingKeysWith: { _, new in new })
@@ -43,7 +43,7 @@ struct SourceRequestBuilder {
             headers: headers,
             body: body,
             expectedCharset: charset,
-            timeout: 20
+            timeout: 12
         )
     }
 
@@ -109,7 +109,7 @@ struct SourceRequestBuilder {
 
     private func applyUserAgentAlias(from object: [String: Any], to headers: inout [String: String]) {
         guard !containsHeader(headers, "User-Agent") else { return }
-        for key in ["userAgent", "ua"] {
+        for key in ["userAgent", "ua", "httpUserAgent"] {
             if let value = object[key] as? String {
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {

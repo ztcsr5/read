@@ -5,6 +5,7 @@ struct DiscoverView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = DiscoverViewModel()
     @State private var selectedTab: DiscoverTab = .books
+    @State private var pendingShelfAddBook: SearchBook?
 
     var body: some View {
         NavigationStack {
@@ -42,6 +43,28 @@ struct DiscoverView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 viewModel.bind(appState: appState)
+            }
+            .confirmationDialog(
+                "加入书架？",
+                isPresented: Binding(
+                    get: { pendingShelfAddBook != nil },
+                    set: { if !$0 { pendingShelfAddBook = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("加入书架") {
+                    guard let book = pendingShelfAddBook else { return }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    appState.bookshelfStore.addOrUpdate(book)
+                    pendingShelfAddBook = nil
+                }
+                Button("取消", role: .cancel) {
+                    pendingShelfAddBook = nil
+                }
+            } message: {
+                if let book = pendingShelfAddBook {
+                    Text("确认把《\(book.name)》加入书架并开始跟踪阅读进度？")
+                }
             }
         }
     }
@@ -188,24 +211,38 @@ struct DiscoverView: View {
             }
 
             ForEach(viewModel.results) { book in
-                NavigationLink {
-                    BookDetailView(book: book)
-                } label: {
-                    SearchBookRow(
-                        book: book,
-                        onAdd: {
-                            appState.bookshelfStore.addOrUpdate(book)
-                        },
-                        isInBookshelf: appState.bookshelfStore.contains(book)
-                    )
-                        .podcastCard()
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(TapGesture().onEnded {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                })
+                searchResultCard(book)
             }
         }
+    }
+
+    private func searchResultCard(_ book: SearchBook) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            NavigationLink {
+                BookDetailView(book: book)
+            } label: {
+                SearchBookRow(book: book)
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            })
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                if !appState.bookshelfStore.contains(book) {
+                    pendingShelfAddBook = book
+                }
+            } label: {
+                Image(systemName: appState.bookshelfStore.contains(book) ? "checkmark.circle.fill" : "plus.circle")
+                    .font(.title2)
+                    .foregroundStyle(appState.bookshelfStore.contains(book) ? Color.green : AppTheme.accent)
+                    .frame(width: 38, height: 38)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(appState.bookshelfStore.contains(book) ? "已在书架" : "加入书架")
+        }
+        .podcastCard()
     }
 
     private var subscriptionTab: some View {

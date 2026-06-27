@@ -1,4 +1,5 @@
 import Foundation
+import SwiftSoup
 
 struct ChapterListParser {
     private let htmlExtractor = HtmlRuleExtractor()
@@ -29,7 +30,15 @@ struct ChapterListParser {
         }
 
         do {
-            let elements = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: listRule)
+            let roots: [Element]
+            if let initRule = htmlExtractor.firstRule(source.ruleToc, keys: ["init"]) {
+                roots = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: initRule)
+            } else {
+                roots = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: "html")
+            }
+            let elements = try roots.flatMap { root in
+                try htmlExtractor.select(from: root, rule: listRule, baseUrl: response.url)
+            }
             let nameRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterName", "name", "title"])
             let urlRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterUrl", "url"])
 
@@ -61,8 +70,15 @@ struct ChapterListParser {
             "source": source,
             "book": bookMap
         ]
+        let rootObject: Any
+        if let initRule = htmlExtractor.firstRule(source.ruleToc, keys: ["init"]),
+           let initialized = jsonExtractor.value(from: object, path: initRule, variables: variables) {
+            rootObject = initialized
+        } else {
+            rootObject = object
+        }
         let listRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterList", "tocList", "list"])
-        let items = jsonExtractor.list(from: object, rule: listRule, variables: variables)
+        let items = jsonExtractor.list(from: rootObject, rule: listRule, variables: variables)
         let nameRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterName", "name", "title"])
         let urlRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterUrl", "url"])
 
@@ -92,4 +108,3 @@ struct ChapterListParser {
         return chapters.isEmpty ? .failure(.empty("JSON 目录解析结果为空")) : .success(chapters)
     }
 }
-

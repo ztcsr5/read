@@ -81,6 +81,44 @@ final class SourceEngineBodyJSTests: XCTestCase {
         }
         XCTAssertEqual(content.paragraphs, ["BodyJSWithSource"])
     }
+
+    func testChapterListUsesBookDetailTocUrlWhenPresent() async throws {
+        let source = BookSource(
+            bookSourceName: "TOC URL",
+            bookSourceUrl: "https://source.example.com",
+            ruleToc: SourceRule(fields: [
+                "chapterList": ".chapter",
+                "chapterName": "a@text",
+                "chapterUrl": "a@href"
+            ])
+        )
+        let detail = BookDetail(
+            name: "书名",
+            author: nil,
+            coverUrl: nil,
+            bookUrl: "https://source.example.com/book/1",
+            tocUrl: "https://source.example.com/book/1/catalog",
+            sourceName: source.bookSourceName,
+            sourceUrl: source.bookSourceUrl,
+            intro: nil,
+            latestChapter: nil
+        )
+        let network = RecordingSourceNetworkClient(
+            responses: [
+                "https://source.example.com/book/1/catalog": "<html><body><div class='chapter'><a href='/chapter/1'>第一章</a></div></body></html>"
+            ]
+        )
+        let engine = LegadoSourceEngine(network: network)
+
+        let result = await engine.getChapterList(source: source, book: detail)
+
+        guard case .success(let chapters) = result else {
+            return XCTFail("expected chapters")
+        }
+        XCTAssertEqual(network.requestedURLs, ["https://source.example.com/book/1/catalog"])
+        XCTAssertEqual(chapters.first?.title, "第一章")
+        XCTAssertEqual(chapters.first?.url, "https://source.example.com/chapter/1")
+    }
 }
 
 private final class StaticSourceNetworkClient: SourceNetworkClient, @unchecked Sendable {
@@ -92,6 +130,38 @@ private final class StaticSourceNetworkClient: SourceNetworkClient, @unchecked S
 
     func load(_ request: SourceRequest) async -> Result<SourceResponse, SourceEngineError> {
         .success(SourceResponse(
+            url: request.url,
+            statusCode: 200,
+            headers: [:],
+            body: body,
+            data: Data(body.utf8)
+        ))
+    }
+}
+
+private final class RecordingSourceNetworkClient: SourceNetworkClient, @unchecked Sendable {
+    private let responses: [String: String]
+    private let lock = NSLock()
+    private var urls: [String] = []
+
+    var requestedURLs: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return urls
+    }
+
+    init(responses: [String: String]) {
+        self.responses = responses
+    }
+
+    func load(_ request: SourceRequest) async -> Result<SourceResponse, SourceEngineError> {
+        let urlText = request.url.absoluteString
+        lock.lock()
+        urls.append(urlText)
+        lock.unlock()
+
+        let body = responses[urlText] ?? ""
+        return .success(SourceResponse(
             url: request.url,
             statusCode: 200,
             headers: [:],

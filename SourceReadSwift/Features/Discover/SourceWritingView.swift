@@ -189,14 +189,14 @@ final class LightweightHTTPServer: ObservableObject {
     var onJSONReceived: ((String) -> Result<String, Error>)?
     
     init() {
-        self.localIP = getLocalIPAddress() ?? "127.0.0.1"
+        self.localIP = getLocalIPAddresses().first ?? "127.0.0.1"
     }
     
     func start() {
         guard !isRunning, !isStarting else { return }
         isStarting = true
         lastError = nil
-        localIP = getLocalIPAddress() ?? "127.0.0.1"
+        localIP = getLocalIPAddresses().first ?? "127.0.0.1"
         let parameters = NWParameters.tcp
         let candidates = [port] + (1122...1132).map(UInt16.init).filter { $0 != port }
         var lastStartError: Error?
@@ -226,7 +226,7 @@ final class LightweightHTTPServer: ObservableObject {
                 case .ready:
                     self.isStarting = false
                     self.isRunning = true
-                    self.localIP = getLocalIPAddress() ?? self.localIP
+                    self.localIP = getLocalIPAddresses().first ?? self.localIP
                     self.localURLs = self.webURLs()
                     self.log("服务器启动成功，正在监听端口 \(self.port)...")
                 case .failed(let error):
@@ -430,9 +430,11 @@ final class LightweightHTTPServer: ObservableObject {
     }
 
     private func webURLs() -> [String] {
-        var urls = ["http://\(localIP):\(port)"]
-        if localIP != "127.0.0.1" {
-            urls.append("http://127.0.0.1:\(port)")
+        var seen = Set<String>()
+        var urls: [String] = []
+        for ip in getLocalIPAddresses() + [localIP, "127.0.0.1"] {
+            guard !ip.isEmpty, seen.insert(ip).inserted else { continue }
+            urls.append("http://\(ip):\(port)")
         }
         return urls
     }
@@ -630,11 +632,12 @@ final class LightweightHTTPServer: ObservableObject {
 
 // MARK: - IP Address Helper
 
-private func getLocalIPAddress() -> String? {
-    var address: String?
+private func getLocalIPAddresses() -> [String] {
+    var wifi: [String] = []
+    var others: [String] = []
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&ifaddr) == 0 else { return nil }
-    guard let firstAddr = ifaddr else { return nil }
+    guard getifaddrs(&ifaddr) == 0 else { return [] }
+    guard let firstAddr = ifaddr else { return [] }
     
     for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
         let interface = ptr.pointee
@@ -649,14 +652,15 @@ private func getLocalIPAddress() -> String? {
                         nil, socklen_t(0), NI_NUMERICHOST)
             let ip = String(cString: hostname)
             if ip != "127.0.0.1" {
-                address = ip
-                if name == "en0" { // Wi-Fi is preferred
-                    freeifaddrs(ifaddr)
-                    return ip
+                if name == "en0" || name.hasPrefix("en") {
+                    wifi.append(ip)
+                } else {
+                    others.append(ip)
                 }
             }
         }
     }
     freeifaddrs(ifaddr)
-    return address
+    var seen = Set<String>()
+    return (wifi + others).filter { seen.insert($0).inserted }
 }

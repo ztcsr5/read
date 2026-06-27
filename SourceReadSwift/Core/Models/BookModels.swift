@@ -17,10 +17,33 @@ struct BookDetail: Identifiable, Codable, Hashable, Sendable {
     let author: String?
     let coverUrl: String?
     let bookUrl: String
+    let tocUrl: String?
     let sourceName: String
     let sourceUrl: String
     let intro: String?
     let latestChapter: String?
+
+    init(
+        name: String,
+        author: String?,
+        coverUrl: String?,
+        bookUrl: String,
+        tocUrl: String? = nil,
+        sourceName: String,
+        sourceUrl: String,
+        intro: String?,
+        latestChapter: String?
+    ) {
+        self.name = name
+        self.author = author
+        self.coverUrl = coverUrl
+        self.bookUrl = bookUrl
+        self.tocUrl = tocUrl
+        self.sourceName = sourceName
+        self.sourceUrl = sourceUrl
+        self.intro = intro
+        self.latestChapter = latestChapter
+    }
 }
 
 struct BookChapter: Identifiable, Codable, Hashable, Sendable {

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftSoup
 
 struct SearchResultParser {
     private let htmlExtractor = HtmlRuleExtractor()
@@ -20,7 +21,15 @@ struct SearchResultParser {
         }
 
         do {
-            let elements = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: listRule)
+            let roots: [Element]
+            if let initRule = firstRule(rule, keys: ["init"]) {
+                roots = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: initRule)
+            } else {
+                roots = try htmlExtractor.select(response.body, baseUrl: response.url, listRule: "html")
+            }
+            let elements = try roots.flatMap { root in
+                try htmlExtractor.select(from: root, rule: listRule, baseUrl: response.url)
+            }
             var books: [SearchBook] = []
             let variables: [String: Any] = ["source": source]
             for element in elements {
@@ -52,9 +61,16 @@ struct SearchResultParser {
         }
         let extractor = JSONRuleExtractor()
         let rule = source.ruleSearch
+        let rootObject: Any
+        if let initRule = firstRule(rule, keys: ["init"]),
+           let initialized = extractor.value(from: object, path: initRule, variables: ["source": source]) {
+            rootObject = initialized
+        } else {
+            rootObject = object
+        }
         let listRule = firstRule(rule, keys: ["bookList", "list", "books"])
         let variables: [String: Any] = ["source": source]
-        let candidates = extractor.list(from: object, rule: listRule, variables: variables).prefix(120)
+        let candidates = extractor.list(from: rootObject, rule: listRule, variables: variables).prefix(120)
         let books = candidates.compactMap { item -> SearchBook? in
             let name = extractor.string(
                 from: item,
