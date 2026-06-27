@@ -74,6 +74,47 @@ final class JSONPipelineParserTests: XCTestCase {
         XCTAssertEqual(detail.tocUrl, "https://api.example.com/book/1/catalog")
     }
 
+    func testParseJSONBookDetailKeepsSearchFieldsWhenDetailIsBlank() throws {
+        let source = BookSource(
+            bookSourceName: "API",
+            bookSourceUrl: "https://api.example.com",
+            ruleBookInfo: SourceRule(fields: [
+                "name": "data.name",
+                "author": "data.author",
+                "coverUrl": "data.cover",
+                "intro": "data.intro",
+                "tocUrl": "data.toc"
+            ])
+        )
+        let book = SearchBook(
+            name: "Search Name",
+            author: "Search Author",
+            coverUrl: "https://img.example.com/search.jpg",
+            bookUrl: "https://api.example.com/book/1",
+            sourceName: source.bookSourceName,
+            sourceUrl: source.bookSourceUrl,
+            intro: "Search intro"
+        )
+        let response = SourceResponse(
+            url: URL(string: book.bookUrl)!,
+            statusCode: 200,
+            headers: [:],
+            body: #"{"data":{"name":"","author":"","cover":"","intro":"","toc":""}}"#,
+            data: Data()
+        )
+
+        let result = BookDetailParser().parse(source: source, book: book, response: response)
+
+        guard case .success(let detail) = result else {
+            return XCTFail("expected success")
+        }
+        XCTAssertEqual(detail.name, book.name)
+        XCTAssertEqual(detail.author, book.author)
+        XCTAssertEqual(detail.coverUrl, book.coverUrl)
+        XCTAssertEqual(detail.intro, book.intro)
+        XCTAssertNil(detail.tocUrl)
+    }
+
     func testParseJSONChapterList() throws {
         let source = BookSource(
             bookSourceName: "API源",

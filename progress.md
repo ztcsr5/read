@@ -494,3 +494,22 @@
 - Push is currently blocked by the local GitHub credential prompt being unavailable/cancelled in this Windows terminal. The local commit can still be created and pushed once credentials are available.
 - Do not commit unrelated `ci-log/run-27952116519/`.
 - Rollback: revert this progress entry and the Swift/doc changes listed above.
+
+## 2026-06-27 - Task: Preserve search metadata when detail JSON is blank
+
+### What was done
+- Absorbed MR's metadata-merge behavior for the Swift JSON detail parser: blank detail fields no longer replace useful search-result metadata.
+- JSON detail parsing now falls back to the search result for blank `name`, `author`, `coverUrl`, and `intro`, and ignores blank `latestChapter` / `tocUrl`.
+- Added regression coverage for a detail API returning empty strings.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- This change still needs GitHub Actions because local Windows has no `swift`, `xcodebuild`, or `xcodegen`.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Core/Rules/BookDetailParser.swift`: treats blank JSON detail values as missing and preserves search metadata.
+  - `SourceReadSwiftTests/JSONPipelineParserTests.swift`: covers blank detail JSON fallback behavior.
+  - `progress.md`: records this MR function absorption fix.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the two Swift/test changes above.

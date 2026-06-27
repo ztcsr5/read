@@ -133,37 +133,38 @@ struct BookDetailParser {
             rule: htmlExtractor.firstRule(rule, keys: ["name", "bookName"]),
             fallbackKeys: ["name", "bookName", "title", "book_name"],
             variables: variables
-        ) ?? book.name
+        )?.nilIfEmpty ?? book.name
         let author = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["author"]),
             fallbackKeys: ["author", "writer"],
             variables: variables
-        ) ?? book.author
+        )?.nilIfEmpty ?? book.author
         let cover = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["coverUrl", "cover"]),
             fallbackKeys: ["cover", "coverUrl", "img", "image"],
             variables: variables
-        ) ?? book.coverUrl
+        )?.nilIfEmpty ?? book.coverUrl
         let intro = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["intro", "introduction"]),
             fallbackKeys: ["intro", "desc", "description"],
             variables: variables
-        ) ?? book.intro
+        )?.nilIfEmpty ?? book.intro
         let latest = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["latestChapter", "lastChapter"]),
             fallbackKeys: ["latestChapter", "lastChapter", "last"],
             variables: variables
-        )
-        let tocUrl = jsonExtractor.string(
+        )?.nilIfEmpty
+        let rawTocUrl = jsonExtractor.string(
             from: dict,
             rule: htmlExtractor.firstRule(rule, keys: ["tocUrl", "chapterUrl", "catalogUrl", "chapterListUrl"]),
             fallbackKeys: ["tocUrl", "chapterUrl", "catalogUrl", "chapterListUrl", "toc_url", "chapter_url"],
             variables: variables
-        ).flatMap { resolveURL($0, base: response.url) }
+        )?.nilIfEmpty
+        let tocUrl = rawTocUrl.flatMap { resolveURL($0, base: response.url) }
 
         return .success(BookDetail(
             name: name,
