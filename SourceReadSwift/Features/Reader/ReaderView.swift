@@ -138,7 +138,7 @@ struct ReaderView: View {
         if pagedBlocksCacheKey == readerPageCacheKey, !pagedBlocksCache.isEmpty {
             return pagedBlocksCache
         }
-        buildReaderPageBlocks()
+        return buildReaderPageBlocks()
     }
 
     private var readerPageCacheKey: String {
