@@ -768,6 +768,12 @@ struct SourceManagerView: View {
             .navigationTitle(state.source.bookSourceName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Copy") {
+                        UIPasteboard.general.string = sourceTest?.output ?? state.output ?? ""
+                    }
+                    .disabled((sourceTest?.output ?? state.output ?? "").isEmpty)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { sourceTest = nil }
                 }
@@ -862,6 +868,12 @@ struct SourceManagerView: View {
             .navigationTitle("批量测试")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Copy") {
+                        UIPasteboard.general.string = batchCheckExportText(batchCheck ?? state)
+                    }
+                    .disabled((batchCheck ?? state).results.isEmpty)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { batchCheck = nil }
                 }
@@ -878,6 +890,22 @@ struct SourceManagerView: View {
             .background(color.opacity(0.12))
             .foregroundStyle(color)
             .clipShape(Capsule())
+    }
+
+    private func batchCheckExportText(_ state: SourceBatchCheckState) -> String {
+        var lines = [
+            "Source batch check",
+            "keyword: \(state.keyword)",
+            "checked: \(state.checkedCount)/\(state.sources.count)",
+            "pass: \(state.passedCount), warn: \(state.warningCount), fail: \(state.failedCount)"
+        ]
+        for result in state.results {
+            lines.append("")
+            lines.append("[\(result.status.title)] \(result.sourceName)")
+            lines.append("url: \(result.sourceURL)")
+            lines.append("message: \(result.message)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func importSources() {

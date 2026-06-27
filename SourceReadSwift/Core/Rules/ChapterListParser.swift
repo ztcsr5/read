@@ -6,6 +6,15 @@ struct ChapterListParser {
     private let jsonExtractor = JSONRuleExtractor()
 
     func parse(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<[BookChapter], SourceEngineError> {
+        switch parsePage(source: source, book: book, response: response) {
+        case .success(let page):
+            return page.chapters.isEmpty ? .failure(.empty("Chapter list is empty")) : .success(page.chapters)
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
+    func parsePage(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<ChapterListPage, SourceEngineError> {
         let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if body.first == "{" || body.first == "[" {
             return parseJSON(source: source, book: book, response: response)
@@ -13,7 +22,7 @@ struct ChapterListParser {
         return parseHTML(source: source, book: book, response: response)
     }
 
-    private func parseHTML(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<[BookChapter], SourceEngineError> {
+    private func parseHTML(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<ChapterListPage, SourceEngineError> {
         let bookMap: [String: Any] = [
             "name": book.name,
             "author": book.author ?? "",
@@ -26,7 +35,7 @@ struct ChapterListParser {
             "book": bookMap
         ]
         guard let listRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterList", "tocList", "list"]) else {
-            return .failure(.rule("ruleToc.chapterList 为空"))
+            return .failure(.rule("ruleToc.chapterList is empty"))
         }
 
         do {
@@ -41,6 +50,7 @@ struct ChapterListParser {
             }
             let nameRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterName", "name", "title"])
             let urlRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterUrl", "url"])
+            let nextRule = htmlExtractor.firstRule(source.ruleToc, keys: ["nextTocUrl", "nextChapterUrl", "nextUrl"])
 
             let chapters = try elements.enumerated().compactMap { index, element -> BookChapter? in
                 let title = try htmlExtractor.value(from: element, rule: nameRule, fallback: "a@text", baseUrl: response.url, variables: variables)
@@ -48,16 +58,24 @@ struct ChapterListParser {
                 guard !title.isEmpty, !url.isEmpty else { return nil }
                 return BookChapter(title: title, url: url, bookUrl: book.bookUrl, index: index, isVip: false)
             }
-            return chapters.isEmpty ? .failure(.empty("目录解析结果为空")) : .success(chapters)
+            var next: String?
+            for root in roots {
+                next = try htmlExtractor.value(from: root, rule: nextRule, fallback: nil, baseUrl: response.url, variables: variables).nilIfEmpty
+                if next != nil { break }
+            }
+
+            return chapters.isEmpty
+                ? .failure(.empty("Chapter list is empty"))
+                : .success(ChapterListPage(chapters: chapters, nextTocUrl: next))
         } catch {
             return .failure(.rule(error.localizedDescription))
         }
     }
 
-    private func parseJSON(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<[BookChapter], SourceEngineError> {
+    private func parseJSON(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<ChapterListPage, SourceEngineError> {
         guard let data = response.body.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) else {
-            return .failure(.rule("JSON 解析失败"))
+            return .failure(.rule("JSON parse failed"))
         }
         let bookMap: [String: Any] = [
             "name": book.name,
@@ -81,6 +99,7 @@ struct ChapterListParser {
         let items = jsonExtractor.list(from: rootObject, rule: listRule, variables: variables)
         let nameRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterName", "name", "title"])
         let urlRule = htmlExtractor.firstRule(source.ruleToc, keys: ["chapterUrl", "url"])
+        let nextRule = htmlExtractor.firstRule(source.ruleToc, keys: ["nextTocUrl", "nextChapterUrl", "nextUrl"])
 
         let chapters = items.enumerated().compactMap { index, item -> BookChapter? in
             let title = jsonExtractor.string(
@@ -105,6 +124,25 @@ struct ChapterListParser {
             )
         }
 
-        return chapters.isEmpty ? .failure(.empty("JSON 目录解析结果为空")) : .success(chapters)
+        let next: String?
+        if let dict = rootObject as? [String: Any] {
+            next = jsonExtractor.string(
+                from: dict,
+                rule: nextRule,
+                fallbackKeys: ["nextTocUrl", "nextChapterUrl", "nextUrl", "next"],
+                variables: variables
+            ).map { htmlExtractor.absolutize($0, base: response.url) }
+        } else {
+            next = nil
+        }
+
+        return chapters.isEmpty
+            ? .failure(.empty("JSON chapter list is empty"))
+            : .success(ChapterListPage(chapters: chapters, nextTocUrl: next))
     }
+}
+
+struct ChapterListPage: Equatable, Sendable {
+    let chapters: [BookChapter]
+    let nextTocUrl: String?
 }

@@ -86,12 +86,19 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let request = requestBuilder.buildPageRequest(source: source, urlText: tocURL)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source)
-            let parsed = ChapterListParser().parse(source: source, book: book, response: transformedResponse)
+            let parsed = parseChapterListPage(source: source, book: book, response: response)
             if case .failure(let error) = parsed {
-                await emitFailure(error, stage: "toc.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
+                await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
             }
-            return parsed
+            guard case .success(let firstPage) = parsed else {
+                return parsed.map { $0.chapters }
+            }
+            return await appendNextChapterListPages(
+                firstPage,
+                source: source,
+                book: book,
+                firstURL: response.url
+            )
         case .failure(let error):
             await emitFailure(error, stage: "toc.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
@@ -100,20 +107,26 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
 
     func getContent(source: BookSource, chapter: BookChapter) async -> Result<ChapterContent, SourceEngineError> {
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
+        let globalPurifyRules = await purifyRules()
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source)
-            let globalPurifyRules = await purifyRules()
-            let parsed = ContentParser().parse(
+            let parsed = parseContentPage(
                 source: source,
                 chapter: chapter,
-                response: transformedResponse,
+                response: response,
                 globalPurifyRules: globalPurifyRules
             )
             if case .failure(let error) = parsed {
-                await emitFailure(error, stage: "content.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
+                await emitFailure(error, stage: "content.parse", source: source, details: ["url": response.url.absoluteString])
             }
-            return parsed
+            guard case .success(let firstPage) = parsed else { return parsed }
+            return await appendNextContentPages(
+                firstPage,
+                source: source,
+                chapter: chapter,
+                firstURL: response.url,
+                globalPurifyRules: globalPurifyRules
+            )
         case .failure(let error):
             await emitFailure(error, stage: "content.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
@@ -213,6 +226,133 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             body: output,
             data: Data(output.utf8)
         )
+    }
+
+    private func parseContentPage(
+        source: BookSource,
+        chapter: BookChapter,
+        response: SourceResponse,
+        globalPurifyRules: [String]
+    ) -> Result<ChapterContent, SourceEngineError> {
+        let transformedResponse = transformBodyIfNeeded(response, source: source)
+        return ContentParser().parse(
+            source: source,
+            chapter: chapter,
+            response: transformedResponse,
+            globalPurifyRules: globalPurifyRules
+        )
+    }
+
+    private func parseChapterListPage(
+        source: BookSource,
+        book: BookDetail,
+        response: SourceResponse
+    ) -> Result<ChapterListPage, SourceEngineError> {
+        let transformedResponse = transformBodyIfNeeded(response, source: source)
+        return ChapterListParser().parsePage(source: source, book: book, response: transformedResponse)
+    }
+
+    private func appendNextChapterListPages(
+        _ firstPage: ChapterListPage,
+        source: BookSource,
+        book: BookDetail,
+        firstURL: URL
+    ) async -> Result<[BookChapter], SourceEngineError> {
+        var chapters = firstPage.chapters
+        var nextURLText = firstPage.nextTocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        var seenURLs: Set<String> = [firstURL.absoluteString]
+        var pagesLoaded = 1
+        let maxPages = 30
+
+        while let currentNext = nextURLText, pagesLoaded < maxPages {
+            let request = requestBuilder.buildPageRequest(source: source, urlText: currentNext)
+            let absolute = request.url.absoluteString
+            guard !seenURLs.contains(absolute) else { break }
+            seenURLs.insert(absolute)
+
+            switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.next.load") {
+            case .success(let response):
+                switch parseChapterListPage(source: source, book: book, response: response) {
+                case .success(let page):
+                    let offset = chapters.count
+                    chapters.append(contentsOf: page.chapters.map { chapter in
+                        BookChapter(
+                            title: chapter.title,
+                            url: chapter.url,
+                            bookUrl: chapter.bookUrl,
+                            index: offset + chapter.index,
+                            isVip: chapter.isVip
+                        )
+                    })
+                    nextURLText = page.nextTocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                    pagesLoaded += 1
+                case .failure(let error):
+                    await emitFailure(error, stage: "toc.next.parse", source: source, details: ["url": response.url.absoluteString])
+                    nextURLText = nil
+                }
+            case .failure(let error):
+                await emitFailure(error, stage: "toc.next.load", source: source, details: ["url": absolute])
+                nextURLText = nil
+            }
+        }
+
+        return chapters.isEmpty ? .failure(.empty("Chapter list is empty")) : .success(chapters)
+    }
+
+    private func appendNextContentPages(
+        _ firstPage: ChapterContent,
+        source: BookSource,
+        chapter: BookChapter,
+        firstURL: URL,
+        globalPurifyRules: [String]
+    ) async -> Result<ChapterContent, SourceEngineError> {
+        var paragraphs = firstPage.paragraphs
+        var nextURLText = firstPage.nextContentUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        var seenURLs: Set<String> = [firstURL.absoluteString]
+        var finalNextURL = nextURLText
+        var pagesLoaded = 1
+        let maxPages = 8
+
+        while let currentNext = nextURLText, pagesLoaded < maxPages {
+            let request = requestBuilder.buildPageRequest(source: source, urlText: currentNext)
+            let absolute = request.url.absoluteString
+            guard !seenURLs.contains(absolute) else {
+                finalNextURL = nil
+                break
+            }
+            seenURLs.insert(absolute)
+
+            switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.next.load") {
+            case .success(let response):
+                switch parseContentPage(
+                    source: source,
+                    chapter: chapter,
+                    response: response,
+                    globalPurifyRules: globalPurifyRules
+                ) {
+                case .success(let nextPage):
+                    paragraphs.append(contentsOf: nextPage.paragraphs)
+                    nextURLText = nextPage.nextContentUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                    finalNextURL = nextURLText
+                    pagesLoaded += 1
+                case .failure(let error):
+                    await emitFailure(error, stage: "content.next.parse", source: source, details: ["url": response.url.absoluteString])
+                    nextURLText = nil
+                    finalNextURL = currentNext
+                }
+            case .failure(let error):
+                await emitFailure(error, stage: "content.next.load", source: source, details: ["url": absolute])
+                nextURLText = nil
+                finalNextURL = currentNext
+            }
+        }
+
+        return .success(ChapterContent(
+            chapter: firstPage.chapter,
+            title: firstPage.title,
+            paragraphs: paragraphs,
+            nextContentUrl: finalNextURL
+        ))
     }
 
     private func bodyJSScript(_ source: BookSource) -> String? {

@@ -425,3 +425,46 @@
   - `progress.md`: records the CI red-point fix and verification limits.
 - Do not commit unrelated `ci-log/run-27952116519/`.
 - Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Core/Models/BookSource.swift`.
+
+## 2026-06-27 - Task: Paged TOC and content compatibility
+
+### What was done
+- Added automatic multi-page chapter-list loading through `nextTocUrl` / `nextChapterUrl` / `nextUrl` rules. Sources with paginated catalogs no longer stop at the first catalog page.
+- Added automatic multi-page chapter-content loading through `nextContentUrl`. A chapter split across multiple web pages is now fetched and merged into one `ChapterContent` result before entering the reader.
+- Added loop guards and page caps to avoid infinite source loops: up to 30 TOC pages and 8 content pages per chapter request.
+- Added regression coverage for both paged TOC and paged chapter content using the injected recording network client.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Confirmed the previous pushed commit `fa41e6d` passed both GitHub Actions workflows:
+  - iOS run `28277189439`: success.
+  - Unsigned IPA run `28277189460`: success.
+- Windows still has no local `swift`, `xcodebuild`, or `xcodegen`, so this new pagination change still needs GitHub Actions after push.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Core/Engine/SourceEngine.swift`: follows and merges paged TOC/content URLs.
+  - `SourceReadSwift/Core/Rules/ChapterListParser.swift`: exposes one parsed TOC page plus `nextTocUrl`.
+  - `SourceReadSwiftTests/SourceEngineBodyJSTests.swift`: adds paged TOC/content regression tests.
+  - `progress.md`: records this compatibility milestone.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the corresponding changes in the three Swift files above.
+
+## 2026-06-27 - Task: Copyable source diagnostics
+
+### What was done
+- Added a copy action to the single-source diagnostic sheet so failed search/detail/TOC/content output can be copied from the device.
+- Added a copy action to the batch source-check sheet, exporting keyword, checked counts, PASS/WARN/FAIL summary, source URL, and failure messages.
+- Added a copy-all action to the Settings diagnostics section so recent engine/import diagnostics can be copied for debugging.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Local Windows still has no `swift`, `xcodebuild`, or `xcodegen`, so toolbar placement and pasteboard behavior need GitHub Actions plus device verification after push.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: adds copy buttons for single-source and batch source diagnostics.
+  - `SourceReadSwift/Features/Settings/SettingsView.swift`: adds copy-all export for recent diagnostics.
+  - `progress.md`: records this diagnostic usability fix.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the two Swift view changes above.
