@@ -337,6 +337,7 @@ private func legadoLegacyRule(_ oldRule: String?) -> String? {
         && !newRule.hasPrefix("//")
         && !newRule.hasPrefix("##")
         && !newRule.hasPrefix(":")
+        && !newRule.hasPrefix("#")
         && !lower.contains("@js:")
         && !lower.contains("<js>")
     if shouldConvertSeparators {
@@ -405,14 +406,20 @@ private func legadoLegacyURL(_ oldURL: String?) -> String? {
         options["headers"] = String(headerDirective.dropFirst(8))
     }
 
-    let charsetParts = url.components(separatedBy: "|")
-    url = charsetParts.first ?? url
-    if charsetParts.count > 1 {
-        let charsetText = charsetParts[1]
-        if !charsetText.isEmpty,
-           let separator = charsetText.firstIndex(of: "="),
+    if let pipe = url.firstIndex(of: "|") {
+        let charsetAndTail = String(url[url.index(after: pipe)...])
+        url = String(url[..<pipe])
+        let tailParts = charsetAndTail.components(separatedBy: "@")
+        let charsetText = tailParts.first ?? ""
+        if let separator = charsetText.firstIndex(of: "="),
            separator < charsetText.index(before: charsetText.endIndex) {
             options["charset"] = String(charsetText[charsetText.index(after: separator)...])
+        } else if !charsetText.isEmpty {
+            options["charset"] = charsetText
+        }
+        if tailParts.count > 1 {
+            options["method"] = "POST"
+            options["body"] = tailParts.dropFirst().joined(separator: "@")
         }
     }
 
@@ -445,7 +452,7 @@ private func legadoLegacyURL(_ oldURL: String?) -> String? {
 
     let bodyParts = url.components(separatedBy: "@")
     url = bodyParts.first ?? url
-    if bodyParts.count > 1 {
+    if bodyParts.count > 1, options["body"] == nil {
         options["method"] = "POST"
         options["body"] = bodyParts.dropFirst().joined(separator: "@")
     }
