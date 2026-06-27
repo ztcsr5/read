@@ -406,3 +406,22 @@
 - Changed files include source engine/model/rule/network layers, bookshelf/discover/reader/source-manager UI, tests, and parity docs.
 - Do not commit unrelated `ci-log/run-27952116519/`.
 - Rollback: revert this progress entry and the commit that contains the Swift v2 morning IPA test-node hardening changes.
+
+## 2026-06-27 - Task: Legacy Legado POST search placeholder fix
+
+### What was done
+- Fixed legacy `ruleSearchUrl` conversion for POST-style search bodies such as `|charset=gbk@q=searchKey&page=searchPage`.
+- The converted body now keeps template placeholders as `q={{key}}&page={{page}}`, allowing `SourceRequestBuilder` to inject the actual keyword and page at request time.
+- This directly addresses the failing iOS unit test and avoids real legacy sources sending literal `searchKey/searchPage` strings to search endpoints.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Used GitHub check-run annotations from run `28275717110` to confirm the failure was the literal POST body `q=searchKey&page=searchPage` instead of `q=abc&page=2`.
+- Windows still has no local `swift`, `xcodebuild`, or `xcodegen`, so final compile/test verification must run through GitHub Actions.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Core/Models/BookSource.swift`: normalizes legacy POST body placeholders during old-rule URL conversion.
+  - `progress.md`: records the CI red-point fix and verification limits.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the corresponding change in `SourceReadSwift/Core/Models/BookSource.swift`.

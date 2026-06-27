@@ -419,7 +419,7 @@ private func legadoLegacyURL(_ oldURL: String?) -> String? {
         }
         if tailParts.count > 1 {
             options["method"] = "POST"
-            options["body"] = tailParts.dropFirst().joined(separator: "@")
+            options["body"] = legadoLegacyTemplatePlaceholders(tailParts.dropFirst().joined(separator: "@"))
         }
     }
 
@@ -454,7 +454,7 @@ private func legadoLegacyURL(_ oldURL: String?) -> String? {
     url = bodyParts.first ?? url
     if bodyParts.count > 1, options["body"] == nil {
         options["method"] = "POST"
-        options["body"] = bodyParts.dropFirst().joined(separator: "@")
+        options["body"] = legadoLegacyTemplatePlaceholders(bodyParts.dropFirst().joined(separator: "@"))
     }
 
     guard !options.isEmpty,
@@ -464,6 +464,35 @@ private func legadoLegacyURL(_ oldURL: String?) -> String? {
         return url
     }
     return "\(url),\(json)"
+}
+
+private func legadoLegacyTemplatePlaceholders(_ text: String) -> String {
+    var output = text
+    var scripts: [String] = []
+    output = replaceMatches(in: output, pattern: #"\{\{.+?\}\}"#) { match in
+        scripts.append(match)
+        return "$\(scripts.count - 1)"
+    }
+    output = output
+        .replacingOccurrences(of: "{searchKey}", with: "{{key}}")
+        .replacingOccurrences(of: "searchKey", with: "{{key}}")
+    output = replaceMatches(in: output, pattern: #"\{searchPage([-+]\d+)\}"#) { match in
+        let delta = match
+            .replacingOccurrences(of: "{searchPage", with: "")
+            .replacingOccurrences(of: "}", with: "")
+        return "{{page\(delta)}}"
+    }
+    output = replaceMatches(in: output, pattern: #"searchPage([-+]\d+)"#) { match in
+        let delta = match.replacingOccurrences(of: "searchPage", with: "")
+        return "{{page\(delta)}}"
+    }
+    output = output
+        .replacingOccurrences(of: "{searchPage}", with: "{{page}}")
+        .replacingOccurrences(of: "searchPage", with: "{{page}}")
+    for index in scripts.indices {
+        output = output.replacingOccurrences(of: "$\(index)", with: scripts[index])
+    }
+    return output
 }
 
 private func replaceMatches(in text: String, pattern: String, transform: (String) -> String) -> String {
