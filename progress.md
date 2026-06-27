@@ -468,3 +468,29 @@
   - `progress.md`: records this diagnostic usability fix.
 - Do not commit unrelated `ci-log/run-27952116519/`.
 - Rollback: revert this progress entry and the two Swift view changes above.
+
+## 2026-06-27 - Task: Native glass shell and MR function absorption notes
+
+### What was done
+- Promoted the frosted-glass / material visual language into the shared design system so cards, floating chrome, and future sheets can reuse one SwiftUI glass style.
+- Replaced the root tab shell's opacity-based pseudo-switching with a real page-style `TabView`, improving horizontal tab swipe behavior and reducing hard visual jumps.
+- Moved the bookshelf homepage further toward the Podcasts-style card carousel direction by enlarging the hero cards and applying shared glass styling to main cards and rows.
+- Unified the reader top bar, bottom controls, and settings panel onto the shared glass style while preserving the existing reader actions.
+- Added an MR function absorption note under `docs/`, identifying the practical features to absorb next: source debug trace, AnalyzeUrl compatibility, source locating by pattern/weight, metadata merge, and reader refresh/cache actions.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Searched for stale `readerGlassPanel`, `rootTabSwipeGesture`, and `tabContent` references; no stale references remained.
+- Local Windows still has no `swift`, `xcodebuild`, or `xcodegen`, so the native UI changes need GitHub Actions and device verification after push.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Shared/DesignSystem/AppTheme.swift`: adds shared `glassPanel` and `glassCircle` styles and makes `podcastCard` use the shared material look.
+  - `SourceReadSwift/App/RootTabView.swift`: uses page-style tab switching and shared glass tab chrome.
+  - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: applies shared glass styling to homepage controls, empty states, rows, and larger hero cards.
+  - `SourceReadSwift/Features/Reader/ReaderView.swift`: replaces the reader-local glass helper with the shared glass style.
+  - `docs/2026-06-27-mr-function-absorption.md`: records the MR features worth absorbing without copying MR UI.
+  - `progress.md`: records this UI/function absorption milestone.
+- Push is currently blocked by the local GitHub credential prompt being unavailable/cancelled in this Windows terminal. The local commit can still be created and pushed once credentials are available.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the Swift/doc changes listed above.

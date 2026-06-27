@@ -6,22 +6,18 @@ struct RootTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ZStack {
-                tabContent(index: 0) {
-                    BookshelfView()
-                }
+            TabView(selection: $selectedTab) {
+                BookshelfView()
+                    .tag(0)
 
-                tabContent(index: 1) {
-                    DiscoverView()
-                }
+                DiscoverView()
+                    .tag(1)
 
-                tabContent(index: 2) {
-                    SettingsView()
-                }
+                SettingsView()
+                    .tag(2)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .contentShape(Rectangle())
-            .simultaneousGesture(rootTabSwipeGesture)
 
             if !appState.isTabChromeHidden {
                 customTabBar
@@ -31,32 +27,10 @@ struct RootTabView: View {
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: appState.isTabChromeHidden)
-        .animation(.easeOut(duration: 0.16), value: selectedTab)
+        .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.88), value: selectedTab)
         .onChange(of: selectedTab) { _ in
             dismissKeyboard()
         }
-    }
-
-    private func tabContent<Content: View>(index: Int, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .opacity(selectedTab == index ? 1 : 0)
-            .allowsHitTesting(selectedTab == index)
-            .accessibilityHidden(selectedTab != index)
-    }
-
-    private var rootTabSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 44, coordinateSpace: .local)
-            .onEnded { value in
-                guard !appState.isTabChromeHidden else { return }
-                let horizontal = value.translation.width
-                let vertical = abs(value.translation.height)
-                guard abs(horizontal) > 72, abs(horizontal) > vertical * 1.35 else { return }
-                if horizontal < 0 {
-                    switchToTab(min(selectedTab + 1, 2))
-                } else {
-                    switchToTab(max(selectedTab - 1, 0))
-                }
-            }
     }
 
     private var customTabBar: some View {
@@ -70,12 +44,7 @@ struct RootTabView: View {
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 9)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(0.12), radius: 24, x: 0, y: 10)
+            .glassPanel(cornerRadius: 28, material: .ultraThinMaterial, strokeOpacity: 0.08, shadowOpacity: 0.16)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
         }

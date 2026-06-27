@@ -535,7 +535,7 @@ struct ReaderView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .readerGlassPanel(background: background)
+            .glassPanel(cornerRadius: 26, material: .ultraThinMaterial, strokeOpacity: background == .dark ? 0.09 : 0.12, shadowOpacity: background == .dark ? 0.42 : 0.14)
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
@@ -596,7 +596,7 @@ struct ReaderView: View {
             .padding(.horizontal, 14)
             .padding(.top, 14)
             .padding(.bottom, 18)
-            .readerGlassPanel(background: background)
+            .glassPanel(cornerRadius: 26, material: .ultraThinMaterial, strokeOpacity: background == .dark ? 0.09 : 0.12, shadowOpacity: background == .dark ? 0.42 : 0.14)
             .padding(.horizontal, 14)
             .padding(.bottom, 10)
         }
@@ -672,12 +672,7 @@ struct ReaderView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 500)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.45), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 24, x: 0, y: -8)
+            .glassPanel(cornerRadius: 28, material: .regularMaterial, strokeOpacity: colorScheme == .dark ? 0.08 : 0.12, shadowOpacity: colorScheme == .dark ? 0.35 : 0.18)
         }
         .ignoresSafeArea(edges: .bottom)
     }
@@ -1602,17 +1597,5 @@ private enum ReaderBackground: String, CaseIterable, Identifiable {
         case .dark: return .white.opacity(0.9)
         default: return .primary
         }
-    }
-}
-
-private extension View {
-    func readerGlassPanel(background: ReaderBackground) -> some View {
-        self
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(Color.white.opacity(background == .dark ? 0.09 : 0.42), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(background == .dark ? 0.42 : 0.14), radius: 24, x: 0, y: 10)
     }
 }

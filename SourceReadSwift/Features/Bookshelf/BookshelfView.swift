@@ -35,11 +35,7 @@ struct BookshelfView: View {
                                     .font(.system(size: 22, weight: .semibold))
                                     .foregroundStyle(AppTheme.accent)
                                     .frame(width: 46, height: 46)
-                                    .background(.ultraThinMaterial, in: Circle())
-                                    .overlay {
-                                        Circle()
-                                            .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), lineWidth: 0.8)
-                                    }
+                                    .glassCircle()
                             }
                             .buttonStyle(PressableScaleButtonStyle())
                             .accessibilityLabel("导入本地书籍")
@@ -260,11 +256,7 @@ struct BookshelfView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(16)
-            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.5)
-            }
+            .glassPanel(cornerRadius: 22, material: .thinMaterial, shadowOpacity: 0.08)
         }
         .buttonStyle(.plain)
     }
@@ -286,7 +278,7 @@ struct BookshelfView: View {
             Spacer()
         }
         .padding(14)
-        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassPanel(cornerRadius: 18, material: .thinMaterial, shadowOpacity: 0.07)
     }
 
     private func importLocalBook(_ result: Result<[URL], Error>) {
@@ -429,7 +421,7 @@ struct BookshelfView: View {
                 }
             }
             .padding(20)
-            .frame(width: 300, height: 236, alignment: .topLeading)
+            .frame(width: 312, height: 246, alignment: .topLeading)
             .background(
                 heroGradient(for: book)
             )
@@ -439,6 +431,7 @@ struct BookshelfView: View {
                     .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
             }
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.32 : 0.13), radius: 22, x: 0, y: 14)
+            .padding(.vertical, 6)
         }
         .buttonStyle(PressableScaleButtonStyle())
         .simultaneousGesture(TapGesture().onEnded {
@@ -486,7 +479,7 @@ struct BookshelfView: View {
                 Spacer()
             }
             .padding(12)
-            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .glassPanel(cornerRadius: 18, material: .thinMaterial, shadowOpacity: 0.08)
         }
         .buttonStyle(PressableScaleButtonStyle())
         .simultaneousGesture(TapGesture().onEnded {
@@ -522,9 +515,7 @@ struct BookshelfView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(14)
-            .background(AppTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 5)
+            .glassPanel(cornerRadius: 16, material: .thinMaterial, shadowOpacity: 0.06)
         }
         .buttonStyle(PressableScaleButtonStyle())
         .simultaneousGesture(TapGesture().onEnded {

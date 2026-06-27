@@ -25,9 +25,40 @@ extension View {
 
     func podcastCard() -> some View {
         padding(18)
-            .background(AppTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cardRadius, style: .continuous))
-            .shadow(color: .black.opacity(0.05), radius: 18, x: 0, y: 10)
+            .glassPanel(cornerRadius: AppTheme.cardRadius, material: .thinMaterial)
+    }
+
+    func glassPanel(
+        cornerRadius: CGFloat = AppTheme.cardRadius,
+        material: Material = .ultraThinMaterial,
+        strokeOpacity: Double = 0.10,
+        shadowOpacity: Double = 0.12
+    ) -> some View {
+        background(material, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.42),
+                                Color.primary.opacity(strokeOpacity)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+            }
+            .shadow(color: .black.opacity(shadowOpacity), radius: 22, x: 0, y: 10)
+    }
+
+    func glassCircle(material: Material = .ultraThinMaterial) -> some View {
+        background(material, in: Circle())
+            .overlay {
+                Circle()
+                    .stroke(Color.white.opacity(0.35), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(0.10), radius: 14, x: 0, y: 8)
     }
 }
 
