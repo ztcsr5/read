@@ -1,0 +1,14 @@
+/.gradle
+/.kotlin
+/captures/
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+/app/src/main/jniLibs/
+/app/src/main/assets/node/scripts/
+
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks

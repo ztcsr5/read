@@ -1,0 +1,87 @@
+name: mr
+description: mr - 一款支持小说、漫画、视频、音频的多媒体阅读器
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  
+  cupertino_icons: ^1.0.6
+  
+  provider: ^6.1.1
+  
+  # HTTP 客户端（OkHttp Dart 等价物）
+  dio: ^5.4.0
+  connectivity_plus: ^5.0.2
+  
+  # 本地存储
+  shared_preferences: ^2.2.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.1
+  
+  # 图片/媒体
+  cached_network_image: ^3.3.1
+  photo_view: ^0.14.0
+  
+  # HTML/Markdown 渲染（Jsoup Dart 等价物）
+  flutter_html: ^3.0.0-beta.2
+  html: ^0.15.4
+  xml: ^7.0.1
+  
+  # 媒体播放
+  video_player: ^2.8.2
+  
+  # 文件/加密/权限
+  archive: ^3.4.10
+  crypto: ^3.0.3
+  encrypt: ^5.0.1
+  permission_handler: ^11.1.0
+  file_picker: ^8.0.0
+  
+  # UI 组件
+  flutter_slidable: ^3.0.1
+  shimmer: ^3.0.0
+  
+  # 分享/链接/Markdown
+  url_launcher: ^6.2.2
+  share_plus: ^7.2.1
+  flutter_markdown_plus: ^1.0.1
+  # 二维码扫描
+  mobile_scanner: ^6.0.2
+
+  # JS 引擎 - 从 C 源码编译的 QuickJS，通过 dart:ffi 直接调用（替代 flutter_js）
+  ffi: ^2.1.0
+  # 互斥锁 - JS 引擎并发保护
+  synchronized: ^3.3.0
+  # WebView 组件 - 用于 webJs 执行和页面渲染（借鉴 legado 的 BackstageWebView）
+  flutter_inappwebview: ^6.1.5
+  # JSON 处理
+  json_annotation: ^4.9.0
+  # TTS 文字转语音
+  flutter_tts: ^3.8.5
+  # 屏幕常亮
+  wakelock_plus: ^1.2.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  # 启用 Swift Package Manager（Flutter 3.45+ stable 默认启用）
+  # SPM 启用时生成 Swift 版 GeneratedPluginRegistrant（API: register(with:)）
+  # AppDelegate.swift 使用 register(with: self) 匹配 Swift 版 API
+  config:
+    enable-swift-package-manager: true
+  assets:
+    - assets/templates/
+    - assets/book_sources/

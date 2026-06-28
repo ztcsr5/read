@@ -1,0 +1,25 @@
+analysis_options.yaml
+.dart_tool/
+.idea/
+.packages
+.pub/
+build/
+doc/
+*.iml
+*.ipr
+*.iws
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+coverage/
+.fvm/
+*.lock
+android_sdk/
+/local.properties
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+*.log
