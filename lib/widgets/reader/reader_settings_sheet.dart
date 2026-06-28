@@ -44,6 +44,7 @@ class ReaderSettingsSheet extends StatefulWidget {
   final int autoPageIntervalSeconds;
   final List<int> tapZones;
   final bool isNightMode;
+  final int textConvertMode;
 
   final ValueChanged<double> onFontSizeChanged;
   final ValueChanged<double> onLineHeightChanged;
@@ -72,6 +73,7 @@ class ReaderSettingsSheet extends StatefulWidget {
   final ValueChanged<int> onAutoPageIntervalChanged;
   final ValueChanged<List<int>> onTapZonesChanged;
   final ValueChanged<bool> onNightModeChanged;
+  final ValueChanged<int> onTextConvertModeChanged;
   final VoidCallback? onClose;
 
   const ReaderSettingsSheet({
@@ -103,6 +105,7 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.autoPageIntervalSeconds,
     required this.tapZones,
     required this.isNightMode,
+    required this.textConvertMode,
     required this.onFontSizeChanged,
     required this.onLineHeightChanged,
     required this.onLetterSpacingChanged,
@@ -130,6 +133,7 @@ class ReaderSettingsSheet extends StatefulWidget {
     required this.onAutoPageIntervalChanged,
     required this.onTapZonesChanged,
     required this.onNightModeChanged,
+    required this.onTextConvertModeChanged,
     this.onClose,
   });
 
@@ -183,6 +187,21 @@ class ReaderSettingsSheet extends StatefulWidget {
     0: '滚动',
   };
 
+  static const Map<String, String> fontFamilyLabels = {
+    '': 'Default',
+    'PingFang SC': 'PingFang',
+    'Songti SC': 'Songti',
+    'Heiti SC': 'Heiti',
+    'Kaiti SC': 'Kaiti',
+    'Menlo': 'Mono',
+  };
+
+  static const Map<int, String> textConvertLabels = {
+    0: 'Original',
+    1: 'Simplified',
+    2: 'Traditional',
+  };
+
   @override
   State<ReaderSettingsSheet> createState() => _ReaderSettingsSheetState();
 }
@@ -213,6 +232,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
   late bool _enableLongPressMenu;
   late int _autoScrollSpeed;
   late int _autoPageIntervalSeconds;
+  late int _textConvertMode;
 
   bool get _isDark =>
       _backgroundColor.computeLuminance() < 0.2 || widget.isNightMode;
@@ -252,6 +272,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     _enableLongPressMenu = widget.enableLongPressMenu;
     _autoScrollSpeed = widget.autoScrollSpeed;
     _autoPageIntervalSeconds = widget.autoPageIntervalSeconds;
+    _textConvertMode = widget.textConvertMode;
   }
 
   @override
@@ -345,7 +366,7 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
           const Spacer(),
           _smallButton('缩进', _showIndentDialog),
           const Spacer(),
-          _smallButton('繁简', _showConverterHint),
+          _smallButton(_textConvertLabel(), _showTextConvertDialog),
           const Spacer(),
           _smallButton('边距', _showPaddingDialog),
           const Spacer(),
@@ -637,24 +658,15 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
-            _sheetOption('默认字体', _fontFamily.isEmpty, () => _setFont('')),
-            _sheetOption(
-              'Serif',
-              _fontFamily == 'serif',
-              () => _setFont('serif'),
-            ),
-            _sheetOption(
-              'Sans Serif',
-              _fontFamily == 'sans-serif',
-              () => _setFont('sans-serif'),
-            ),
-            _sheetOption(
-              'Monospace',
-              _fontFamily == 'monospace',
-              () => _setFont('monospace'),
-            ),
-          ],
+          children: ReaderSettingsSheet.fontFamilyLabels.entries
+              .map(
+                (entry) => _sheetOption(
+                  entry.value,
+                  _fontFamily == entry.key,
+                  () => _setFont(entry.key),
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -931,9 +943,34 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
     }
   }
 
-  void _showConverterHint() {
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(const SnackBar(content: Text('繁简转换设置暂未接入')));
+  String _textConvertLabel() {
+    return ReaderSettingsSheet.textConvertLabels[_textConvertMode] ?? 'Original';
+  }
+
+  void _showTextConvertDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panelColor,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: ReaderSettingsSheet.textConvertLabels.entries
+              .map(
+                (entry) => _sheetOption(
+                  entry.value,
+                  _textConvertMode == entry.key,
+                  () => _setTextConvertMode(entry.key),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+
+  void _setTextConvertMode(int mode) {
+    Navigator.pop(context);
+    setState(() => _textConvertMode = mode);
+    widget.onTextConvertModeChanged(mode);
   }
 }

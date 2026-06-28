@@ -60,3 +60,24 @@ Reader UI work is limited to interaction and presentation behavior. It does not 
 - Search result grid cards use stronger title/chapter hierarchy and a bounded source pill while keeping the existing cover and tap behavior.
 - Chapter-list cache management uses a compact summary bar with cached/total count, a progress indicator, and a cloud-marker hint for uncached chapters.
 - This is UI polish only and does not change search parsing, bridge code, source-engine services, or network request behavior.
+
+## Reader Interaction Follow-Up
+
+- Reader paragraph rendering applies first-line indentation per paragraph in both plain text and HTML display paths.
+- Reader font-family choices now use platform families available on iOS, and font-weight switching maps to regular, medium, and bold weights.
+- Reader simplified/traditional display conversion is wired as a display-layer option and repaginates the current content after switching.
+- Cover and simulation page-turn modes use distinct transform/opacity animations, with a slower default page animation duration.
+- Route transitions use the iOS-style back gesture through the shared app page route.
+- These reader changes are presentation-layer changes only and do not change book-source, parser, bridge, source-engine, or network request logic.
+
+## Chapter Cache Actions
+
+- Chapter-list cache management can cache the visible chapter list or all known text chapters through the existing content cache service.
+- Cached chapter counting now uses the same text/comic cache suffix convention as the cache service, so text chapter cache state is shown correctly.
+- Comic chapter batch caching remains blocked from the chapter list and should continue to be handled by the reader path.
+- The implementation calls the existing content loading and cache-save APIs only; it does not change parser, bridge, book-source, source-engine, or network request code.
+
+## Book Source Import Overlay
+
+- The book-source import page uses the active theme surface while importing and shows a bounded progress overlay instead of a full black screen.
+- The overlay keeps the existing import flow unchanged and only changes the visual loading state.

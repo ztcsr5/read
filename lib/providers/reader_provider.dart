@@ -59,7 +59,7 @@ class ReaderProvider extends ChangeNotifier {
   bool _showClock = true;
   bool _showProgress = true;
   int _pageAnim = 3; // 仿真翻页
-  int _pageAnimDurationMs = 300;
+  int _pageAnimDurationMs = 420;
   double _screenBrightness = -1.0; // -1表示跟随系统
   bool _keepScreenOn = false;
   bool _enableVolumeKeyPage = false;
@@ -73,6 +73,7 @@ class ReaderProvider extends ChangeNotifier {
   String _paragraphIndent = '\u3000\u3000';
   int _fontWeightIndex = 1;
   String? _backgroundImagePath;
+  int _textConvertMode = 0;
 
   PageMode get pageMode => _pageMode;
   double get fontSize => _fontSize;
@@ -142,7 +143,7 @@ class ReaderProvider extends ChangeNotifier {
       _showChapterTitle = config['showChapterTitle'] as bool? ?? true;
       _showClock = config['showClock'] as bool? ?? true;
       _showProgress = config['showProgress'] as bool? ?? true;
-      _pageAnimDurationMs = config['pageAnimDurationMs'] as int? ?? 300;
+      _pageAnimDurationMs = config['pageAnimDurationMs'] as int? ?? 420;
       _keepScreenOn = config['keepScreenOn'] as bool? ?? false;
       _enableVolumeKeyPage = config['enableVolumeKeyPage'] as bool? ?? false;
       _volumeKeyPageOnTts = config['volumeKeyPageOnTts'] as bool? ?? false;
@@ -155,6 +156,7 @@ class ReaderProvider extends ChangeNotifier {
       _paragraphIndent = config['paragraphIndent'] as String? ?? '\u3000\u3000';
       _fontWeightIndex = config['fontWeightIndex'] as int? ?? 1;
       _backgroundImagePath = config['backgroundImagePath'] as String?;
+      _textConvertMode = config['textConvertMode'] as int? ?? 0;
       final highlightRulesJson = config['highlightRules'] as List?;
       if (highlightRulesJson != null) {
         _highlightRules = highlightRulesJson
@@ -208,6 +210,7 @@ class ReaderProvider extends ChangeNotifier {
       'paragraphIndent': _paragraphIndent,
       'fontWeightIndex': _fontWeightIndex,
       'backgroundImagePath': _backgroundImagePath,
+      'textConvertMode': _textConvertMode,
     });
   }
 
@@ -534,6 +537,7 @@ class ReaderProvider extends ChangeNotifier {
   String get paragraphIndent => _paragraphIndent;
   int get fontWeightIndex => _fontWeightIndex;
   String? get backgroundImagePath => _backgroundImagePath;
+  int get textConvertMode => _textConvertMode;
 
   void setShowReadingInfo(bool value) {
     _showReadingInfo = value;
@@ -645,6 +649,12 @@ class ReaderProvider extends ChangeNotifier {
 
   void setBackgroundImagePath(String? value) {
     _backgroundImagePath = value;
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void setTextConvertMode(int value) {
+    _textConvertMode = value.clamp(0, 2);
     _saveToStorage();
     notifyListeners();
   }

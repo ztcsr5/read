@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import '../models/book.dart';
 import '../models/book_source.dart';
 import '../pages/main/main_page.dart';
@@ -27,38 +28,17 @@ import '../pages/debug/book_source_debug_page.dart';
 import '../pages/detail/chapter_list_page.dart';
 import '../pages/web/internal_browser_page.dart';
 
-class AppPageRoute<T> extends PageRouteBuilder<T> {
+class AppPageRoute<T> extends CupertinoPageRoute<T> {
   AppPageRoute({
     required WidgetBuilder builder,
     RouteSettings? settings,
     bool maintainState = true,
     bool fullscreenDialog = false,
   }) : super(
+          builder: builder,
           settings: settings,
           maintainState: maintainState,
           fullscreenDialog: fullscreenDialog,
-          allowSnapshotting: false,
-          transitionDuration: const Duration(milliseconds: 250),
-          reverseTransitionDuration: const Duration(milliseconds: 250),
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              builder(context),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            final curve = CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-              reverseCurve: Curves.easeInCubic,
-            );
-            return FadeTransition(
-              opacity: curve,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0.0, 0.08),
-                  end: Offset.zero,
-                ).animate(curve),
-                child: child,
-              ),
-            );
-          },
         );
 }
 
