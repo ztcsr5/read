@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -8,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../models/book_source.dart';
 import '../../services/book_source_import_service.dart';
 import '../../utils/design_tokens.dart';
 
@@ -179,7 +177,9 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
+      backgroundColor: scheme.surface,
       appBar: AppBar(
         title: const Text('导入书源'),
         bottom: TabBar(
@@ -203,12 +203,52 @@ class _BookSourceImportPageState extends State<BookSourceImportPage>
               _buildQrTab(),
             ],
           ),
-          if (_isImporting)
-            Container(
-              color: Colors.black54,
-              child: const Center(child: CircularProgressIndicator()),
-            ),
+          if (_isImporting) _buildImportingOverlay(scheme),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImportingOverlay(ColorScheme scheme) {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.38),
+        child: Center(
+          child: Material(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '正在导入书源',
+                    style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '网络订阅或大文件可能需要等待',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -302,3 +302,30 @@
 - `docs/reader-ui.md`: documented profile reader settings text color consistency.
 - `progress.md`: appended this task log.
 - Rollback before staging: run `git restore -- lib/pages/profile/profile_page.dart docs/reader-ui.md`; remove this profile reader settings section from `progress.md`. After commit, use that commit as the rollback point.
+
+## 2026-06-29 - Task: Reader interaction and chapter cache follow-up
+### What was done
+- Fixed reader paragraph first-line indentation across plain text and HTML display paths.
+- Wired reader font-family, font-weight, and simplified/traditional display settings so switching them updates the rendered reader content.
+- Slowed and separated cover/simulation page-turn animations while keeping transform/opacity based transitions for high-refresh scrolling.
+- Enabled iOS-style route back gestures through the shared route wrapper.
+- Added chapter-list cache actions for visible chapters and all known text chapters, and corrected text chapter cache-state counting.
+- Replaced the book-source import black loading screen with a themed bounded loading overlay.
+
+### Testing
+- `FLUTTER_ROOT=D:\Gemini反重力\flutter .\flutter.ps1 analyze lib/pages/reader/novel_reader_page.dart lib/widgets/reader/reader_settings_sheet.dart lib/providers/reader_provider.dart lib/utils/chinese_text_converter.dart lib/pages/detail/chapter_list_page.dart lib/routes/app_routes.dart lib/pages/profile/book_source_import_page.dart lib/pages/profile/profile_page.dart` completed with no compile errors; remaining output was existing deprecated API info in profile radio settings and reader color serialization.
+- `FLUTTER_ROOT=D:\Gemini反重力\flutter .\flutter.ps1 analyze --no-fatal-infos --no-fatal-warnings lib/pages/reader/novel_reader_page.dart lib/widgets/reader/reader_settings_sheet.dart lib/providers/reader_provider.dart lib/utils/chinese_text_converter.dart lib/pages/detail/chapter_list_page.dart lib/routes/app_routes.dart lib/pages/profile/book_source_import_page.dart lib/pages/profile/profile_page.dart` passed.
+- `git diff --check` passed.
+
+### Notes
+- `lib/pages/reader/novel_reader_page.dart`: applied display conversion, reliable indentation, font repagination, and distinct page-turn animation behavior.
+- `lib/widgets/reader/reader_settings_sheet.dart`: replaced invalid font choices and connected the simplified/traditional selector.
+- `lib/providers/reader_provider.dart`: persisted reader text-conversion mode and adjusted the default page-animation duration.
+- `lib/utils/chinese_text_converter.dart`: added a display-layer character conversion helper for simplified/traditional toggling.
+- `lib/pages/detail/chapter_list_page.dart`: added visible/all text chapter cache actions and corrected cache suffix counting.
+- `lib/routes/app_routes.dart`: switched the shared page route to an iOS-style route with edge-swipe back behavior.
+- `lib/pages/profile/profile_page.dart`: passed the text-conversion setting through the shared reader settings sheet.
+- `lib/pages/profile/book_source_import_page.dart`: changed the import loading state from a black overlay to a themed bounded overlay.
+- `docs/reader-ui.md`: documented reader follow-up behavior, chapter cache actions, and the import overlay.
+- `progress.md`: appended this task log.
+- Rollback before staging: run `git restore -- lib/pages/reader/novel_reader_page.dart lib/widgets/reader/reader_settings_sheet.dart lib/providers/reader_provider.dart lib/pages/detail/chapter_list_page.dart lib/routes/app_routes.dart lib/pages/profile/profile_page.dart lib/pages/profile/book_source_import_page.dart docs/reader-ui.md`; remove `lib/utils/chinese_text_converter.dart`; remove this 2026-06-29 task section from `progress.md`. After commit, use that commit as the rollback point.

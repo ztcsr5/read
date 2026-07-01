@@ -534,6 +534,7 @@ class _ProfilePageState extends State<ProfilePage>
                 autoPageIntervalSeconds: provider.autoPageIntervalSeconds,
                 tapZones: provider.tapZones,
                 isNightMode: provider.isNightMode,
+                textConvertMode: provider.textConvertMode,
                 onFontSizeChanged: provider.setFontSize,
                 onLineHeightChanged: provider.setLineHeight,
                 onLetterSpacingChanged: provider.setLetterSpacing,
@@ -565,6 +566,7 @@ class _ProfilePageState extends State<ProfilePage>
                 onAutoPageIntervalChanged: provider.setAutoPageIntervalSeconds,
                 onTapZonesChanged: provider.setTapZones,
                 onNightModeChanged: provider.setNightMode,
+                onTextConvertModeChanged: provider.setTextConvertMode,
               ),
             );
           },

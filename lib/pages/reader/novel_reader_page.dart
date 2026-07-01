@@ -23,6 +23,7 @@ import '../../widgets/reader/reader_settings_sheet.dart';
 import '../../widgets/reader/reader_tts_bar.dart';
 import '../../widgets/change_source_sheet.dart';
 import '../../routes/app_routes.dart';
+import '../../utils/chinese_text_converter.dart';
 import '../../utils/design_tokens.dart';
 
 class NovelReaderPage extends StatefulWidget {
@@ -95,6 +96,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   double _dragStartX = 0;
   double _dragCurrentX = 0;
   bool _isDragging = false;
+  int _simulationTurnDirection = 1;
 
   // 增强版控制
   final bool _useEnhancedControls = true;
@@ -742,7 +744,8 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   List<String> _splitContentToPages(String content, ReaderProvider provider) {
-    final paragraphs = _splitToParagraphs(content);
+    final displayContent = _readerDisplayText(content, provider);
+    final paragraphs = _splitToParagraphs(displayContent);
     final pages = <String>[];
     if (paragraphs.isEmpty) return [''];
 
@@ -751,7 +754,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     var page = StringBuffer();
     var usedHeight = provider.showChapterTitle
         ? _measureTextHeight(
-                _chapterTitle,
+                _readerDisplayText(_chapterTitle, provider),
                 _titleTextStyle(provider),
                 metrics.width,
               ) +
@@ -940,7 +943,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     } else {
       if (_currentPage > 0) {
         if (provider.pageMode == PageMode.simulation) {
-          setState(() => _currentPage--);
+          setState(() {
+            _simulationTurnDirection = -1;
+            _currentPage--;
+          });
           _scheduleProgressSave(pos: _currentPage);
         } else if (_pageController?.hasClients == true) {
           _pageController?.previousPage(
@@ -991,7 +997,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     } else {
       if (_currentPage < _pages.length - 1) {
         if (provider.pageMode == PageMode.simulation) {
-          setState(() => _currentPage++);
+          setState(() {
+            _simulationTurnDirection = 1;
+            _currentPage++;
+          });
           _scheduleProgressSave(pos: _currentPage);
         } else if (_pageController?.hasClients == true) {
           _pageController?.nextPage(
@@ -1022,7 +1031,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   }
 
   Duration _pageAnimationDuration(ReaderProvider provider) {
-    return Duration(milliseconds: provider.pageAnimDurationMs.clamp(80, 1200));
+    return Duration(milliseconds: provider.pageAnimDurationMs.clamp(180, 1200));
   }
 
   void _previousChapter({bool toLastPage = false}) {
@@ -1313,7 +1322,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return SizedBox(
       width: double.infinity,
       child: Text(
-        title,
+        _readerDisplayText(title, provider),
         style: _titleTextStyle(provider),
         textAlign: TextAlign.center,
       ),
@@ -1337,16 +1346,17 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     String content, {
     bool applyIndent = true,
   }) {
+    final displayContent = _readerDisplayText(content, provider);
     // 如果内容包含 HTML 标签，使用 Html 组件渲染
-    if (_containsHtml(content)) {
+    if (_containsHtml(displayContent)) {
       // 全角空格宽度等于字号本身，两个全角空格 = 2 * fontSize
       final indentWidth = provider.paragraphIndent.isNotEmpty
           ? provider.paragraphIndent.length * provider.fontSize
           : 0.0;
       // 使用 CSS text-indent 实现首行缩进（不是整个段落左移）
       final htmlWithIndent = indentWidth > 0
-          ? '<style>p, div { text-indent: ${indentWidth}px; }</style>$content'
-          : content;
+          ? '<style>body, p, div { text-indent: ${indentWidth}px; }</style>$displayContent'
+          : displayContent;
       return Html(
         data: htmlWithIndent,
         style: {
@@ -1370,7 +1380,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       );
     }
 
-    final paragraphs = _splitToParagraphs(content);
+    final paragraphs = _splitToParagraphs(displayContent);
     final highlights = _getActiveHighlights();
     final rules = provider.highlightRules.where((r) => r.enabled).toList();
 
@@ -1393,15 +1403,28 @@ class _NovelReaderPageState extends State<NovelReaderPage>
     return '${provider.paragraphIndent}$trimmed';
   }
 
+  String _readerDisplayText(String text, ReaderProvider provider) {
+    return ChineseTextConverter.convert(text, provider.textConvertMode);
+  }
+
   Widget _buildRichParagraph(
     ReaderProvider provider,
     String text,
     List<Highlight> highlights,
     List<HighlightRule> rules,
   ) {
-    final spans = _buildTextSpans(provider, text, highlights, rules);
+    final trimmedText = text.replaceAll(RegExp(r'^[\u3000\t ]+'), '');
+    final spans = _buildTextSpans(provider, trimmedText, highlights, rules);
+    final indentWidth = provider.paragraphIndent.isEmpty
+        ? 0.0
+        : provider.paragraphIndent.length * provider.fontSize;
     return Text.rich(
-      TextSpan(children: spans),
+      TextSpan(
+        children: [
+          if (indentWidth > 0) WidgetSpan(child: SizedBox(width: indentWidth)),
+          ...spans,
+        ],
+      ),
       style: _readerTextStyle(provider),
       textAlign: TextAlign.justify,
       softWrap: true,
@@ -1411,11 +1434,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
   FontWeight _readerFontWeight(ReaderProvider provider) {
     switch (provider.fontWeightIndex) {
       case 0:
-        return FontWeight.w300;
+        return FontWeight.w400;
       case 2:
         return FontWeight.w700;
       default:
-        return FontWeight.w400;
+        return FontWeight.w500;
     }
   }
 
@@ -1577,11 +1600,38 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         if (pageIndex >= _pages.length) {
           return _buildChapterBoundaryPage(provider, '下一章');
         }
-        return RepaintBoundary(
-          child: _buildPageContent(
-            provider,
-            _pages[pageIndex],
-            pageIndex: pageIndex,
+        return AnimatedBuilder(
+          animation: _pageController ?? const AlwaysStoppedAnimation(0),
+          builder: (context, child) {
+            if (provider.pageMode != PageMode.cover ||
+                _pageController?.hasClients != true) {
+              return child!;
+            }
+            final currentPage = _pageController!.page ??
+                (_currentPage + _pagedLeadingCount).toDouble();
+            final delta = (currentPage - index).abs().clamp(0.0, 1.0);
+            return Transform.scale(
+              scale: 1 - delta * 0.018,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.10 * (1 - delta)),
+                      blurRadius: 18,
+                      offset: const Offset(-8, 0),
+                    ),
+                  ],
+                ),
+                child: child,
+              ),
+            );
+          },
+          child: RepaintBoundary(
+            child: _buildPageContent(
+              provider,
+              _pages[pageIndex],
+              pageIndex: pageIndex,
+            ),
           ),
         );
       },
@@ -1661,11 +1711,31 @@ class _NovelReaderPageState extends State<NovelReaderPage>
               },
               child: Stack(
                 children: [
-                  RepaintBoundary(
-                    child: _buildPageContent(
-                      provider,
-                      _pages[_currentPage.clamp(0, _pages.length - 1)],
-                      pageIndex: _currentPage,
+                  AnimatedSwitcher(
+                    duration: _pageAnimationDuration(provider),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeOutCubic,
+                    transitionBuilder: (child, animation) {
+                      final begin = Offset(
+                        0.08 * _simulationTurnDirection,
+                        0,
+                      );
+                      final offset = Tween<Offset>(
+                        begin: begin,
+                        end: Offset.zero,
+                      ).animate(animation);
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(position: offset, child: child),
+                      );
+                    },
+                    child: RepaintBoundary(
+                      key: ValueKey('$_currentChapterIndex:$_currentPage'),
+                      child: _buildPageContent(
+                        provider,
+                        _pages[_currentPage.clamp(0, _pages.length - 1)],
+                        pageIndex: _currentPage,
+                      ),
                     ),
                   ),
                   if (_isDragging) _buildCurlEffect(provider),
@@ -2861,6 +2931,7 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       autoPageIntervalSeconds: provider.autoPageIntervalSeconds,
       tapZones: provider.tapZones,
       isNightMode: provider.isNightMode,
+      textConvertMode: provider.textConvertMode,
       onFontSizeChanged: (value) {
         provider.setFontSize(value);
         _repaginatePreservingPosition();
@@ -2893,7 +2964,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
         provider.setFontWeightIndex(value);
         _repaginatePreservingPosition();
       },
-      onFontFamilyChanged: (value) => provider.setFontFamily(value),
+      onFontFamilyChanged: (value) {
+        provider.setFontFamily(value);
+        _repaginatePreservingPosition();
+      },
       onBackgroundColorChanged: (value) => provider.setBackgroundColor(value),
       onTextColorChanged: (value) => provider.setTextColor(value),
       onBackgroundImageChanged: (value) =>
@@ -2925,6 +2999,10 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       onAutoPageIntervalChanged: (value) =>
           provider.setAutoPageIntervalSeconds(value),
       onTapZonesChanged: (value) => provider.setTapZones(value),
+      onTextConvertModeChanged: (value) {
+        provider.setTextConvertMode(value);
+        _repaginatePreservingPosition();
+      },
       onNightModeChanged: (value) {
         if (provider.isNightMode != value) {
           provider.toggleNightMode();

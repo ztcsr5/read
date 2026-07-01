@@ -57,6 +57,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
   bool _searchChapterName = true;
   bool _searchBookText = true;
   bool _searchNote = true;
+  bool _isCaching = false;
+  String _cacheStatusText = '';
 
   @override
   void initState() {
@@ -747,12 +749,45 @@ class _ChapterListPageState extends State<ChapterListPage> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(2.0),
                 child: LinearProgressIndicator(
-                  value: progress,
+                  value: _isCaching ? null : progress,
                   minHeight: 3,
                   backgroundColor:
                       scheme.outlineVariant.withValues(alpha: 0.45),
                 ),
               ),
+              const SizedBox(height: DesignTokens.spacingSm),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isCaching ? null : _cacheVisibleChapters,
+                      icon: const Icon(Icons.view_list_outlined, size: 18),
+                      label: const Text('缓存当前列表'),
+                    ),
+                  ),
+                  const SizedBox(width: DesignTokens.spacingSm),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _isCaching ? null : _cacheAllChapters,
+                      icon: const Icon(Icons.download_for_offline_outlined, size: 18),
+                      label: const Text('缓存全书'),
+                    ),
+                  ),
+                ],
+              ),
+              if (_cacheStatusText.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: DesignTokens.spacingXs),
+                  child: Text(
+                    _cacheStatusText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: DesignTokens.fontCaption,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -841,13 +876,91 @@ class _ChapterListPageState extends State<ChapterListPage> {
     for (final chapter in _chapters.where((chapter) => !chapter.isVolume)) {
       final fileName = ChapterCacheService.instance.getChapterFileName(
         chapter,
-        suffix: 'cb',
+        suffix: _cacheFileSuffix,
       );
       if (_cachedFiles.contains(fileName)) {
         count++;
       }
     }
     return count;
+  }
+
+  String get _cacheFileSuffix => _book?.mediaType == MediaType.comic ? 'cb' : 'nb';
+
+  Future<void> _refreshCacheFiles() async {
+    if (_book == null || _book!.originType != BookOriginType.online) return;
+    final files = await ChapterCacheService.instance.getChapterCacheFiles(
+      _book!,
+      isComic: _book!.mediaType == MediaType.comic,
+    );
+    if (mounted) setState(() => _cachedFiles = files);
+  }
+
+  Future<void> _cacheVisibleChapters() async {
+    await _cacheChapters(
+      _visibleChapterEntries.where((chapter) => !chapter.isVolume).toList(),
+    );
+  }
+
+  Future<void> _cacheAllChapters() async {
+    await _cacheChapters(
+      _chapters.where((chapter) => !chapter.isVolume).toList(),
+    );
+  }
+
+  Future<void> _cacheChapters(List<Chapter> chapters) async {
+    if (_book == null || _dataProvider == null || chapters.isEmpty) return;
+    if (_book!.mediaType == MediaType.comic) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('漫画章节请在阅读器中缓存')),
+      );
+      return;
+    }
+    setState(() {
+      _isCaching = true;
+      _cacheStatusText = '准备缓存 ${chapters.length} 章';
+    });
+    var done = 0;
+    var failed = 0;
+    for (final chapter in chapters) {
+      if (!mounted) return;
+      final fileName = ChapterCacheService.instance.getChapterFileName(
+        chapter,
+        suffix: _cacheFileSuffix,
+      );
+      if (_cachedFiles.contains(fileName)) {
+        done++;
+        continue;
+      }
+      setState(() {
+        _cacheStatusText = '正在缓存 ${done + 1}/${chapters.length}：${chapter.title}';
+      });
+      try {
+        final content = await _dataProvider!.getContent(_book!, chapter);
+        if (content != null && content.trim().isNotEmpty) {
+          await ChapterCacheService.instance.saveChapterContent(
+            _book!,
+            chapter,
+            content,
+          );
+          _cachedFiles.add(fileName);
+        } else {
+          failed++;
+        }
+      } catch (_) {
+        failed++;
+      }
+      done++;
+      if (mounted) setState(() {});
+    }
+    await _refreshCacheFiles();
+    if (!mounted) return;
+    setState(() {
+      _isCaching = false;
+      _cacheStatusText = failed == 0
+          ? '缓存完成：${chapters.length} 章'
+          : '缓存完成：失败 $failed 章';
+    });
   }
 
   List<Chapter> get _visibleChapterEntries {
@@ -1064,7 +1177,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
     final isExpanded = _expandedVolumes.contains(chapter.index);
     final fileName = ChapterCacheService.instance.getChapterFileName(
       chapter,
-      suffix: 'cb',
+      suffix: _cacheFileSuffix,
     );
     final isCached =
         !isOnline || chapter.isVolume || _cachedFiles.contains(fileName);
