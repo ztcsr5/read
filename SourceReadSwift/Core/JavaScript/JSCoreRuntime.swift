@@ -6,16 +6,34 @@ import CryptoKit
 final class JSCoreRuntime {
     private let context: JSContext
     private let ajaxHandler: ((String) -> String)?
-    private var bridgeStore: [String: String] = [:]
+    private let executionContext: RuleExecutionContext
+    private let javaHostBridge: LegadoJavaHostBridge
+    private let ruleHostBridge: LegadoRuleHostBridge
+    private let jsoupBridge: LegadoJsoupBridge
 
-    init(ajaxHandler: ((String) -> String)? = nil) {
+    init(
+        ajaxHandler: ((String) -> String)? = nil,
+        executionContext: RuleExecutionContext = RuleExecutionContext()
+    ) {
         self.context = JSContext()!
         self.ajaxHandler = ajaxHandler
+        self.executionContext = executionContext
+        self.javaHostBridge = LegadoJavaHostBridge(executionContext: executionContext)
+        self.ruleHostBridge = LegadoRuleHostBridge(executionContext: executionContext)
+        self.jsoupBridge = LegadoJsoupBridge(executionContext: executionContext)
+        if executionContext.networkHandler == nil {
+            executionContext.networkHandler = ajaxHandler
+        }
+        context.setObject(javaHostBridge, forKeyedSubscript: "__nativeLegado" as NSString)
+        context.setObject(ruleHostBridge, forKeyedSubscript: "__nativeRule" as NSString)
+        context.setObject(jsoupBridge, forKeyedSubscript: "__nativeJsoup" as NSString)
         installNativeClosures()
         installBaseBridge()
     }
 
     func evaluate(_ script: String, variables: [String: Any] = [:]) -> Result<String, SourceEngineError> {
+        executionContext.bind(variables)
+        context.exception = nil
         for (key, value) in variables {
             var jsCompatibleValue = value
             if let source = value as? BookSource {
@@ -97,7 +115,17 @@ final class JSCoreRuntime {
             context.exception = nil
             return .failure(.javascript(exception.toString()))
         }
+        synchronizeExecutionContextFromJavaScript()
         return .success(result.toString())
+    }
+
+    private func synchronizeExecutionContextFromJavaScript() {
+        for key in ["result", "baseUrl", "nextChapterUrl", "cookieHeader"] {
+            guard let value = context.objectForKeyedSubscript(key),
+                  !value.isUndefined,
+                  !value.isNull else { continue }
+            executionContext.setValue(value.toObject(), for: key)
+        }
     }
 
     private func installNativeClosures() {
@@ -201,11 +229,10 @@ final class JSCoreRuntime {
             return ajaxHandler?(requestText) ?? ""
         }
         let put: @convention(block) (String, String) -> String = { key, value in
-            weakSelf?.bridgeStore[key] = value
-            return value
+            weakSelf?.executionContext.put(value, for: key) ?? value
         }
         let getStore: @convention(block) (String) -> String = { key in
-            weakSelf?.bridgeStore[key] ?? ""
+            weakSelf?.executionContext.get(key) ?? ""
         }
         let removeElements: @convention(block) (String, String) -> String = { html, selector in
             do {
@@ -350,6 +377,15 @@ final class JSCoreRuntime {
           list.isEmpty = function() { return list.length === 0; };
           return list;
         }
+        if (!Array.prototype.get) {
+          Array.prototype.get = function(index) { return this[Number(index)]; };
+        }
+        if (!Array.prototype.size) {
+          Array.prototype.size = function() { return this.length; };
+        }
+        if (!Array.prototype.isEmpty) {
+          Array.prototype.isEmpty = function() { return this.length === 0; };
+        }
         java.getString = function(input, rule) {
           if (arguments.length <= 1 || typeof rule === 'boolean') {
             return __native_getString(__defaultHtml(), String(input), __defaultBaseUrl());
@@ -378,7 +414,10 @@ final class JSCoreRuntime {
           var parsed = parseFloat(String(value));
           return isNaN(parsed) ? Number(fallback || 0) : parsed;
         };
-        java.getElement = function(rule) { return java.getString(rule); };
+        java.getElement = function(rule) {
+          __nativeRule.setContent(__defaultHtml());
+          return __nativeRule.getElement(String(rule || ''));
+        };
         function __bridgeString(value) {
           if (value === undefined || value === null) return '';
           if (typeof value === 'string') return value;
@@ -396,8 +435,12 @@ final class JSCoreRuntime {
             valueOf: function() { return value; }
           };
         }
-        java.put = function(key, value) { return __native_put(String(key), __bridgeString(value)); };
-        java.getVar = function(key) { return __bridgeStored(key); };
+        java.put = function(key, value) {
+          return __nativeLegado.invoke({ method: 'put', args: [String(key), value] });
+        };
+        java.getVar = function(key) {
+          return String(__nativeLegado.invoke({ method: 'get', args: [String(key)] }) || '');
+        };
         java.ajax = function(url, headers) { return __bridgeResponse(__native_ajax(String(url), __bridgeString(headers || ''))); };
         java.get = function(url, headers) {
           var key = String(url);
@@ -408,6 +451,18 @@ final class JSCoreRuntime {
         };
         java.fetch = function(url, options) { return java.get(url, options && options.headers ? options.headers : options); };
         java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || ''))); };
+        java.ajaxAll = function(urls) {
+          var values = [];
+          if (urls && typeof urls.length === 'number') {
+            for (var i = 0; i < urls.length; i++) values.push(String(urls[i]));
+          } else if (urls != null) {
+            values.push(String(urls));
+          }
+          var loaded = __nativeLegado.invoke({ method: 'ajaxAll', args: [values] });
+          var out = [];
+          for (var j = 0; loaded && j < loaded.length; j++) out.push(__bridgeResponse(loaded[j]));
+          return __asJavaList(out);
+        };
         function __makeConnect(url) {
           var target = String(url || '');
           var config = { headers: {}, body: '' };
@@ -476,10 +531,16 @@ final class JSCoreRuntime {
           return api;
         }
         java.connect = __makeConnect;
-        java.log = function(value) { return String(value); };
+        java.log = function(value) {
+          return String(__nativeLegado.invoke({ method: 'log', args: [__bridgeString(value)] }) || '');
+        };
         java.toast = function(_) { return ''; };
         java.longToast = function(_) { return ''; };
-        java.getCookie = function() { return String(typeof cookieHeader === 'undefined' ? '' : cookieHeader); };
+        java.getCookie = function() {
+          var nativeCookie = __nativeLegado.invoke({ method: 'getCookie', args: [] });
+          if (nativeCookie != null && String(nativeCookie) !== '') return String(nativeCookie);
+          return String(typeof cookieHeader === 'undefined' ? '' : cookieHeader);
+        };
         java.getWebViewUA = function() { return 'Mozilla/5.0 SourceReadSwift iOS'; };
         java.startBrowser = function() { return ''; };
         java.startBrowserAwait = function() { return ''; };
@@ -497,8 +558,20 @@ final class JSCoreRuntime {
           }
           return '';
         };
-        cookie.setCookie = function(value) { cookieHeader = String(value || ''); return cookieHeader; };
-        cookie.removeCookie = function() { cookieHeader = ''; return true; };
+        cookie.setCookie = function(value) {
+          cookieHeader = String(value || '');
+          return String(__nativeLegado.invoke({ method: 'setCookie', args: [cookieHeader] }) || '');
+        };
+        cookie.removeCookie = function() {
+          cookieHeader = '';
+          __nativeLegado.invoke({ method: 'setCookie', args: [''] });
+          return true;
+        };
+        java.setCookie = cookie.setCookie;
+        java.setContent = function(value) {
+          result = String(value == null ? '' : value);
+          return String(__nativeRule.setContent(result));
+        };
         function __installSourceAndBook() {
           if (typeof source === 'undefined' || source === null) source = {};
           source.getKey = function() { return source.key || source.bookSourceUrl || source.sourceUrl || ''; };
@@ -706,14 +779,18 @@ final class JSCoreRuntime {
           };
         }
         java.getElements = function(rule) {
-          return __makeJsoupSelection({ html: __defaultHtml() }, String(rule || ''), __defaultBaseUrl());
+          __nativeRule.setContent(__defaultHtml());
+          return __nativeRule.getElements(String(rule || ''));
         };
         Packages.org.jsoup.Jsoup = {
           parse: function(html, baseUrlValue) {
-            return __makeJsoupSelection({ html: String(html) }, '', String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl)));
+            var resolvedBase = String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl));
+            if (resolvedBase) return __nativeJsoup.parseWithBase({ html: String(html), baseUrl: resolvedBase });
+            return __nativeJsoup.parse(String(html));
           },
           connect: __makeConnect
         };
+        var ruleResolver = __nativeRule;
         function importClass(_) { return undefined; }
         """
         context.evaluateScript(prelude)
@@ -736,7 +813,7 @@ final class JSCoreRuntime {
     private func mergedHeaders(_ explicitHeaders: String) -> [String: String] {
         var headers: [String: String] = [:]
         for key in ["headers", "header", "bookSourceHeader"] {
-            headers.merge(parseStringMap(bridgeStore[key] ?? ""), uniquingKeysWith: { _, new in new })
+            headers.merge(parseStringMap(executionContext.get(key)), uniquingKeysWith: { _, new in new })
         }
         headers.merge(parseStringMap(explicitHeaders), uniquingKeysWith: { _, new in new })
         return headers
@@ -748,7 +825,8 @@ final class JSCoreRuntime {
         }
         guard includeStoredBody else { return nil }
         for key in ["body", "requestBody", "postBody", "params"] {
-            if let value = bridgeStore[key], !value.isEmpty {
+            let value = executionContext.get(key)
+            if !value.isEmpty {
                 return normalizedBody(value)
             }
         }
