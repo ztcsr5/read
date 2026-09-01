@@ -738,9 +738,14 @@ final class LegadoElementsBridge: NSObject, LegadoElementsExport {
 
     func select(_ selector: String) -> LegadoElementsBridge {
         let query = normalizedSelector(selector)
-        let selected: [SwiftSoup.Element] = elements.flatMap { element in
-            guard let values: SwiftSoup.Elements = try? element.select(query) else { return [] }
-            return Array(values)
+        var selected: [SwiftSoup.Element] = []
+        for element in elements {
+            do {
+                let values = try element.select(query)
+                selected.append(contentsOf: values)
+            } catch {
+                continue
+            }
         }
         return LegadoElementsBridge(elements: unique(selected), baseURL: baseURL)
     }
