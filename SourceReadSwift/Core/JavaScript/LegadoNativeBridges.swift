@@ -526,17 +526,17 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
         LegadoElementsBridge(elements: Array(element.siblingElements()), baseURL: baseURL)
     }
     func nextElementSibling() -> LegadoElementBridge? {
-        guard let optional = try? element.nextElementSibling(), let value = optional else { return nil }
+        guard let value = try? element.nextElementSibling() else { return nil }
         return LegadoElementBridge(element: value, baseURL: baseURL)
     }
     func previousElementSibling() -> LegadoElementBridge? {
-        guard let optional = try? element.previousElementSibling(), let value = optional else { return nil }
+        guard let value = try? element.previousElementSibling() else { return nil }
         return LegadoElementBridge(element: value, baseURL: baseURL)
     }
     func elementSiblingIndex() -> Int { (try? element.elementSiblingIndex()) ?? -1 }
     func getElementsByTag(_ tag: String) -> LegadoElementsBridge { wrap(try? element.getElementsByTag(tag)) }
     func getElementById(_ id: String) -> LegadoElementBridge? {
-        guard let optional = try? element.getElementById(id), let value = optional else { return nil }
+        guard let value = try? element.getElementById(id) else { return nil }
         return LegadoElementBridge(element: value, baseURL: baseURL)
     }
     func getElementsByClass(_ name: String) -> LegadoElementsBridge { wrap(try? element.getElementsByClass(name)) }
@@ -738,8 +738,8 @@ final class LegadoElementsBridge: NSObject, LegadoElementsExport {
 
     func select(_ selector: String) -> LegadoElementsBridge {
         let query = normalizedSelector(selector)
-        let selected = elements.flatMap { element in
-            guard let values = try? element.select(query) else { return [] }
+        let selected: [SwiftSoup.Element] = elements.flatMap { element in
+            guard let values: SwiftSoup.Elements = try? element.select(query) else { return [] }
             return Array(values)
         }
         return LegadoElementsBridge(elements: unique(selected), baseURL: baseURL)
