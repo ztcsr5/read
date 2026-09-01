@@ -17,9 +17,14 @@ final class RuleDirectiveStore {
 
 struct HtmlRuleExtractor {
     private let directiveStore: RuleDirectiveStore
+    private let executionContext: RuleExecutionContext
 
-    init(directiveStore: RuleDirectiveStore = RuleDirectiveStore()) {
+    init(
+        directiveStore: RuleDirectiveStore = RuleDirectiveStore(),
+        executionContext: RuleExecutionContext = RuleExecutionContext()
+    ) {
         self.directiveStore = directiveStore
+        self.executionContext = executionContext
     }
 
     func select(_ html: String, baseUrl: URL, listRule: String) throws -> [Element] {
@@ -386,12 +391,12 @@ struct HtmlRuleExtractor {
         }
 
         let source = extraVariables["source"] as? BookSource
-        let runtime = JSCoreRuntime { urlText in
+        let runtime = JSCoreRuntime(ajaxHandler: { urlText in
             if let source {
                 return SynchronousSourceLoader().load(urlText: urlText, source: source)
             }
             return ""
-        }
+        }, executionContext: executionContext)
 
         var variables: [String: Any] = [
             "result": rootHtml,

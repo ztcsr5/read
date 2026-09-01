@@ -298,7 +298,9 @@ final class JSCoreRuntime {
         let prelude = """
         var java = java || {};
         java.urlEncode = function(value) { return __native_urlEncode(String(value)); };
-        java.encodeURI = java.urlEncode;
+        java.encodeURI = function(value, charset) {
+          return String(__nativeLegado.invoke({ method: 'encodeURI', args: [String(value), charset == null ? '' : String(charset)] }) || '');
+        };
         java.encodeURIComponent = java.urlEncode;
         java.decodeURI = function(value) { return __native_urlDecode(String(value)); };
         java.decodeURIComponent = java.decodeURI;
@@ -311,13 +313,16 @@ final class JSCoreRuntime {
         java.decodeBase64 = java.base64Decode;
         java.md5 = function(value) { return __native_md5(String(value)); };
         java.md5Encode = java.md5;
+        java.md5Encode16 = function(value) { return java.md5(value).substring(8, 24); };
         java.hexMd5 = java.md5;
         java.MD5 = java.md5;
         java.sha1 = function(value) { return __native_sha1(String(value)); };
         java.SHA1 = java.sha1;
         java.sha256 = function(value) { return __native_sha256(String(value)); };
         java.SHA256 = java.sha256;
-        java.timeFormat = function(timestamp, format) { return __native_timeFormat(Number(timestamp), String(format)); };
+        java.timeFormat = function(timestamp, format) {
+          return __native_timeFormat(Number(timestamp), String(format || 'yyyy-MM-dd HH:mm:ss'));
+        };
         java.getTime = function() { return Date.now(); };
         java.currentTimeMillis = java.getTime;
         java.now = java.getTime;
@@ -426,11 +431,12 @@ final class JSCoreRuntime {
         function __bridgeStored(name) {
           return __native_getStore(String(name));
         }
-        function __bridgeResponse(text) {
+        function __bridgeResponse(text, responseUrl) {
           var value = String(text || '');
           return {
             body: function() { return value; },
             text: function() { return value; },
+            url: function() { return String(responseUrl || ''); },
             toString: function() { return value; },
             valueOf: function() { return value; }
           };
@@ -441,16 +447,21 @@ final class JSCoreRuntime {
         java.getVar = function(key) {
           return String(__nativeLegado.invoke({ method: 'get', args: [String(key)] }) || '');
         };
-        java.ajax = function(url, headers) { return __bridgeResponse(__native_ajax(String(url), __bridgeString(headers || ''))); };
+        java.ajax = function(url, headers) { return __bridgeResponse(__native_ajax(String(url), __bridgeString(headers || '')), url); };
         java.get = function(url, headers) {
           var key = String(url);
           var value = __bridgeStored(key);
           if (value && key.indexOf('://') < 0 && key.charAt(0) !== '/') return value;
           if (key.indexOf('://') < 0 && key.charAt(0) !== '/') return '';
-          return __bridgeResponse(__native_ajax(key, __bridgeString(headers || '')));
+          return __bridgeResponse(__native_ajax(key, __bridgeString(headers || '')), key);
         };
-        java.fetch = function(url, options) { return java.get(url, options && options.headers ? options.headers : options); };
-        java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || ''))); };
+        java.fetch = function(url, options) {
+          options = options || {};
+          var method = String(options.method || 'GET').toUpperCase();
+          if (method === 'POST' || options.body != null) return java.post(url, options.body || '', options.headers || {});
+          return __bridgeResponse(__native_ajax(String(url), __bridgeString(options.headers || options)), url);
+        };
+        java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || '')), url); };
         java.ajaxAll = function(urls) {
           var values = [];
           if (urls && typeof urls.length === 'number') {
@@ -460,7 +471,7 @@ final class JSCoreRuntime {
           }
           var loaded = __nativeLegado.invoke({ method: 'ajaxAll', args: [values] });
           var out = [];
-          for (var j = 0; loaded && j < loaded.length; j++) out.push(__bridgeResponse(loaded[j]));
+          for (var j = 0; loaded && j < loaded.length; j++) out.push(__bridgeResponse(loaded[j], values[j] || ''));
           return __asJavaList(out);
         };
         function __makeConnect(url) {
@@ -513,11 +524,11 @@ final class JSCoreRuntime {
               return api;
             },
             get: function() {
-              return __bridgeResponse(__native_ajax(target, __bridgeString(config.headers)));
+              return __bridgeResponse(__native_ajax(target, __bridgeString(config.headers)), target);
             },
             post: function(body) {
               if (arguments.length > 0) config.body = __bridgeString(body);
-              return __bridgeResponse(__native_post(target, config.body || '', __bridgeString(config.headers)));
+              return __bridgeResponse(__native_post(target, config.body || '', __bridgeString(config.headers)), target);
             },
             body: function() {
               return config.body ? api.post() : api.get();
@@ -536,8 +547,8 @@ final class JSCoreRuntime {
         };
         java.toast = function(_) { return ''; };
         java.longToast = function(_) { return ''; };
-        java.getCookie = function() {
-          var nativeCookie = __nativeLegado.invoke({ method: 'getCookie', args: [] });
+        java.getCookie = function(url, key) {
+          var nativeCookie = __nativeLegado.invoke({ method: 'getCookie', args: [String(url || __defaultBaseUrl()), key == null ? '' : String(key)] });
           if (nativeCookie != null && String(nativeCookie) !== '') return String(nativeCookie);
           return String(typeof cookieHeader === 'undefined' ? '' : cookieHeader);
         };
@@ -549,7 +560,7 @@ final class JSCoreRuntime {
         cookie.getCookie = java.getCookie;
         cookie.getKey = function(url, key) {
           var name = String(key || '');
-          var header = java.getCookie();
+          var header = java.getCookie(url);
           var parts = header.split(';');
           for (var i = 0; i < parts.length; i++) {
             var item = parts[i].trim();
@@ -558,9 +569,10 @@ final class JSCoreRuntime {
           }
           return '';
         };
-        cookie.setCookie = function(value) {
+        cookie.setCookie = function(url, value) {
+          if (arguments.length < 2) { value = url; url = __defaultBaseUrl(); }
           cookieHeader = String(value || '');
-          return String(__nativeLegado.invoke({ method: 'setCookie', args: [cookieHeader] }) || '');
+          return String(__nativeLegado.invoke({ method: 'setCookie', args: [String(url || __defaultBaseUrl()), cookieHeader] }) || '');
         };
         cookie.removeCookie = function() {
           cookieHeader = '';
@@ -568,6 +580,28 @@ final class JSCoreRuntime {
           return true;
         };
         java.setCookie = cookie.setCookie;
+        java.utf8ToGbk = function(value) { return __nativeLegado.invoke({ method: 'utf8ToGbk', args: [String(value || '')] }); };
+        java.htmlFormat = function(value) { return String(__nativeLegado.invoke({ method: 'htmlFormat', args: [String(value || '')] }) || ''); };
+        java.readFile = function(path) { return __nativeLegado.invoke({ method: 'readFile', args: [String(path || '')] }); };
+        java.readTxtFile = function(path, charset) { return String(__nativeLegado.invoke({ method: 'readTxtFile', args: [String(path || ''), String(charset || 'utf-8')] }) || ''); };
+        java.downloadFile = function(url, path) { return String(__nativeLegado.invoke({ method: 'downloadFile', args: [String(url || ''), String(path || '')] }) || ''); };
+        java.unzipFile = function(path) { return String(__nativeLegado.invoke({ method: 'unzipFile', args: [String(path || '')] }) || ''); };
+        java.getTxtInFolder = function(path) { return __nativeLegado.invoke({ method: 'getTxtInFolder', args: [String(path || '')] }); };
+        java.getZipStringContent = function(path, entry, charset) { return String(__nativeLegado.invoke({ method: 'getZipStringContent', args: [String(path || ''), String(entry || ''), String(charset || 'utf-8')] }) || ''); };
+        java.getZipByteArrayContent = function(path, entry) { return __nativeLegado.invoke({ method: 'getZipByteArrayContent', args: [String(path || ''), String(entry || '')] }); };
+        java.getSandboxPath = function() { return String(__nativeLegado.invoke({ method: 'sandboxPath', args: [] }) || ''); };
+        java.fetchCloudTTS = function(_) { return ''; };
+        function __aes(method, input, key, transformation, iv) {
+          return __nativeLegado.invoke({ method: method, args: [input, key, String(transformation || 'AES/CBC/PKCS7Padding'), iv] });
+        }
+        java.aesDecodeToByteArray = function(a,b,c,d) { return __aes('aesDecodeToByteArray',a,b,c,d); };
+        java.aesDecodeToString = function(a,b,c,d) { return __aes('aesDecodeToString',a,b,c,d); };
+        java.aesBase64DecodeToByteArray = function(a,b,c,d) { return __aes('aesBase64DecodeToByteArray',a,b,c,d); };
+        java.aesBase64DecodeToString = function(a,b,c,d) { return __aes('aesBase64DecodeToString',a,b,c,d); };
+        java.aesEncodeToByteArray = function(a,b,c,d) { return __aes('aesEncodeToByteArray',a,b,c,d); };
+        java.aesEncodeToString = function(a,b,c,d) { return __aes('aesEncodeToString',a,b,c,d); };
+        java.aesEncodeToBase64ByteArray = function(a,b,c,d) { return __aes('aesEncodeToBase64ByteArray',a,b,c,d); };
+        java.aesEncodeToBase64String = function(a,b,c,d) { return __aes('aesEncodeToBase64String',a,b,c,d); };
         java.setContent = function(value) {
           result = String(value == null ? '' : value);
           return String(__nativeRule.setContent(result));
@@ -602,7 +636,19 @@ final class JSCoreRuntime {
             book.variable = key == null ? '' : String(key);
             return java.put('book.variable', book.variable);
           };
+          book.putVariable = function(key, value) { return book.setVariable(key, value); };
+          book.variableMap = book.variableMap || { get: function(k) { return book.getVariable(k); }, put: function(k,v) { return book.setVariable(k,v); } };
           if (typeof chapter === 'undefined' || chapter === null) chapter = {};
+          chapter.getVariable = function(key) {
+            if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('chapter.variable.' + String(key));
+            return chapter.variable || java.getVar('chapter.variable') || '';
+          };
+          chapter.setVariable = function(key, value) {
+            if (arguments.length > 1) return java.put('chapter.variable.' + String(key), value == null ? '' : String(value));
+            chapter.variable = key == null ? '' : String(key);
+            return java.put('chapter.variable', chapter.variable);
+          };
+          chapter.putVariable = function(key, value) { return chapter.setVariable(key, value); };
           chapter.isVip = function() {
             var title = String(chapter.title || chapter.name || '').toLowerCase();
             return title.indexOf('vip') >= 0 || title.indexOf('订阅') >= 0 || title.indexOf('付费') >= 0;
@@ -790,7 +836,36 @@ final class JSCoreRuntime {
           },
           connect: __makeConnect
         };
-        var ruleResolver = __nativeRule;
+        var ruleResolver = {
+          chapter: (typeof chapter === 'undefined' ? null : chapter),
+          book: (typeof book === 'undefined' ? null : book),
+          nextChapterUrl: (typeof nextChapterUrl === 'undefined' ? '' : nextChapterUrl),
+          setContent: function(content, baseUrlValue) {
+            if (baseUrlValue != null && String(baseUrlValue) !== '') baseUrl = String(baseUrlValue);
+            result = String(content == null ? '' : content);
+            return __nativeRule.setContent(result);
+          },
+          getString: function(rule, isUrl, content) {
+            var htmlValue = content == null ? __defaultHtml() : String(content);
+            var value = __native_getString(htmlValue, String(rule || ''), __defaultBaseUrl());
+            if (isUrl === true && value) {
+              try { return String(new URL(value, __defaultBaseUrl())); } catch (_) {}
+            }
+            return value;
+          },
+          getStringList: function(rule, isUrl) {
+            var values = __native_getStringList(__defaultHtml(), String(rule || ''), __defaultBaseUrl());
+            var out = [];
+            for (var i = 0; values && i < values.length; i++) {
+              var value = String(values[i]);
+              if (isUrl === true && value) { try { value = String(new URL(value, __defaultBaseUrl())); } catch (_) {} }
+              out.push(value);
+            }
+            return __asJavaList(out);
+          },
+          getElement: function(rule) { __nativeRule.setContent(__defaultHtml()); return __nativeRule.getElement(String(rule || '')); },
+          getElements: function(rule) { __nativeRule.setContent(__defaultHtml()); return __nativeRule.getElements(String(rule || '')); }
+        };
         function importClass(_) { return undefined; }
         """
         context.evaluateScript(prelude)

@@ -21,9 +21,14 @@ struct JSONRuleExtractor {
     }
 
     private let directiveStore: JSONRuleDirectiveStore
+    private let executionContext: RuleExecutionContext
 
-    init(directiveStore: JSONRuleDirectiveStore = JSONRuleDirectiveStore()) {
+    init(
+        directiveStore: JSONRuleDirectiveStore = JSONRuleDirectiveStore(),
+        executionContext: RuleExecutionContext = RuleExecutionContext()
+    ) {
         self.directiveStore = directiveStore
+        self.executionContext = executionContext
     }
 
     func list(from object: Any, rule: String?, variables: [String: Any] = [:]) -> [[String: Any]] {
@@ -394,12 +399,12 @@ struct JSONRuleExtractor {
         }
 
         let source = extraVariables["source"] as? BookSource
-        let runtime = JSCoreRuntime { urlText in
+        let runtime = JSCoreRuntime(ajaxHandler: { urlText in
             if let source {
                 return SynchronousSourceLoader().load(urlText: urlText, source: source)
             }
             return ""
-        }
+        }, executionContext: executionContext)
 
         var variables: [String: Any] = [
             "result": object

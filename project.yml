@@ -14,6 +14,9 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation.git
     from: 0.9.19
+  CryptoSwift:
+    url: https://github.com/krzyzanowskim/CryptoSwift.git
+    from: 1.9.0
 targets:
   SourceReadSwift:
     type: application
@@ -23,6 +26,7 @@ targets:
     dependencies:
       - package: SwiftSoup
       - package: ZIPFoundation
+      - package: CryptoSwift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.edc21.SourceReadSwift
@@ -39,7 +43,7 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        NSLocalNetworkUsageDescription: 用于在局域网内导入、导出和管理书源。
+        NSLocalNetworkUsageDescription: Used to import, export and manage book sources on the local network.
         LSSupportsOpeningDocumentsInPlace: true
         UIFileSharingEnabled: true
         CFBundleDocumentTypes:
@@ -51,7 +55,25 @@ targets:
               - public.text
               - public.plain-text
               - public.data
+              - public.item
+              - public.content
+              - com.edc21.sourceread.source-json
               - org.idpf.epub-container
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.edc21.sourceread.source-json
+            UTTypeDescription: SourceRead book source JSON or plain text
+            UTTypeConformsTo:
+              - public.json
+              - public.text
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - json
+                - txt
+                - text
+              public.mime-type:
+                - application/json
+                - text/plain
   SourceReadSwiftTests:
     type: bundle.unit-test
     platform: iOS
@@ -61,3 +83,4 @@ targets:
       - target: SourceReadSwift
       - package: SwiftSoup
       - package: ZIPFoundation
+      - package: CryptoSwift

@@ -1,0 +1,252 @@
+import Foundation
+import CoreFoundation
+import CryptoSwift
+import ZIPFoundation
+
+/// Native services required by Legado JavaScript sources.  All filesystem access is
+/// constrained to the app container; relative paths live under Documents/LegadoSandbox.
+final class LegadoHostServices {
+    private let executionContext: RuleExecutionContext
+    private let fileManager: FileManager
+    let sandboxURL: URL
+
+    init(executionContext: RuleExecutionContext, fileManager: FileManager = .default) {
+        self.executionContext = executionContext
+        self.fileManager = fileManager
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        self.sandboxURL = documents.appendingPathComponent("LegadoSandbox", isDirectory: true)
+        try? fileManager.createDirectory(at: sandboxURL, withIntermediateDirectories: true)
+    }
+
+    // MARK: - Cookie
+
+    func cookie(url rawURL: String, key: String?) -> String {
+        guard let url = URL(string: rawURL),
+              let cookies = HTTPCookieStorage.shared.cookies(for: url) else {
+            return executionContext.string(for: "cookieHeader")
+        }
+        if let key, !key.isEmpty {
+            return cookies.first(where: { $0.name == key })?.value ?? ""
+        }
+        return HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? ""
+    }
+
+    @discardableResult
+    func setCookie(url rawURL: String, value: String) -> String {
+        executionContext.setValue(value, for: "cookieHeader")
+        guard let url = URL(string: rawURL), !value.isEmpty else { return value }
+        let headerFields = ["Set-Cookie": value]
+        HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
+            .forEach(HTTPCookieStorage.shared.setCookie)
+        return value
+    }
+
+    // MARK: - Text/encoding
+
+    func encodeURI(_ value: String, charset: String? = nil) -> String {
+        let normalized = charset?.lowercased() ?? "utf-8"
+        if normalized.contains("gbk") || normalized.contains("gb2312") || normalized.contains("gb18030") {
+            let encoding = Self.gbkEncoding
+            guard let data = value.data(using: encoding) else { return value }
+            return data.map { byte in
+                let scalar = UnicodeScalar(byte)
+                if CharacterSet.alphanumerics.contains(scalar) || "-._~".utf8.contains(byte) {
+                    return String(UnicodeScalar(byte))
+                }
+                return String(format: "%%%02X", byte)
+            }.joined()
+        }
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    func utf8ToGbk(_ value: String) -> NSArray {
+        guard let data = value.data(using: Self.gbkEncoding) else { return [] }
+        return data.map { NSNumber(value: $0) } as NSArray
+    }
+
+    func decodeText(_ data: Data, charset: String?) -> String {
+        let name = charset?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let encoding: String.Encoding
+        if name.contains("gbk") || name.contains("gb2312") || name.contains("gb18030") {
+            encoding = Self.gbkEncoding
+        } else if name.contains("utf-16") {
+            encoding = .utf16
+        } else if name.contains("big5") {
+            encoding = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.big5.rawValue)))
+        } else {
+            encoding = .utf8
+        }
+        return String(data: data, encoding: encoding)
+            ?? String(data: data, encoding: .utf8)
+            ?? ""
+    }
+
+    func htmlFormat(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+    }
+
+    // MARK: - AES
+
+    func aes(
+        operation: String,
+        input: Any?,
+        key: Any?,
+        transformation: String,
+        iv: Any?
+    ) -> Any {
+        do {
+            let keyBytes = bytes(from: key)
+            let ivBytes = bytes(from: iv)
+            let mode: BlockMode = transformation.uppercased().contains("ECB")
+                ? ECB()
+                : CBC(iv: normalizedIV(ivBytes))
+            let padding: Padding = transformation.uppercased().contains("NOPADDING") ? .noPadding : .pkcs7
+            let cipher = try AES(key: normalizedKey(keyBytes), blockMode: mode, padding: padding)
+            let isDecode = operation.localizedCaseInsensitiveContains("decode")
+            var payload = bytes(from: input)
+            if operation.localizedCaseInsensitiveContains("base64decode"),
+               let decoded = Data(base64Encoded: RuleExecutionContext.bridgeString(input)) {
+                payload = Array(decoded)
+            }
+            let output = try isDecode ? cipher.decrypt(payload) : cipher.encrypt(payload)
+            if operation.localizedCaseInsensitiveContains("base64") && !isDecode {
+                let encoded = Data(output).base64EncodedString()
+                if operation.localizedCaseInsensitiveContains("bytearray") {
+                    return Array(encoded.utf8).map { NSNumber(value: $0) } as NSArray
+                }
+                return encoded
+            }
+            if operation.localizedCaseInsensitiveContains("bytearray") {
+                return output.map { NSNumber(value: $0) } as NSArray
+            }
+            return String(data: Data(output), encoding: .utf8) ?? Data(output).base64EncodedString()
+        } catch {
+            executionContext.log("AES failed: \(error.localizedDescription)")
+            return operation.localizedCaseInsensitiveContains("bytearray") ? ([] as NSArray) : ""
+        }
+    }
+
+    // MARK: - Files and ZIP
+
+    func readFile(_ path: String) -> NSArray {
+        guard let url = resolvedURL(path), let data = try? Data(contentsOf: url) else { return [] }
+        return data.map { NSNumber(value: $0) } as NSArray
+    }
+
+    func readText(_ path: String, charset: String? = nil) -> String {
+        guard let url = resolvedURL(path), let data = try? Data(contentsOf: url) else { return "" }
+        return decodeText(data, charset: charset)
+    }
+
+    func downloadFile(_ rawURL: String, path: String) -> String {
+        guard let sourceURL = URL(string: rawURL), let destination = resolvedURL(path, createParent: true) else { return "" }
+        let semaphore = DispatchSemaphore(value: 0)
+        var output = ""
+        URLSession.shared.dataTask(with: sourceURL) { data, _, error in
+            defer { semaphore.signal() }
+            guard error == nil, let data else { return }
+            do {
+                try data.write(to: destination, options: .atomic)
+                output = destination.path
+            } catch {
+                self.executionContext.log("downloadFile failed: \(error.localizedDescription)")
+            }
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 30)
+        return output
+    }
+
+    func unzipFile(_ path: String) -> String {
+        guard let archiveURL = resolvedURL(path) else { return "" }
+        let destination = archiveURL.deletingPathExtension()
+        do {
+            try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+            try fileManager.unzipItem(at: archiveURL, to: destination)
+            return destination.path
+        } catch {
+            executionContext.log("unzipFile failed: \(error.localizedDescription)")
+            return ""
+        }
+    }
+
+    func textFiles(in path: String) -> NSArray {
+        guard let folder = resolvedURL(path),
+              let enumerator = fileManager.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) else {
+            return []
+        }
+        let values = enumerator.compactMap { item -> String? in
+            guard let url = item as? URL,
+                  ["txt", "text", "html", "htm"].contains(url.pathExtension.lowercased()) else { return nil }
+            return url.path
+        }.sorted()
+        return values as NSArray
+    }
+
+    func zipData(zipPath: String, entryName: String) -> Data? {
+        guard let url = resolvedURL(zipPath), let archive = Archive(url: url, accessMode: .read),
+              let entry = archive[entryName] else { return nil }
+        var data = Data()
+        do {
+            _ = try archive.extract(entry) { data.append($0) }
+            return data
+        } catch {
+            executionContext.log("ZIP read failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func zipString(zipPath: String, entryName: String, charset: String?) -> String {
+        guard let data = zipData(zipPath: zipPath, entryName: entryName) else { return "" }
+        return decodeText(data, charset: charset)
+    }
+
+    private func resolvedURL(_ path: String, createParent: Bool = false) -> URL? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let candidate: URL
+        if trimmed.hasPrefix("file://"), let url = URL(string: trimmed) {
+            candidate = url
+        } else if (trimmed as NSString).isAbsolutePath {
+            candidate = URL(fileURLWithPath: trimmed)
+        } else {
+            candidate = sandboxURL.appendingPathComponent(trimmed)
+        }
+        let standardized = candidate.standardizedFileURL
+        let home = URL(fileURLWithPath: NSHomeDirectory()).standardizedFileURL.path
+        guard standardized.path == home || standardized.path.hasPrefix(home + "/") else { return nil }
+        if createParent {
+            try? fileManager.createDirectory(at: standardized.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
+        return standardized
+    }
+
+    private func bytes(from value: Any?) -> [UInt8] {
+        if let data = value as? Data { return Array(data) }
+        if let values = value as? [UInt8] { return values }
+        if let values = value as? [NSNumber] { return values.map(\.uint8Value) }
+        if let values = value as? NSArray { return values.compactMap { ($0 as? NSNumber)?.uint8Value } }
+        return Array(RuleExecutionContext.bridgeString(value).utf8)
+    }
+
+    private func normalizedKey(_ value: [UInt8]) -> [UInt8] {
+        let size = value.count <= 16 ? 16 : (value.count <= 24 ? 24 : 32)
+        return Array((value + Array(repeating: 0, count: size)).prefix(size))
+    }
+
+    private func normalizedIV(_ value: [UInt8]) -> [UInt8] {
+        Array((value + Array(repeating: 0, count: 16)).prefix(16))
+    }
+
+    private static let gbkEncoding = String.Encoding(
+        rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
+    )
+}
