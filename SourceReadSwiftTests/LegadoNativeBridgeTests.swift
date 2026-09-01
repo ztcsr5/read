@@ -100,6 +100,30 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(value, "206|partial|https://example.com/final|fixture|text/plain")
     }
 
+    func testAjaxAllAndPostPreserveResponseMetadata() throws {
+        let context = RuleExecutionContext(responseHandler: { encoded in
+            SourceResponse(
+                url: URL(string: encoded.contains("post") ? "https://example.com/post-final" : "https://example.com/get-final")!,
+                statusCode: encoded.contains("post") ? 201 : 203,
+                headers: ["X-Mode": encoded.contains("post") ? "post" : "get"],
+                body: encoded.contains("post") ? "created" : "fetched",
+                data: Data()
+            )
+        })
+        let runtime = JSCoreRuntime(executionContext: context)
+        let result = runtime.evaluate("[java.ajaxAll(['https://example.com/get']).first().statusCode, java.ajaxAll(['https://example.com/get']).first().header('x-mode'), java.post('https://example.com/post', 'a=1').statusCode, java.post('https://example.com/post', 'a=1').body()].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "203|get|201|created")
+    }
+
+    func testExplicitHtmlOverloadsForElementsAndParents() throws {
+        let html = "<div class='wrap'><a>One</a><a>Two</a></div>"
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("java.getElements(html, 'a').eachText().join(',') + '|' + java.getParents(html, 'a').size() + '|' + java.removeElements(html, 'a').contains('One')", variables: ["html": html])
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "One,Two|6|false")
+    }
+
     func testNativeCookieAndLogBridgesAreObservable() throws {
         let executionContext = RuleExecutionContext()
         let runtime = JSCoreRuntime(executionContext: executionContext)
@@ -152,6 +176,20 @@ final class LegadoNativeBridgeTests: XCTestCase {
         """)
         guard case .success(let value) = result else { return XCTFail("expected success") }
         XCTAssertEqual(value, "function|function|function|function|function|function|function")
+    }
+
+    func testJsoupElementAbiSiblingAndIndexHelpers() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("var d=org.jsoup.Jsoup.parse('<div><p>A</p><p>B</p><p>C</p></div>'); var p=d.select('p').get(1); [p.firstElementSibling().text(), p.lastElementSibling().text(), d.getElementsByIndexLessThan(2).size(), d.getElementsByIndexEquals(2).text()].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "A|C|2|C")
+    }
+
+    func testJavaUtilityCollectionsAndStringBuilder() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("var b=new Packages.java.lang.StringBuilder('A'); b.append('B').append(3); var m=new Packages.java.util.HashMap(); m.put('k','v'); [b.toString(),m.get('k'),m.containsKey('k'),Packages.java.lang.Integer.parseInt('42')].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "AB3|v|true|42")
     }
 
     func testNativeModelBridgesAreInjectedForJavaScriptRules() throws {

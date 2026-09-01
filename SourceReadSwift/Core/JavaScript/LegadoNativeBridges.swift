@@ -409,7 +409,9 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     func siblingElements() -> LegadoElementsBridge
     func nextElementSibling() -> LegadoElementBridge?
     func previousElementSibling() -> LegadoElementBridge?
+    func firstElementSibling() -> LegadoElementBridge?
     func elementSiblingIndex() -> Int
+    func lastElementSibling() -> LegadoElementBridge?
     func getElementsByTag(_ tag: String) -> LegadoElementsBridge
     func getElementById(_ id: String) -> LegadoElementBridge?
     func getElementsByClass(_ name: String) -> LegadoElementsBridge
@@ -421,6 +423,9 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     func getElementsByAttributeValueEnding(_ key: String, _ value: String) -> LegadoElementsBridge
     func getElementsByAttributeValueContaining(_ key: String, _ value: String) -> LegadoElementsBridge
     func getElementsByAttributeValueMatching(_ key: String, _ value: String) -> LegadoElementsBridge
+    func getElementsByIndexLessThan(_ index: Int) -> LegadoElementsBridge
+    func getElementsByIndexGreaterThan(_ index: Int) -> LegadoElementsBridge
+    func getElementsByIndexEquals(_ index: Int) -> LegadoElementsBridge
     func getElementsContainingText(_ value: String) -> LegadoElementsBridge
     func getElementsContainingOwnText(_ value: String) -> LegadoElementsBridge
     func getElementsMatchingText(_ value: String) -> LegadoElementsBridge
@@ -428,6 +433,7 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     func getAllElements() -> LegadoElementsBridge
     func className() -> String
     func classNames() -> NSArray
+    func classNames(_ value: String) -> LegadoElementBridge
     func hasClass(_ name: String) -> Bool
     func addClass(_ name: String) -> LegadoElementBridge
     func removeClass(_ name: String) -> LegadoElementBridge
@@ -435,6 +441,9 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     func val() -> String
     func setVal(_ value: String) -> LegadoElementBridge
     func remove() -> LegadoElementBridge
+    func appendChild(_ child: LegadoElementBridge?) -> LegadoElementBridge
+    func prependChild(_ child: LegadoElementBridge?) -> LegadoElementBridge
+    func addSiblingHtml(_ index: Int, _ html: String) -> LegadoElementBridge
 }
 
 final class LegadoElementBridge: NSObject, LegadoElementExport {
@@ -533,7 +542,15 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
         guard let value = try? element.previousElementSibling() else { return nil }
         return LegadoElementBridge(element: value, baseURL: baseURL)
     }
+    func firstElementSibling() -> LegadoElementBridge? {
+        let siblings = Array(element.siblingElements())
+        return LegadoElementBridge(element: siblings.first ?? element, baseURL: baseURL)
+    }
     func elementSiblingIndex() -> Int { (try? element.elementSiblingIndex()) ?? -1 }
+    func lastElementSibling() -> LegadoElementBridge? {
+        let siblings = Array(element.siblingElements())
+        return LegadoElementBridge(element: siblings.last ?? element, baseURL: baseURL)
+    }
     func getElementsByTag(_ tag: String) -> LegadoElementsBridge { wrap(try? element.getElementsByTag(tag)) }
     func getElementById(_ id: String) -> LegadoElementBridge? {
         guard let value = try? element.getElementById(id) else { return nil }
@@ -543,6 +560,15 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
     func getElementsByAttribute(_ name: String) -> LegadoElementsBridge { wrap(try? element.getElementsByAttribute(name)) }
     func className() -> String { (try? element.className()) ?? "" }
     func classNames() -> NSArray { ((try? element.classNames().map { $0 }) ?? []) as NSArray }
+    func classNames(_ value: String) -> LegadoElementBridge {
+        if let current = try? element.classNames() {
+            for name in current { _ = try? element.removeClass(name) }
+        }
+        for name in value.split(whereSeparator: { $0.isWhitespace }) where !name.isEmpty {
+            _ = try? element.addClass(String(name))
+        }
+        return self
+    }
     func hasClass(_ name: String) -> Bool { element.hasClass(name) }
     func addClass(_ name: String) -> LegadoElementBridge { _ = try? element.addClass(name); return self }
     func removeClass(_ name: String) -> LegadoElementBridge { _ = try? element.removeClass(name); return self }
@@ -556,6 +582,30 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
 
     func remove() -> LegadoElementBridge {
         try? element.remove()
+        return self
+    }
+
+    func appendChild(_ child: LegadoElementBridge?) -> LegadoElementBridge {
+        guard let child else { return self }
+        let html = (try? child.element.outerHtml()) ?? ""
+        if let nodes = try? Parser.parseFragment(html, element, element.getBaseUriUTF8()) {
+            try? element.addChildren(nodes)
+        }
+        return self
+    }
+
+    func prependChild(_ child: LegadoElementBridge?) -> LegadoElementBridge {
+        guard let child else { return self }
+        let html = (try? child.element.outerHtml()) ?? ""
+        _ = try? element.prepend(html)
+        return self
+    }
+
+    func addSiblingHtml(_ index: Int, _ html: String) -> LegadoElementBridge {
+        guard let parent = element.parent() else { return self }
+        if let nodes = try? Parser.parseFragment(html, parent, parent.getBaseUriUTF8()) {
+            try? parent.addChildren(max(0, min(index, parent.childNodeSize())), nodes)
+        }
         return self
     }
 
@@ -629,8 +679,8 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
     func tagNameNormal() -> String { element.tagNameNormal() }
     func tag() -> LegadoTagBridge { LegadoTagBridge(tagName: element.tagName()) }
     func dataset() -> NSDictionary { element.dataset() as NSDictionary }
-    func textNodes() -> NSArray { element.textNodes() as NSArray }
-    func dataNodes() -> NSArray { element.dataNodes() as NSArray }
+    func textNodes() -> NSArray { element.textNodes().map { bridgeNode($0) } as NSArray }
+    func dataNodes() -> NSArray { element.dataNodes().map { bridgeNode($0) } as NSArray }
     func insertChildren(_ index: Int, _ html: String) -> LegadoElementBridge {
         guard let nodes = try? Parser.parseFragment(html, element, element.getBaseUriUTF8()) else { return self }
         try? element.addChildren(index, nodes)
@@ -643,6 +693,20 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
     func getElementsByAttributeValueEnding(_ key: String, _ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsByAttributeValueEnding(key, value)) }
     func getElementsByAttributeValueContaining(_ key: String, _ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsByAttributeValueContaining(key, value)) }
     func getElementsByAttributeValueMatching(_ key: String, _ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsByAttributeValueMatching(key, value)) }
+    func getElementsByIndexLessThan(_ index: Int) -> LegadoElementsBridge {
+        let all = (try? element.getAllElements()) ?? []
+        return LegadoElementsBridge(elements: Array(all.prefix(max(0, index))), baseURL: baseURL)
+    }
+    func getElementsByIndexGreaterThan(_ index: Int) -> LegadoElementsBridge {
+        let all = (try? element.getAllElements()) ?? []
+        let start = min(all.count, max(0, index + 1))
+        return LegadoElementsBridge(elements: Array(all.dropFirst(start)), baseURL: baseURL)
+    }
+    func getElementsByIndexEquals(_ index: Int) -> LegadoElementsBridge {
+        let all = (try? element.getAllElements()) ?? []
+        guard all.indices.contains(index) else { return LegadoElementsBridge(elements: [], baseURL: baseURL) }
+        return LegadoElementsBridge(elements: [all[index]], baseURL: baseURL)
+    }
     func getElementsContainingText(_ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsContainingText(value)) }
     func getElementsContainingOwnText(_ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsContainingOwnText(value)) }
     func getElementsMatchingText(_ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsMatchingText(value)) }

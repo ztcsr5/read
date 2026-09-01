@@ -42,8 +42,14 @@ struct SynchronousSourceLoader {
               let result = resultBox.load() else {
             return nil
         }
+        let responseURL = result.url ?? request.url
+        // JS callbacks use this synchronous loader. Mirror URLSessionSourceNetworkClient
+        // by persisting response cookies so subsequent source requests (including
+        // java.ajax chains) see the same session state.
+        let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: result.headers, for: responseURL)
+        for cookie in responseCookies { HTTPCookieStorage.shared.setCookie(cookie) }
         let body = ResponseTextDecoder().decode(data: result.data, headers: result.headers, preferredCharset: request.expectedCharset)
-        return SourceResponse(url: result.url ?? request.url, statusCode: result.statusCode, headers: result.headers, body: body, data: result.data)
+        return SourceResponse(url: responseURL, statusCode: result.statusCode, headers: result.headers, body: body, data: result.data)
     }
 }
 

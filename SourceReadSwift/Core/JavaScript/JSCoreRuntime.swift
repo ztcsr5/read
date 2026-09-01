@@ -234,7 +234,8 @@ final class JSCoreRuntime {
         weak var weakSelf = self
         let ajaxResponse: @convention(block) (String, String) -> NSDictionary = { url, headers in
             guard let runtime = weakSelf else { return [:] }
-            if let response = runtime.executionContext.responseHandler?(url) {
+            let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
+            if let response = runtime.executionContext.responseHandler?(requestText) {
                 return [
                     "body": response.body,
                     "url": response.url.absoluteString,
@@ -242,7 +243,6 @@ final class JSCoreRuntime {
                     "headers": response.headers
                 ] as NSDictionary
             }
-            let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
             let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
             return ["body": body, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
         }
@@ -252,7 +252,24 @@ final class JSCoreRuntime {
         }
         let post: @convention(block) (String, String, String) -> String = { url, body, headers in
             let requestText = weakSelf?.requestText(url: url, body: body, headers: headers, includeStoredBody: true) ?? "\(url)@Body:\(body)"
-            return ajaxHandler?(requestText) ?? ""
+            if let response = weakSelf?.executionContext.responseHandler?(requestText) {
+                return response.body
+            }
+            return weakSelf?.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
+        }
+        let postResponse: @convention(block) (String, String, String) -> NSDictionary = { url, body, headers in
+            guard let runtime = weakSelf else { return [:] }
+            let requestText = runtime.requestText(url: url, body: body, headers: headers, includeStoredBody: true)
+            if let response = runtime.executionContext.responseHandler?(requestText) {
+                return [
+                    "body": response.body,
+                    "url": response.url.absoluteString,
+                    "statusCode": response.statusCode,
+                    "headers": response.headers
+                ] as NSDictionary
+            }
+            let value = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
+            return ["body": value, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
         }
         let put: @convention(block) (String, String) -> String = { key, value in
             weakSelf?.executionContext.put(value, for: key) ?? value
@@ -311,6 +328,7 @@ final class JSCoreRuntime {
         context.setObject(ajax, forKeyedSubscript: "__native_ajax" as NSString)
         context.setObject(ajaxResponse, forKeyedSubscript: "__native_ajaxResponse" as NSString)
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
+        context.setObject(postResponse, forKeyedSubscript: "__native_postResponse" as NSString)
         context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
         context.setObject(getStore, forKeyedSubscript: "__native_getStore" as NSString)
         context.setObject(removeElements, forKeyedSubscript: "__native_removeElements" as NSString)
@@ -418,6 +436,9 @@ final class JSCoreRuntime {
         if (!Array.prototype.isEmpty) {
           Array.prototype.isEmpty = function() { return this.length === 0; };
         }
+        // Legado exposes these helpers in both forms:
+        //   java.getString(rule) and java.getString(html, rule)
+        // The boolean second argument is an isUrl flag, not HTML.
         java.getString = function(input, rule) {
           if (arguments.length <= 1 || typeof rule === 'boolean') {
             return __native_getString(__defaultHtml(), String(input), __defaultBaseUrl());
@@ -432,6 +453,30 @@ final class JSCoreRuntime {
           var out = [];
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
           return __asJavaList(out);
+        };
+        java.getElements = function(input, rule) {
+          var useDefaultHtml = arguments.length <= 1 || typeof rule === 'boolean';
+          var pageHtml = useDefaultHtml ? __defaultHtml() : String(input);
+          var actualRule = useDefaultHtml ? String(input) : String(rule);
+          if (useDefaultHtml) {
+            __nativeRule.setContent(pageHtml);
+            return __nativeRule.getElements(actualRule);
+          }
+          // The native bridge is document-scoped; return a Jsoup-like selection
+          // proxy for the explicit HTML overload so callers can still chain text,
+          // attr, first/get/eachText and remove operations.
+          return __makeJsoupSelection({ html: pageHtml }, actualRule, __defaultBaseUrl());
+        };
+        java.removeElements = function(input, selector) {
+          var pageHtml = arguments.length > 1 ? String(input) : __defaultHtml();
+          var actualSelector = arguments.length > 1 ? String(selector) : String(input);
+          return __native_removeElements(pageHtml, actualSelector);
+        };
+        java.getParents = function(input, selector, baseUrlValue) {
+          var pageHtml = arguments.length > 1 ? String(input) : __defaultHtml();
+          var actualSelector = arguments.length > 1 ? String(selector) : String(input);
+          var actualBase = arguments.length > 2 ? String(baseUrlValue || '') : __defaultBaseUrl();
+          return __asJavaList(__native_getParents(pageHtml, actualSelector, actualBase));
         };
         java.getInt = function(input, fallback) {
           var stored = java.getVar(input);
@@ -509,17 +554,26 @@ final class JSCoreRuntime {
           var target = String(url);
           return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(options.headers || options)));
         };
-        java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || '')), url); };
-        java.ajaxAll = function(urls) {
+        java.post = function(url, body, headers) {
+          var target = String(url);
+          return __bridgeResponse('', target, __native_postResponse(target, __bridgeString(body || ''), __bridgeString(headers || '')));
+        };
+        java.ajaxAll = function(urls, headers) {
           var values = [];
           if (urls && typeof urls.length === 'number') {
             for (var i = 0; i < urls.length; i++) values.push(String(urls[i]));
           } else if (urls != null) {
             values.push(String(urls));
           }
-          var loaded = __nativeLegado.invoke({ method: 'ajaxAll', args: [values] });
           var out = [];
-          for (var j = 0; loaded && j < loaded.length; j++) out.push(__bridgeResponse(loaded[j], values[j] || ''));
+          // Keep status/headers/final URL for each response.  A number of
+          // Android sources inspect Set-Cookie or Content-Type from ajaxAll;
+          // routing through the metadata bridge avoids losing that information.
+          var headerText = __bridgeString(headers || '');
+            for (var j = 0; j < values.length; j++) {
+            var target = values[j] || '';
+            out.push(__bridgeResponse('', target, __native_ajaxResponse(target, headerText)));
+          }
           return __asJavaList(out);
         };
         function __makeConnect(url) {
@@ -576,7 +630,7 @@ final class JSCoreRuntime {
             },
             post: function(body) {
               if (arguments.length > 0) config.body = __bridgeString(body);
-              return __bridgeResponse(__native_post(target, config.body || '', __bridgeString(config.headers)), target);
+              return __bridgeResponse('', target, __native_postResponse(target, config.body || '', __bridgeString(config.headers)));
             },
             body: function() {
               return config.body ? api.post() : api.get();
@@ -669,9 +723,19 @@ final class JSCoreRuntime {
           source.getVariableMap = function() {
             var parsed = {};
             try { parsed = JSON.parse(source.getVariable() || '{}'); } catch (_) {}
-            return { get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; } };
+            return {
+              get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; },
+              put: function(k, v) { parsed[String(k)] = v; source.setVariable(JSON.stringify(parsed)); return v; },
+              remove: function(k) { var old = parsed[String(k)]; delete parsed[String(k)]; source.setVariable(JSON.stringify(parsed)); return old == null ? null : old; },
+              containsKey: function(k) { return Object.prototype.hasOwnProperty.call(parsed, String(k)); },
+              isEmpty: function() { return Object.keys(parsed).length === 0; }
+            };
           };
-          source.getLoginInfoMap = function() { return { get: function(k) { return java.getVar('source.login.' + String(k || '')); } }; };
+          source.getLoginInfoMap = function() { return {
+            get: function(k) { return java.getVar('source.login.' + String(k || '')); },
+            put: function(k, v) { return java.put('source.login.' + String(k || ''), v == null ? '' : String(v)); },
+            remove: function(k) { return java.removeVar('source.login.' + String(k || '')); }
+          }; };
           source.putLoginHeader = function(k, v) { return java.put('source.loginHeader.' + String(k || ''), v == null ? '' : String(v)); };
           source.getLoginHeader = function(k) { return java.getVar('source.loginHeader.' + String(k || '')); };
           if (typeof book === 'undefined' || book === null) book = {};
@@ -685,7 +749,12 @@ final class JSCoreRuntime {
             return java.put('book.variable', book.variable);
           };
           book.putVariable = function(key, value) { return book.setVariable(key, value); };
-          book.variableMap = book.variableMap || { get: function(k) { return book.getVariable(k); }, put: function(k,v) { return book.setVariable(k,v); } };
+          book.variableMap = book.variableMap || {
+            get: function(k) { return book.getVariable(k); },
+            put: function(k,v) { return book.setVariable(k,v); },
+            remove: function(k) { return java.removeVar('book.variable.' + String(k || '')); },
+            containsKey: function(k) { return book.getVariable(k) !== ''; }
+          };
           if (typeof chapter === 'undefined' || chapter === null) chapter = {};
           chapter.getVariable = function(key) {
             if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('chapter.variable.' + String(key));
@@ -697,6 +766,12 @@ final class JSCoreRuntime {
             return java.put('chapter.variable', chapter.variable);
           };
           chapter.putVariable = function(key, value) { return chapter.setVariable(key, value); };
+          chapter.variableMap = chapter.variableMap || {
+            get: function(k) { return chapter.getVariable(k); },
+            put: function(k,v) { return chapter.setVariable(k,v); },
+            remove: function(k) { return java.removeVar('chapter.variable.' + String(k || '')); },
+            containsKey: function(k) { return chapter.getVariable(k) !== ''; }
+          };
           chapter.isVip = function() {
             var title = String(chapter.title || chapter.name || '').toLowerCase();
             return title.indexOf('vip') >= 0 || title.indexOf('订阅') >= 0 || title.indexOf('付费') >= 0;
@@ -777,6 +852,32 @@ final class JSCoreRuntime {
         Packages.java = Packages.java || {};
         Packages.java.lang = Packages.java.lang || {};
         Packages.java.lang.String = Packages.java.lang.String || function(value) { return new String(String(value || '')); };
+        Packages.java.lang.Integer = Packages.java.lang.Integer || {
+          parseInt: function(value, radix) { var n = parseInt(String(value || ''), Number(radix || 10)); return isNaN(n) ? 0 : n; },
+          valueOf: function(value) { return Number(value || 0); }
+        };
+        Packages.java.lang.Long = Packages.java.lang.Long || Packages.java.lang.Integer;
+        Packages.java.lang.Double = Packages.java.lang.Double || {
+          parseDouble: function(value) { var n = parseFloat(String(value || '')); return isNaN(n) ? 0 : n; },
+          valueOf: function(value) { return Number(value || 0); }
+        };
+        Packages.java.lang.Boolean = Packages.java.lang.Boolean || {
+          parseBoolean: function(value) { return String(value || '').toLowerCase() === 'true'; },
+          valueOf: function(value) { return String(value || '').toLowerCase() === 'true'; }
+        };
+        Packages.java.lang.StringBuilder = Packages.java.lang.StringBuilder || function(value) {
+          this.__parts = [value == null ? '' : String(value)];
+          this.append = function(next) { this.__parts.push(next == null ? 'null' : String(next)); return this; };
+          this.insert = function(index, next) {
+            var text = this.toString(); var i = Math.max(0, Math.min(Number(index) || 0, text.length));
+            this.__parts = [text.substring(0, i), next == null ? 'null' : String(next), text.substring(i)]; return this;
+          };
+          this.delete = function(start, end) {
+            var text = this.toString(); this.__parts = [text.substring(0, Number(start) || 0), text.substring(Number(end) || 0)]; return this;
+          };
+          this.length = function() { return this.toString().length; };
+          this.toString = function() { return this.__parts.join(''); };
+        };
         Packages.java.lang.Thread = Packages.java.lang.Thread || { sleep: function(_) {} };
         Packages.java.util = Packages.java.util || {};
         Packages.java.util.UUID = Packages.java.util.UUID || { randomUUID: java.randomUUID };
@@ -787,6 +888,39 @@ final class JSCoreRuntime {
             var out = [];
             for (var i = 0; i < text.length; i++) out.push(text.charCodeAt(i));
             return out;
+          }
+        };
+        Packages.java.util.HashMap = Packages.java.util.HashMap || function() {
+          this.__map = {};
+          this.put = function(key, value) { var k = String(key); var old = this.__map[k]; this.__map[k] = value; return old == null ? null : old; };
+          this.get = function(key) { var value = this.__map[String(key)]; return value == null ? null : value; };
+          this.remove = function(key) { var k = String(key); var old = this.__map[k]; delete this.__map[k]; return old == null ? null : old; };
+          this.containsKey = function(key) { return Object.prototype.hasOwnProperty.call(this.__map, String(key)); };
+          this.isEmpty = function() { return Object.keys(this.__map).length === 0; };
+          this.size = function() { return Object.keys(this.__map).length; };
+          this.toString = function() { return JSON.stringify(this.__map); };
+        };
+        Packages.java.util.ArrayList = Packages.java.util.ArrayList || function() {
+          var values = [];
+          this.add = function(value) { values.push(value); return true; };
+          this.get = function(index) { return values[Number(index)]; };
+          this.set = function(index, value) { var old = values[Number(index)]; values[Number(index)] = value; return old; };
+          this.remove = function(index) { return values.splice(Number(index), 1)[0]; };
+          this.size = function() { return values.length; };
+          this.isEmpty = function() { return values.length === 0; };
+          this.toArray = function() { return values.slice(); };
+          this.toString = function() { return values.join(','); };
+        };
+        Packages.java.util.regex = Packages.java.util.regex || {};
+        Packages.java.util.regex.Pattern = Packages.java.util.regex.Pattern || {
+          compile: function(pattern) {
+            return {
+              matcher: function(input) {
+                var re; try { re = new RegExp(String(pattern)); } catch (_) { re = /$a/; }
+                var text = String(input || '');
+                return { find: function() { return re.test(text); }, matches: function() { return re.test(text); }, group: function(_) { var m = re.exec(text); return m ? (m[1] || m[0]) : ''; } };
+              }
+            };
           }
         };
         Packages.android = Packages.android || {};
@@ -872,10 +1006,7 @@ final class JSCoreRuntime {
             }
           };
         }
-        java.getElements = function(rule) {
-          __nativeRule.setContent(__defaultHtml());
-          return __nativeRule.getElements(String(rule || ''));
-        };
+        // The overload-aware java.getElements implementation is installed above.
         Packages.org.jsoup.Jsoup = {
           parse: function(html, baseUrlValue) {
             var resolvedBase = String(baseUrlValue || (typeof baseUrl === 'undefined' ? '' : baseUrl));
