@@ -99,4 +99,43 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(executionContext.string(for: "cookieHeader"), "sid=1")
         XCTAssertEqual(executionContext.logs(), ["bridge-ready"])
     }
+
+    func testLegadoRuleAnalyzerRoutesHTMLAndJSONThroughOneContext() throws {
+        let analyzer = LegadoRuleAnalyzer()
+        let html = "<div class='item'><a href='/a'>Alpha</a></div><div class='item'><a href='/b'>Beta</a></div>"
+        XCTAssertEqual(
+            analyzer.stringList(content: html, rule: ".item a@text", baseURL: URL(string: "https://example.com/") ),
+            ["Alpha", "Beta"]
+        )
+        let json = #"{"items":[{"title":"One"},{"title":"Two"}]}"#
+        XCTAssertEqual(analyzer.stringList(content: json, rule: "$.items[*].title", baseURL: nil), ["One", "Two"])
+        XCTAssertEqual(analyzer.executionContext.string(for: "result"), json)
+    }
+
+    func testNativeJavaABIExposesFilesystemAndCryptoMethods() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("[typeof java.aesEncodeToString, typeof java.readTxtFile, typeof java.getZipStringContent, typeof java.downloadFile, typeof java.utf8ToGbk].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "function|function|function|function|function")
+    }
+
+    func testNativeJsoupAndResponseCompatibilitySurface() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("""
+            var d = org.jsoup.Jsoup.parse('<div id=\"x\"><a href=\"/a\">A</a></div>', 'https://example.com/');
+            var n = d.select('a').first();
+            [typeof n.nodeName, typeof n.getAttributes, typeof n.absUrl, typeof n.parent,
+             typeof n.nextSibling, typeof d.title, typeof java.ajax].join('|');
+        """)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "function|function|function|function|function|function|function")
+    }
+
+    func testNativeModelBridgesAreInjectedForJavaScriptRules() throws {
+        let chapter = BookChapter(title: "VIP 1", url: "https://example.com/1", bookUrl: "https://example.com", index: 0, isVip: true)
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("chapter.title + '|' + chapter.isVip()", variables: ["chapter": chapter])
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "VIP 1|true")
+    }
 }

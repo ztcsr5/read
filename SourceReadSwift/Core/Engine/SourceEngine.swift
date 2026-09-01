@@ -28,6 +28,9 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     }
 
     func searchBooks(source: BookSource, keyword: String, page: Int) async -> Result<[SearchBook], SourceEngineError> {
+        let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
+            self.syncLoad(encoded: encoded, source: source, network: network)
+        })
         await diagnostics.emit(.init(
             level: .info,
             stage: "search.prepare",
@@ -54,7 +57,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 await emitFailure(error, stage: "search.empty", source: source, details: ["url": transformedResponse.url.absoluteString])
                 return .failure(error)
             }
-            let parsed = SearchResultParser().parse(source: source, response: transformedResponse)
+            let parsed = SearchResultParser(executionContext: executionContext).parse(source: source, response: transformedResponse)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "search.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
             }
@@ -66,11 +69,14 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     }
 
     func getBookDetail(source: BookSource, book: SearchBook) async -> Result<BookDetail, SourceEngineError> {
+        let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
+            self.syncLoad(encoded: encoded, source: source, network: network)
+        })
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
             let transformedResponse = transformBodyIfNeeded(response, source: source)
-            let parsed = BookDetailParser().parse(source: source, book: book, response: transformedResponse)
+            let parsed = BookDetailParser(executionContext: executionContext).parse(source: source, book: book, response: transformedResponse)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "detail.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
             }
@@ -82,11 +88,14 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     }
 
     func getChapterList(source: BookSource, book: BookDetail) async -> Result<[BookChapter], SourceEngineError> {
+        let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
+            self.syncLoad(encoded: encoded, source: source, network: network)
+        })
         let tocURL = book.tocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? book.bookUrl
         let request = requestBuilder.buildPageRequest(source: source, urlText: tocURL)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
-            let parsed = parseChapterListPage(source: source, book: book, response: response)
+            let parsed = parseChapterListPage(source: source, book: book, response: response, executionContext: executionContext)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
             }
@@ -97,7 +106,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 firstPage,
                 source: source,
                 book: book,
-                firstURL: response.url
+                firstURL: response.url,
+                executionContext: executionContext
             )
         case .failure(let error):
             await emitFailure(error, stage: "toc.load", source: source, details: ["url": request.url.absoluteString])
@@ -106,6 +116,9 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     }
 
     func getContent(source: BookSource, chapter: BookChapter) async -> Result<ChapterContent, SourceEngineError> {
+        let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
+            self.syncLoad(encoded: encoded, source: source, network: network)
+        })
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
         let globalPurifyRules = await purifyRules()
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
@@ -114,7 +127,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 source: source,
                 chapter: chapter,
                 response: response,
-                globalPurifyRules: globalPurifyRules
+                globalPurifyRules: globalPurifyRules,
+                executionContext: executionContext
             )
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "content.parse", source: source, details: ["url": response.url.absoluteString])
@@ -125,7 +139,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 source: source,
                 chapter: chapter,
                 firstURL: response.url,
-                globalPurifyRules: globalPurifyRules
+                globalPurifyRules: globalPurifyRules,
+                executionContext: executionContext
             )
         case .failure(let error):
             await emitFailure(error, stage: "content.load", source: source, details: ["url": request.url.absoluteString])
@@ -232,10 +247,11 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         source: BookSource,
         chapter: BookChapter,
         response: SourceResponse,
-        globalPurifyRules: [String]
+        globalPurifyRules: [String],
+        executionContext: RuleExecutionContext = RuleExecutionContext()
     ) -> Result<ChapterContent, SourceEngineError> {
         let transformedResponse = transformBodyIfNeeded(response, source: source)
-        return ContentParser().parse(
+        return ContentParser(executionContext: executionContext).parse(
             source: source,
             chapter: chapter,
             response: transformedResponse,
@@ -246,17 +262,27 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     private func parseChapterListPage(
         source: BookSource,
         book: BookDetail,
-        response: SourceResponse
+        response: SourceResponse,
+        executionContext: RuleExecutionContext = RuleExecutionContext()
     ) -> Result<ChapterListPage, SourceEngineError> {
         let transformedResponse = transformBodyIfNeeded(response, source: source)
-        return ChapterListParser().parsePage(source: source, book: book, response: transformedResponse)
+        return ChapterListParser(executionContext: executionContext).parsePage(source: source, book: book, response: transformedResponse)
+    }
+
+    private func syncLoad(encoded: String, source: BookSource, network: SourceNetworkClient) -> String {
+        // JavaScriptCore callbacks are synchronous. Calling async `network.load` and
+        // waiting on a semaphore can deadlock when the callback is already running on
+        // the cooperative executor, so use the dedicated synchronous loader here.
+        _ = network // kept in the signature for source-engine injection compatibility
+        return SynchronousSourceLoader().load(urlText: encoded, source: source)
     }
 
     private func appendNextChapterListPages(
         _ firstPage: ChapterListPage,
         source: BookSource,
         book: BookDetail,
-        firstURL: URL
+        firstURL: URL,
+        executionContext: RuleExecutionContext
     ) async -> Result<[BookChapter], SourceEngineError> {
         var chapters = firstPage.chapters
         var nextURLText = firstPage.nextTocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -272,7 +298,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.next.load") {
             case .success(let response):
-                switch parseChapterListPage(source: source, book: book, response: response) {
+                switch parseChapterListPage(source: source, book: book, response: response, executionContext: executionContext) {
                 case .success(let page):
                     let offset = chapters.count
                     chapters.append(contentsOf: page.chapters.map { chapter in
@@ -304,7 +330,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         source: BookSource,
         chapter: BookChapter,
         firstURL: URL,
-        globalPurifyRules: [String]
+        globalPurifyRules: [String],
+        executionContext: RuleExecutionContext
     ) async -> Result<ChapterContent, SourceEngineError> {
         var paragraphs = firstPage.paragraphs
         var nextURLText = firstPage.nextContentUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -328,7 +355,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                     source: source,
                     chapter: chapter,
                     response: response,
-                    globalPurifyRules: globalPurifyRules
+                    globalPurifyRules: globalPurifyRules,
+                    executionContext: executionContext
                 ) {
                 case .success(let nextPage):
                     paragraphs.append(contentsOf: nextPage.paragraphs)

@@ -145,6 +145,32 @@ final class SourceStore: ObservableObject {
         sources.first { $0.bookSourceUrl == sourceUrl }
     }
 
+    func sourceSwitchCandidates(for bookURL: String, excluding currentSourceURL: String) -> [BookSource] {
+        let enabledSources = sources.filter {
+            $0.enabled && $0.bookSourceUrl != currentSourceURL && $0.searchUrl != nil
+        }
+        let matched = enabledSources.filter { source in
+            guard let pattern = source.raw["bookUrlPattern"]?.nilIfEmpty,
+                  let regex = try? NSRegularExpression(pattern: pattern) else {
+                return false
+            }
+            let range = NSRange(bookURL.startIndex..<bookURL.endIndex, in: bookURL)
+            return regex.firstMatch(in: bookURL, range: range) != nil
+        }
+        let orderedMatched = matched.sorted {
+            if $0.weight != $1.weight { return $0.weight > $1.weight }
+            return $0.bookSourceName < $1.bookSourceName
+        }
+        let matchedURLs = Set(orderedMatched.map(\.bookSourceUrl))
+        let fallback = enabledSources
+            .filter { !matchedURLs.contains($0.bookSourceUrl) }
+            .sorted {
+                if $0.weight != $1.weight { return $0.weight > $1.weight }
+                return $0.bookSourceName < $1.bookSourceName
+            }
+        return orderedMatched + fallback
+    }
+
     func remove(_ source: BookSource) {
         sources.removeAll { $0.bookSourceUrl == source.bookSourceUrl }
         saveAfterMutation()

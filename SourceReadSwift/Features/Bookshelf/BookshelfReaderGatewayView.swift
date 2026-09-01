@@ -172,10 +172,17 @@ struct BookshelfReaderGatewayView: View {
             intro: activeBook.intro
         )
 
-        switch await appState.engine.getBookDetail(source: source, book: searchBook) {
+        let engine = appState.engine
+        let detailResult = await AsyncTimeout.run(seconds: 12) {
+            await engine.getBookDetail(source: source, book: searchBook)
+        } ?? .failure(.network("Detail load timed out"))
+        switch detailResult {
         case .success(let loadedDetail):
             detail = loadedDetail
-            switch await appState.engine.getChapterList(source: source, book: loadedDetail) {
+            let chapterResult = await AsyncTimeout.run(seconds: 12) {
+                await engine.getChapterList(source: source, book: loadedDetail)
+            } ?? .failure(.network("Chapter list timed out"))
+            switch chapterResult {
             case .success(let loadedChapters):
                 chapters = loadedChapters
                 let target = loadedChapters.first(where: { $0.index == activeBook.currentChapterIndex })
@@ -259,12 +266,15 @@ struct BookshelfReaderGatewayView: View {
     private func searchSwitchCandidates() async {
         sourceSwitchState = SourceSwitchState(isLoading: true)
         let activeBook = currentBook
-        let enabledSources = appState.sourceStore.sources
-            .filter { $0.enabled && $0.bookSourceUrl != activeBook.sourceURL && $0.searchUrl != nil }
+        let enabledSources = appState.sourceStore
+            .sourceSwitchCandidates(for: activeBook.bookURL, excluding: activeBook.sourceURL)
             .prefix(40)
         var candidates: [SourceSwitchCandidate] = []
+        let engine = appState.engine
         for source in enabledSources {
-            let result = await appState.engine.searchBooks(source: source, keyword: activeBook.title, page: 1)
+            let result = await AsyncTimeout.run(seconds: 10) {
+                await engine.searchBooks(source: source, keyword: activeBook.title, page: 1)
+            } ?? .failure(.network("Source switch search timed out"))
             guard case .success(let books) = result else { continue }
             let match = books.first { candidate in
                 candidate.name.localizedCaseInsensitiveContains(activeBook.title)
@@ -282,9 +292,16 @@ struct BookshelfReaderGatewayView: View {
 
     private func applySwitch(_ candidate: SourceSwitchCandidate) async {
         sourceSwitchState.isLoading = true
-        switch await appState.engine.getBookDetail(source: candidate.source, book: candidate.book) {
+        let engine = appState.engine
+        let detailResult = await AsyncTimeout.run(seconds: 12) {
+            await engine.getBookDetail(source: candidate.source, book: candidate.book)
+        } ?? .failure(.network("Detail load timed out"))
+        switch detailResult {
         case .success(let detail):
-            switch await appState.engine.getChapterList(source: candidate.source, book: detail) {
+            let chapterResult = await AsyncTimeout.run(seconds: 12) {
+                await engine.getChapterList(source: candidate.source, book: detail)
+            } ?? .failure(.network("Chapter list timed out"))
+            switch chapterResult {
             case .success(let loadedChapters):
                 appState.bookshelfStore.switchSource(
                     bookID: book.id,
@@ -307,13 +324,13 @@ struct BookshelfReaderGatewayView: View {
     }
 }
 
-private struct SourceSwitchState {
+private struct SourceSwitchState: Sendable {
     var isLoading = false
     var candidates: [SourceSwitchCandidate] = []
     var message: String?
 }
 
-private struct SourceSwitchCandidate: Identifiable {
+private struct SourceSwitchCandidate: Identifiable, Sendable {
     var id: String { "\(source.bookSourceUrl)|\(book.bookUrl)" }
     let source: BookSource
     let book: SearchBook

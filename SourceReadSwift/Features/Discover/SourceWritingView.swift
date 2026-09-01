@@ -1,6 +1,7 @@
 import SwiftUI
 import Network
 import Foundation
+import UIKit
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -55,6 +56,14 @@ struct SourceWritingView: View {
                             }
                         }
                         .padding(.vertical, 8)
+
+                        Button {
+                            UIPasteboard.general.string = server.localURLs.joined(separator: "\n")
+                        } label: {
+                            Label("Copy server address", systemImage: "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
 
                     if let lastError = server.lastError {
@@ -119,6 +128,14 @@ struct SourceWritingView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(.secondarySystemBackground).opacity(0.5))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        Button {
+                            UIPasteboard.general.string = server.logMessages.joined(separator: "\n")
+                        } label: {
+                            Label("Copy logs", systemImage: "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
                 
@@ -440,107 +457,110 @@ final class LightweightHTTPServer: ObservableObject {
     }
 
     private func getWebPageHtml() -> String {
+        return stableWebPageHtml()
+    }
+
+    private func stableWebPageHtml() -> String {
         return """
         <!DOCTYPE html>
-        <html>
+        <html lang="en">
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Web 书源导入助手</title>
+            <title>SourceRead Web Source Import</title>
             <style>
                 :root {
                     --primary: #5c50ec;
-                    --primary-hover: #4b3fd3;
-                    --bg: #f6f6f9;
-                    --card: #ffffff;
-                    --text: #333333;
-                    --text-secondary: #666666;
-                    --border: #e2e8f0;
+                    --bg: #f5f5f8;
+                    --card: rgba(255,255,255,.84);
+                    --text: #16161d;
+                    --muted: #6f6f7a;
+                    --border: rgba(92,80,236,.18);
                 }
                 body {
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    background-color: var(--bg);
-                    color: var(--text);
+                    min-height: 100vh;
                     margin: 0;
-                    padding: 20px;
+                    padding: 24px;
+                    box-sizing: border-box;
+                    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+                    background:
+                        radial-gradient(circle at top left, rgba(92,80,236,.20), transparent 32rem),
+                        radial-gradient(circle at bottom right, rgba(88,186,255,.18), transparent 30rem),
+                        var(--bg);
+                    color: var(--text);
                     display: flex;
-                    flex-direction: column;
                     align-items: center;
                     justify-content: center;
-                    min-height: 90vh;
                 }
                 .container {
-                    background: var(--card);
-                    padding: 35px;
-                    border-radius: 24px;
-                    box-shadow: 0 20px 40px rgba(0,0,0,0.06);
-                    max-width: 650px;
+                    max-width: 720px;
                     width: 100%;
+                    padding: 28px;
                     box-sizing: border-box;
-                    transition: transform 0.3s;
+                    border-radius: 28px;
+                    background: var(--card);
+                    border: 1px solid rgba(255,255,255,.62);
+                    box-shadow: 0 28px 80px rgba(20,20,40,.12);
+                    backdrop-filter: blur(28px) saturate(1.45);
+                    -webkit-backdrop-filter: blur(28px) saturate(1.45);
                 }
                 h1 {
-                    font-size: 26px;
-                    color: var(--primary);
-                    margin-top: 0;
-                    text-align: center;
-                    font-weight: 800;
-                    letter-spacing: -0.5px;
+                    margin: 0 0 8px;
+                    font-size: 28px;
+                    line-height: 1.15;
+                    letter-spacing: -.6px;
                 }
-                p {
+                .subtitle {
+                    margin: 0 0 22px;
+                    color: var(--muted);
                     font-size: 14px;
-                    color: var(--text-secondary);
-                    line-height: 1.6;
-                    margin-bottom: 20px;
-                    text-align: center;
+                    line-height: 1.65;
+                }
+                .pill {
+                    display: inline-flex;
+                    margin-bottom: 14px;
+                    padding: 7px 11px;
+                    border-radius: 999px;
+                    background: rgba(92,80,236,.10);
+                    color: var(--primary);
+                    font-size: 12px;
+                    font-weight: 700;
                 }
                 textarea {
                     width: 100%;
-                    height: 300px;
+                    min-height: 330px;
                     padding: 18px;
-                    border: 2px solid var(--border);
-                    border-radius: 16px;
+                    border: 1px solid var(--border);
+                    border-radius: 20px;
                     font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
                     font-size: 13px;
+                    line-height: 1.55;
                     box-sizing: border-box;
                     resize: vertical;
-                    background: #fafafa;
-                    transition: all 0.3s;
+                    background: rgba(255,255,255,.74);
+                    color: var(--text);
                 }
                 textarea:focus {
                     outline: none;
                     border-color: var(--primary);
-                    background: #ffffff;
-                    box-shadow: 0 0 0 4px rgba(92, 80, 236, 0.12);
+                    box-shadow: 0 0 0 4px rgba(92,80,236,.12);
                 }
                 button {
+                    width: 100%;
+                    margin-top: 18px;
+                    padding: 16px 18px;
+                    border: 0;
+                    border-radius: 18px;
                     background-color: var(--primary);
                     color: white;
-                    border: none;
-                    padding: 16px 20px;
-                    font-size: 16px;
-                    font-weight: bold;
-                    border-radius: 16px;
-                    width: 100%;
+                    font-size: 15px;
+                    font-weight: 800;
                     cursor: pointer;
-                    margin-top: 20px;
-                    transition: all 0.2s;
-                    box-shadow: 0 4px 12px rgba(92, 80, 236, 0.2);
+                    box-shadow: 0 14px 30px rgba(92,80,236,.24);
+                    transition: transform .16s ease, opacity .16s ease;
                 }
-                button:hover {
-                    background-color: var(--primary-hover);
-                    transform: translateY(-2px);
-                    box-shadow: 0 6px 20px rgba(92, 80, 236, 0.3);
-                }
-                button:active {
-                    transform: translateY(0);
-                }
-                .footer {
-                    margin-top: 25px;
-                    font-size: 12px;
-                    color: #999;
-                    text-align: center;
-                }
+                button:active { transform: scale(.985); }
+                button:disabled { opacity: .55; cursor: wait; }
                 .toast {
                     position: fixed;
                     top: -100px;
@@ -549,61 +569,56 @@ final class LightweightHTTPServer: ObservableObject {
                     padding: 16px 24px;
                     border-radius: 16px;
                     color: white;
-                    font-weight: 600;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-                    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    font-weight: 700;
+                    box-shadow: 0 10px 30px rgba(0,0,0,.15);
+                    transition: all .35s cubic-bezier(.2,.8,.2,1);
                     z-index: 1000;
                     text-align: center;
                     min-width: 300px;
                 }
-                .toast.success {
-                    background-color: #10b981;
-                }
-                .toast.error {
-                    background-color: #ef4444;
-                }
-                .toast.show {
-                    top: 24px;
-                }
+                .toast.success { background-color: #10b981; }
+                .toast.error { background-color: #ef4444; }
+                .toast.show { top: 24px; }
+                .footer { margin-top: 16px; color: var(--muted); font-size: 12px; text-align: center; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>Web 书源导入助手</h1>
-                <p>粘贴您的 JSON 书源规则或规则数组，点击下方按钮立即同步到手机中。</p>
-                <textarea id="json-input" placeholder='请在此处输入 JSON 书源，支持单个书源或书源数组，例如：&#10;[&#10;  {&#10;    "bookSourceName": "我的精选书源",&#10;    "bookSourceUrl": "http://example.com"&#10;  }&#10;]'></textarea>
-                <button id="import-btn" onclick="performImport()">立即导入到手机</button>
+                <div class="pill">LAN source writer</div>
+                <h1>Web Source Import</h1>
+                <p class="subtitle">Paste Legado 3.0 JSON, iOS-compatible JSON, or a JSON source array. The content will be imported into the iPhone app.</p>
+                <textarea id="json-input" placeholder='Paste JSON book source here, for example:
+        [
+          {
+            "bookSourceName": "Example",
+            "bookSourceUrl": "https://example.invalid",
+            "searchUrl": "https://example.invalid/search?q={{key}}"
+          }
+        ]'></textarea>
+                <button id="import-btn" onclick="performImport()">Import to iPhone</button>
+                <div class="footer">Keep this page and the iPhone on the same Wi-Fi.</div>
             </div>
-            <div class="footer">SourceReadSwift Web Sync Center</div>
-            
             <div id="toast" class="toast"></div>
-
             <script>
                 function showToast(message, isSuccess) {
                     const toast = document.getElementById('toast');
                     toast.textContent = message;
                     toast.className = 'toast ' + (isSuccess ? 'success' : 'error') + ' show';
-                    setTimeout(() => {
-                        toast.classList.remove('show');
-                    }, 4000);
+                    setTimeout(() => toast.classList.remove('show'), 4000);
                 }
 
                 function performImport() {
                     const text = document.getElementById('json-input').value.trim();
                     if (!text) {
-                        showToast('请输入 JSON 书源内容', false);
+                        showToast('Please paste JSON source content.', false);
                         return;
                     }
-                    
                     const btn = document.getElementById('import-btn');
                     btn.disabled = true;
-                    btn.textContent = '正在导入...';
-                    
+                    btn.textContent = 'Importing...';
                     fetch('/import', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: text
                     })
                     .then(async res => {
@@ -612,15 +627,13 @@ final class LightweightHTTPServer: ObservableObject {
                             showToast(responseText, true);
                             document.getElementById('json-input').value = '';
                         } else {
-                            showToast('导入失败: ' + responseText, false);
+                            showToast('Import failed: ' + responseText, false);
                         }
                     })
-                    .catch(err => {
-                        showToast('网络连接失败: ' + err, false);
-                    })
+                    .catch(err => showToast('Network error: ' + err, false))
                     .finally(() => {
                         btn.disabled = false;
-                        btn.textContent = '立即导入到手机';
+                        btn.textContent = 'Import to iPhone';
                     });
                 }
             </script>
@@ -628,6 +641,7 @@ final class LightweightHTTPServer: ObservableObject {
         </html>
         """
     }
+
 }
 
 // MARK: - IP Address Helper

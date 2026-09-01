@@ -14,6 +14,8 @@ struct ReaderView: View {
     var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
     var onRequestSourceSwitch: (() -> Void)?
     var onSelectChapter: ((BookChapter) -> Void)?
+    var onRefreshChapter: (() -> Void)?
+    var onCacheNextChapters: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var showOverlay = false
@@ -50,6 +52,7 @@ struct ReaderView: View {
     @AppStorage("reader.tapZones") private var tapZonesRawValue: String = ReaderTapAction.defaultRawValue
     @AppStorage("reader.keepScreenAwake") private var keepScreenAwake = true
     @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
+    @AppStorage("reader.textSelectionEnabled") private var textSelectionEnabled = false
 
     private var background: ReaderBackground {
         ReaderBackground(rawValue: backgroundRawValue) ?? .paper
@@ -207,6 +210,7 @@ struct ReaderView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .statusBarHidden(!showOverlay)
         .preferredColorScheme(background == .dark ? .dark : .light)
         .sheet(isPresented: $showChapterList) {
             chapterListSheet
@@ -425,7 +429,7 @@ struct ReaderView: View {
                             .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
                             .foregroundStyle(background.textColor)
                             .padding(.bottom, CGFloat(titleSpacing))
-                            .textSelection(.enabled)
+                            .readerSelectableText(textSelectionEnabled)
                     }
 
                     ForEach(page.paragraphs, id: \.index) { entry in
@@ -471,7 +475,7 @@ struct ReaderView: View {
                         .fill(AppTheme.accent.opacity(background == .dark ? 0.22 : 0.12))
                 }
             }
-            .textSelection(.enabled)
+            .readerSelectableText(textSelectionEnabled)
     }
 
     private func paragraphPositionReader(index: Int) -> some View {
@@ -524,6 +528,12 @@ struct ReaderView: View {
                 Spacer()
 
                 extraToolbarActions()
+
+                if let onRefreshChapter {
+                    chromeIconButton(systemName: "arrow.clockwise") {
+                        onRefreshChapter()
+                    }
+                }
 
                 chromeIconButton(systemName: isCurrentChapterBookmarked ? "bookmark.fill" : "bookmark") {
                     toggleCurrentBookmark(openList: false)
@@ -585,6 +595,12 @@ struct ReaderView: View {
                     toolButton(icon: autoScrollEnabled ? "pause.fill" : "play.fill", title: autoScrollEnabled ? "暂停" : "自动") {
                         toggleAutoScroll()
                         showSettings = false
+                    }
+                    if let onCacheNextChapters {
+                        toolButton(icon: "square.and.arrow.down", title: "缓存") {
+                            onCacheNextChapters()
+                            showSettings = false
+                        }
                     }
                     toolButton(icon: "gearshape", title: "设置") {
                         withAnimation(.easeOut(duration: 0.2)) {
@@ -839,6 +855,9 @@ struct ReaderView: View {
             Slider(value: $autoScrollDelay, in: 0.8...5.0, step: 0.2)
 
             Toggle("阅读时保持屏幕常亮", isOn: $keepScreenAwake)
+                .font(.subheadline.weight(.semibold))
+
+            Toggle("允许正文文字选择", isOn: $textSelectionEnabled)
                 .font(.subheadline.weight(.semibold))
 
             settingStepper(title: "预加载章节", value: ReaderPreloadPolicy.title(for: preloadChapterCount)) {
@@ -1508,6 +1527,17 @@ private struct ReaderPageBlock: Identifiable, Equatable {
 
     var lastParagraphIndex: Int? {
         paragraphs.last?.index
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func readerSelectableText(_ enabled: Bool) -> some View {
+        if enabled {
+            textSelection(.enabled)
+        } else {
+            self
+        }
     }
 }
 

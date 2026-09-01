@@ -2,8 +2,13 @@ import Foundation
 import SwiftSoup
 
 struct BookDetailParser {
-    private let htmlExtractor = HtmlRuleExtractor()
-    private let jsonExtractor = JSONRuleExtractor()
+    private let htmlExtractor: HtmlRuleExtractor
+    private let jsonExtractor: JSONRuleExtractor
+
+    init(executionContext: RuleExecutionContext = RuleExecutionContext()) {
+        self.htmlExtractor = HtmlRuleExtractor(executionContext: executionContext)
+        self.jsonExtractor = JSONRuleExtractor(executionContext: executionContext)
+    }
 
     func parse(source: BookSource, book: SearchBook, response: SourceResponse) -> Result<BookDetail, SourceEngineError> {
         let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)

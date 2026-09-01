@@ -67,9 +67,15 @@ final class AppState: ObservableObject {
                 record(DiagnosticEvent(level: .info, stage: "import", sourceName: parsed.title, message: "已导入 EPUB"))
             } else {
                 let data = try Data(contentsOf: localURL)
-                if ext == "json", let text = String(data: data, encoding: .utf8) {
-                    let report = try sourceStore.importJSON(text)
-                    record(DiagnosticEvent(level: .info, stage: "import", message: report.userMessage))
+                if shouldTrySourceImport(fileExtension: ext, data: data) {
+                    do {
+                        let report = try sourceStore.importJSONData(data)
+                        record(DiagnosticEvent(level: .info, stage: "import", message: report.userMessage))
+                    } catch where ext != "json" {
+                        let parsed = LocalTextBookParser().parse(data: data, fileName: localURL.lastPathComponent)
+                        bookshelfStore.addLocalTextBook(parsed)
+                        record(DiagnosticEvent(level: .info, stage: "import", sourceName: parsed.title, message: "已导入本地文本"))
+                    }
                 } else {
                     let parsed = LocalTextBookParser().parse(data: data, fileName: localURL.lastPathComponent)
                     bookshelfStore.addLocalTextBook(parsed)
@@ -79,6 +85,20 @@ final class AppState: ObservableObject {
         } catch {
             record(DiagnosticEvent(level: .error, stage: "import", message: "文件导入失败：\(error.localizedDescription)", details: ["file": url.lastPathComponent]))
         }
+    }
+
+    private func shouldTrySourceImport(fileExtension ext: String, data: Data) -> Bool {
+        if ext == "json" { return true }
+        guard ["", "txt", "text", "data"].contains(ext) else { return false }
+        let text = ResponseTextDecoder()
+            .decode(data: data.prefix(128_000), headers: [:])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        return text.hasPrefix("{")
+            || text.hasPrefix("[")
+            || text.contains("bookSourceName")
+            || text.contains("bookSourceUrl")
+            || text.contains("ruleSearch")
     }
 
     private func bindChildStores() {

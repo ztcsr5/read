@@ -37,6 +37,10 @@ struct DiscoverView: View {
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                dismissKeyboard()
+            }
             .scrollDismissesKeyboard(.interactively)
             .pageBackground()
             .navigationTitle("")
@@ -98,6 +102,12 @@ struct DiscoverView: View {
                 .submitLabel(.search)
                 .onSubmit {
                     Task { await viewModel.search() }
+                }
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { dismissKeyboard() }
+                    }
                 }
         }
         .padding(.horizontal, 16)
@@ -329,8 +339,23 @@ struct DiscoverView: View {
 }
 
 private struct WebNovelModeView: View {
+    @State private var pageURL = ""
+
     var body: some View {
         List {
+            Section("URL") {
+                TextField("https://example.com/book/1", text: $pageURL)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+
+                Button {
+                    UIPasteboard.general.string = pageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                } label: {
+                    Label("Copy URL", systemImage: "doc.on.doc")
+                }
+                .disabled(pageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("智能网页小说模式")
@@ -433,7 +458,9 @@ final class DiscoverViewModel: ObservableObject {
             await withTaskGroup(of: (BookSource, Result<[SearchBook], SourceEngineError>).self) { group in
                 for source in batch {
                     group.addTask {
-                        let result = await engine.searchBooks(source: source, keyword: keyword, page: 1)
+                        let result = await AsyncTimeout.run(seconds: 10) {
+                            await engine.searchBooks(source: source, keyword: keyword, page: 1)
+                        } ?? .failure(.network("Search timed out"))
                         return (source, result)
                     }
                 }

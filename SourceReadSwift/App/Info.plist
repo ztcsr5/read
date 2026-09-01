@@ -12,7 +12,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>用于在局域网内导入、导出和管理书源。</string>
+	<string>Used to import, export and manage book sources on the local network.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
@@ -32,8 +32,40 @@
 				<string>public.text</string>
 				<string>public.plain-text</string>
 				<string>public.data</string>
+				<string>public.item</string>
+				<string>public.content</string>
+				<string>com.edc21.sourceread.source-json</string>
 				<string>org.idpf.epub-container</string>
 			</array>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.edc21.sourceread.source-json</string>
+			<key>UTTypeDescription</key>
+			<string>SourceRead book source JSON or plain text</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+				<string>public.text</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>json</string>
+					<string>txt</string>
+					<string>text</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/json</string>
+					<string>text/plain</string>
+				</array>
+			</dict>
 		</dict>
 	</array>
 	<key>UILaunchScreen</key>

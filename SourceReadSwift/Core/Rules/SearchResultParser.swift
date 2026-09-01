@@ -2,7 +2,13 @@ import Foundation
 import SwiftSoup
 
 struct SearchResultParser {
-    private let htmlExtractor = HtmlRuleExtractor()
+    private let htmlExtractor: HtmlRuleExtractor
+    private let jsonExtractor: JSONRuleExtractor
+
+    init(executionContext: RuleExecutionContext = RuleExecutionContext()) {
+        self.htmlExtractor = HtmlRuleExtractor(executionContext: executionContext)
+        self.jsonExtractor = JSONRuleExtractor(executionContext: executionContext)
+    }
 
     func parse(source: BookSource, response: SourceResponse) -> Result<[SearchBook], SourceEngineError> {
         let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -59,7 +65,7 @@ struct SearchResultParser {
               let object = try? JSONSerialization.jsonObject(with: data) else {
             return .failure(.rule("JSON 解析失败"))
         }
-        let extractor = JSONRuleExtractor()
+        let extractor = jsonExtractor
         let rule = source.ruleSearch
         let rootObject: Any
         if let initRule = firstRule(rule, keys: ["init"]),

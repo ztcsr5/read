@@ -1,8 +1,13 @@
 import Foundation
 
 struct ContentParser {
-    private let htmlExtractor = HtmlRuleExtractor()
-    private let jsonExtractor = JSONRuleExtractor()
+    private let htmlExtractor: HtmlRuleExtractor
+    private let jsonExtractor: JSONRuleExtractor
+
+    init(executionContext: RuleExecutionContext = RuleExecutionContext()) {
+        self.htmlExtractor = HtmlRuleExtractor(executionContext: executionContext)
+        self.jsonExtractor = JSONRuleExtractor(executionContext: executionContext)
+    }
 
     func parse(
         source: BookSource,

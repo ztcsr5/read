@@ -439,4 +439,43 @@ final class SourceStoreTests: XCTestCase {
         XCTAssertEqual(store.rssSources.count, 0)
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testSourceSwitchCandidatesPrioritizePatternAndWeight() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+
+        try store.importJSON("""
+        [
+          {
+            "bookSourceName": "Fallback",
+            "bookSourceUrl": "https://fallback.example.com",
+            "searchUrl": "/search?q={{key}}",
+            "weight": 100
+          },
+          {
+            "bookSourceName": "Low Pattern",
+            "bookSourceUrl": "https://low.example.com",
+            "searchUrl": "/search?q={{key}}",
+            "weight": 1,
+            "bookUrlPattern": "books\\\\.example/\\\\d+"
+          },
+          {
+            "bookSourceName": "High Pattern",
+            "bookSourceUrl": "https://high.example.com",
+            "searchUrl": "/search?q={{key}}",
+            "weight": 10,
+            "bookUrlPattern": "books\\\\.example/\\\\d+"
+          }
+        ]
+        """)
+
+        let candidates = store.sourceSwitchCandidates(
+            for: "https://books.example/123",
+            excluding: "https://current.example.com"
+        )
+
+        XCTAssertEqual(candidates.map(\.bookSourceName), ["High Pattern", "Low Pattern", "Fallback"])
+        try? FileManager.default.removeItem(at: root)
+    }
 }

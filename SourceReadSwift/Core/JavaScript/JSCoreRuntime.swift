@@ -51,6 +51,18 @@ final class JSCoreRuntime {
                 map["header"] = source.header ?? ""
                 map["customConfig"] = source.customConfig ?? ""
                 jsCompatibleValue = map
+            } else if let chapter = value as? BookChapter {
+                jsCompatibleValue = LegadoBookChapterBridge(chapter: chapter)
+            } else if let book = value as? SearchBook {
+                jsCompatibleValue = LegadoSearchBookBridge(book: book)
+            } else if let book = value as? BookDetail {
+                let bridge = LegadoSearchBookBridge(book: SearchBook(
+                    name: book.name, author: book.author, coverUrl: book.coverUrl,
+                    bookUrl: book.bookUrl, sourceName: book.sourceName, sourceUrl: book.sourceUrl, intro: book.intro
+                ))
+                bridge.tocUrl = book.tocUrl ?? ""
+                bridge.latestChapterTitle = book.latestChapter ?? ""
+                jsCompatibleValue = bridge
             }
             context.setObject(jsCompatibleValue, forKeyedSubscript: key as NSString)
             
@@ -434,9 +446,12 @@ final class JSCoreRuntime {
         function __bridgeResponse(text, responseUrl) {
           var value = String(text || '');
           return {
+            statusCode: 200,
             body: function() { return value; },
             text: function() { return value; },
             url: function() { return String(responseUrl || ''); },
+            header: function(_) { return ''; },
+            headers: function() { return {}; },
             toString: function() { return value; },
             valueOf: function() { return value; }
           };

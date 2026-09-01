@@ -513,3 +513,62 @@
   - `progress.md`: records this MR function absorption fix.
 - Do not commit unrelated `ci-log/run-27952116519/`.
 - Rollback: revert this progress entry and the two Swift/test changes above.
+
+## 2026-06-27 - Task: Local product-node reader and source workflow hardening
+
+### What was done
+- Continued local-only development after the previous push. No new push or Actions run was triggered for this batch.
+- Added reader callbacks for refreshing the current chapter from network and manually caching upcoming chapters.
+- Added copyable chapter-load diagnostics so failed source/chapter/book URLs can be copied from the error screen.
+- Added Web source-writing copy actions for the LAN server address and server logs.
+- Improved Discover search keyboard handling with background tap dismissal and a keyboard Done action.
+- Added source-switch candidate ordering based on `bookUrlPattern` plus `weight`, then falling back to weighted searchable sources.
+- Added a concrete URL copy tool to the Web helper page so the previous explanatory-only page now has a usable source-writing handoff step.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Added unit coverage for source-switch candidate ordering by `bookUrlPattern` and `weight`.
+- Local Windows still has no `swift`, `xcodebuild`, or `xcodegen`; this batch remains local and unpushed until a larger product-node pass is ready.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/Features/Reader/ReaderView.swift`: exposes refresh/cache callbacks in the glass reader controls.
+  - `SourceReadSwift/Features/Discover/BookDetailView.swift`: wires refresh/cache callbacks, stale-cache bypass retry, and copyable chapter diagnostics.
+  - `SourceReadSwift/Features/Discover/SourceWritingView.swift`: adds copy actions for server URLs and logs.
+  - `SourceReadSwift/Features/Discover/DiscoverView.swift`: adds keyboard dismissal affordances.
+  - `SourceReadSwift/Core/Storage/SourceStore.swift`: adds source-switch candidate ordering by pattern and weight.
+  - `SourceReadSwift/Features/Bookshelf/BookshelfReaderGatewayView.swift`: uses the ordered source-switch candidates.
+  - `SourceReadSwiftTests/SourceStoreTests.swift`: covers pattern/weight source-switch ordering.
+  - `progress.md`: records this local product-node hardening batch.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the files listed above.
+
+## 2026-06-27 - Task: Local-only product-node interaction, import, reader, and source-check hardening
+
+### What was done
+- Stopped treating push/Actions as progress for this batch; this round remains local-only and is not ready to push.
+- Removed stale legacy Web source-writing HTML and the unreachable duplicate return path, leaving one stable LAN import page.
+- Reduced tap-feedback latency for the root tab bar and bookshelf cards to better match the existing Flutter `PressableScale` feel.
+- Made bookshelf section headers consistently navigable, removed a zero-distance drag gesture that could steal `NavigationLink` taps, and added empty collection states.
+- Added a direct local JSON import button in source management and increased the sheet-dismiss delay for the fallback file-picker path.
+- Added shared-document content sniffing so JSON sources received as `.txt`, `.text`, no-extension, or generic data can be imported as sources instead of being misclassified as local books.
+- Hardened reader smoothness by hiding the status bar during reading and defaulting paragraph text selection off, with an advanced setting to re-enable text selection when needed.
+- Clarified batch source-check semantics and added timeout protection to single-source and batch deep checks for details, table of contents, and content.
+
+### Testing
+- Ran `git diff --check`; it passed with only Windows LF-to-CRLF warnings.
+- Loaded `SourceReadSwift/App/Info.plist` as XML; it passed with `Info.plist XML OK`.
+- Local Windows still has no `swift`, `xcodebuild`, or `xcodegen`, so compile/device behavior remains unverified until a later product-node push/Actions pass.
+
+### Notes
+- Changed files:
+  - `SourceReadSwift/App/AppState.swift`: sniffs shared JSON-like files before falling back to local book import.
+  - `SourceReadSwift/App/RootTabView.swift`: shortens tab press feedback animation.
+  - `SourceReadSwift/Features/Bookshelf/BookshelfView.swift`: fixes section navigation consistency, removes tap-stealing drag handling, improves collection empty state, and shortens press feedback.
+  - `SourceReadSwift/Features/Discover/SourceWritingView.swift`: removes stale legacy Web HTML and keeps the stable LAN source writer page.
+  - `SourceReadSwift/Features/Reader/ReaderView.swift`: hides status bar during reading and adds a text-selection performance toggle.
+  - `SourceReadSwift/Features/SourceManager/SourceManagerView.swift`: adds direct local JSON import, improves import-picker timing, updates batch-check copy, and adds deep-check timeouts.
+  - `progress.md`: records this local-only hardening batch.
+- Do not push this batch yet; it is still a local product-node hardening pass, not a release/test handoff.
+- Do not commit unrelated `ci-log/run-27952116519/`.
+- Rollback: revert this progress entry and the files listed above, or reset only these local hunks before the eventual product-node commit.

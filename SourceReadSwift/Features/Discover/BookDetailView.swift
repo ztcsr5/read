@@ -145,10 +145,18 @@ struct BookDetailView: View {
         isLoading = true
         defer { isLoading = false }
 
-        switch await appState.engine.getBookDetail(source: source, book: book) {
+        let engine = appState.engine
+        let selectedBook = book
+        let detailResult = await AsyncTimeout.run(seconds: 12) {
+            await engine.getBookDetail(source: source, book: selectedBook)
+        } ?? .failure(.network("Detail load timed out"))
+        switch detailResult {
         case .success(let loadedDetail):
             detail = loadedDetail
-            switch await appState.engine.getChapterList(source: source, book: loadedDetail) {
+            let chapterResult = await AsyncTimeout.run(seconds: 12) {
+                await engine.getChapterList(source: source, book: loadedDetail)
+            } ?? .failure(.network("Chapter list timed out"))
+            switch chapterResult {
             case .success(let loadedChapters):
                 chapters = loadedChapters
                 if appState.bookshelfStore.contains(book) {
@@ -204,6 +212,7 @@ struct ChapterLoadingView: View {
     @State private var currentChapter: BookChapter?
     @State private var errorMessage: String?
     @State private var isUsingStaleCache = false
+    @State private var isCachingNext = false
     @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
 
     private var effectiveChapter: BookChapter {
@@ -227,12 +236,28 @@ struct ChapterLoadingView: View {
                         content = nil
                         errorMessage = nil
                         isUsingStaleCache = false
+                    },
+                    onRefreshChapter: {
+                        Task { await load(force: true, ignoreCache: true) }
+                    },
+                    onCacheNextChapters: {
+                        Task { await cacheNextChaptersFromReader() }
                     }
                 )
             } else if let errorMessage {
                 chapterLoadErrorView(errorMessage)
             } else {
                 chapterLoadingView
+            }
+        }
+        .overlay(alignment: .top) {
+            if isCachingNext {
+                Text("Caching next chapters...")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .glassPanel(cornerRadius: 14, material: .thinMaterial, shadowOpacity: 0.08)
+                    .padding(.top, 14)
             }
         }
         .task {
@@ -245,7 +270,7 @@ struct ChapterLoadingView: View {
         }
     }
 
-    private func load(force: Bool = false) async {
+    private func load(force: Bool = false, ignoreCache: Bool = false) async {
         if force {
             content = nil
             errorMessage = nil
@@ -257,26 +282,31 @@ struct ChapterLoadingView: View {
             return
         }
         let purifyRules = appState.purifyRuleStore.enabledPatterns
-        if let cached = appState.chapterContentCacheStore.content(
+        let targetChapter = effectiveChapter
+        if !ignoreCache, let cached = appState.chapterContentCacheStore.content(
             sourceURL: source.bookSourceUrl,
-            chapter: effectiveChapter,
+            chapter: targetChapter,
             purifyRules: purifyRules
         ) {
             content = cached
             isUsingStaleCache = false
-            preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
+            preloadNextChapters(after: targetChapter, source: source, purifyRules: purifyRules)
             return
         }
-        switch await appState.engine.getContent(source: source, chapter: effectiveChapter) {
+        let engine = appState.engine
+        let contentResult = await AsyncTimeout.run(seconds: 14) {
+            await engine.getContent(source: source, chapter: targetChapter)
+        } ?? .failure(.network("Content load timed out"))
+        switch contentResult {
         case .success(let loaded):
             appState.chapterContentCacheStore.save(loaded, sourceURL: source.bookSourceUrl, purifyRules: purifyRules)
             content = loaded
             isUsingStaleCache = false
-            preloadNextChapters(after: effectiveChapter, source: source, purifyRules: purifyRules)
+            preloadNextChapters(after: targetChapter, source: source, purifyRules: purifyRules)
         case .failure(let error):
             if let cached = appState.chapterContentCacheStore.staleContent(
                 sourceURL: source.bookSourceUrl,
-                chapter: effectiveChapter
+                chapter: targetChapter
             ) {
                 content = cached
                 isUsingStaleCache = true
@@ -301,9 +331,12 @@ struct ChapterLoadingView: View {
                 )
             }
         guard !nextChapters.isEmpty else { return }
+        let engine = appState.engine
         Task {
             for next in nextChapters {
-                let result = await appState.engine.getContent(source: source, chapter: next)
+                let result = await AsyncTimeout.run(seconds: 10) {
+                    await engine.getContent(source: source, chapter: next)
+                } ?? .failure(.network("Preload timed out"))
                 if case .success(let loaded) = result {
                     await MainActor.run {
                         appState.chapterContentCacheStore.save(
@@ -313,6 +346,35 @@ struct ChapterLoadingView: View {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    private func cacheNextChapters(after chapter: BookChapter, source: BookSource, purifyRules: [String]) async {
+        let count = ReaderPreloadPolicy.clamp(preloadChapterCount)
+        guard count > 0 else { return }
+        let nextChapters = chapters
+            .filter { $0.index > chapter.index }
+            .sorted { $0.index < $1.index }
+            .prefix(count)
+            .filter {
+                !appState.chapterContentCacheStore.isCached(
+                    sourceURL: source.bookSourceUrl,
+                    chapter: $0,
+                    purifyRules: purifyRules
+                )
+        }
+        let engine = appState.engine
+        for next in nextChapters {
+            let result = await AsyncTimeout.run(seconds: 10) {
+                await engine.getContent(source: source, chapter: next)
+            } ?? .failure(.network("Cache timed out"))
+            if case .success(let loaded) = result {
+                appState.chapterContentCacheStore.save(
+                    loaded,
+                    sourceURL: source.bookSourceUrl,
+                    purifyRules: purifyRules
+                )
             }
         }
     }
@@ -336,13 +398,31 @@ struct ChapterLoadingView: View {
         .pageBackground()
     }
 
+    private func cacheNextChaptersFromReader() async {
+        guard !isCachingNext else { return }
+        guard let source = appState.sourceStore.source(for: sourceUrl) else { return }
+        isCachingNext = true
+        defer { isCachingNext = false }
+        await cacheNextChapters(after: effectiveChapter, source: source, purifyRules: appState.purifyRuleStore.enabledPatterns)
+    }
+
     private func chapterLoadErrorView(_ message: String) -> some View {
         VStack(spacing: 14) {
             EmptyStateCard(systemImage: "xmark.octagon", title: "正文加载失败", message: message)
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                Task { await load(force: true) }
+                UIPasteboard.general.string = chapterDiagnosticText(message)
+            } label: {
+                Label("Copy diagnostics", systemImage: "doc.on.doc")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Task { await load(force: true, ignoreCache: true) }
             } label: {
                 Label("重试当前章节", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity)
@@ -364,6 +444,18 @@ struct ChapterLoadingView: View {
         }
         .padding(AppTheme.pagePadding)
         .pageBackground()
+    }
+
+    private func chapterDiagnosticText(_ message: String) -> String {
+        [
+            "Chapter load failed",
+            "sourceUrl: \(sourceUrl)",
+            "bookUrl: \(effectiveChapter.bookUrl)",
+            "chapterIndex: \(effectiveChapter.index)",
+            "chapterTitle: \(effectiveChapter.title)",
+            "chapterUrl: \(effectiveChapter.url)",
+            "message: \(message)"
+        ].joined(separator: "\n")
     }
 
     init(

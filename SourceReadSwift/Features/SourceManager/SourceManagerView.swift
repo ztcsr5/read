@@ -99,7 +99,7 @@ struct SourceManagerView: View {
             .onChange(of: showImportSheet) { isPresented in
                 guard !isPresented, openFileImporterAfterSheetDismiss else { return }
                 openFileImporterAfterSheetDismiss = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                     showFileImporter = true
                 }
             }
@@ -139,6 +139,7 @@ struct SourceManagerView: View {
                         .data,
                         .content,
                         .item,
+                        UTType(importedAs: "com.edc21.sourceread.source-json"),
                         UTType(filenameExtension: "json") ?? .json,
                         UTType(filenameExtension: "txt") ?? .plainText,
                         UTType(filenameExtension: "text") ?? .text
@@ -187,6 +188,15 @@ struct SourceManagerView: View {
                     showImportSheet = true
                 } label: {
                     Label("导入", systemImage: "tray.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showFileImporter = true
+                } label: {
+                    Label("本地 JSON", systemImage: "doc.badge.plus")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -785,7 +795,7 @@ struct SourceManagerView: View {
     private func batchCheckSheet(_ state: SourceBatchCheckState) -> some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text("将按顺序测试 \(state.sources.count) 个书源的搜索阶段。搜索通过后，可再进入单源深测验证详情、目录和正文。")
+                Text("将按顺序测试 \(state.sources.count) 个书源。默认会在搜索通过后继续验证首条结果的详情、目录和正文，避免只测搜索造成假绿。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -960,7 +970,10 @@ struct SourceManagerView: View {
         state.output = sourceTestHeader(source: state.source, keyword: keyword)
         sourceTest = state
 
-        let result = await appState.engine.searchBooks(source: state.source, keyword: keyword, page: 1)
+        let engine = appState.engine
+        let result = await AsyncTimeout.run(seconds: 10) {
+            await engine.searchBooks(source: state.source, keyword: keyword, page: 1)
+        } ?? .failure(.network("Search timed out"))
         guard var latest = sourceTest else { return }
         latest.isRunning = false
         switch result {
@@ -979,14 +992,23 @@ struct SourceManagerView: View {
                 output += "\n\n正在验证首条结果详情..."
                 latest.output = output
                 sourceTest = latest
-                switch await appState.engine.getBookDetail(source: state.source, book: first) {
+                let detailResult = await AsyncTimeout.run(seconds: 10) {
+                    await engine.getBookDetail(source: state.source, book: first)
+                } ?? .failure(.network("Detail test timed out"))
+                switch detailResult {
                 case .success(let detail):
                     output += "\n[PASS] 详情：\(detail.name)"
-                    switch await appState.engine.getChapterList(source: state.source, book: detail) {
+                    let chapterResult = await AsyncTimeout.run(seconds: 10) {
+                        await engine.getChapterList(source: state.source, book: detail)
+                    } ?? .failure(.network("Chapter test timed out"))
+                    switch chapterResult {
                     case .success(let chapters):
                         output += "\n[PASS] 目录：\(chapters.count) 章"
                         if let chapter = chapters.first {
-                            switch await appState.engine.getContent(source: state.source, chapter: chapter) {
+                            let contentResult = await AsyncTimeout.run(seconds: 10) {
+                                await engine.getContent(source: state.source, chapter: chapter)
+                            } ?? .failure(.network("Content test timed out"))
+                            switch contentResult {
                             case .success(let content):
                                 output += "\n[PASS] 正文：\(content.paragraphs.count) 段"
                                 if content.paragraphs.isEmpty {
@@ -1037,8 +1059,11 @@ struct SourceManagerView: View {
         state.results = []
         batchCheck = state
 
+        let engine = appState.engine
         for source in state.sources {
-            let result = await appState.engine.searchBooks(source: source, keyword: keyword, page: 1)
+            let result = await AsyncTimeout.run(seconds: 10) {
+                await engine.searchBooks(source: source, keyword: keyword, page: 1)
+            } ?? .failure(.network("Search timed out"))
             guard var latest = batchCheck else { return }
             latest.checkedCount += 1
             switch result {
@@ -1152,14 +1177,24 @@ struct SourceManagerView: View {
     }
 
     private func batchDeepCheckFirstResult(source: BookSource, book: SearchBook) async -> (status: SourceBatchCheckStatus, message: String) {
-        switch await appState.engine.getBookDetail(source: source, book: book) {
+        let engine = appState.engine
+        let detailResult = await AsyncTimeout.run(seconds: 10) {
+            await engine.getBookDetail(source: source, book: book)
+        } ?? .failure(.network("Detail deep check timed out"))
+        switch detailResult {
         case .success(let detail):
-            switch await appState.engine.getChapterList(source: source, book: detail) {
+            let chapterResult = await AsyncTimeout.run(seconds: 10) {
+                await engine.getChapterList(source: source, book: detail)
+            } ?? .failure(.network("Chapter deep check timed out"))
+            switch chapterResult {
             case .success(let chapters):
                 guard let firstChapter = chapters.first else {
                     return (.warning, "深测：详情通过，但目录为空。")
                 }
-                switch await appState.engine.getContent(source: source, chapter: firstChapter) {
+                let contentResult = await AsyncTimeout.run(seconds: 10) {
+                    await engine.getContent(source: source, chapter: firstChapter)
+                } ?? .failure(.network("Content deep check timed out"))
+                switch contentResult {
                 case .success(let content):
                     if content.paragraphs.isEmpty {
                         return (.warning, "深测：详情/目录通过，但正文为空。")
@@ -1291,7 +1326,7 @@ private struct SourceJSONEditorState: Identifiable {
     var json: String
 }
 
-private struct SourceTestState: Identifiable {
+private struct SourceTestState: Identifiable, Sendable {
     let id = UUID()
     let source: BookSource
     var keyword = "斗破苍穹"
@@ -1299,7 +1334,7 @@ private struct SourceTestState: Identifiable {
     var output: String?
 }
 
-private struct SourceBatchCheckState: Identifiable {
+private struct SourceBatchCheckState: Identifiable, Sendable {
     let id = UUID()
     let sources: [BookSource]
     var keyword = "斗破苍穹"
@@ -1314,7 +1349,7 @@ private struct SourceBatchCheckState: Identifiable {
     var failedCount: Int { results.filter { $0.status == .failed }.count }
 }
 
-private struct SourceBatchCheckResult: Identifiable {
+private struct SourceBatchCheckResult: Identifiable, Sendable {
     let id = UUID()
     let sourceName: String
     let sourceURL: String
@@ -1348,7 +1383,7 @@ private extension SourceHealthStatus {
     }
 }
 
-private enum SourceBatchCheckStatus: Equatable {
+private enum SourceBatchCheckStatus: Equatable, Sendable {
     case passed
     case warning
     case failed

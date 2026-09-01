@@ -72,6 +72,7 @@ struct BookshelfView: View {
                         .data,
                         .content,
                         .item,
+                        UTType(importedAs: "com.edc21.sourceread.source-json"),
                         UTType(filenameExtension: "txt") ?? .plainText,
                         UTType(filenameExtension: "text") ?? .text,
                         UTType(filenameExtension: "epub") ?? UTType(importedAs: "org.idpf.epub-container")
@@ -202,28 +203,22 @@ struct BookshelfView: View {
 
     @ViewBuilder
     private func collectionHeader(title: String, books: [BookshelfBook]) -> some View {
-        if books.isEmpty {
-            Text(title)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.primary)
-                .accessibilityAddTraits(.isHeader)
-        } else {
-            NavigationLink {
-                BookshelfCollectionView(title: title, books: books)
-            } label: {
-                HStack(spacing: 7) {
-                    Text(title)
-                        .font(.system(size: 22, weight: .bold))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .foregroundStyle(.primary)
-                .contentShape(Rectangle())
+        NavigationLink {
+            BookshelfCollectionView(title: title, books: books)
+        } label: {
+            HStack(spacing: 7) {
+                Text(title)
+                    .font(.system(size: 22, weight: .bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
-            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isHeader)
     }
 
     private var emptyImportCard: some View {
@@ -333,9 +328,15 @@ struct BookshelfView: View {
             await withTaskGroup(of: BookshelfRefreshResult.self) { group in
                 for candidate in batch {
                     group.addTask {
-                        switch await engine.getBookDetail(source: candidate.source, book: candidate.book) {
+                        let detailResult = await AsyncTimeout.run(seconds: 12) {
+                            await engine.getBookDetail(source: candidate.source, book: candidate.book)
+                        } ?? .failure(.network("Refresh timed out"))
+                        switch detailResult {
                         case .success(let detail):
-                            switch await engine.getChapterList(source: candidate.source, book: detail) {
+                            let chapterResult = await AsyncTimeout.run(seconds: 12) {
+                                await engine.getChapterList(source: candidate.source, book: detail)
+                            } ?? .failure(.network("Chapter refresh timed out"))
+                            switch chapterResult {
                             case .success(let chapters):
                                 return .success(
                                     bookID: candidate.bookID,
@@ -548,42 +549,50 @@ private struct BookshelfCollectionView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(books) { book in
-                    NavigationLink {
-                        BookshelfReaderGatewayView(book: book)
-                    } label: {
-                        HStack(spacing: 14) {
-                            AsyncBookCover(urlString: book.coverURL, width: 58, height: 82)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(book.title)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(2)
-                                Text(book.author)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                Text(book.currentChapterTitle ?? book.latestChapterTitle ?? "尚未开始阅读")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                if books.isEmpty {
+                    EmptyStateCard(
+                        systemImage: "books.vertical",
+                        title: "\(title)暂无书籍",
+                        message: "返回主页导入或搜索书籍后会显示在这里。"
+                    )
+                } else {
+                    ForEach(books) { book in
+                        NavigationLink {
+                            BookshelfReaderGatewayView(book: book)
+                        } label: {
+                            HStack(spacing: 14) {
+                                AsyncBookCover(urlString: book.coverURL, width: 58, height: 82)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(book.title)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Text(book.author)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Text(book.currentChapterTitle ?? book.latestChapterTitle ?? "尚未开始阅读")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.tertiary)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.tertiary)
+                            .padding(14)
+                            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         }
-                        .padding(14)
-                        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                    .buttonStyle(PressableScaleButtonStyle())
-                    .simultaneousGesture(TapGesture().onEnded {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
-                    })
-                    .contextMenu {
-                        Button("从书架删除", role: .destructive) {
-                            appState.bookshelfStore.remove(bookID: book.id)
+                        .buttonStyle(PressableScaleButtonStyle())
+                        .simultaneousGesture(TapGesture().onEnded {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
+                        })
+                        .contextMenu {
+                            Button("从书架删除", role: .destructive) {
+                                appState.bookshelfStore.remove(bookID: book.id)
+                            }
                         }
                     }
                 }
@@ -610,7 +619,7 @@ private struct PressableScaleButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.965 : 1)
             .opacity(configuration.isPressed ? 0.88 : 1)
-            .animation(.spring(response: 0.18, dampingFraction: 0.78), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.105), value: configuration.isPressed)
     }
 }
 
