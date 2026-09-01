@@ -791,8 +791,12 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
     }
     func getElementsByIndexEquals(_ index: Int) -> LegadoElementsBridge {
         let all: [SwiftSoup.Element] = (try? element.getAllElements()).map { Array($0) } ?? []
-        guard all.indices.contains(index) else { return LegadoElementsBridge(elements: [], baseURL: baseURL) }
-        return LegadoElementsBridge(elements: [all[index]], baseURL: baseURL)
+        // Jsoup's index evaluators refer to an element's sibling index, not
+        // its position in the depth-first getAllElements() traversal. Using
+        // the traversal index returned synthetic html/head nodes for a
+        // Document and made common rules such as index=2 miss the third item.
+        let matched = all.filter { (try? $0.elementSiblingIndex()) == index }
+        return LegadoElementsBridge(elements: matched, baseURL: baseURL)
     }
     func getElementsContainingText(_ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsContainingText(value)) }
     func getElementsContainingOwnText(_ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsContainingOwnText(value)) }

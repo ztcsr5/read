@@ -304,7 +304,12 @@ final class JSCoreRuntime {
                 for el in elements {
                     var curr = el.parent()
                     while let p = curr {
-                        parentsHtml.append(try p.outerHtml())
+                        // SwiftSoup exposes the synthetic Document (`#root`) as
+                        // an Element parent. Jsoup/SourceRead's JS bridge stops
+                        // at <html>, so do not leak that implementation detail.
+                        if p.nodeName() != "#root" {
+                            parentsHtml.append(try p.outerHtml())
+                        }
                         curr = p.parent()
                     }
                 }
@@ -431,6 +436,8 @@ final class JSCoreRuntime {
         }
         function __asJavaList(list) {
           list.get = function(index) { return list[Number(index)]; };
+          list.first = function() { return list.length ? list[0] : null; };
+          list.last = function() { return list.length ? list[list.length - 1] : null; };
           list.size = function() { return list.length; };
           list.isEmpty = function() { return list.length === 0; };
           return list;
