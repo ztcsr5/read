@@ -370,7 +370,11 @@ final class LegadoJXNodeBridge: NSObject, LegadoJXNodeExport {
         if let value = raw as? NSNumber { return value.doubleValue }
         return Double(toString()) ?? 0
     }
-    func isBoolean() -> Bool { raw is Bool || (raw as? NSNumber)?.objCType == "c" }
+    func isBoolean() -> Bool {
+        if raw is Bool { return true }
+        guard let type = (raw as? NSNumber)?.objCType else { return false }
+        return String(cString: type) == "c"
+    }
     func asBoolean() -> Bool {
         if let value = raw as? Bool { return value }
         if let value = raw as? NSNumber { return value.boolValue }
@@ -777,16 +781,16 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
     func getElementsByAttributeValueContaining(_ key: String, _ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsByAttributeValueContaining(key, value)) }
     func getElementsByAttributeValueMatching(_ key: String, _ value: String) -> LegadoElementsBridge { wrap(try? element.getElementsByAttributeValueMatching(key, value)) }
     func getElementsByIndexLessThan(_ index: Int) -> LegadoElementsBridge {
-        let all = ((try? element.getAllElements()) ?? []).compactMap { $0 as? SwiftSoup.Element }
+        let all: [SwiftSoup.Element] = (try? element.getAllElements()).map { Array($0) } ?? []
         return LegadoElementsBridge(elements: Array(all.prefix(max(0, index))), baseURL: baseURL)
     }
     func getElementsByIndexGreaterThan(_ index: Int) -> LegadoElementsBridge {
-        let all = ((try? element.getAllElements()) ?? []).compactMap { $0 as? SwiftSoup.Element }
+        let all: [SwiftSoup.Element] = (try? element.getAllElements()).map { Array($0) } ?? []
         let start = min(all.count, max(0, index + 1))
         return LegadoElementsBridge(elements: Array(all.dropFirst(start)), baseURL: baseURL)
     }
     func getElementsByIndexEquals(_ index: Int) -> LegadoElementsBridge {
-        let all = ((try? element.getAllElements()) ?? []).compactMap { $0 as? SwiftSoup.Element }
+        let all: [SwiftSoup.Element] = (try? element.getAllElements()).map { Array($0) } ?? []
         guard all.indices.contains(index) else { return LegadoElementsBridge(elements: [], baseURL: baseURL) }
         return LegadoElementsBridge(elements: [all[index]], baseURL: baseURL)
     }
