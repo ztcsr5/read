@@ -307,7 +307,7 @@ final class JSCoreRuntime {
                         // SwiftSoup exposes the synthetic Document (`#root`) as
                         // an Element parent. Jsoup/SourceRead's JS bridge stops
                         // at <html>, so do not leak that implementation detail.
-                        if p.nodeName() != "#root" {
+                        if p.nodeName() != "#root" && p.nodeName() != "#document" {
                             parentsHtml.append(try p.outerHtml())
                         }
                         curr = p.parent()
