@@ -5,4 +5,4 @@ build/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 .swiftpm/
-
+ci-log/
