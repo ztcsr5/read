@@ -102,7 +102,10 @@ final class LegadoTagBridge: NSObject, LegadoTagExport {
 }
 
 @objc protocol LegadoJavaHostExport: JSExport {
-    func invoke(_ payload: JSValue) -> Any
+    /// JSExport methods must use Objective-C bridgeable return types.  `Any` works
+    /// when called from Swift but prevents Xcode from emitting the generated ObjC
+    /// header, so expose the native command result as an object instead.
+    func invoke(_ payload: JSValue) -> AnyObject
 }
 
 /// Small command bridge used by the compatibility prelude. Public `java.*` names stay
@@ -117,12 +120,13 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
         super.init()
     }
 
-    func invoke(_ payload: JSValue) -> Any {
+    func invoke(_ payload: JSValue) -> AnyObject {
         let dictionary = Self.stringDictionary(payload.toDictionary())
         let method = RuleExecutionContext.bridgeString(dictionary["method"])
         let arguments = Self.arguments(dictionary["args"])
 
-        switch method {
+        let result: Any = {
+            switch method {
         case "put":
             guard let key = arguments.first else { return "" }
             return executionContext.put(arguments.dropFirst().first, for: RuleExecutionContext.bridgeString(key))
@@ -213,9 +217,13 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
             )
         case "sandboxPath":
             return services.sandboxURL.path
-        default:
-            return ""
-        }
+            default:
+                return ""
+            }
+        }()
+        // Foundation bridges String/Array/NSNumber/NSDictionary to ObjC objects,
+        // which is exactly what JavaScriptCore expects from a JSExport callback.
+        return result as AnyObject
     }
 
     private static func stringDictionary(_ value: [AnyHashable: Any]?) -> [String: Any] {
@@ -316,6 +324,7 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
 
 @objc protocol LegadoElementExport: JSExport {
     func nodeName() -> String
+    func getAttributes() -> LegadoAttributesBridge
     func nodeAttr(_ name: String) -> String
     func nodeAttr(_ name: String, _ value: String) -> LegadoElementBridge
     func nodeHasAttr(_ name: String) -> Bool
@@ -338,6 +347,7 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     func removeChild(_ index: Int) -> LegadoElementBridge
     func addChildren(_ html: String) -> LegadoElementBridge
     func addChildrenAt(_ index: Int, _ html: String) -> LegadoElementBridge
+    func insertChildren(_ index: Int, _ html: String) -> LegadoElementBridge
     func siblingNodes() -> NSArray
     func nextSibling() -> LegadoElementBridge?
     func previousSibling() -> LegadoElementBridge?
@@ -353,6 +363,11 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     func title(_ value: String) -> LegadoElementBridge
     func createElement(_ tag: String) -> LegadoElementBridge?
     func normalise() -> LegadoElementBridge
+    func tag() -> LegadoTagBridge
+    func tagNameNormal() -> String
+    func dataset() -> NSDictionary
+    func textNodes() -> NSArray
+    func dataNodes() -> NSArray
     func tagName() -> String
     func tagName(_ value: String) -> LegadoElementBridge
     func id() -> String
@@ -571,7 +586,12 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
         try? element.replaceWith(first)
         return self
     }
-    func setParentNode(_ parent: LegadoElementBridge?) -> LegadoElementBridge { try? element.setParentNode(parent?.element); return self }
+    func setParentNode(_ parent: LegadoElementBridge?) -> LegadoElementBridge {
+        // SwiftSoup follows Jsoup here but its native API does not accept nil.
+        // A missing parent is therefore a no-op rather than an ObjC bridge error.
+        if let parent { try? element.setParentNode(parent.element) }
+        return self
+    }
     func replaceChild(_ oldIndex: Int, _ html: String) -> LegadoElementBridge {
         guard oldIndex >= 0, oldIndex < element.childNodeSize(), let nodes = try? Parser.parseFragment(html, element, element.getBaseUriUTF8()), let first = nodes.first else { return self }
         try? element.replaceChild(element.childNode(oldIndex), first)
