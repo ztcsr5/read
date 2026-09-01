@@ -4,6 +4,10 @@ struct SynchronousSourceLoader {
     private let requestBuilder = SourceRequestBuilder()
 
     func load(urlText: String, source: BookSource, timeout: TimeInterval = 20) -> String {
+        loadResponse(urlText: urlText, source: source, timeout: timeout)?.body ?? ""
+    }
+
+    func loadResponse(urlText: String, source: BookSource, timeout: TimeInterval = 20) -> SourceResponse? {
         let request = requestBuilder.buildPageRequest(source: source, urlText: urlText)
         var urlRequest = URLRequest(url: request.url, timeoutInterval: timeout)
         urlRequest.httpMethod = request.method.rawValue
@@ -17,36 +21,46 @@ struct SynchronousSourceLoader {
 
         URLSession.shared.dataTask(with: urlRequest) { data, response, _ in
             var headers: [String: String] = [:]
+            var finalURL: URL?
+            var statusCode = 200
             if let http = response as? HTTPURLResponse {
+                finalURL = http.url
+                statusCode = http.statusCode
                 headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                     result[String(describing: item.key)] = String(describing: item.value)
                 }
             }
-            resultBox.store(data: data, headers: headers)
+            resultBox.store(data: data, headers: headers, url: finalURL, statusCode: statusCode)
             semaphore.signal()
         }.resume()
 
         let deadline = DispatchTime.now() + timeout
         guard semaphore.wait(timeout: deadline) == .success,
               let result = resultBox.load() else {
-            return ""
+            return nil
         }
-        return ResponseTextDecoder().decode(data: result.data, headers: result.headers, preferredCharset: request.expectedCharset)
+        let body = ResponseTextDecoder().decode(data: result.data, headers: result.headers, preferredCharset: request.expectedCharset)
+        return SourceResponse(url: result.url ?? request.url, statusCode: result.statusCode, headers: result.headers, body: body, data: result.data)
     }
 }
 
 private final class SynchronousLoadResultBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var result: (data: Data, headers: [String: String])?
+    private var result: (data: Data, headers: [String: String], url: URL?, statusCode: Int)?
 
-    func store(data: Data?, headers: [String: String]) {
-        guard let data else { return }
+    func store(data: Data?, headers: [String: String], url: URL?, statusCode: Int) {
+        guard let data else {
+            lock.lock()
+            result = nil
+            lock.unlock()
+            return
+        }
         lock.lock()
-        result = (data, headers)
+        result = (data, headers, url, statusCode)
         lock.unlock()
     }
 
-    func load() -> (data: Data, headers: [String: String])? {
+    func load() -> (data: Data, headers: [String: String], url: URL?, statusCode: Int)? {
         lock.lock()
         let current = result
         lock.unlock()

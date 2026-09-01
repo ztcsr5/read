@@ -97,6 +97,9 @@ final class LegadoRuleAnalyzer {
             script = String(script.dropFirst(4).dropLast(5))
         }
         let source = variables["source"] as? BookSource
+        executionContext.responseHandler = { urlText in
+            source.flatMap { SynchronousSourceLoader().loadResponse(urlText: urlText, source: $0) }
+        }
         let runtime = JSCoreRuntime(ajaxHandler: { urlText in
             source.map { SynchronousSourceLoader().load(urlText: urlText, source: $0) } ?? ""
         }, executionContext: executionContext)

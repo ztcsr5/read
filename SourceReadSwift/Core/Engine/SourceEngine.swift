@@ -31,6 +31,9 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
+        executionContext.responseHandler = { encoded in
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+        }
         await diagnostics.emit(.init(
             level: .info,
             stage: "search.prepare",
@@ -72,6 +75,9 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
+        executionContext.responseHandler = { encoded in
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+        }
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
@@ -91,6 +97,9 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
+        executionContext.responseHandler = { encoded in
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+        }
         let tocURL = book.tocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? book.bookUrl
         let request = requestBuilder.buildPageRequest(source: source, urlText: tocURL)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
@@ -119,6 +128,9 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
+        executionContext.responseHandler = { encoded in
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+        }
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
         let globalPurifyRules = await purifyRules()
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {

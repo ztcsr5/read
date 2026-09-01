@@ -7,6 +7,7 @@ import Foundation
 /// variable store (the main compatibility problem of the previous prelude-only runtime).
 final class RuleExecutionContext: @unchecked Sendable {
     typealias NetworkHandler = (String) -> String
+    typealias ResponseHandler = (String) -> SourceResponse?
     typealias LogHandler = (String) -> Void
 
     private let lock = NSRecursiveLock()
@@ -15,14 +16,17 @@ final class RuleExecutionContext: @unchecked Sendable {
     private var recordedLogs: [String] = []
 
     var networkHandler: NetworkHandler?
+    var responseHandler: ResponseHandler?
     var logHandler: LogHandler?
 
     init(
         initialValues: [String: Any] = [:],
         networkHandler: NetworkHandler? = nil,
+        responseHandler: ResponseHandler? = nil,
         logHandler: LogHandler? = nil
     ) {
         self.networkHandler = networkHandler
+        self.responseHandler = responseHandler
         self.logHandler = logHandler
         bind(initialValues)
     }

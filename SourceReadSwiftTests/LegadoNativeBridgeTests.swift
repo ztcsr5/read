@@ -84,6 +84,22 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(value, "loaded:https://example.com/1|loaded:https://example.com/2")
     }
 
+    func testAjaxResponsePreservesStatusHeadersAndFinalURL() throws {
+        let context = RuleExecutionContext(responseHandler: { _ in
+            SourceResponse(
+                url: URL(string: "https://example.com/final")!,
+                statusCode: 206,
+                headers: ["Content-Type": "text/plain", "X-Trace": "fixture"],
+                body: "partial",
+                data: Data("partial".utf8)
+            )
+        })
+        let runtime = JSCoreRuntime(executionContext: context)
+        let result = runtime.evaluate("var r = java.ajax('https://example.com/start'); [r.statusCode, r.body(), r.url(), r.header('x-trace'), r.header('CONTENT-TYPE')].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "206|partial|https://example.com/final|fixture|text/plain")
+    }
+
     func testNativeCookieAndLogBridgesAreObservable() throws {
         let executionContext = RuleExecutionContext()
         let runtime = JSCoreRuntime(executionContext: executionContext)

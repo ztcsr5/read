@@ -232,6 +232,20 @@ final class JSCoreRuntime {
         }
         let ajaxHandler = self.ajaxHandler
         weak var weakSelf = self
+        let ajaxResponse: @convention(block) (String, String) -> NSDictionary = { url, headers in
+            guard let runtime = weakSelf else { return [:] }
+            if let response = runtime.executionContext.responseHandler?(url) {
+                return [
+                    "body": response.body,
+                    "url": response.url.absoluteString,
+                    "statusCode": response.statusCode,
+                    "headers": response.headers
+                ] as NSDictionary
+            }
+            let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
+            let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
+            return ["body": body, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
+        }
         let ajax: @convention(block) (String, String) -> String = { url, headers in
             let requestText = weakSelf?.requestText(url: url, body: nil, headers: headers, includeStoredBody: false) ?? url
             return ajaxHandler?(requestText) ?? ""
@@ -295,6 +309,7 @@ final class JSCoreRuntime {
         context.setObject(getStringList, forKeyedSubscript: "__native_getStringList" as NSString)
         context.setObject(countElements, forKeyedSubscript: "__native_countElements" as NSString)
         context.setObject(ajax, forKeyedSubscript: "__native_ajax" as NSString)
+        context.setObject(ajaxResponse, forKeyedSubscript: "__native_ajaxResponse" as NSString)
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
         context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
         context.setObject(getStore, forKeyedSubscript: "__native_getStore" as NSString)
@@ -443,15 +458,23 @@ final class JSCoreRuntime {
         function __bridgeStored(name) {
           return __native_getStore(String(name));
         }
-        function __bridgeResponse(text, responseUrl) {
-          var value = String(text || '');
+        function __bridgeResponse(text, responseUrl, responseMeta) {
+          var meta = responseMeta || {};
+          var value = meta.body !== undefined ? String(meta.body || '') : String(text || '');
+          var finalUrl = meta.url !== undefined ? String(meta.url || responseUrl || '') : String(responseUrl || '');
+          var code = meta.statusCode !== undefined ? Number(meta.statusCode) : 200;
+          var responseHeaders = meta.headers || {};
           return {
-            statusCode: 200,
+            statusCode: code,
             body: function() { return value; },
             text: function() { return value; },
-            url: function() { return String(responseUrl || ''); },
-            header: function(_) { return ''; },
-            headers: function() { return {}; },
+            url: function() { return finalUrl; },
+            header: function(name) {
+              var key = String(name || '').toLowerCase();
+              for (var headerKey in responseHeaders) if (String(headerKey).toLowerCase() === key) return String(responseHeaders[headerKey] || '');
+              return '';
+            },
+            headers: function() { return responseHeaders; },
             toString: function() { return value; },
             valueOf: function() { return value; }
           };
@@ -462,19 +485,23 @@ final class JSCoreRuntime {
         java.getVar = function(key) {
           return String(__nativeLegado.invoke({ method: 'get', args: [String(key)] }) || '');
         };
-        java.ajax = function(url, headers) { return __bridgeResponse(__native_ajax(String(url), __bridgeString(headers || '')), url); };
+        java.ajax = function(url, headers) {
+          var target = String(url);
+          return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(headers || '')));
+        };
         java.get = function(url, headers) {
           var key = String(url);
           var value = __bridgeStored(key);
           if (value && key.indexOf('://') < 0 && key.charAt(0) !== '/') return value;
           if (key.indexOf('://') < 0 && key.charAt(0) !== '/') return '';
-          return __bridgeResponse(__native_ajax(key, __bridgeString(headers || '')), key);
+          return __bridgeResponse('', key, __native_ajaxResponse(key, __bridgeString(headers || '')));
         };
         java.fetch = function(url, options) {
           options = options || {};
           var method = String(options.method || 'GET').toUpperCase();
           if (method === 'POST' || options.body != null) return java.post(url, options.body || '', options.headers || {});
-          return __bridgeResponse(__native_ajax(String(url), __bridgeString(options.headers || options)), url);
+          var target = String(url);
+          return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(options.headers || options)));
         };
         java.post = function(url, body, headers) { return __bridgeResponse(__native_post(String(url), __bridgeString(body || ''), __bridgeString(headers || '')), url); };
         java.ajaxAll = function(urls) {
@@ -539,7 +566,7 @@ final class JSCoreRuntime {
               return api;
             },
             get: function() {
-              return __bridgeResponse(__native_ajax(target, __bridgeString(config.headers)), target);
+              return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(config.headers)));
             },
             post: function(body) {
               if (arguments.length > 0) config.body = __bridgeString(body);
