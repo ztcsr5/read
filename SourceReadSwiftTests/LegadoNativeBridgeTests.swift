@@ -135,6 +135,13 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(value, "function|function|function|function|function")
     }
 
+    func testLegacyVariableAliasesRemainAvailable() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("java.putVar('x', 'v'); var a = java.getValue('x'); java.removeVar('x'); a + '|' + java.getVar('x')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "v|")
+    }
+
     func testNativeJsoupAndResponseCompatibilitySurface() throws {
         let runtime = JSCoreRuntime()
         let result = runtime.evaluate("""

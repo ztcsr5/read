@@ -482,9 +482,15 @@ final class JSCoreRuntime {
         java.put = function(key, value) {
           return __nativeLegado.invoke({ method: 'put', args: [String(key), value] });
         };
+        java.putVar = java.put;
         java.getVar = function(key) {
           return String(__nativeLegado.invoke({ method: 'get', args: [String(key)] }) || '');
         };
+        java.getValue = java.getVar;
+        java.removeVar = function(key) {
+          return !!__nativeLegado.invoke({ method: 'remove', args: [String(key)] });
+        };
+        java.remove = java.removeVar;
         java.ajax = function(url, headers) {
           var target = String(url);
           return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(headers || '')));
