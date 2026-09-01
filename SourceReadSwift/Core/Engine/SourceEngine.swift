@@ -32,7 +32,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
         }
         await diagnostics.emit(.init(
             level: .info,
@@ -76,7 +76,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
         }
         let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
@@ -98,7 +98,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
         }
         let tocURL = book.tocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? book.bookUrl
         let request = requestBuilder.buildPageRequest(source: source, urlText: tocURL)
@@ -129,7 +129,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             self.syncLoad(encoded: encoded, source: source, network: network)
         })
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source)
+            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
         }
         let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
         let globalPurifyRules = await purifyRules()
