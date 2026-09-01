@@ -192,6 +192,20 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(value, "AB3|v|true|42")
     }
 
+    func testJXNodeHybridValueBridge() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("var n = new JXNode(42); [n.isNumber(), n.asDouble(), n.toString(), n.isString()].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "true|42|42|false")
+    }
+
+    func testJXNodeSelectsNativeElement() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("var d=org.jsoup.Jsoup.parse('<div><a>A</a><a>B</a></div>'); var n=new JXNode(d); n.selOne('a').text()")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "A")
+    }
+
     func testNativeModelBridgesAreInjectedForJavaScriptRules() throws {
         let chapter = BookChapter(title: "VIP 1", url: "https://example.com/1", bookUrl: "https://example.com", index: 0, isVip: true)
         let runtime = JSCoreRuntime()

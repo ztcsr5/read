@@ -10,6 +10,7 @@ final class JSCoreRuntime {
     private let javaHostBridge: LegadoJavaHostBridge
     private let ruleHostBridge: LegadoRuleHostBridge
     private let jsoupBridge: LegadoJsoupBridge
+    private let jxNodeFactory: LegadoJXNodeFactoryBridge
 
     init(
         ajaxHandler: ((String) -> String)? = nil,
@@ -21,12 +22,14 @@ final class JSCoreRuntime {
         self.javaHostBridge = LegadoJavaHostBridge(executionContext: executionContext)
         self.ruleHostBridge = LegadoRuleHostBridge(executionContext: executionContext)
         self.jsoupBridge = LegadoJsoupBridge(executionContext: executionContext)
+        self.jxNodeFactory = LegadoJXNodeFactoryBridge(executionContext: executionContext)
         if executionContext.networkHandler == nil {
             executionContext.networkHandler = ajaxHandler
         }
         context.setObject(javaHostBridge, forKeyedSubscript: "__nativeLegado" as NSString)
         context.setObject(ruleHostBridge, forKeyedSubscript: "__nativeRule" as NSString)
         context.setObject(jsoupBridge, forKeyedSubscript: "__nativeJsoup" as NSString)
+        context.setObject(jxNodeFactory, forKeyedSubscript: "__nativeJXNode" as NSString)
         installNativeClosures()
         installBaseBridge()
     }
@@ -342,6 +345,11 @@ final class JSCoreRuntime {
 
         let prelude = """
         var java = java || {};
+        // SourceRead's JSON/HTML hybrid helper.  Keep both constructor and
+        // factory spellings used by Android Legado sources.
+        var JXNode = JXNode || function(value) { return __nativeJXNode.create(value); };
+        JXNode.create = function(value) { return __nativeJXNode.create(value); };
+        var jxNode = function(value) { return __nativeJXNode.create(value); };
         java.urlEncode = function(value) { return __native_urlEncode(String(value)); };
         java.encodeURI = function(value, charset) {
           return String(__nativeLegado.invoke({ method: 'encodeURI', args: [String(value), charset == null ? '' : String(charset)] }) || '');

@@ -328,6 +328,89 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
     }
 }
 
+/// SourceRead exposes JXNode as a small type-erased selector/value wrapper.
+/// Legado sources use it for rules that can return either a DOM element or a
+/// scalar JSON value. Keep the wrapper deliberately permissive so JavaScript
+/// can probe the value kind before selecting from it.
+@objc protocol LegadoJXNodeExport: JSExport {
+    func isElement() -> Bool
+    func asElement() -> LegadoElementBridge?
+    func isString() -> Bool
+    func asString() -> String
+    func isNumber() -> Bool
+    func asDouble() -> Double
+    func isBoolean() -> Bool
+    func asBoolean() -> Bool
+    func sel(_ selector: String) -> LegadoElementsBridge
+    func selOne(_ selector: String) -> LegadoElementBridge?
+    func toString() -> String
+    func value() -> AnyObject
+}
+
+@objc protocol LegadoJXNodeFactoryExport: JSExport {
+    func create(_ value: JSValue) -> LegadoJXNodeBridge
+}
+
+final class LegadoJXNodeBridge: NSObject, LegadoJXNodeExport {
+    fileprivate let raw: Any
+    fileprivate let baseURL: String
+
+    init(value: Any, baseURL: String = "http://localhost/") {
+        self.raw = value
+        self.baseURL = normalizedBaseURL(baseURL)
+        super.init()
+    }
+
+    func isElement() -> Bool { raw is LegadoElementBridge }
+    func asElement() -> LegadoElementBridge? { raw as? LegadoElementBridge }
+    func isString() -> Bool { raw is String }
+    func asString() -> String { raw as? String ?? toString() }
+    func isNumber() -> Bool { raw is NSNumber || raw is Int || raw is Double || raw is Float }
+    func asDouble() -> Double {
+        if let value = raw as? NSNumber { return value.doubleValue }
+        return Double(toString()) ?? 0
+    }
+    func isBoolean() -> Bool { raw is Bool || (raw as? NSNumber)?.objCType == "c" }
+    func asBoolean() -> Bool {
+        if let value = raw as? Bool { return value }
+        if let value = raw as? NSNumber { return value.boolValue }
+        return ["true", "1", "yes"].contains(toString().lowercased())
+    }
+
+    func sel(_ selector: String) -> LegadoElementsBridge {
+        guard let element = raw as? LegadoElementBridge else { return LegadoElementsBridge(elements: [], baseURL: baseURL) }
+        return element.select(selector)
+    }
+
+    func selOne(_ selector: String) -> LegadoElementBridge? { sel(selector).first() }
+
+    func toString() -> String {
+        if let string = raw as? String { return string }
+        if let element = raw as? LegadoElementBridge { return element.outerHtml() }
+        if let array = raw as? [Any] { return array.map { String(describing: $0) }.joined(separator: "\n") }
+        if let value = raw as? NSNumber { return value.stringValue }
+        return String(describing: raw)
+    }
+
+    func value() -> AnyObject {
+        if let object = raw as? AnyObject { return object }
+        return toString() as NSString
+    }
+}
+
+final class LegadoJXNodeFactoryBridge: NSObject, LegadoJXNodeFactoryExport {
+    private let executionContext: RuleExecutionContext
+    init(executionContext: RuleExecutionContext) { self.executionContext = executionContext; super.init() }
+
+    func create(_ value: JSValue) -> LegadoJXNodeBridge {
+        let object = value.toObject() ?? NSNull()
+        let base = executionContext.string(for: "baseUrl")
+        if let node = object as? LegadoJXNodeBridge { return node }
+        if let element = object as? LegadoElementBridge { return LegadoJXNodeBridge(value: element, baseURL: base) }
+        return LegadoJXNodeBridge(value: object, baseURL: base)
+    }
+}
+
 @objc protocol LegadoElementExport: JSExport {
     func nodeName() -> String
     func getAttributes() -> LegadoAttributesBridge
