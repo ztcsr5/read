@@ -451,6 +451,15 @@ final class JSCoreRuntime {
         if (!Array.prototype.isEmpty) {
           Array.prototype.isEmpty = function() { return this.length === 0; };
         }
+        // Android's java.util.List proxies are frequently consumed through
+        // JavaScript's Array prototype (not only as an own property). Keep
+        // both spellings so `ajaxAll(...).first()` works across JSCore builds.
+        if (!Array.prototype.first) {
+          Array.prototype.first = function() { return this.length ? this[0] : null; };
+        }
+        if (!Array.prototype.last) {
+          Array.prototype.last = function() { return this.length ? this[this.length - 1] : null; };
+        }
         // Legado exposes these helpers in both forms:
         //   java.getString(rule) and java.getString(html, rule)
         // The boolean second argument is an isUrl flag, not HTML.
