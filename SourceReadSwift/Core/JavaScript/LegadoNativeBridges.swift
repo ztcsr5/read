@@ -70,6 +70,12 @@ class LegadoNodeBridge: NSObject, LegadoNodeExport {
     fileprivate let node: SwiftSoup.Node
     init(node: SwiftSoup.Node) { self.node = node; super.init() }
     func nodeName() -> String { node.nodeName() }
+    func getAttributes() -> LegadoAttributesBridge {
+        if let element = node as? SwiftSoup.Element, let attributes = element.getAttributes() {
+            return LegadoAttributesBridge(attributes: attributes)
+        }
+        return LegadoAttributesBridge(attributes: Attributes())
+    }
     func getWholeData() -> String { (node as? DataNode)?.getWholeData() ?? "" }
     func setWholeData(_ value: String) -> LegadoNodeBridge { if let data = node as? DataNode { _ = try? data.setWholeData(value) }; return self }
     func getWholeText() -> String { (node as? TextNode)?.getWholeText() ?? "" }
