@@ -13,10 +13,13 @@ struct BookDetailView: View {
     @State private var showAddAfterPreviewPrompt = false
     @State private var isAscending = true
     @State private var showAllChapters = false
-    @State private var isDownloading = false
-    @State private var downloadProgress = 0
-    @State private var downloadTotal = 0
-    @State private var downloadTask: Task<Void, Never>?
+    private var downloadRecord: ChapterDownloadRecord? {
+        appState.chapterDownloadStore.record(bookID: book.id)
+    }
+
+    private var isDownloading: Bool {
+        appState.chapterDownloadCoordinator.isRunning(bookID: book.id)
+    }
 
     private var displayedChapters: [BookChapter] {
         Array((isAscending ? chapters : Array(chapters.reversed())).prefix(100))
@@ -71,10 +74,10 @@ struct BookDetailView: View {
                     Button { Task { await reload() } } label: {
                         Label("刷新目录", systemImage: "arrow.clockwise")
                     }
-                    Button { startDownload() } label: {
-                        Label(isDownloading ? "正在缓存 \(downloadProgress)/\(downloadTotal)" : "缓存全本章节", systemImage: "arrow.down.circle")
+                    Button { toggleDownload() } label: {
+                        Label(downloadLabel, systemImage: isDownloading ? "stop.circle" : "arrow.down.circle")
                     }
-                    .disabled(isDownloading || chapters.isEmpty)
+                    .disabled(chapters.isEmpty)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -83,10 +86,6 @@ struct BookDetailView: View {
         }
         .task {
             await load()
-        }
-        .onDisappear {
-            downloadTask?.cancel()
-            downloadTask = nil
         }
         .sheet(isPresented: $showAllChapters) {
             NavigationStack {
@@ -259,32 +258,33 @@ struct BookDetailView: View {
         )
     }
 
-    private func startDownload() {
-        guard !isDownloading, !chapters.isEmpty,
-              let source = appState.sourceStore.source(for: book.sourceUrl) else { return }
-        isDownloading = true
-        downloadProgress = 0
-        downloadTotal = chapters.count
-        let engine = appState.engine
-        let purifyRules = appState.purifyRuleStore.enabledPatterns
-        downloadTask = Task { @MainActor in
-            defer {
-                isDownloading = false
-                downloadTask = nil
-            }
-            for chapter in chapters {
-                guard !Task.isCancelled else { return }
-                if !appState.chapterContentCacheStore.isCached(sourceURL: source.bookSourceUrl, chapter: chapter, purifyRules: purifyRules) {
-                    let result = await AsyncTimeout.run(seconds: 14) {
-                        await engine.getContent(source: source, chapter: chapter)
-                    } ?? .failure(.network("Download timed out"))
-                    if case .success(let content) = result {
-                        appState.chapterContentCacheStore.save(content, sourceURL: source.bookSourceUrl, purifyRules: purifyRules)
-                    }
-                }
-                downloadProgress += 1
-            }
+    private var downloadLabel: String {
+        if isDownloading { return "停止缓存" }
+        guard let record = downloadRecord else { return "缓存全本章节" }
+        switch record.status {
+        case .completed: return "全本已缓存"
+        case .paused: return "继续缓存 \(record.completedCount)/\(record.chapterCount)"
+        case .failed: return "重试缓存（失败 \(record.failedCount)）"
+        case .cancelled, .queued, .running: return "继续缓存 \(record.completedCount)/\(record.chapterCount)"
         }
+    }
+
+    private func toggleDownload() {
+        if isDownloading {
+            appState.chapterDownloadCoordinator.cancel(bookID: book.id)
+            return
+        }
+        guard !chapters.isEmpty,
+              let source = appState.sourceStore.source(for: book.sourceUrl) else { return }
+        appState.chapterDownloadCoordinator.start(
+            bookID: book.id,
+            source: source,
+            title: book.name,
+            chapters: chapters,
+            engine: appState.engine,
+            cacheStore: appState.chapterContentCacheStore,
+            purifyRules: appState.purifyRuleStore.enabledPatterns
+        )
     }
 
     private func addCurrentBookToShelf() {

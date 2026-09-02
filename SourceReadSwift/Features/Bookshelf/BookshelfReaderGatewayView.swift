@@ -4,6 +4,7 @@ struct BookshelfReaderGatewayView: View {
     @EnvironmentObject private var appState: AppState
     let book: BookshelfBook
     var initialBookmark: ReaderBookmark? = nil
+    var initialChapterIndex: Int? = nil
 
     @State private var detail: BookDetail?
     @State private var chapters: [BookChapter] = []
@@ -14,6 +15,8 @@ struct BookshelfReaderGatewayView: View {
     @State private var sourceSwitchState = SourceSwitchState()
     @State private var autoplaySpeechAfterHandoff = false
     @State private var didApplyInitialBookmark = false
+    @State private var didApplyInitialChapter = false
+    @State private var requestedChapterIndex: Int?
 
     private var currentBook: BookshelfBook {
         appState.bookshelfStore.book(id: book.id) ?? book
@@ -24,6 +27,7 @@ struct BookshelfReaderGatewayView: View {
         .task {
             appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
             applyInitialBookmarkIfNeeded()
+            applyInitialChapterIfNeeded()
             await resumeReading()
         }
         .sheet(isPresented: $showSourceSwitcher) {
@@ -104,6 +108,12 @@ struct BookshelfReaderGatewayView: View {
         )
     }
 
+    private func applyInitialChapterIfNeeded() {
+        guard !didApplyInitialChapter, let initialChapterIndex else { return }
+        didApplyInitialChapter = true
+        requestedChapterIndex = max(0, initialChapterIndex)
+    }
+
     private func readerRecoveryErrorView(_ message: String) -> some View {
         VStack(spacing: 14) {
             EmptyStateCard(systemImage: "xmark.octagon", title: "阅读恢复失败", message: message)
@@ -137,7 +147,7 @@ struct BookshelfReaderGatewayView: View {
 
     private var localReader: some View {
         let chapters = localBookChapters
-        let requestedIndex = selectedLocalChapterIndex ?? currentBook.currentChapterIndex
+        let requestedIndex = selectedLocalChapterIndex ?? requestedChapterIndex ?? currentBook.currentChapterIndex
         let safeIndex = min(max(requestedIndex, 0), max(chapters.count - 1, 0))
         let localChapter = chapters[safeIndex]
         let bookChapters = chapters.map {
@@ -221,7 +231,8 @@ struct BookshelfReaderGatewayView: View {
             switch chapterResult {
             case .success(let loadedChapters):
                 chapters = loadedChapters
-                let target = loadedChapters.first(where: { $0.index == activeBook.currentChapterIndex })
+                let targetIndex = requestedChapterIndex ?? activeBook.currentChapterIndex
+                let target = loadedChapters.first(where: { $0.index == targetIndex })
                     ?? loadedChapters.first
                 if let target {
                     appState.bookshelfStore.updateDetails(
@@ -239,7 +250,8 @@ struct BookshelfReaderGatewayView: View {
                     sourceURL: source.bookSourceUrl,
                     bookURL: activeBook.bookURL
                 )
-                if let target = cached.first(where: { $0.index == activeBook.currentChapterIndex }) ?? cached.first {
+                let targetIndex = requestedChapterIndex ?? activeBook.currentChapterIndex
+                if let target = cached.first(where: { $0.index == targetIndex }) ?? cached.first {
                     chapters = cached
                     selectedChapter = target
                     errorMessage = nil
@@ -253,7 +265,8 @@ struct BookshelfReaderGatewayView: View {
                 sourceURL: source.bookSourceUrl,
                 bookURL: activeBook.bookURL
             )
-            if let target = cached.first(where: { $0.index == activeBook.currentChapterIndex }) ?? cached.first {
+            let targetIndex = requestedChapterIndex ?? activeBook.currentChapterIndex
+            if let target = cached.first(where: { $0.index == targetIndex }) ?? cached.first {
                 chapters = cached
                 selectedChapter = target
                 errorMessage = nil

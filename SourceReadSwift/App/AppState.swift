@@ -7,6 +7,8 @@ final class AppState: ObservableObject {
     let bookshelfStore: BookshelfStore
     let purifyRuleStore: PurifyRuleStore
     let chapterContentCacheStore: ChapterContentCacheStore
+    let chapterDownloadStore: ChapterDownloadStore
+    let chapterDownloadCoordinator: ChapterDownloadCoordinator
     let rssArticleStateStore: RSSArticleStateStore
     let rssFeedCacheStore: RSSFeedCacheStore
     let rssArticleContentCacheStore: RSSArticleContentCacheStore
@@ -43,6 +45,7 @@ final class AppState: ObservableObject {
         bookshelfStore: BookshelfStore? = nil,
         purifyRuleStore: PurifyRuleStore? = nil,
         chapterContentCacheStore: ChapterContentCacheStore? = nil,
+        chapterDownloadStore: ChapterDownloadStore? = nil,
         rssArticleStateStore: RSSArticleStateStore? = nil,
         rssFeedCacheStore: RSSFeedCacheStore? = nil,
         rssArticleContentCacheStore: RSSArticleContentCacheStore? = nil,
@@ -55,6 +58,9 @@ final class AppState: ObservableObject {
         self.bookshelfStore = bookshelfStore ?? BookshelfStore()
         self.purifyRuleStore = purifyRuleStore ?? PurifyRuleStore()
         self.chapterContentCacheStore = chapterContentCacheStore ?? ChapterContentCacheStore()
+        let resolvedChapterDownloadStore = chapterDownloadStore ?? ChapterDownloadStore()
+        self.chapterDownloadStore = resolvedChapterDownloadStore
+        self.chapterDownloadCoordinator = ChapterDownloadCoordinator(store: resolvedChapterDownloadStore)
         self.rssArticleStateStore = rssArticleStateStore ?? RSSArticleStateStore()
         self.rssFeedCacheStore = rssFeedCacheStore ?? RSSFeedCacheStore()
         self.rssArticleContentCacheStore = rssArticleContentCacheStore ?? RSSArticleContentCacheStore()
@@ -143,6 +149,14 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
 
         chapterContentCacheStore.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
+
+        chapterDownloadStore.objectWillChange
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.objectWillChange.send()

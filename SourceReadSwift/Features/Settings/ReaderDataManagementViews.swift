@@ -131,13 +131,24 @@ struct OfflineChapterCacheView: View {
                 ForEach(grouped) { section in
                     Section {
                         ForEach(section.entries) { entry in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(entry.title)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Text("\(entry.paragraphs.count) 段 · \(entry.cachedAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            let cachedBook = appState.bookshelfStore.books.first(where: {
+                                $0.bookURL == entry.bookURL && $0.sourceURL == entry.sourceURL
+                            })
+                            Group {
+                                if let cachedBook {
+                                    NavigationLink {
+                                        BookshelfReaderGatewayView(
+                                            book: cachedBook,
+                                            initialChapterIndex: entry.chapterIndex
+                                                ?? Int(entry.chapterURL.split(separator: "#").last ?? "")
+                                                ?? 0
+                                        )
+                                    } label: {
+                                        cacheRow(entry)
+                                    }
+                                } else {
+                                    cacheRow(entry)
+                                }
                             }
                             .swipeActions {
                                 Button("删除", role: .destructive) {
@@ -171,5 +182,23 @@ struct OfflineChapterCacheView: View {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
         return String(format: "%.1f MB", Double(bytes) / 1024 / 1024)
+    }
+
+    private func cacheRow(_ entry: ChapterContentCacheEntry) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(entry.title)
+                .font(.headline)
+                .lineLimit(1)
+            Text("\(entry.paragraphs.count) 段 · \(entry.cachedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if appState.bookshelfStore.books.contains(where: {
+                $0.bookURL == entry.bookURL && $0.sourceURL == entry.sourceURL
+            }) {
+                Text("点击继续阅读")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
     }
 }
