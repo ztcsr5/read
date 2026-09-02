@@ -231,7 +231,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 "cookieHeader": cookieHeader ?? ""
             ],
             networkHandler: { encoded in
-                SynchronousSourceLoader().load(urlText: encoded, source: source, cookieHeader: cookieHeader)
+                SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: cookieHeader)?.body ?? ""
             },
             responseHandler: { encoded in
                 SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: cookieHeader)
@@ -249,7 +249,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let value: String
         switch evaluated {
         case .success(let output):
-            value = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            value = String(output).trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         case .failure(let error):
             return .failure(error)
         }

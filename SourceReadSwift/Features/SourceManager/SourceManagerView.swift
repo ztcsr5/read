@@ -1046,7 +1046,7 @@ struct SourceManagerView: View {
             } ?? .failure(.network("Login check timed out"))
             switch loginResult {
             case .success(let verification):
-                let health = verification.healthStatus
+                let health = verification.status.healthStatus
                 loginNote = "\n[\(verification.status.displayTitle)] 登录检查：\(verification.message)（Cookie：\(verification.cookiePresent ? "present" : "absent")）"
                 appState.sourceDiagnosticHistoryStore.record(
                     source: state.source,
