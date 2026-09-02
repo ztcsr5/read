@@ -888,3 +888,10 @@
 
 ### Rollback
 - Revert this phase commit to remove login verification, diagnostic history and RSS editor changes while preserving the prior source health model and login WebView.
+
+### CI verification update
+
+- Commit `c54d8ef` pushed to `codex/swift-v2-lifetime-reader`.
+- iOS build/XCTest Actions run `33662965147`: `success`.
+- Unsigned IPA Actions run `33662965213`: `success`; the workflow page reports the `SourceReadSwift-unsigned-ipa` artifact. Artifact bytes/hash were not available from the Windows host because the GitHub API was rate-limited, so no size or SHA-256 is claimed here.
+- This closes the compile/test gate for the phase; external-source login behavior and sustained ProMotion 120 Hz still require device/network evidence.
