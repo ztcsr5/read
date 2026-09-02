@@ -1,3 +1,13 @@
+## 2026-09-02 - Task: EPUB cover and local-book metadata phase
+
+### What was done
+- Extended `LocalTextBook` with optional cover metadata and propagated it into bookshelf records.
+- EPUB parser now resolves OPF cover metadata (`meta name="cover"`) and `cover-image` manifest properties, extracts the image from the ZIP, and stores a stable local cover asset under Application Support.
+- Added regression coverage for cover extraction and file existence.
+
+### Testing
+- Ran `git diff --check` locally.
+- EPUB JSON/XML and source changes remain gated by GitHub Actions for Swift compilation and XCTest.
 ## 2026-09-02 - Task: Reader automation boundary and speech queue phase
 
 ### What was done

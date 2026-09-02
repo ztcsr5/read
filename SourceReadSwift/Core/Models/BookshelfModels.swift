@@ -100,7 +100,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             id: id,
             title: localTextBook.title,
             author: localTextBook.author,
-            coverURL: nil,
+            coverURL: localTextBook.coverURL?.absoluteString,
             sourceName: "Local",
             sourceURL: "local://text",
             bookURL: id,

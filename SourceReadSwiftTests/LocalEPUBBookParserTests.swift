@@ -92,8 +92,28 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testExtractsCoverImageFromManifest() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("cover.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>"#, to: archive)
+        try add("book.opf", text: #"<package><metadata><dc:title>Cover Book</dc:title><meta name="cover" content="cover"/></metadata><manifest><item id="cover" href="images/cover.jpg" media-type="image/jpeg"/><item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>"#, to: archive)
+        try add("chapter.xhtml", text: #"<html><body><h1>Chapter</h1><p>Body</p></body></html>"#, to: archive)
+        try add("images/cover.jpg", data: Data([0xFF, 0xD8, 0xFF, 0xD9]), to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.title, "Cover Book")
+        XCTAssertTrue(book.coverURL?.isFileURL == true)
+        XCTAssertTrue(book.coverURL.map { FileManager.default.fileExists(atPath: $0.path) } == true)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
-        let data = Data(text.utf8)
+        try add(path, data: Data(text.utf8), to: archive)
+    }
+
+    private func add(_ path: String, data: Data, to archive: Archive) throws {
         try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { position, size in
             let start = Int(position)
             let end = start + Int(size)

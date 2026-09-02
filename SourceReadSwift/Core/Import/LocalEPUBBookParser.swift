@@ -19,6 +19,13 @@ struct LocalEPUBBookParser {
         let metadata = metadata(from: opfXML, fallbackTitle: fileURL.deletingPathExtension().lastPathComponent)
         let manifest = manifestItems(from: opfXML)
         let spine = spineIDs(from: opfXML)
+        let coverURL = extractCoverURL(
+            from: opfXML,
+            manifest: manifest,
+            basePath: basePath,
+            archive: archive,
+            bookURL: fileURL
+        )
         let orderedIDs = spine.isEmpty
             ? manifest.filter { $0.mediaType.contains("xhtml") || $0.mediaType.contains("html") }.map(\.id)
             : spine
@@ -38,7 +45,7 @@ struct LocalEPUBBookParser {
         guard !chapters.isEmpty else {
             throw LocalEPUBImportError.emptyContent
         }
-        return LocalTextBook(title: metadata.title, author: metadata.author, chapters: chapters)
+        return LocalTextBook(title: metadata.title, author: metadata.author, chapters: chapters, coverURL: coverURL)
     }
 
     private func stringEntry(_ path: String, in archive: Archive) throws -> String {
@@ -65,7 +72,12 @@ struct LocalEPUBBookParser {
                 let id = try item.attr("id")
                 let href = try item.attr("href")
                 guard !id.isEmpty, !href.isEmpty else { return nil }
-                return ManifestItem(id: id, href: href, mediaType: try item.attr("media-type").lowercased())
+                return ManifestItem(
+                    id: id,
+                    href: href,
+                    mediaType: try item.attr("media-type").lowercased(),
+                    properties: try item.attr("properties")
+                )
             }
         } catch {
             return []
@@ -107,6 +119,56 @@ struct LocalEPUBBookParser {
         } catch {
             return nil
         }
+    }
+
+    private func extractCoverURL(
+        from opf: String,
+        manifest: [ManifestItem],
+        basePath: String,
+        archive: Archive,
+        bookURL: URL
+    ) -> URL? {
+        let coverID: String? = {
+            if let raw = try? firstMatch(
+                in: opf,
+                pattern: #"<meta[^>]+name\s*=\s*["']cover["'][^>]+content\s*=\s*["']([^"']+)["']"#
+            ) { return raw }
+            return manifest.first(where: { $0.properties.split(separator: " ").contains("cover-image") })?.id
+        }()
+        guard let item = manifest.first(where: { $0.id == coverID })
+                ?? manifest.first(where: { $0.mediaType.hasPrefix("image/") }) else {
+            return nil
+        }
+        let path = normalizeEPUBPath(basePath: basePath, href: item.href)
+        guard let entry = archive[path] else { return nil }
+        var data = Data()
+        do {
+            _ = try archive.extract(entry) { data.append($0) }
+            guard !data.isEmpty else { return nil }
+            let root = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            ).appendingPathComponent("SourceReadSwift/EPUBCovers", isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let ext = URL(fileURLWithPath: item.href).pathExtension.nilIfEmpty ?? "img"
+            let key = stableFileKey(bookURL.standardizedFileURL.path)
+            let destination = root.appendingPathComponent("\(key).\(ext)")
+            try data.write(to: destination, options: [.atomic])
+            return destination
+        } catch {
+            return nil
+        }
+    }
+
+    private func stableFileKey(_ value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
     }
 
     private func normalizeEPUBPath(basePath: String, href: String) -> String {
@@ -152,6 +214,7 @@ private struct ManifestItem {
     let id: String
     let href: String
     let mediaType: String
+    let properties: String
 }
 
 enum LocalEPUBImportError: LocalizedError {

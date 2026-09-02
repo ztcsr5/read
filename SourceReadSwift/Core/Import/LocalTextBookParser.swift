@@ -72,6 +72,14 @@ struct LocalTextBook: Equatable {
     let title: String
     let author: String
     let chapters: [LocalTextChapter]
+    let coverURL: URL?
+
+    init(title: String, author: String, chapters: [LocalTextChapter], coverURL: URL? = nil) {
+        self.title = title
+        self.author = author
+        self.chapters = chapters
+        self.coverURL = coverURL
+    }
 
     var paragraphs: [String] {
         chapters.flatMap(\.paragraphs)
