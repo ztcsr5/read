@@ -133,7 +133,9 @@ struct LocalEPUBBookParser {
                 in: opf,
                 pattern: #"<meta[^>]+name\s*=\s*["']cover["'][^>]+content\s*=\s*["']([^"']+)["']"#
             ) { return raw }
-            return manifest.first(where: { $0.properties.split(separator: " ").contains("cover-image") })?.id
+            return manifest.first(where: { item in
+                item.properties.split(separator: " ").contains { $0 == "cover-image" }
+            })?.id
         }()
         guard let item = manifest.first(where: { $0.id == coverID })
                 ?? manifest.first(where: { $0.mediaType.hasPrefix("image/") }) else {
