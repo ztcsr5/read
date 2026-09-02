@@ -714,3 +714,19 @@
 
 ### Next
 - Continue the RSS/source diagnostic large phase after the new Actions run reports.
+## 2026-09-02 - Task: RSS cache and failure-recovery hardening
+
+### What was done
+- Added persistent RSS article-body cache with bounded entries and seven-day freshness policy.
+- RSS article reader now renders fresh cached paragraphs immediately, refreshes from network, and keeps cached content on transient failures.
+- Added retry action for feeds that fail before producing any articles; valid empty feeds remain distinct from network errors.
+- RSS feed cache decoding now honors ISO-8601 dates consistently.
+- Settings RSS cleanup now clears both feed metadata and article-body caches.
+- Added persistence/removal regression tests for article-body cache.
+
+### Testing
+- Ran `git diff --check` locally.
+- GitHub Actions remains the compile/XCTest/unsigned-IPA gate for this Windows-only workspace.
+
+### Rollback
+- Revert the RSS cache/retry commit and this progress entry together.
