@@ -2,10 +2,9 @@ import QuartzCore
 import UIKit
 
 /// Coordinates the frame-rate budget for active iOS windows.
-/// `CADisableMinimumFrameDurationOnPhone` is declared in Info.plist and this
-/// scene-level range keeps ProMotion devices on the native 120 Hz path while
-/// remaining valid on 60 Hz hardware. UIKit may still adapt down when the
-/// scene is idle or thermally constrained.
+/// `CADisableMinimumFrameDurationOnPhone` is declared in Info.plist. The layer
+/// range requests the device-native ceiling while leaving room for iOS to
+/// adapt under thermal, power, or idle conditions.
 enum FrameRateCoordinator {
     static func apply(to scene: UIScene? = nil) {
         let scenes: [UIWindowScene]
@@ -23,18 +22,21 @@ enum FrameRateCoordinator {
         let maximum = windowScene.screen.maximumFramesPerSecond
         guard maximum > 0 else { return }
 
-        let minimum = min(maximum, 60)
         let preferred = min(maximum, 120)
-        if #available(iOS 15.0, *) {
-            windowScene.preferredFrameRateRange = CAFrameRateRange(
-                minimum: Float(minimum),
-                maximum: Float(preferred),
-                preferred: Float(preferred)
-            )
+        // `CADisableMinimumFrameDurationOnPhone` enables ProMotion on iPhone.
+        // CALayer is the SDK-stable point for expressing the preferred range;
+        // SwiftUI then schedules work against the active window's layer.
+        let range = CAFrameRateRange(
+            minimum: maximum >= 120 ? 80 : maximum,
+            maximum: preferred,
+            preferred: preferred
+        )
+        for window in windowScene.windows {
+            window.layer.preferredFrameRateRange = range
         }
         PerformanceSignpost.event(
             "frame.rate",
-            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) min=\(minimum) preferred=\(preferred)"
+            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
         )
     }
 }
