@@ -48,6 +48,29 @@ final class RSSFeedParserTests: XCTestCase {
         XCTAssertEqual(article?.description, "Atom summary")
     }
 
+    func testPrefersAtomAlternateHTMLLinkOverSelfAndNonHTMLLinks() {
+        let xml = """
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <entry>
+            <title>Preferred</title>
+            <link rel="self" href="https://example.com/api/entry" type="application/atom+xml" />
+            <link rel="alternate" href="/stories/preferred" type="text/html" />
+            <link rel="related" href="https://example.com/related" type="text/plain" />
+          </entry>
+        </feed>
+        """
+
+        let article = RSSFeedParser().parseArticles(from: xml, sourceURL: "https://example.com/feed").first
+
+        XCTAssertEqual(article?.link, "https://example.com/stories/preferred")
+    }
+
+    func testResolvesRelativeRSSLinkAgainstFeedURL() {
+        let xml = "<rss><channel><item><title>Relative</title><link>/article/1</link></item></channel></rss>"
+        let article = RSSFeedParser().parseArticles(from: xml, sourceURL: "https://example.com/rss/feed.xml").first
+        XCTAssertEqual(article?.link, "https://example.com/article/1")
+    }
+
     func testExtractsArticleBodyParagraphs() {
         let html = "<html><body><nav>Menu</nav><article><h1>Title</h1><p>First</p><p>Second <b>part</b></p></article></body></html>"
         XCTAssertEqual(RSSArticleContentParser().parseParagraphs(from: html), ["Title", "First", "Second part"])

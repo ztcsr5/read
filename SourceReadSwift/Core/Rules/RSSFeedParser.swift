@@ -35,7 +35,7 @@ struct RSSFeedParser {
             guard let title = firstXMLValue(in: item, tags: ["title"]) else { return nil }
             return RSSArticlePreview(
                 title: title,
-                link: firstXMLValue(in: item, tags: ["link", "guid"]),
+                link: firstLink(in: item, baseURL: sourceURL) ?? firstXMLValue(in: item, tags: ["guid"]),
                 pubDate: firstXMLValue(in: item, tags: ["pubDate", "published", "updated"]),
                 description: firstXMLValue(in: item, tags: ["description", "summary", "content"]),
                 sourceURL: sourceURL,
@@ -62,6 +62,54 @@ struct RSSFeedParser {
             if !value.isEmpty { return value }
         }
         return nil
+    }
+
+    /// Atom feeds commonly expose a self link before the browser-facing article
+    /// link. Prefer an alternate HTML link and fall back to the first usable
+    /// link so RSS text links retain their existing behaviour.
+    private func firstLink(in text: String, baseURL: String?) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"<link\b([^>]*)>"#, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        var candidates: [(priority: Int, value: String)] = []
+        for match in regex.matches(in: text, range: range) {
+            guard let attributesRange = Range(match.range(at: 1), in: text) else { continue }
+            let attributes = String(text[attributesRange])
+            if let href = attributeValue("href", in: attributes) {
+                let rel = attributeValue("rel", in: attributes)?.lowercased()
+                let type = attributeValue("type", in: attributes)?.lowercased()
+                let relTokens = Set(rel?.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init) ?? [])
+                if relTokens.contains("self") || relTokens.contains("enclosure") { continue }
+                var priority = 2
+                if rel?.split(separator: " ").contains("alternate") == true { priority = 0 }
+                if type == "text/html" { priority = min(priority, 0) }
+                candidates.append((priority, resolveURL(href, baseURL: baseURL)))
+            }
+        }
+        if let best = candidates.sorted(by: { $0.priority < $1.priority }).first {
+            return best.value
+        }
+        guard let value = firstXMLValue(in: text, tags: ["link"]), !value.isEmpty else { return nil }
+        return resolveURL(value, baseURL: baseURL)
+    }
+
+    private func attributeValue(_ name: String, in attributes: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: name)
+        let pattern = #"(?:^|\s)"# + escaped + #"\s*=\s*[\"']([^\"']+)[\"']"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: attributes, range: NSRange(attributes.startIndex..<attributes.endIndex, in: attributes)),
+              let valueRange = Range(match.range(at: 1), in: attributes) else { return nil }
+        return String(attributes[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolveURL(_ value: String, baseURL: String?) -> String {
+        let trimmed = cleanFeedText(value)
+        guard let base = baseURL.flatMap(URL.init(string:)),
+              let resolved = URL(string: trimmed, relativeTo: base)?.absoluteURL else {
+            return trimmed
+        }
+        return resolved.absoluteString
     }
 
     private func firstXMLValue(in text: String, tags: [String]) -> String? {
