@@ -1263,7 +1263,13 @@ final class JSCoreRuntime {
           if (hashPos >= 0) authorityEnd = Math.min(authorityEnd, hashPos);
           var scheme = schemeEnd > 0 ? raw.substring(0, schemeEnd) : '', authority = schemeEnd > 0 ? raw.substring(schemeEnd + 3, authorityEnd) : '';
           var host = authority, port = -1, colon = authority.lastIndexOf(':');
-          if (colon > 0 && /^\d+$/.test(authority.substring(colon + 1))) { port = Number(authority.substring(colon + 1)); host = authority.substring(0, colon); }
+          var portText = colon > 0 ? authority.substring(colon + 1) : '';
+          var portIsNumeric = portText.length > 0;
+          for (var portIndex = 0; portIndex < portText.length; portIndex++) {
+            var portChar = portText.charAt(portIndex);
+            if (portChar < '0' || portChar > '9') { portIsNumeric = false; break; }
+          }
+          if (colon > 0 && portIsNumeric) { port = Number(portText); host = authority.substring(0, colon); }
           var pathPart = schemeEnd > 0 ? raw.substring(authorityEnd) : raw, hash = pathPart.indexOf('#'), query = pathPart.indexOf('?');
           var pathOnly = pathPart; if (query >= 0) pathOnly = pathPart.substring(0, query); else if (hash >= 0) pathOnly = pathPart.substring(0, hash);
           var queryOnly = query >= 0 ? pathPart.substring(query + 1, hash >= 0 ? hash : pathPart.length) : '', refOnly = hash >= 0 ? pathPart.substring(hash + 1) : '';
