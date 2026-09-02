@@ -11,6 +11,16 @@ struct BookDetailView: View {
     @State private var didOpenReader = false
     @State private var hasPromptedAddAfterPreview = false
     @State private var showAddAfterPreviewPrompt = false
+    @State private var isAscending = true
+    @State private var showAllChapters = false
+    @State private var isDownloading = false
+    @State private var downloadProgress = 0
+    @State private var downloadTotal = 0
+    @State private var downloadTask: Task<Void, Never>?
+
+    private var displayedChapters: [BookChapter] {
+        Array((isAscending ? chapters : Array(chapters.reversed())).prefix(100))
+    }
 
     var body: some View {
         ScrollView {
@@ -49,8 +59,53 @@ struct BookDetailView: View {
         .pageBackground()
         .navigationTitle(book.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button { markAsRead() } label: {
+                        Label("标记为已读", systemImage: "checkmark.circle")
+                    }
+                    Button { isAscending.toggle() } label: {
+                        Label(isAscending ? "切换倒序" : "切换正序", systemImage: "arrow.up.arrow.down")
+                    }
+                    Button { Task { await reload() } } label: {
+                        Label("刷新目录", systemImage: "arrow.clockwise")
+                    }
+                    Button { startDownload() } label: {
+                        Label(isDownloading ? "正在缓存 \(downloadProgress)/\(downloadTotal)" : "缓存全本章节", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(isDownloading || chapters.isEmpty)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("书籍操作")
+            }
+        }
         .task {
             await load()
+        }
+        .onDisappear {
+            downloadTask?.cancel()
+            downloadTask = nil
+        }
+        .sheet(isPresented: $showAllChapters) {
+            NavigationStack {
+                List {
+                    ForEach(isAscending ? chapters : Array(chapters.reversed())) { chapter in
+                        NavigationLink {
+                            ChapterLoadingView(
+                                bookID: appState.bookshelfStore.contains(book) ? book.id : nil,
+                                sourceUrl: book.sourceUrl,
+                                chapter: chapter,
+                                totalChapters: chapters.count,
+                                chapters: chapters
+                            )
+                        } label: { Text(chapter.title).lineLimit(1) }
+                    }
+                }
+                .navigationTitle("完整目录")
+                .navigationBarTitleDisplayMode(.inline)
+            }
         }
         .onAppear {
             promptToAddAfterPreviewIfNeeded()
@@ -104,7 +159,7 @@ struct BookDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(chapters) { chapter in
+            ForEach(displayedChapters) { chapter in
                 NavigationLink {
                     ChapterLoadingView(
                         bookID: appState.bookshelfStore.contains(book) ? book.id : nil,
@@ -131,6 +186,15 @@ struct BookDetailView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     didOpenReader = true
                 })
+            }
+            if chapters.count > displayedChapters.count {
+                Button {
+                    showAllChapters = true
+                } label: {
+                    Label("查看全部 \(chapters.count) 章", systemImage: "list.number")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -172,6 +236,54 @@ struct BookDetailView: View {
             }
         case .failure(let error):
             errorMessage = error.displayMessage
+        }
+    }
+
+    private func reload() async {
+        detail = nil
+        chapters = []
+        errorMessage = nil
+        await load()
+    }
+
+    private func markAsRead() {
+        guard !chapters.isEmpty else { return }
+        if !appState.bookshelfStore.contains(book) {
+            appState.bookshelfStore.addOrUpdate(book)
+        }
+        appState.bookshelfStore.updateReadingProgress(
+            bookID: book.id,
+            chapterIndex: max(chapters.count - 1, 0),
+            chapterTitle: chapters.last?.title,
+            totalChapters: chapters.count
+        )
+    }
+
+    private func startDownload() {
+        guard !isDownloading, !chapters.isEmpty,
+              let source = appState.sourceStore.source(for: book.sourceUrl) else { return }
+        isDownloading = true
+        downloadProgress = 0
+        downloadTotal = chapters.count
+        let engine = appState.engine
+        let purifyRules = appState.purifyRuleStore.enabledPatterns
+        downloadTask = Task { @MainActor in
+            defer {
+                isDownloading = false
+                downloadTask = nil
+            }
+            for chapter in chapters {
+                guard !Task.isCancelled else { return }
+                if !appState.chapterContentCacheStore.isCached(sourceURL: source.bookSourceUrl, chapter: chapter, purifyRules: purifyRules) {
+                    let result = await AsyncTimeout.run(seconds: 14) {
+                        await engine.getContent(source: source, chapter: chapter)
+                    } ?? .failure(.network("Download timed out"))
+                    if case .success(let content) = result {
+                        appState.chapterContentCacheStore.save(content, sourceURL: source.bookSourceUrl, purifyRules: purifyRules)
+                    }
+                }
+                downloadProgress += 1
+            }
         }
     }
 

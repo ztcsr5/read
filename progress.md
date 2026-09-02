@@ -895,3 +895,19 @@
 - iOS build/XCTest Actions run `33662965147`: `success`.
 - Unsigned IPA Actions run `33662965213`: `success`; the workflow page reports the `SourceReadSwift-unsigned-ipa` artifact. Artifact bytes/hash were not available from the Windows host because the GitHub API was rate-limited, so no size or SHA-256 is claimed here.
 - This closes the compile/test gate for the phase; external-source login behavior and sustained ProMotion 120 Hz still require device/network evidence.
+## 2026-09-03 - Task: Flutter parity offline recovery and reader data management phase
+
+### Scope
+- Added a native all-books bookmark page with chapter/paragraph locations, snippets, swipe-to-delete, and direct jump into the existing reader gateway.
+- Added an offline chapter cache browser with source/book grouping, byte/count summaries and single-entry deletion; this exposes the stale-cache recovery path instead of hiding it inside the reader.
+- Expanded book detail parity with mark-as-read, refresh catalog, ascending/descending order, full-catalog sheet, and cancellable whole-book chapter caching with progress state.
+- Added portable bookshelf backup/restore through the iOS document picker. The JSON contains bookshelf books, progress, bookmarks and groups only; cookies, login sessions and credentials remain excluded.
+- Added deterministic store/cache regression coverage for backup round-trip, unknown-group normalization, single-entry cache deletion and book filtering.
+
+### Testing
+- `git diff --check` passed locally; Windows only reports the repository's existing LF-to-CRLF normalization warnings.
+- Swift/Xcode compilation, XCTest and unsigned IPA are pending the GitHub Actions gate for the phase commit.
+- Windows cannot validate document-picker presentation, reader jump animation, external source downloads or sustained ProMotion frame pacing; those remain device/Actions evidence items.
+
+### Rollback
+- Revert the phase commit to remove the bookmark/offline-management views, backup/restore APIs, cache-management APIs and book-detail download controls while preserving the previous source/reader engine.

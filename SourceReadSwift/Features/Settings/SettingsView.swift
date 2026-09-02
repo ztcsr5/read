@@ -1,11 +1,16 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("settings.themeMode") private var themeModeRawValue = ThemeMode.system.rawValue
     @State private var cacheSize = "无缓存"
     @State private var rssCacheSize = "无缓存"
+    @State private var backupDocument: BookshelfBackupDocument?
+    @State private var showBackupExporter = false
+    @State private var showBackupImporter = false
+    @State private var backupMessage: String?
 
     private var themeMode: ThemeMode {
         get { ThemeMode(rawValue: themeModeRawValue) ?? .system }
@@ -101,9 +106,35 @@ struct SettingsView: View {
                     }
 
                     NavigationLink {
+                        ReaderBookmarksView()
+                    } label: {
+                        Label("全部书签", systemImage: "bookmark")
+                    }
+
+                    NavigationLink {
+                        OfflineChapterCacheView()
+                    } label: {
+                        Label("离线章节", systemImage: "arrow.down.circle")
+                    }
+                    NavigationLink {
                         AboutReadView()
                     } label: {
                         Label("关于阅读", systemImage: "info.circle")
+                    }
+                }
+
+                Section("数据") {
+                    Button {
+                        backupDocument = BookshelfBackupDocument(snapshot: appState.bookshelfStore.backupSnapshot())
+                        showBackupExporter = true
+                    } label: {
+                        Label("导出书架备份", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
+                        showBackupImporter = true
+                    } label: {
+                        Label("恢复书架备份", systemImage: "square.and.arrow.down")
                     }
                 }
 
@@ -149,6 +180,53 @@ struct SettingsView: View {
                 updateCacheSummary()
                 updateRSSCacheSummary()
             }
+            .fileExporter(
+                isPresented: $showBackupExporter,
+                document: $backupDocument,
+                contentType: .json,
+                defaultFilename: "SourceReadSwift-bookshelf-backup"
+            ) { result in
+                switch result {
+                case .success:
+                    backupMessage = "书架备份已导出"
+                case .failure(let error):
+                    backupMessage = "导出失败：\(error.localizedDescription)"
+                }
+            }
+            .fileImporter(
+                isPresented: $showBackupImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                importBackup(result)
+            }
+            .alert("数据备份", isPresented: Binding(
+                get: { backupMessage != nil },
+                set: { if !$0 { backupMessage = nil } }
+            )) {
+                Button("确定") { backupMessage = nil }
+            } message: {
+                Text(backupMessage ?? "")
+            }
+        }
+    }
+
+    private func importBackup(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let snapshot = try decoder.decode(BookshelfBackupSnapshot.self, from: Data(contentsOf: url))
+            guard appState.bookshelfStore.restore(snapshot) else {
+                backupMessage = "备份版本不受支持"
+                return
+            }
+            updateCacheSummary()
+            backupMessage = "已恢复 \(snapshot.books.count) 本书和 \(snapshot.groups.count) 个分组"
+        } catch {
+            backupMessage = "恢复失败：\(error.localizedDescription)"
         }
     }
 

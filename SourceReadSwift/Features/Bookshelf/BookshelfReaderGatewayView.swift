@@ -3,6 +3,7 @@ import SwiftUI
 struct BookshelfReaderGatewayView: View {
     @EnvironmentObject private var appState: AppState
     let book: BookshelfBook
+    var initialBookmark: ReaderBookmark? = nil
 
     @State private var detail: BookDetail?
     @State private var chapters: [BookChapter] = []
@@ -12,6 +13,7 @@ struct BookshelfReaderGatewayView: View {
     @State private var showSourceSwitcher = false
     @State private var sourceSwitchState = SourceSwitchState()
     @State private var autoplaySpeechAfterHandoff = false
+    @State private var didApplyInitialBookmark = false
 
     private var currentBook: BookshelfBook {
         appState.bookshelfStore.book(id: book.id) ?? book
@@ -21,6 +23,7 @@ struct BookshelfReaderGatewayView: View {
         gatewayContent
         .task {
             appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
+            applyInitialBookmarkIfNeeded()
             await resumeReading()
         }
         .sheet(isPresented: $showSourceSwitcher) {
@@ -84,6 +87,21 @@ struct BookshelfReaderGatewayView: View {
 
     private var localBookChapters: [LocalTextChapter] {
         book.localChapters ?? []
+    }
+
+    private func applyInitialBookmarkIfNeeded() {
+        guard !didApplyInitialBookmark, let initialBookmark else { return }
+        didApplyInitialBookmark = true
+        if !localBookChapters.isEmpty {
+            selectedLocalChapterIndex = initialBookmark.chapterIndex
+        }
+        appState.bookshelfStore.updateReadingProgress(
+            bookID: book.id,
+            chapterIndex: initialBookmark.chapterIndex,
+            chapterTitle: initialBookmark.chapterTitle,
+            totalChapters: max(currentBook.totalChapters, initialBookmark.chapterIndex + 1),
+            paragraphIndex: initialBookmark.paragraphIndex
+        )
     }
 
     private func readerRecoveryErrorView(_ message: String) -> some View {
@@ -217,10 +235,32 @@ struct BookshelfReaderGatewayView: View {
                     errorMessage = "目录为空"
                 }
             case .failure(let error):
-                errorMessage = "目录加载失败：\(error.displayMessage)"
+                let cached = appState.chapterContentCacheStore.cachedChapters(
+                    sourceURL: source.bookSourceUrl,
+                    bookURL: activeBook.bookURL
+                )
+                if let target = cached.first(where: { $0.index == activeBook.currentChapterIndex }) ?? cached.first {
+                    chapters = cached
+                    selectedChapter = target
+                    errorMessage = nil
+                    appState.record(DiagnosticEvent(level: .info, stage: "reader.offline", sourceName: activeBook.sourceName, message: "目录网络失败，已切换到离线缓存", details: ["chapters": String(cached.count)]))
+                } else {
+                    errorMessage = "目录加载失败：\(error.displayMessage)"
+                }
             }
         case .failure(let error):
-            errorMessage = "详情加载失败：\(error.displayMessage)"
+            let cached = appState.chapterContentCacheStore.cachedChapters(
+                sourceURL: source.bookSourceUrl,
+                bookURL: activeBook.bookURL
+            )
+            if let target = cached.first(where: { $0.index == activeBook.currentChapterIndex }) ?? cached.first {
+                chapters = cached
+                selectedChapter = target
+                errorMessage = nil
+                appState.record(DiagnosticEvent(level: .info, stage: "reader.offline", sourceName: activeBook.sourceName, message: "详情网络失败，已切换到离线缓存", details: ["chapters": String(cached.count)]))
+            } else {
+                errorMessage = "详情加载失败：\(error.displayMessage)"
+            }
         }
     }
 

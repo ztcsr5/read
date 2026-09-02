@@ -224,6 +224,42 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    /// Returns a portable snapshot. Cookies, login state and source credentials
+    /// live in separate stores and are deliberately excluded.
+    func backupSnapshot() -> BookshelfBackupSnapshot {
+        BookshelfBackupSnapshot(books: books, groups: groups)
+    }
+
+    /// Restores a snapshot atomically. Existing records are replaced so a
+    /// restore behaves predictably on a new device; malformed/empty backups are
+    /// rejected by the caller before this method is reached.
+    @discardableResult
+    func restore(_ snapshot: BookshelfBackupSnapshot) -> Bool {
+        guard snapshot.schemaVersion == 1 else { return false }
+        let normalizedGroups = snapshot.groups
+            .filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .enumerated()
+            .map { offset, group in
+                var updated = group
+                updated.sortOrder = offset
+                return updated
+            }
+        let validGroupNames = Set(normalizedGroups.map(\.name))
+        let normalizedBooks = snapshot.books.map { book in
+            var updated = book
+            if let groupName = updated.groupName, !validGroupNames.contains(groupName) {
+                updated.groupName = nil
+            }
+            return updated
+        }
+        books = normalizedBooks
+        groups = normalizedGroups
+        persistGroups()
+        persist()
+        return lastError == nil
+    }
+
     var recentBooks: [BookshelfBook] {
         books
             .filter { $0.lastReadAt != nil }

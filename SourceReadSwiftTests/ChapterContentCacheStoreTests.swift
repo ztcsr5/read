@@ -137,4 +137,21 @@ final class ChapterContentCacheStoreTests: XCTestCase {
         )
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testRemovesSingleEntryAndFiltersByBook() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let persistence = ChapterContentCachePersistence(fileManager: .default, rootURL: root)
+        let store = ChapterContentCacheStore(persistence: persistence)
+        let first = BookChapter(title: "One", url: "https://example.com/1", bookUrl: "book-a", index: 0, isVip: false)
+        let second = BookChapter(title: "Two", url: "https://example.com/2", bookUrl: "book-b", index: 0, isVip: false)
+        store.save(ChapterContent(chapter: first, title: "One", paragraphs: ["A"], nextContentUrl: nil), sourceURL: "source", purifyRules: [])
+        store.save(ChapterContent(chapter: second, title: "Two", paragraphs: ["B"], nextContentUrl: nil), sourceURL: "source", purifyRules: [])
+        XCTAssertEqual(store.entries(forBookURL: "book-a").map(\.title), ["One"])
+        let key = try XCTUnwrap(store.entries.first?.key)
+        store.remove(key: key)
+        XCTAssertEqual(store.entries.count, 1)
+        let reloaded = ChapterContentCacheStore(persistence: persistence)
+        XCTAssertEqual(reloaded.entries.count, 1)
+        try? FileManager.default.removeItem(at: root)
+    }
 }

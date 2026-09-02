@@ -251,4 +251,28 @@ final class BookshelfStoreTests: XCTestCase {
         XCTAssertNil(store.book(id: book.id)?.groupName)
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testBackupRestoreRoundTripDropsUnknownGroupAssignments() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let persistence = BookshelfPersistence(fileManager: .default, rootURL: root)
+        let groupPersistence = BookshelfGroupPersistence(fileManager: .default, rootURL: root)
+        let store = BookshelfStore(persistence: persistence, groupPersistence: groupPersistence)
+        let book = SearchBook(name: "Backup", author: "Author", coverUrl: nil, bookUrl: "https://example.com/backup", sourceName: "Example", sourceUrl: "https://example.com", intro: nil)
+        store.addOrUpdate(book)
+        store.createGroup(name: "收藏")
+        store.moveBooks(bookIDs: [book.id], toGroupName: "收藏")
+        store.toggleBookmark(bookID: book.id, chapterIndex: 2, chapterTitle: "第三章", paragraphIndex: 4, snippet: "摘录")
+
+        var snapshot = store.backupSnapshot()
+        var modifiedBook = try XCTUnwrap(snapshot.books.first)
+        modifiedBook.groupName = "不存在的分组"
+        snapshot = BookshelfBackupSnapshot(books: [modifiedBook], groups: snapshot.groups)
+        let restored = BookshelfStore(persistence: BookshelfPersistence(fileManager: .default, rootURL: root.appendingPathComponent("restored")), groupPersistence: BookshelfGroupPersistence(fileManager: .default, rootURL: root.appendingPathComponent("restored")))
+
+        XCTAssertTrue(restored.restore(snapshot))
+        XCTAssertEqual(restored.book(id: book.id)?.bookmarks?.first?.snippet, "摘录")
+        XCTAssertNil(restored.book(id: book.id)?.groupName)
+        XCTAssertEqual(restored.groups.first?.name, "收藏")
+        try? FileManager.default.removeItem(at: root)
+    }
 }

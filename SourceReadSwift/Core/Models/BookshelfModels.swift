@@ -133,3 +133,24 @@ struct BookshelfGroup: Identifiable, Codable, Hashable, Sendable {
         self.createdAt = createdAt
     }
 }
+
+/// Portable bookshelf backup. Source cookies, login sessions and other
+/// credentials are intentionally not part of this document.
+struct BookshelfBackupSnapshot: Codable, Hashable, Sendable {
+    let schemaVersion: Int
+    let exportedAt: Date
+    let books: [BookshelfBook]
+    let groups: [BookshelfGroup]
+
+    init(
+        schemaVersion: Int = 1,
+        exportedAt: Date = Date(),
+        books: [BookshelfBook],
+        groups: [BookshelfGroup]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.exportedAt = exportedAt
+        self.books = books
+        self.groups = groups
+    }
+}

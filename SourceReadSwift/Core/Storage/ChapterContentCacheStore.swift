@@ -6,6 +6,7 @@ struct ChapterContentCacheEntry: Identifiable, Codable, Hashable, Sendable {
     let sourceURL: String
     let chapterURL: String
     let bookURL: String
+    let chapterIndex: Int? = nil
     let title: String
     let paragraphs: [String]
     let nextContentUrl: String?
@@ -82,6 +83,7 @@ final class ChapterContentCacheStore: ObservableObject {
             sourceURL: sourceURL,
             chapterURL: content.chapter.url,
             bookURL: content.chapter.bookUrl,
+            chapterIndex: content.chapter.index,
             title: content.title,
             paragraphs: content.paragraphs,
             nextContentUrl: content.nextContentUrl,
@@ -105,6 +107,35 @@ final class ChapterContentCacheStore: ObservableObject {
     func removeAll() {
         entries.removeAll()
         persist()
+    }
+
+    func remove(key: String) {
+        guard entries.contains(where: { $0.key == key }) else { return }
+        entries.removeAll { $0.key == key }
+        persist()
+    }
+
+    func entries(forBookURL bookURL: String) -> [ChapterContentCacheEntry] {
+        entries.filter { $0.bookURL == bookURL }
+    }
+
+    func cachedChapters(sourceURL: String, bookURL: String) -> [BookChapter] {
+        entries
+            .filter { $0.sourceURL == sourceURL && $0.bookURL == bookURL }
+            .sorted { lhs, rhs in
+                let left = lhs.chapterIndex ?? Int(lhs.chapterURL.split(separator: "#").last ?? "") ?? 0
+                let right = rhs.chapterIndex ?? Int(rhs.chapterURL.split(separator: "#").last ?? "") ?? 0
+                return left < right
+            }
+            .map { entry in
+                BookChapter(
+                    title: entry.title,
+                    url: entry.chapterURL,
+                    bookUrl: entry.bookURL,
+                    index: entry.chapterIndex ?? (Int(entry.chapterURL.split(separator: "#").last ?? "") ?? 0),
+                    isVip: false
+                )
+            }
     }
 
     private func cacheKey(sourceURL: String, chapterURL: String) -> String {
