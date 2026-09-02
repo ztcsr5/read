@@ -77,6 +77,7 @@ struct SettingsView: View {
                     Button {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         appState.rssFeedCacheStore.removeAll()
+                        appState.rssArticleContentCacheStore.removeAll()
                         rssCacheSize = "无缓存"
                     } label: {
                         HStack {
@@ -160,7 +161,10 @@ struct SettingsView: View {
 
     private func updateRSSCacheSummary() {
         let count = appState.rssFeedCacheStore.entries.reduce(0) { $0 + $1.articles.count }
-        rssCacheSize = count == 0 ? "无缓存" : "(count) 篇 / (appState.rssFeedCacheStore.entries.count) 源"
+        let bodies = appState.rssArticleContentCacheStore.entries.count
+        rssCacheSize = count == 0 && bodies == 0
+            ? "无缓存"
+            : "\(count) 篇 / \(appState.rssFeedCacheStore.entries.count) 源 / 正文 \(bodies)"
     }
 
     private func byteCountText(_ bytes: Int) -> String {

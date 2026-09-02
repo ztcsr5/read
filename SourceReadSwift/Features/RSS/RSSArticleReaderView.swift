@@ -8,6 +8,7 @@ struct RSSArticleReaderView: View {
     @State private var paragraphs: [String] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showingCachedContent = false
     @AppStorage("reader.fontSize") private var fontSize: Double = 19
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
 
@@ -39,6 +40,12 @@ struct RSSArticleReaderView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
+                }
+                if showingCachedContent {
+                    Text("显示已缓存正文")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
             .padding(AppTheme.pagePadding)
@@ -73,6 +80,10 @@ struct RSSArticleReaderView: View {
 
     @MainActor
     private func load() async {
+        if let cached = appState.rssArticleContentCacheStore.paragraphs(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) {
+            paragraphs = cached
+            showingCachedContent = true
+        }
         guard let link = article.link, let url = URL(string: link) else {
             paragraphs = article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
             return
@@ -89,9 +100,20 @@ struct RSSArticleReaderView: View {
             if paragraphs.isEmpty, let description = article.description {
                 paragraphs = RSSArticleContentParser().parseParagraphs(from: description)
             }
+            if !paragraphs.isEmpty {
+                appState.rssArticleContentCacheStore.save(paragraphs, for: article)
+                showingCachedContent = false
+            }
         } catch {
-            errorMessage = error.localizedDescription
-            paragraphs = article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
+            if paragraphs.isEmpty {
+                paragraphs = article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
+            }
+            if paragraphs.isEmpty {
+                errorMessage = error.localizedDescription
+            } else {
+                errorMessage = nil
+                showingCachedContent = true
+            }
         }
     }
 }

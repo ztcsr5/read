@@ -9,6 +9,7 @@ struct RSSFeedCacheEntry: Codable, Hashable, Sendable {
 
 @MainActor
 final class RSSFeedCacheStore: ObservableObject {
+    static let defaultMaxAge: TimeInterval = 7 * 24 * 60 * 60
     @Published private(set) var entries: [RSSFeedCacheEntry] = []
     private let fileURL: URL
     private let maxSources: Int
@@ -22,8 +23,10 @@ final class RSSFeedCacheStore: ObservableObject {
                 ?? FileManager.default.temporaryDirectory
             self.fileURL = base.appendingPathComponent("SourceReadSwift/RSSFeedCache.json")
         }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         if let data = try? Data(contentsOf: self.fileURL),
-           let decoded = try? JSONDecoder().decode([RSSFeedCacheEntry].self, from: data) {
+           let decoded = try? decoder.decode([RSSFeedCacheEntry].self, from: data) {
             entries = decoded
         }
     }

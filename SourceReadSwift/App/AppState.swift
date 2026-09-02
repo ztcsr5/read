@@ -9,6 +9,7 @@ final class AppState: ObservableObject {
     let chapterContentCacheStore: ChapterContentCacheStore
     let rssArticleStateStore: RSSArticleStateStore
     let rssFeedCacheStore: RSSFeedCacheStore
+    let rssArticleContentCacheStore: RSSArticleContentCacheStore
     let sourceHealthStore: SourceHealthStore
     let sourceWritingServer: LightweightHTTPServer
     private let injectedEngine: SourceEngine?
@@ -41,6 +42,7 @@ final class AppState: ObservableObject {
         chapterContentCacheStore: ChapterContentCacheStore? = nil,
         rssArticleStateStore: RSSArticleStateStore? = nil,
         rssFeedCacheStore: RSSFeedCacheStore? = nil,
+        rssArticleContentCacheStore: RSSArticleContentCacheStore? = nil,
         sourceHealthStore: SourceHealthStore? = nil,
         engine: SourceEngine? = nil
     ) {
@@ -50,6 +52,7 @@ final class AppState: ObservableObject {
         self.chapterContentCacheStore = chapterContentCacheStore ?? ChapterContentCacheStore()
         self.rssArticleStateStore = rssArticleStateStore ?? RSSArticleStateStore()
         self.rssFeedCacheStore = rssFeedCacheStore ?? RSSFeedCacheStore()
+        self.rssArticleContentCacheStore = rssArticleContentCacheStore ?? RSSArticleContentCacheStore()
         self.sourceHealthStore = sourceHealthStore ?? SourceHealthStore()
         self.sourceWritingServer = LightweightHTTPServer()
         self.injectedEngine = engine
@@ -149,6 +152,14 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
 
         rssFeedCacheStore.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
+
+        rssArticleContentCacheStore.objectWillChange
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.objectWillChange.send()

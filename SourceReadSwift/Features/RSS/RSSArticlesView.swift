@@ -7,6 +7,7 @@ struct RSSArticlesView: View {
     @State private var articles: [RSSArticlePreview] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var didLoadFeed = false
 
     var body: some View {
         List {
@@ -31,11 +32,19 @@ struct RSSArticlesView: View {
                     }
                     .padding(.vertical, 30)
                 }
-            } else if let errorMessage, articles.isEmpty {
+            } else if let errorMessage, articles.isEmpty, !didLoadFeed {
                 Section {
-                    EmptyStateCard(systemImage: "exclamationmark.triangle", title: "订阅加载失败", message: errorMessage)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                    VStack(spacing: 12) {
+                        EmptyStateCard(systemImage: "exclamationmark.triangle", title: "订阅加载失败", message: errorMessage)
+                        Button {
+                            Task { await loadArticles(force: true) }
+                        } label: {
+                            Label("重试", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
             } else if articles.isEmpty {
                 Section {
@@ -76,7 +85,7 @@ struct RSSArticlesView: View {
             }
         }
         .task {
-            if let cached = appState.rssFeedCacheStore.articles(for: source.sourceUrl) {
+            if let cached = appState.rssFeedCacheStore.articles(for: source.sourceUrl, maxAge: RSSFeedCacheStore.defaultMaxAge) {
                 articles = cached
             }
             await loadArticles(force: false)
@@ -88,6 +97,7 @@ struct RSSArticlesView: View {
         guard force || articles.isEmpty else { return }
         isLoading = true
         errorMessage = nil
+        didLoadFeed = false
         defer { isLoading = false }
         do {
             guard let url = URL(string: source.sourceUrl) else {
@@ -99,6 +109,7 @@ struct RSSArticlesView: View {
             let (data, _) = try await URLSession.shared.data(for: request)
             let text = ResponseTextDecoder().decode(data: data, headers: [:])
             let parsed = RSSFeedParser().parseArticles(from: text, sourceURL: source.sourceUrl)
+            didLoadFeed = true
             if parsed.isEmpty {
                 errorMessage = "已加载响应，但没有识别到 RSS/Atom 文章。"
             }
