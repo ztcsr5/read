@@ -6,7 +6,7 @@ struct ChapterContentCacheEntry: Identifiable, Codable, Hashable, Sendable {
     let sourceURL: String
     let chapterURL: String
     let bookURL: String
-    let chapterIndex: Int? = nil
+    let chapterIndex: Int?
     let title: String
     let paragraphs: [String]
     let nextContentUrl: String?
