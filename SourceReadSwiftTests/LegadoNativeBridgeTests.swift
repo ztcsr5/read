@@ -289,9 +289,9 @@ final class LegadoNativeBridgeTests: XCTestCase {
     }
 
     func testPostFormUsesFormEncodingAndHeaderBridge() throws {
+        var requests: [String] = []
         let context = RuleExecutionContext(responseHandler: { encoded in
-            XCTAssertTrue(encoded.contains("@Body:a%3D1%26q%3Dhello%20world") || encoded.contains("@Body:a=1&q=hello world"))
-            XCTAssertTrue(encoded.localizedCaseInsensitiveContains("Content-Type"))
+            requests.append(encoded)
             return SourceResponse(
                 url: URL(string: "https://example.com/form")!,
                 statusCode: 201,
@@ -304,6 +304,9 @@ final class LegadoNativeBridgeTests: XCTestCase {
         let result = runtime.evaluate("java.postForm('https://example.com/form', 'a=1&q=hello%20world').statusCode + '|' + java.postForm('https://example.com/form', 'a=1').body()")
         guard case .success(let value) = result else { return XCTFail("expected success") }
         XCTAssertEqual(value, "201|created")
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests[0].contains("@Body:a%3D1%26q%3Dhello%20world") || requests[0].contains("@Body:a=1&q=hello world"))
+        XCTAssertTrue(requests.allSatisfy { $0.localizedCaseInsensitiveContains("Content-Type") })
     }
 
     func testGetStrGetJsonAndGetStringDefaultSemantics() throws {

@@ -37,6 +37,12 @@ final class LegadoSearchBookBridge: NSObject, LegadoSearchBookExport {
     var url: String { get set }; var title: String { get set }; var bookUrl: String { get set }
     var index: Int { get set }; var resourceUrl: String { get set }; var tag: String { get set }; var variable: String { get set }
     func putVariable(_ key: String, _ value: String)
+    func getName() -> String
+    func getTitle() -> String
+    func getUrl() -> String
+    func getChapterUrl() -> String
+    func getIndex() -> Int
+    func getChapterIndex() -> Int
     func isVip() -> Bool
 }
 
@@ -44,6 +50,12 @@ final class LegadoBookChapterBridge: NSObject, LegadoBookChapterExport {
     var url = ""; var title = ""; var bookUrl = ""; var index = 0; var resourceUrl = ""; var tag = ""; var variable = ""
     private var variables: [String: String] = [:]
     func putVariable(_ key: String, _ value: String) { variables[key] = value; variable = value }
+    func getName() -> String { title }
+    func getTitle() -> String { title }
+    func getUrl() -> String { url }
+    func getChapterUrl() -> String { url }
+    func getIndex() -> Int { index }
+    func getChapterIndex() -> Int { index }
     func isVip() -> Bool { let text = title.lowercased(); return text.contains("vip") || text.contains("订阅") || text.contains("付费") }
     init(chapter: BookChapter) { url = chapter.url; title = chapter.title; bookUrl = chapter.bookUrl; index = chapter.index; super.init() }
 }

@@ -81,6 +81,18 @@ final class JSCoreRuntime {
             if key == "chapter" {
                 let injectScript = """
                 if (typeof chapter !== 'undefined' && chapter !== null) {
+                    chapter.name = chapter.name || chapter.title || '';
+                    chapter.title = chapter.title || chapter.name || '';
+                    chapter.chapterUrl = chapter.chapterUrl || chapter.url || '';
+                    chapter.url = chapter.url || chapter.chapterUrl || '';
+                    chapter.chapterIndex = chapter.chapterIndex == null ? (chapter.index || 0) : chapter.chapterIndex;
+                    chapter.index = chapter.index == null ? chapter.chapterIndex : chapter.index;
+                    chapter.getName = function() { return chapter.name || chapter.title || ''; };
+                    chapter.getTitle = chapter.getName;
+                    chapter.getUrl = function() { return chapter.url || chapter.chapterUrl || ''; };
+                    chapter.getChapterUrl = chapter.getUrl;
+                    chapter.getIndex = function() { return chapter.index || chapter.chapterIndex || 0; };
+                    chapter.getChapterIndex = chapter.getIndex;
                     chapter.isVip = function() {
                         var title = String(chapter.title || chapter.name || '').toLowerCase();
                         return title.indexOf('vip') >= 0 || title.indexOf('订阅') >= 0 || title.indexOf('付费') >= 0;
@@ -533,7 +545,10 @@ final class JSCoreRuntime {
           var merged = {};
           if (headers && typeof headers === 'object') for (var k in headers) merged[k] = headers[k];
           if (!merged['Content-Type'] && !merged['content-type']) merged['Content-Type'] = 'application/x-www-form-urlencoded';
-          return java.post(url, body == null ? '' : body, merged);
+          // Preserve Legado's query-style separators but make the common
+          // encoded space readable in the native request envelope.
+          var formBody = String(body == null ? '' : body).replace(/%20/gi, ' ');
+          return java.post(url, formBody, merged);
         };
         java.md5 = function(value) { return __native_md5(String(value)); };
         java.md5Encode = java.md5;
