@@ -609,3 +609,15 @@
 ### Large-batch follow-up
 - Corrected frame-rate coordination again to use the SDK-supported `CALayer.preferredFrameRateRange` path after the runner showed that neither `UIWindowScene` nor `UIWindow` exposes the property in this toolchain.
 - Pushed the corrected batch as commit `91cfc1e`; new iOS and unsigned IPA runs are queued/in progress.
+
+## 2026-09-02 - Task: RSS persistence and EPUB/content phase completion pass
+
+### What was done
+- Added persistent RSS article read/favorite state through `RSSArticleStateStore` and exposed it through `AppState`.
+- RSS article rows now show read/favorite state; opening an article marks it read, and the article reader exposes a favorite toggle.
+- Added regression coverage proving RSS state survives store reload from `UserDefaults`.
+- Continued EPUB path compatibility coverage and retained the native reader as the shared article/content presentation route.
+
+### Testing
+- Ran `git diff --check` locally.
+- Pushed the large batch as commit `192c7bc`; Actions iOS and unsigned IPA validation are running for this phase.
