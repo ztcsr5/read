@@ -739,3 +739,12 @@
 ### Testing
 - Ran `git diff --check` locally.
 - iOS compile/XCTest and unsigned IPA remain GitHub Actions gates.
+## 2026-09-02 - Task: Legado JS bridge diagnostics visibility
+
+### What was done
+- Wired `RuleExecutionContext` JS log callbacks into the app diagnostic sink for search, detail, TOC and content stages.
+- JS/runtime failures and bridge messages now appear in the existing diagnostics stream with stage labels, while response observations remain sanitized (status, bytes, content type, cookie presence only).
+
+### Testing
+- Ran `git diff --check` locally.
+- GitHub Actions remains the authoritative Swift compile/XCTest/unsigned-IPA gate.

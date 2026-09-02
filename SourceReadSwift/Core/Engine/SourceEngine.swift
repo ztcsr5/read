@@ -30,6 +30,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     func searchBooks(source: BookSource, keyword: String, page: Int) async -> Result<[SearchBook], SourceEngineError> {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
+        }, logHandler: { [diagnostics] message in
+            Task { await diagnostics.emit(.init(level: .info, stage: "search.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.responseHandler = { encoded in
             SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
@@ -74,6 +76,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     func getBookDetail(source: BookSource, book: SearchBook) async -> Result<BookDetail, SourceEngineError> {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
+        }, logHandler: { [diagnostics] message in
+            Task { await diagnostics.emit(.init(level: .info, stage: "detail.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.responseHandler = { encoded in
             SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
@@ -96,6 +100,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     func getChapterList(source: BookSource, book: BookDetail) async -> Result<[BookChapter], SourceEngineError> {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
+        }, logHandler: { [diagnostics] message in
+            Task { await diagnostics.emit(.init(level: .info, stage: "toc.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.responseHandler = { encoded in
             SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
@@ -127,6 +133,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     func getContent(source: BookSource, chapter: BookChapter) async -> Result<ChapterContent, SourceEngineError> {
         let executionContext = RuleExecutionContext(networkHandler: { [network] encoded in
             self.syncLoad(encoded: encoded, source: source, network: network)
+        }, logHandler: { [diagnostics] message in
+            Task { await diagnostics.emit(.init(level: .info, stage: "content.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.responseHandler = { encoded in
             SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
@@ -166,8 +174,11 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         stage: String
     ) async -> Result<SourceResponse, SourceEngineError> {
         let primary = await network.load(request)
-        if case .success(let response) = primary, !shouldUseWebViewFallback(source: source, response: response) {
-            return .success(response)
+        if case .success(let response) = primary {
+            await emitResponseObservation(response, request: request, source: source, stage: stage)
+            if !shouldUseWebViewFallback(source: source, response: response) {
+                return .success(response)
+            }
         }
         guard shouldUseWebView(source: source) else {
             return primary
@@ -429,6 +440,34 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             sourceName: source.bookSourceName,
             message: error.displayMessage,
             details: details
+        ))
+    }
+
+    private func emitResponseObservation(
+        _ response: SourceResponse,
+        request: SourceRequest,
+        source: BookSource,
+        stage: String
+    ) async {
+        let contentType = response.headers.first {
+            $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame
+        }?.value ?? ""
+        let hasCookie = response.headers.contains {
+            $0.key.caseInsensitiveCompare("Set-Cookie") == .orderedSame
+        }
+        await diagnostics.emit(.init(
+            level: .info,
+            stage: "\(stage).response",
+            sourceName: source.bookSourceName,
+            message: "收到书源响应",
+            details: [
+                "method": request.method.rawValue,
+                "url": response.url.absoluteString,
+                "status": String(response.statusCode),
+                "bytes": String(response.data.count),
+                "contentType": contentType,
+                "setCookie": hasCookie ? "present" : "absent"
+            ]
         ))
     }
 }
