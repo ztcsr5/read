@@ -489,7 +489,7 @@ final class JSCoreRuntime {
           return out;
         };
         java.hexDecodeToString = function(value) {
-          var text = String(value || '').replace(/\s+/g, '');
+          var text = String(value || '').replace(/\\s+/g, '');
           if (text.length % 2) return '';
           var bytes = [];
           for (var i = 0; i < text.length; i += 2) {
@@ -683,8 +683,8 @@ final class JSCoreRuntime {
           var useDefaultHtml = arguments.length <= 1 || typeof rule === 'boolean';
           var pageHtml = useDefaultHtml ? __defaultHtml() : String(input);
           var actualRule = useDefaultHtml ? String(input) : String(rule);
-          if (!useDefaultHtml && ((input && typeof input === 'object') || (/^\s*[\[{]/.test(pageHtml) && /^\$/.test(actualRule)))) {
-            if (/^\$/.test(actualRule)) return __jsonRuleList(input, actualRule);
+          if (!useDefaultHtml && ((input && typeof input === 'object') || (/^\\s*[\\[{]/.test(pageHtml) && /^\\$/.test(actualRule)))) {
+            if (/^\\$/.test(actualRule)) return __jsonRuleList(input, actualRule);
           }
           var list = __native_getStringList(pageHtml, actualRule, __defaultBaseUrl());
           var out = [];
@@ -1252,7 +1252,7 @@ final class JSCoreRuntime {
               }
             } catch (_) {}
           }
-          var parsed = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/:?#]+)(?::(\d+))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/);
+          var parsed = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/:?#]+)(?::(\\d+))?([^?#]*)(?:\\?([^#]*))?(?:#(.*))?/);
           this.toString = function() { return raw; };
           this.toExternalForm = this.toString;
           this.getProtocol = function() { return parsed ? parsed[1] : ''; };
