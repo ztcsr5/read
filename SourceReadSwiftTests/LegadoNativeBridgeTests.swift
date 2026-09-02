@@ -326,4 +326,19 @@ final class LegadoNativeBridgeTests: XCTestCase {
         guard case .success(let value) = result else { return XCTFail("expected success") }
         XCTAssertEqual(value, "Fixture|https://example.com/source|Book|Author|https://example.com/book|Chapter 1|4")
     }
+
+    func testJavaPatternMatcherSupportsIterationAndCaptureMetadata() throws {
+        let runtime = JSCoreRuntime()
+        let script = "var m=Packages.java.util.regex.Pattern.compile('([A-Za-z]+)-(\\\\d+)').matcher('one-12 two-34'); var a=m.find() ? [m.group(),m.group(1),m.group(2),m.start(),m.end(),m.groupCount()].join(':') : 'none'; var b=m.find() ? [m.group(),m.start(),m.end()].join(':') : 'none'; [a,b,m.find()].join('|')"
+        let result = runtime.evaluate(script)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "one-12:one:12:0:6:2|two-34:7:13|false")
+    }
+
+    func testJavaPatternMatcherMatchesAndReset() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("var m=java.util.regex.Pattern.compile('abc').matcher('abc'); [m.matches(),m.group(),m.start(),m.end(),m.reset() === m,m.find()].join('|')")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "true|abc|0|3|true|true")
+    }
 }

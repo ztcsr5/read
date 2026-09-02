@@ -1352,9 +1352,31 @@ final class JSCoreRuntime {
           compile: function(pattern) {
             return {
               matcher: function(input) {
-                var re; try { re = new RegExp(String(pattern)); } catch (_) { re = /$a/; }
+                var re; try { re = new RegExp(String(pattern), 'g'); } catch (_) { re = new RegExp('a^', 'g'); }
                 var text = String(input || '');
-                return { find: function() { return re.test(text); }, matches: function() { return re.test(text); }, group: function(_) { var m = re.exec(text); return m ? (m[1] || m[0]) : ''; } };
+                var lastMatch = null;
+                var lastStart = -1;
+                var lastEnd = -1;
+                var matcher;
+                var reset = function() { re.lastIndex = 0; lastMatch = null; lastStart = -1; lastEnd = -1; return matcher; };
+                var find = function() {
+                  var match = re.exec(text);
+                  if (!match) { lastMatch = null; lastStart = -1; lastEnd = -1; return false; }
+                  lastMatch = match; lastStart = match.index; lastEnd = match.index + match[0].length; return true;
+                };
+                matcher = {
+                  find: find,
+                  matches: function() {
+                    var full; try { full = new RegExp('^(?:' + String(pattern) + ')$'); } catch (_) { return false; }
+                    var match = full.exec(text); lastMatch = match; lastStart = match ? 0 : -1; lastEnd = match ? text.length : -1; return !!match;
+                  },
+                  reset: reset,
+                  group: function(index) { var slot = index == null ? 0 : Number(index); return lastMatch && lastMatch[slot] != null ? String(lastMatch[slot]) : ''; },
+                  groupCount: function() { return lastMatch ? Math.max(0, lastMatch.length - 1) : 0; },
+                  start: function(index) { return lastMatch ? (index == null || Number(index) === 0 ? lastStart : lastStart) : -1; },
+                  end: function(index) { return lastMatch ? (index == null || Number(index) === 0 ? lastEnd : lastEnd) : -1; }
+                };
+                return matcher;
               }
             };
           }
