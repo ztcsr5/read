@@ -2,15 +2,26 @@ import Foundation
 import SwiftSoup
 
 struct RSSArticlePreview: Identifiable, Hashable, Sendable {
-    var id: String { [title, link ?? "", pubDate ?? ""].joined(separator: "|") }
+    var id: String { [sourceURL ?? "", title, link ?? "", pubDate ?? ""].joined(separator: "|") }
+    let sourceURL: String?
     let title: String
     let link: String?
     let pubDate: String?
     let description: String?
+    let imageURL: String?
+
+    init(title: String, link: String?, pubDate: String?, description: String?, sourceURL: String? = nil, imageURL: String? = nil) {
+        self.sourceURL = sourceURL
+        self.title = title
+        self.link = link
+        self.pubDate = pubDate
+        self.description = description
+        self.imageURL = imageURL
+    }
 }
 
 struct RSSFeedParser {
-    func parseArticles(from text: String) -> [RSSArticlePreview] {
+    func parseArticles(from text: String, sourceURL: String? = nil) -> [RSSArticlePreview] {
         let itemPattern = text.range(of: "<entry", options: .caseInsensitive) == nil
             ? #"<item[\s\S]*?</item>"#
             : #"<entry[\s\S]*?</entry>"#
@@ -26,9 +37,31 @@ struct RSSFeedParser {
                 title: title,
                 link: firstXMLValue(in: item, tags: ["link", "guid"]),
                 pubDate: firstXMLValue(in: item, tags: ["pubDate", "published", "updated"]),
-                description: firstXMLValue(in: item, tags: ["description", "summary", "content"])
+                description: firstXMLValue(in: item, tags: ["description", "summary", "content"]),
+                sourceURL: sourceURL,
+                imageURL: firstImageURL(in: item, baseURL: sourceURL)
             )
         }
+    }
+
+    private func firstImageURL(in text: String, baseURL: String?) -> String? {
+        let patterns = [
+            #"<enclosure[^>]+url=[\"']([^\"']+)[\"']"#,
+            #"<media:content[^>]+url=[\"']([^\"']+)[\"']"#,
+            #"<img[^>]+src=[\"']([^\"']+)[\"']"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text)),
+                  let range = Range(match.range(at: 1), in: text) else { continue }
+            let value = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let base = baseURL.flatMap { URL(string: $0) }
+            if let absolute = URL(string: value, relativeTo: base)?.absoluteURL.absoluteString {
+                return absolute
+            }
+            if !value.isEmpty { return value }
+        }
+        return nil
     }
 
     private func firstXMLValue(in text: String, tags: [String]) -> String? {

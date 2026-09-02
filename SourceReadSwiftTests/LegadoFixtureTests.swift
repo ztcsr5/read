@@ -1,0 +1,18 @@
+import XCTest
+@testable import SourceReadSwift
+
+final class LegadoFixtureTests: XCTestCase {
+    func testAllBookSourceFixturesDecodeAndExposePipelineCoverage() throws {
+        let names = [
+            "legado-html-source", "legado-json-source", "legado-js-source",
+            "legado-html-pagination-source", "legado-post-source", "legado-jxnode-source"
+        ]
+        for name in names {
+            let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "Fixtures"))
+            let source = try JSONDecoder().decode(BookSource.self, from: Data(contentsOf: url))
+            XCTAssertFalse(source.bookSourceName.isEmpty, name)
+            XCTAssertNotNil(source.searchUrl, name)
+            XCTAssertNotNil(source.ruleSearch, name)
+        }
+    }
+}

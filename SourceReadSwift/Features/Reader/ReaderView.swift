@@ -18,6 +18,7 @@ struct ReaderView: View {
     var onCacheNextChapters: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showOverlay = false
     @State private var showSettings = false
     @State private var showChapterList = false
@@ -29,6 +30,7 @@ struct ReaderView: View {
     @State private var autoScrollEnabled = false
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
+    @State private var sleepTimerTask: Task<Void, Never>?
     @State private var positionPersistTask: Task<Void, Never>?
     @State private var paragraphJumpRequest: ParagraphJumpRequest?
     @State private var pagedBlocksCache: [ReaderPageBlock] = []
@@ -47,6 +49,7 @@ struct ReaderView: View {
     @AppStorage("reader.footerHeight") private var footerHeight: Double = 72
     @AppStorage("reader.ttsRate") private var ttsRate: Double = 0.52
     @AppStorage("reader.autoScrollDelay") private var autoScrollDelay: Double = 2.0
+    @AppStorage("reader.sleepTimerMinutes") private var sleepTimerMinutes: Int = 0
     @AppStorage("reader.background") private var backgroundRawValue: String = ReaderBackground.paper.rawValue
     @AppStorage("reader.mode") private var readerModeRawValue: String = ReaderMode.scroll.rawValue
     @AppStorage("reader.tapZones") private var tapZonesRawValue: String = ReaderTapAction.defaultRawValue
@@ -225,6 +228,7 @@ struct ReaderView: View {
             autoScrollTarget = initialAutoScrollTarget()
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             applyIdleTimerPreference()
+            scheduleSleepTimer()
             appState.bookshelfStore.markReaderOpened(bookID: bookID)
             persistReadingPosition()
         }
@@ -232,6 +236,8 @@ struct ReaderView: View {
             positionPersistTask?.cancel()
             persistReadingPosition(paragraphIndexOverride: currentParagraphIndexForPersistence())
             stopAutoScroll()
+            sleepTimerTask?.cancel()
+            sleepTimerTask = nil
             speechController.stop()
             restoreIdleTimerPreference()
             appState.isTabChromeHidden = false
@@ -242,6 +248,16 @@ struct ReaderView: View {
         }
         .onChange(of: keepScreenAwake) { _ in
             applyIdleTimerPreference()
+        }
+        .onChange(of: sleepTimerMinutes) { _ in
+            scheduleSleepTimer()
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                autoScrollTask?.cancel()
+                autoScrollTask = nil
+                if autoScrollEnabled { autoScrollEnabled = false }
+            }
         }
         .onChange(of: autoScrollTarget) { _ in
             persistReadingPosition()
@@ -588,7 +604,7 @@ struct ReaderView: View {
                         }
                     }
 
-                    toolButton(icon: speechController.isSpeaking ? "speaker.slash.fill" : "speaker.wave.2", title: speechController.isSpeaking ? "暂停" : "朗读") {
+                    toolButton(icon: speechController.isPaused ? "play.fill" : (speechController.isSpeaking ? "pause.fill" : "speaker.wave.2"), title: speechController.isPaused ? "继续" : (speechController.isSpeaking ? "暂停" : "朗读")) {
                         toggleSpeech()
                         showSettings = false
                     }
@@ -854,6 +870,17 @@ struct ReaderView: View {
                 .foregroundStyle(.secondary)
             Slider(value: $autoScrollDelay, in: 0.8...5.0, step: 0.2)
 
+            Text("睡眠定时")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker("睡眠定时", selection: $sleepTimerMinutes) {
+                Text("关闭").tag(0)
+                Text("15 分钟").tag(15)
+                Text("30 分钟").tag(30)
+                Text("60 分钟").tag(60)
+            }
+            .pickerStyle(.segmented)
+
             Toggle("阅读时保持屏幕常亮", isOn: $keepScreenAwake)
                 .font(.subheadline.weight(.semibold))
 
@@ -872,7 +899,7 @@ struct ReaderView: View {
                 }
                 .buttonStyle(.borderedProminent)
 
-                Button(speechController.isSpeaking ? "停止朗读" : "开始朗读") {
+                Button(speechController.isPaused ? "继续朗读" : (speechController.isSpeaking ? "暂停朗读" : "开始朗读")) {
                     toggleSpeech()
                 }
                 .buttonStyle(.bordered)
@@ -1279,8 +1306,10 @@ struct ReaderView: View {
     }
 
     private func toggleSpeech() {
-        if speechController.isSpeaking {
-            speechController.stop()
+        if speechController.isPaused {
+            speechController.resume()
+        } else if speechController.isSpeaking {
+            speechController.pause()
         } else {
             stopAutoScroll()
             speechController.speak(title: content.title, paragraphs: content.paragraphs, rate: Float(ttsRate))
@@ -1321,6 +1350,22 @@ struct ReaderView: View {
         autoScrollEnabled = false
         autoScrollTask?.cancel()
         autoScrollTask = nil
+    }
+
+    private func scheduleSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        guard sleepTimerMinutes > 0 else { return }
+        let duration = UInt64(sleepTimerMinutes) * 60 * 1_000_000_000
+        sleepTimerTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: duration)
+            guard !Task.isCancelled else { return }
+            stopAutoScroll()
+            speechController.stop()
+            sleepTimerMinutes = 0
+            appState.record(DiagnosticEvent(level: .info, stage: "reader.sleepTimer", sourceName: content.title, message: "睡眠定时已结束"))
+            sleepTimerTask = nil
+        }
     }
 
     private func applyIdleTimerPreference() {
@@ -1545,6 +1590,7 @@ private extension View {
 
 final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published var isSpeaking = false
+    @Published var isPaused = false
     @Published var currentParagraphIndex = -1
 
     private let synthesizer = AVSpeechSynthesizer()
@@ -1562,13 +1608,31 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         self.paragraphs = [title] + paragraphs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         self.nextIndex = 0
         self.rate = rate
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setActive(true, options: [])
         isSpeaking = true
+        isPaused = false
         speakNext()
+    }
+
+    func pause() {
+        guard isSpeaking else { return }
+        synthesizer.pauseSpeaking(at: .word)
+        isPaused = true
+    }
+
+    func resume() {
+        guard isSpeaking else { return }
+        if synthesizer.isPaused {
+            synthesizer.continueSpeaking()
+        }
+        isPaused = false
     }
 
     func stop() {
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
+        isPaused = false
         currentParagraphIndex = -1
         paragraphs = []
         nextIndex = 0
@@ -1594,6 +1658,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         isSpeaking = false
+        isPaused = false
         currentParagraphIndex = -1
     }
 }

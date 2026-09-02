@@ -1,0 +1,7 @@
+{
+  "bookSourceName": "Fixture JXNode",
+  "bookSourceUrl": "https://fixture.example/jxnode",
+  "searchUrl": "https://fixture.example/search?q={{key}}",
+  "ruleSearch": {"bookList": "@js:JSON.stringify([{name:'Node',url:'https://fixture.example/node'}])", "name": "$.name", "bookUrl": "$.url"},
+  "ruleContent": {"content": "div.content@text"}
+}

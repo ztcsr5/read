@@ -1,0 +1,8 @@
+{
+  "bookSourceName": "Fixture Pagination",
+  "bookSourceUrl": "https://fixture.example/pagination",
+  "searchUrl": "https://fixture.example/search?q={{key}}&page={{page}}",
+  "ruleSearch": {"bookList": ".book", "name": "h2@text", "bookUrl": "a@href"},
+  "ruleToc": {"chapterList": ".chapter", "chapterName": "a@text", "chapterUrl": "a@href", "nextTocUrl": "a.next@href"},
+  "ruleContent": {"content": "#content@text", "nextContentUrl": "a.next@href"}
+}

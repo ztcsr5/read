@@ -1,0 +1,9 @@
+{
+  "bookSourceName": "Fixture HTML",
+  "bookSourceUrl": "https://fixture.example/html",
+  "searchUrl": "https://fixture.example/search?q={{key}}&page={{page}}",
+  "ruleSearch": {"bookList": ".book", "name": "h2@text", "author": ".author@text", "bookUrl": "a@href"},
+  "ruleBookInfo": {"name": "h1@text", "tocUrl": "a.toc@href"},
+  "ruleToc": {"chapterList": ".chapter", "chapterName": "a@text", "chapterUrl": "a@href"},
+  "ruleContent": {"content": "#content@text"}
+}

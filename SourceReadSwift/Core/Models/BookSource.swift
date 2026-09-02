@@ -269,6 +269,38 @@ struct BookSource: Identifiable, Codable, Hashable, Sendable {
             raw: raw
         )
     }
+
+    func updatingRules(searchURL: String, search: String, detail: String, toc: String, content: String) -> BookSource {
+        func rule(_ text: String) -> SourceRule? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            if let data = trimmed.data(using: .utf8),
+               let fields = try? JSONDecoder().decode([String: String].self, from: data) {
+                return SourceRule(fields: fields)
+            }
+            return SourceRule(raw: trimmed)
+        }
+        return BookSource(
+            bookSourceName: bookSourceName,
+            bookSourceUrl: bookSourceUrl,
+            bookSourceGroup: bookSourceGroup,
+            bookSourceType: bookSourceType,
+            enabled: enabled,
+            weight: weight,
+            searchUrl: searchURL.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            exploreUrl: exploreUrl,
+            ruleSearch: rule(search),
+            ruleBookInfo: rule(detail),
+            ruleToc: rule(toc),
+            ruleContent: rule(content),
+            ruleExplore: ruleExplore,
+            header: header,
+            loginUrl: loginUrl,
+            loginCheckJs: loginCheckJs,
+            customConfig: customConfig,
+            raw: raw
+        )
+    }
 }
 
 struct SourceRule: Codable, Hashable, Sendable {

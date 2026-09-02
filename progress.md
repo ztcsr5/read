@@ -621,3 +621,21 @@
 ### Testing
 - Ran `git diff --check` locally.
 - Pushed the large batch as commit `192c7bc`; Actions iOS and unsigned IPA validation are running for this phase.
+
+## 2026-09-02 - Task: Source diagnostics, rule editor, RSS media and reader lifecycle phase
+
+### What was done
+- Added a native grouped rule editor for search, detail, TOC and content rules. It keeps the original source fields, validates URL/JS/XPath input, and persists edits through the existing source JSON import path.
+- Added a Legado fixture bank covering HTML, JSON, JavaScript, pagination, POST and JXNode-shaped sources, with bundle-backed decoding tests.
+- RSS articles now retain their feed URL in their stable identity and extract common enclosure/media/img cover URLs for native `AsyncImage` thumbnails.
+- Corrected RSS source-scoped state clearing to use the actual source identity prefix.
+- Reader speech now supports pause/resume with `AVAudioSession` playback configuration; leaving the foreground pauses automatic scrolling to avoid runaway work while preserving speech state.
+- EPUB parsing now tolerates books without a spine by using HTML/XHTML manifest order and recognizes headings, lists, quotes and preformatted blocks as readable paragraphs.
+
+### Testing
+- All six fixture JSON files parse successfully with PowerShell JSON validation.
+- Ran `git diff --check` locally.
+- Windows host has no Swift/Xcode/XcodeGen; iOS compile, unit tests and unsigned IPA remain Actions gates.
+
+### Notes
+- `FrameRateCoordinator` intentionally only records the device ceiling and relies on `CADisableMinimumFrameDurationOnPhone`; the current SDK does not expose a compile-safe frame-rate range property. Documentation must not claim a forced 120 FPS result until ProMotion hardware measurement exists.

@@ -137,6 +137,14 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
+        rssArticleStateStore.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
+
         sourceHealthStore.objectWillChange
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in

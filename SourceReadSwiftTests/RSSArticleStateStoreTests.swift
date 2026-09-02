@@ -16,4 +16,24 @@ final class RSSArticleStateStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.isFavorite(article))
         defaults.removePersistentDomain(forName: suite)
     }
+
+    func testClearsOnlyTheRequestedFeed() {
+        let suite = "RSSArticleStateStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let first = RSSArticlePreview(title: "A", link: "https://example.com/a", pubDate: nil, description: nil, sourceURL: "https://feed.one")
+        let second = RSSArticlePreview(title: "B", link: "https://example.com/b", pubDate: nil, description: nil, sourceURL: "https://feed.two")
+        let store = RSSArticleStateStore(defaults: defaults)
+        store.markRead(first)
+        store.toggleFavorite(first)
+        store.markRead(second)
+        store.toggleFavorite(second)
+
+        store.clear(sourceURL: "https://feed.one")
+
+        XCTAssertFalse(store.isRead(first))
+        XCTAssertFalse(store.isFavorite(first))
+        XCTAssertTrue(store.isRead(second))
+        XCTAssertTrue(store.isFavorite(second))
+        defaults.removePersistentDomain(forName: suite)
+    }
 }

@@ -52,4 +52,15 @@ final class RSSFeedParserTests: XCTestCase {
         let html = "<html><body><nav>Menu</nav><article><h1>Title</h1><p>First</p><p>Second <b>part</b></p></article></body></html>"
         XCTAssertEqual(RSSArticleContentParser().parseParagraphs(from: html), ["Title", "First", "Second part"])
     }
+
+    func testTracksSourceAndExtractsArticleImage() {
+        let xml = """
+        <rss><channel><item><title>Image</title><link>/article</link>
+        <media:content url="/images/cover.jpg" /></item></channel></rss>
+        """
+        let article = RSSFeedParser().parseArticles(from: xml, sourceURL: "https://example.com/feed").first
+        XCTAssertEqual(article?.sourceURL, "https://example.com/feed")
+        XCTAssertEqual(article?.imageURL, "https://example.com/images/cover.jpg")
+        XCTAssertEqual(article?.id.hasPrefix("https://example.com/feed|"), true)
+    }
 }

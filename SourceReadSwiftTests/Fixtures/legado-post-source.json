@@ -1,0 +1,6 @@
+{
+  "bookSourceName": "Fixture POST",
+  "bookSourceUrl": "https://fixture.example/post",
+  "searchUrl": "https://fixture.example/search,{\"method\":\"POST\",\"body\":\"keyword={{key}}\"}",
+  "ruleSearch": {"bookList": "$.data", "name": "$.title", "bookUrl": "$.url"}
+}

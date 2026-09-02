@@ -1,0 +1,7 @@
+{
+  "bookSourceName": "Fixture JS",
+  "bookSourceUrl": "https://fixture.example/js",
+  "searchUrl": "@js: 'https://fixture.example/api?q=' + key",
+  "ruleSearch": {"bookList": "@js:JSON.stringify([{name:'JS Book',url:'https://fixture.example/book'}])", "name": "$.name", "bookUrl": "$.url"},
+  "ruleContent": {"content": "@js: result.replace('A', 'B')"}
+}

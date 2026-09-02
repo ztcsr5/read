@@ -1,0 +1,9 @@
+{
+  "bookSourceName": "Fixture JSON",
+  "bookSourceUrl": "https://fixture.example/json",
+  "searchUrl": "https://fixture.example/api?q={{key}}",
+  "ruleSearch": {"bookList": "$.data.books", "name": "$.name", "author": "$.author", "bookUrl": "$.url"},
+  "ruleBookInfo": {"name": "$.name", "tocUrl": "$.toc"},
+  "ruleToc": {"chapterList": "$.chapters", "chapterName": "$.title", "chapterUrl": "$.url"},
+  "ruleContent": {"content": "$.content"}
+}

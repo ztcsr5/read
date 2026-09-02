@@ -14,6 +14,7 @@ struct SourceManagerView: View {
     @State private var showImportSheet = false
     @State private var openFileImporterAfterSheetDismiss = false
     @State private var sourceJSONEditor: SourceJSONEditorState?
+    @State private var sourceRuleEditor: BookSource?
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
     @State private var batchCheck: SourceBatchCheckState?
@@ -105,6 +106,24 @@ struct SourceManagerView: View {
             }
             .sheet(item: $sourceJSONEditor) { editor in
                 sourceJSONEditorSheet(editor)
+            }
+            .sheet(item: $sourceRuleEditor) { source in
+                SourceRuleEditorView(
+                    source: source,
+                    onSave: { updated in
+                        do {
+                            let data = try JSONEncoder().encode(updated)
+                            _ = try appState.sourceStore.upsertBookSourceJSON(String(decoding: data, as: UTF8.self))
+                            importError = nil
+                            importMessage = "规则已保存：\(updated.bookSourceName)"
+                            sourceRuleEditor = nil
+                        } catch {
+                            importMessage = nil
+                            importError = "规则保存失败：\(error.localizedDescription)"
+                        }
+                    },
+                    onCancel: { sourceRuleEditor = nil }
+                )
             }
             .sheet(item: $jsonPreview) { preview in
                 jsonPreviewSheet(preview)
@@ -341,6 +360,9 @@ struct SourceManagerView: View {
                 }
                 Button("编辑 JSON") {
                     sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source))
+                }
+                Button("规则编辑") {
+                    sourceRuleEditor = source
                 }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.remove(source)

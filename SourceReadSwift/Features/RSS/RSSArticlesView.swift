@@ -95,7 +95,7 @@ struct RSSArticlesView: View {
             request.setValue("application/rss+xml,application/atom+xml,application/xml,text/xml,text/plain,*/*", forHTTPHeaderField: "Accept")
             let (data, _) = try await URLSession.shared.data(for: request)
             let text = ResponseTextDecoder().decode(data: data, headers: [:])
-            let parsed = RSSFeedParser().parseArticles(from: text)
+            let parsed = RSSFeedParser().parseArticles(from: text, sourceURL: source.sourceUrl)
             if parsed.isEmpty {
                 errorMessage = "已加载响应，但没有识别到 RSS/Atom 文章。"
             }
@@ -114,6 +114,17 @@ private struct RSSArticleRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 8) {
+                if let imageURL = article.imageURL, let url = URL(string: imageURL) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Image(systemName: "photo").foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
                 Text(article.title)
                 .font(.headline)
                 .foregroundStyle(.primary)

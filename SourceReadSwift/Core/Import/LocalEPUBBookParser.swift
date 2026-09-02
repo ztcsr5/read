@@ -19,8 +19,12 @@ struct LocalEPUBBookParser {
         let metadata = metadata(from: opfXML, fallbackTitle: fileURL.deletingPathExtension().lastPathComponent)
         let manifest = manifestItems(from: opfXML)
         let spine = spineIDs(from: opfXML)
-        let chapters = try spine.enumerated().compactMap { index, id -> LocalTextChapter? in
-            guard let href = manifest[id] else { return nil }
+        let orderedIDs = spine.isEmpty
+            ? manifest.filter { $0.mediaType.contains("xhtml") || $0.mediaType.contains("html") }.map(\.id)
+            : spine
+        let chapters = try orderedIDs.enumerated().compactMap { index, id -> LocalTextChapter? in
+            guard let item = manifest.first(where: { $0.id == id }) else { return nil }
+            let href = item.href
             let path = normalizeEPUBPath(basePath: basePath, href: href)
             guard let html = try? stringEntry(path, in: archive) else { return nil }
             let paragraphs = paragraphs(from: html)
@@ -54,17 +58,17 @@ struct LocalEPUBBookParser {
         return (title, author)
     }
 
-    private func manifestItems(from opf: String) -> [String: String] {
+    private func manifestItems(from opf: String) -> [ManifestItem] {
         do {
             let document = try SwiftSoup.parse(opf)
-            return try document.select("manifest item").array().reduce(into: [:]) { result, item in
+            return try document.select("manifest item").array().compactMap { item in
                 let id = try item.attr("id")
                 let href = try item.attr("href")
-                guard !id.isEmpty, !href.isEmpty else { return }
-                result[id] = href
+                guard !id.isEmpty, !href.isEmpty else { return nil }
+                return ManifestItem(id: id, href: href, mediaType: try item.attr("media-type").lowercased())
             }
         } catch {
-            return [:]
+            return []
         }
     }
 
@@ -83,7 +87,7 @@ struct LocalEPUBBookParser {
     private func paragraphs(from html: String) -> [String] {
         do {
             let document = try SwiftSoup.parse(html)
-            let nodes = try document.select("p, h1, h2, h3, h4, div").array()
+            let nodes = try document.select("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre").array()
             let values = try nodes.map { try $0.text().trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             if !values.isEmpty {
@@ -142,6 +146,12 @@ struct LocalEPUBBookParser {
         }
         return nil
     }
+}
+
+private struct ManifestItem {
+    let id: String
+    let href: String
+    let mediaType: String
 }
 
 enum LocalEPUBImportError: LocalizedError {

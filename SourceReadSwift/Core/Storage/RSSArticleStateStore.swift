@@ -35,8 +35,9 @@ final class RSSArticleStateStore: ObservableObject {
 
     func clear(sourceURL: String? = nil) {
         if let sourceURL {
-            readIDs = readIDs.filter { !$0.hasPrefix("(sourceURL)|") }
-            favoriteIDs = favoriteIDs.filter { !$0.hasPrefix("(sourceURL)|") }
+            let prefix = sourceURL + "|"
+            readIDs = readIDs.filter { !$0.hasPrefix(prefix) }
+            favoriteIDs = favoriteIDs.filter { !$0.hasPrefix(prefix) }
         } else {
             readIDs.removeAll()
             favoriteIDs.removeAll()

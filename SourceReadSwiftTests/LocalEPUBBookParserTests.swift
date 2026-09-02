@@ -77,6 +77,21 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testUsesHTMLManifestOrderWhenSpineIsMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("no-spine.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>"#, to: archive)
+        try add("book.opf", text: #"<package><metadata><dc:title>No Spine</dc:title></metadata><manifest><item id="cover" href="cover.jpg" media-type="image/jpeg"/><item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest></package>"#, to: archive)
+        try add("chapter.xhtml", text: #"<html><body><h1>Chapter</h1><p>Body</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.chapters.map(\.title), ["Chapter"])
+        XCTAssertEqual(book.chapters.first?.paragraphs, ["Chapter", "Body"])
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
         let data = Data(text.utf8)
         try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { position, size in
