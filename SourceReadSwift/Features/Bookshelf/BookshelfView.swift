@@ -545,44 +545,60 @@ private struct BookshelfCollectionView: View {
     @EnvironmentObject private var appState: AppState
     let title: String
     let books: [BookshelfBook]
+    @State private var selectedGroupName: String?
+    @State private var showGroupEditor = false
+    @State private var groupName = ""
+    @State private var isManaging = false
+    @State private var selectedBookIDs: Set<String> = []
+    @State private var confirmBatchDelete = false
+
+    private var displayBooks: [BookshelfBook] {
+        guard let selectedGroupName else { return books }
+        return books.filter { $0.groupName == selectedGroupName }
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                if books.isEmpty {
+                if !appState.bookshelfStore.groups.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            groupChip("全部", selected: selectedGroupName == nil) { selectedGroupName = nil }
+                            ForEach(appState.bookshelfStore.groups) { group in
+                                groupChip(group.name, selected: selectedGroupName == group.name) {
+                                    selectedGroupName = group.name
+                                }
+                            }
+                        }
+                    }
+                }
+                if displayBooks.isEmpty {
                     EmptyStateCard(
                         systemImage: "books.vertical",
-                        title: "\(title)暂无书籍",
-                        message: "返回主页导入或搜索书籍后会显示在这里。"
+                        title: selectedGroupName == nil ? "\(title)暂无书籍" : "该分组暂无书籍",
+                        message: selectedGroupName == nil ? "返回主页导入或搜索书籍后会显示在这里。" : "长按书籍可移动到其他分组。"
                     )
                 } else {
-                    ForEach(books) { book in
-                        NavigationLink {
-                            BookshelfReaderGatewayView(book: book)
-                        } label: {
-                            HStack(spacing: 14) {
-                                AsyncBookCover(urlString: book.coverURL, width: 58, height: 82)
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(book.title)
-                                        .font(.headline)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-                                    Text(book.author)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                    Text(book.currentChapterTitle ?? book.latestChapterTitle ?? "尚未开始阅读")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                    ForEach(displayBooks) { book in
+                        Group {
+                            if isManaging {
+                                Button {
+                                    toggleSelection(book.id)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: selectedBookIDs.contains(book.id) ? "checkmark.circle.fill" : "circle")
+                                            .font(.title3)
+                                            .foregroundStyle(selectedBookIDs.contains(book.id) ? AppTheme.accent : .secondary)
+                                        collectionBookLabel(book)
+                                    }
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.tertiary)
+                            } else {
+                                NavigationLink {
+                                    BookshelfReaderGatewayView(book: book)
+                                } label: {
+                                    collectionBookLabel(book)
+                                }
                             }
-                            .padding(14)
-                            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         }
                         .buttonStyle(PressableScaleButtonStyle())
                         .simultaneousGesture(TapGesture().onEnded {
@@ -590,6 +606,14 @@ private struct BookshelfCollectionView: View {
                             appState.bookshelfStore.markUpdatesSeen(bookID: book.id)
                         })
                         .contextMenu {
+                            if !appState.bookshelfStore.groups.isEmpty {
+                                Menu("移动到分组") {
+                                    Button("全部") { appState.bookshelfStore.moveBooks(bookIDs: [book.id], toGroupName: nil) }
+                                    ForEach(appState.bookshelfStore.groups) { group in
+                                        Button(group.name) { appState.bookshelfStore.moveBooks(bookIDs: [book.id], toGroupName: group.name) }
+                                    }
+                                }
+                            }
                             Button("从书架删除", role: .destructive) {
                                 appState.bookshelfStore.remove(bookID: book.id)
                             }
@@ -602,6 +626,128 @@ private struct BookshelfCollectionView: View {
         .pageBackground()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if !books.isEmpty {
+                    Button(isManaging ? "完成" : "管理") {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            isManaging.toggle()
+                            if !isManaging { selectedBookIDs.removeAll() }
+                        }
+                    }
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        groupName = ""
+                        showGroupEditor = true
+                    } label: {
+                        Label("新建分组", systemImage: "folder.badge.plus")
+                    }
+                    if !appState.bookshelfStore.groups.isEmpty {
+                        Divider()
+                        ForEach(appState.bookshelfStore.groups) { group in
+                            Button(role: .destructive) {
+                                if selectedGroupName == group.name { selectedGroupName = nil }
+                                appState.bookshelfStore.deleteGroup(id: group.id)
+                            } label: {
+                                Label("删除 \(group.name)", systemImage: "trash")
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .accessibilityLabel("管理分组")
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if isManaging {
+                HStack(spacing: 12) {
+                    Button(role: .destructive) { confirmBatchDelete = true } label: {
+                        Label("删除 \(selectedBookIDs.count) 本", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(selectedBookIDs.isEmpty)
+
+                    Menu {
+                        Button("移出分组") {
+                            appState.bookshelfStore.moveBooks(bookIDs: selectedBookIDs, toGroupName: nil)
+                            selectedBookIDs.removeAll()
+                        }
+                        ForEach(appState.bookshelfStore.groups) { group in
+                            Button(group.name) {
+                                appState.bookshelfStore.moveBooks(bookIDs: selectedBookIDs, toGroupName: group.name)
+                                selectedBookIDs.removeAll()
+                            }
+                        }
+                    } label: {
+                        Label("移动", systemImage: "folder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedBookIDs.isEmpty || appState.bookshelfStore.groups.isEmpty)
+                }
+                .padding(.horizontal, AppTheme.pagePadding)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+            }
+        }
+        .alert("新建分组", isPresented: $showGroupEditor) {
+            TextField("分组名称", text: $groupName)
+            Button("取消", role: .cancel) {}
+            Button("保存") {
+                appState.bookshelfStore.createGroup(name: groupName)
+            }
+        } message: {
+            Text("分组用于整理书架，不会改变书籍内容或阅读进度。")
+        }
+        .alert("删除选中的书籍？", isPresented: $confirmBatchDelete) {
+            Button("取消", role: .cancel) {}
+            Button("删除", role: .destructive) {
+                appState.bookshelfStore.removeBooks(bookIDs: selectedBookIDs)
+                selectedBookIDs.removeAll()
+                isManaging = false
+            }
+        } message: {
+            Text("将从书架删除 \(selectedBookIDs.count) 本书，阅读进度也会一并移除。")
+        }
+    }
+
+    private func collectionBookLabel(_ book: BookshelfBook) -> some View {
+        HStack(spacing: 14) {
+            AsyncBookCover(urlString: book.coverURL, width: 58, height: 82)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(book.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(book.currentChapterTitle ?? book.latestChapterTitle ?? "尚未开始阅读")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if !isManaging {
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(14)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func toggleSelection(_ id: String) {
+        if selectedBookIDs.contains(id) { selectedBookIDs.remove(id) } else { selectedBookIDs.insert(id) }
+    }
+
+    private func groupChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(selected ? .white : .primary)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 8)
+                .background(selected ? AppTheme.accent : AppTheme.card, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 

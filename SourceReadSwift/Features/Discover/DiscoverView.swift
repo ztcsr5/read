@@ -80,6 +80,7 @@ struct DiscoverView: View {
                 webModeButton
                 sourceManagerCard
                 matchModePicker
+                resultFilterPicker
             }
 
             Text("搜索结果")
@@ -177,6 +178,27 @@ struct DiscoverView: View {
         }
     }
 
+    private var resultFilterPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.hasUnfilteredResults {
+                Picker("筛选范围", selection: $viewModel.resultFilterScope) {
+                    ForEach(SearchResultFilterScope.allCases) { scope in
+                        Text(scope.title).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                TextField(viewModel.resultFilterScope.placeholder, text: $viewModel.resultFilter)
+                    .textInputAutocapitalization(.never)
+                    .padding(.horizontal, 12)
+                    .frame(height: 42)
+                    .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .onChange(of: viewModel.resultFilter) { _ in viewModel.applyResultFilter() }
+                    .onChange(of: viewModel.resultFilterScope) { _ in viewModel.applyResultFilter() }
+            }
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         if viewModel.isSearching && viewModel.results.isEmpty {
@@ -196,6 +218,8 @@ struct DiscoverView: View {
             .frame(maxWidth: .infinity, minHeight: 260)
         } else if let error = viewModel.errorMessage, viewModel.results.isEmpty {
             EmptyStateCard(systemImage: "exclamationmark.triangle", title: "搜索失败", message: error)
+        } else if viewModel.hasUnfilteredResults && viewModel.results.isEmpty {
+            EmptyStateCard(systemImage: "line.3.horizontal.decrease.circle", title: "没有符合筛选的结果", message: "换一个筛选词，或切换书名、作者、来源范围。")
         } else if viewModel.results.isEmpty {
             Text("输入书名后，会从启用的小说书源里搜索")
                 .font(.system(size: 15, weight: .regular))
@@ -210,7 +234,7 @@ struct DiscoverView: View {
     private var resultsList: some View {
         LazyVStack(spacing: 14) {
             HStack {
-                Text("已检测 \(viewModel.checkedSourceCount)/\(appState.sourceStore.sources.count) 个源 · 命中 \(viewModel.hitSourceCount) 个源 · 结果 \(viewModel.results.count) 条")
+                Text("已检测 \(viewModel.checkedSourceCount)/\(appState.sourceStore.sources.count) 个源 · 命中 \(viewModel.hitSourceCount) 个源 · 结果 \(viewModel.totalResultCount) 条\(viewModel.filterSummary)")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -404,7 +428,14 @@ private enum DiscoverTab: String, CaseIterable, Identifiable {
 final class DiscoverViewModel: ObservableObject {
     @Published var keyword = ""
     @Published var matchMode: SearchMatchMode = .fuzzy
+    @Published var resultFilterScope: SearchResultFilterScope = .all
+    @Published var resultFilter = ""
     @Published var results: [SearchBook] = []
+    private var unfilteredResults: [SearchBook] = []
+    var hasUnfilteredResults: Bool { !unfilteredResults.isEmpty }
+    var filterSummary: String {
+        resultFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : " · 筛选后 \(results.count) 条"
+    }
     @Published var isSearching = false
     @Published var errorMessage: String?
     @Published var hitSourceCount = 0
@@ -423,6 +454,12 @@ final class DiscoverViewModel: ObservableObject {
         isSearching = false
     }
 
+    func applyResultFilter() {
+        // Search results are already deduplicated by the source search. This only
+        // changes the visible projection, so changing the filter never re-runs IO.
+        results = SearchResultFilter.apply(unfilteredResults, query: resultFilter, scope: resultFilterScope)
+    }
+
     func search() async {
         guard let appState else { return }
         let keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -433,6 +470,9 @@ final class DiscoverViewModel: ObservableObject {
         isSearching = true
         errorMessage = nil
         results = []
+        unfilteredResults = []
+        resultFilter = ""
+        resultFilterScope = .all
         totalResultCount = 0
         hitSourceCount = 0
         checkedSourceCount = 0
@@ -480,19 +520,25 @@ final class DiscoverViewModel: ObservableObject {
                         failures.append("\(source.bookSourceName): \(error.displayMessage)")
                     }
                     if checkedSourceCount % 6 == 0 || !allBooks.isEmpty && checkedSourceCount % 3 == 0 {
-                        results = filtered(allBooks, keyword: keyword)
+                        unfilteredResults = filtered(allBooks, keyword: keyword)
+                        results = unfilteredResults
+                        applyResultFilter()
                         totalResultCount = allBooks.count
                     }
                 }
             }
-            results = filtered(allBooks, keyword: keyword)
+            unfilteredResults = filtered(allBooks, keyword: keyword)
+            results = unfilteredResults
+            applyResultFilter()
             totalResultCount = allBooks.count
             hitSourceCount = hitSources.count
         }
 
         guard activeSearchID == searchID else { return }
         totalResultCount = allBooks.count
-        results = filtered(allBooks, keyword: keyword)
+        unfilteredResults = filtered(allBooks, keyword: keyword)
+        results = unfilteredResults
+        applyResultFilter()
         hitSourceCount = hitSources.count
         if results.isEmpty {
             errorMessage = failures.isEmpty ? "没有搜索结果，请检查关键词或书源规则。" : failures.prefix(8).joined(separator: "\n")

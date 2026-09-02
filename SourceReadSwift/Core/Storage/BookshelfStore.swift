@@ -3,14 +3,18 @@ import Foundation
 @MainActor
 final class BookshelfStore: ObservableObject {
     @Published private(set) var books: [BookshelfBook] = []
+    @Published private(set) var groups: [BookshelfGroup] = []
     @Published private(set) var lastError: String?
 
     private let persistence: BookshelfPersistence
+    private let groupPersistence: BookshelfGroupPersistence
 
-    init(persistence: BookshelfPersistence = BookshelfPersistence()) {
+    init(persistence: BookshelfPersistence = BookshelfPersistence(), groupPersistence: BookshelfGroupPersistence = BookshelfGroupPersistence()) {
         self.persistence = persistence
+        self.groupPersistence = groupPersistence
         do {
             books = try persistence.load()
+            groups = try groupPersistence.load().sorted { $0.sortOrder < $1.sortOrder }
         } catch {
             lastError = error.localizedDescription
         }
@@ -148,6 +152,38 @@ final class BookshelfStore: ObservableObject {
         persist()
     }
 
+    func removeBooks(bookIDs: Set<String>) {
+        guard !bookIDs.isEmpty else { return }
+        books.removeAll { bookIDs.contains($0.id) }
+        persist()
+    }
+
+    func createGroup(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !groups.contains(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+        groups.append(BookshelfGroup(name: trimmed, sortOrder: groups.count))
+        persistGroups()
+    }
+
+    func deleteGroup(id: String) {
+        guard let deletedName = groups.first(where: { $0.id == id })?.name else { return }
+        groups.removeAll { $0.id == id }
+        for index in books.indices where books[index].groupName == deletedName {
+            books[index].groupName = nil
+        }
+        normalizeGroupOrder()
+        persistGroups()
+        persist()
+    }
+
+    func moveBooks(bookIDs: Set<String>, toGroupName: String?) {
+        let normalized = toGroupName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        for index in books.indices where bookIDs.contains(books[index].id) {
+            books[index].groupName = normalized
+        }
+        persist()
+    }
+
     func isBookmarked(bookID: String, chapterIndex: Int, paragraphIndex: Int? = nil) -> Bool {
         book(id: bookID)?.bookmarks?.contains {
             $0.chapterIndex == chapterIndex && $0.paragraphIndex == paragraphIndex
@@ -210,6 +246,18 @@ final class BookshelfStore: ObservableObject {
             lastError = nil
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    private func persistGroups() {
+        do { try groupPersistence.save(groups) } catch { lastError = error.localizedDescription }
+    }
+
+    private func normalizeGroupOrder() {
+        groups = groups.enumerated().map { offset, group in
+            var updated = group
+            updated.sortOrder = offset
+            return updated
         }
     }
 }

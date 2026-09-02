@@ -837,3 +837,17 @@
 
 - Revert this phase commit to restore the previous reader automation, persistence timing, and preload behavior.
 
+## 2026-09-03 - Task: Flutter parity bookshelf groups and search filtering phase
+
+### What was done
+- Added native search-result filtering parity: all/title/author/source scopes, local filtering without re-running network search, and accessible placeholder text.
+- Added persistent bookshelf groups with create/delete, group chips, per-book move actions, and safe ungrouping when a group is deleted.
+- Added XCTest coverage for case/diacritic-insensitive result filtering and group persistence/move/delete behavior.
+
+### Testing
+- `git diff --check` passed locally (Windows only reports existing LF-to-CRLF normalization warnings).
+- Swift/Xcode compilation and XCTest remain delegated to GitHub Actions; this Windows host has no `swift`, `xcodebuild`, or `xcodegen`.
+- ProMotion frame pacing still requires a real iPhone Pro/Instruments run; this phase does not claim sustained 120 FPS.
+
+### Rollback
+- Revert the phase commit and remove `BookshelfGroupPersistence.swift` / `SearchResultFilter.swift` plus their tests.

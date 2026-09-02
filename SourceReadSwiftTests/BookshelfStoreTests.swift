@@ -231,4 +231,24 @@ final class BookshelfStoreTests: XCTestCase {
         XCTAssertEqual(updated.bookmarks, nil)
         try? FileManager.default.removeItem(at: root)
     }
+
+    func testCreatesPersistsAndMovesBooksBetweenGroups() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = BookshelfPersistence(fileManager: .default, rootURL: root)
+        let groupPersistence = BookshelfGroupPersistence(fileManager: .default, rootURL: root)
+        let store = BookshelfStore(persistence: persistence, groupPersistence: groupPersistence)
+        let book = SearchBook(name: "Grouped", author: "Author", coverUrl: nil, bookUrl: "https://example.com/book", sourceName: "Example", sourceUrl: "https://example.com", intro: nil)
+        store.addOrUpdate(book)
+        store.createGroup(name: "待读")
+        XCTAssertEqual(store.groups.count, 1)
+        store.moveBooks(bookIDs: [book.id], toGroupName: "待读")
+        XCTAssertEqual(store.book(id: book.id)?.groupName, "待读")
+
+        let reloaded = BookshelfStore(persistence: persistence, groupPersistence: groupPersistence)
+        XCTAssertEqual(reloaded.groups.first?.name, "待读")
+        XCTAssertEqual(reloaded.book(id: book.id)?.groupName, "待读")
+        store.deleteGroup(id: try XCTUnwrap(store.groups.first?.id))
+        XCTAssertNil(store.book(id: book.id)?.groupName)
+        try? FileManager.default.removeItem(at: root)
+    }
 }

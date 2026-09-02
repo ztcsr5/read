@@ -22,6 +22,8 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     var lastOpenedAt: Date?
     var readingSessionCount: Int?
     var totalReadingSeconds: TimeInterval?
+    /// Optional user-managed bookshelf group. Nil means the default "全部" view.
+    var groupName: String?
     var addedAt: Date
 
     var readingProgress: Double {
@@ -55,6 +57,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         lastOpenedAt: Date? = nil,
         readingSessionCount: Int? = nil,
         totalReadingSeconds: TimeInterval? = nil,
+        groupName: String? = nil,
         addedAt: Date = Date()
     ) {
         self.id = id
@@ -78,6 +81,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         self.lastOpenedAt = lastOpenedAt
         self.readingSessionCount = readingSessionCount
         self.totalReadingSeconds = totalReadingSeconds
+        self.groupName = groupName
         self.addedAt = addedAt
     }
 
@@ -113,5 +117,19 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             currentChapterIndex: 0,
             currentChapterTitle: localTextBook.chapters.first?.title ?? "全文"
         )
+    }
+}
+
+struct BookshelfGroup: Identifiable, Codable, Hashable, Sendable {
+    let id: String
+    var name: String
+    var sortOrder: Int
+    var createdAt: Date
+
+    init(id: String = UUID().uuidString, name: String, sortOrder: Int = 0, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
     }
 }
