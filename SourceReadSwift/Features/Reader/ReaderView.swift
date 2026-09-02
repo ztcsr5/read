@@ -1436,6 +1436,8 @@ struct ReaderView: View {
     }
 
     private func buildReaderPageBlocks() -> [ReaderPageBlock] {
+        let signpost = PerformanceSignpost.begin("reader.layout")
+        defer { PerformanceSignpost.end("reader.layout", id: signpost) }
         guard !content.paragraphs.isEmpty else {
             return [ReaderPageBlock(id: 0, includesTitle: true, paragraphs: [])]
         }

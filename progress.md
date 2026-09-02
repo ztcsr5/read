@@ -572,3 +572,19 @@
 - Do not push this batch yet; it is still a local product-node hardening pass, not a release/test handoff.
 - Do not commit unrelated `ci-log/run-27952116519/`.
 - Rollback: revert this progress entry and the files listed above, or reset only these local hunks before the eventual product-node commit.
+## 2026-09-02 - Task: Native iOS high-refresh performance foundation
+
+### What was done
+- Locked the next product phase around native iOS performance, EPUB, RSS reading, source diagnostics/rule editing, reader speech/auto-advance, and Flutter parity.
+- Added `FrameRateCoordinator` to request up to 120 Hz on ProMotion windows and automatically use the device's native ceiling elsewhere.
+- Re-applied frame-rate coordination when the app becomes active, so scene/window transitions do not lose the preference.
+- Added `PerformanceSignpost` and instrumented reader pagination/layout work with an `os_signpost` interval for Instruments diagnosis.
+- Added the phase design specification at `docs/superpowers/specs/2026-09-02-native-ios-performance-and-reader-features-design.md`.
+
+### Testing
+- Ran static diff validation locally.
+- iOS compilation and runtime FPS measurement still require GitHub Actions/Xcode and a physical ProMotion device.
+
+### Notes
+- This is the first performance foundation slice; it does not claim a measured 120 FPS result yet.
+- The coordinator is intentionally conservative on non-ProMotion devices and does not force unsupported refresh rates.
