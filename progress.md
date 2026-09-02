@@ -991,3 +991,18 @@
 
 ### Rollback
 - Revert commit `cbafada` to restore the previous prelude namespace declarations.
+## 2026-09-03 - Task: Legado JSCore prelude EOF root-cause and bridge follow-up (CI pending)
+
+### What was done
+- Found the JavaScriptCore-only `Unexpected EOF` root cause: a Swift multiline string contained `join('\n')`, which Swift materialized as a literal newline inside a JavaScript string. Escaped it as `join('\\n')`.
+- The next Actions run no longer reports the prelude EOF; remaining failures were real bridge-contract gaps.
+- Added native `BookChapter` getter aliases (`getName`, `getTitle`, `getUrl`, `getChapterUrl`, `getIndex`, `getChapterIndex`) and normalized the injected chapter object path.
+- Stabilized the post-form test by collecting request envelopes outside the response callback, then asserting body/header behavior after evaluation.
+
+### Testing
+- `git diff --check` passes locally.
+- Prior CI run `33692282545` confirms the EOF failure is gone; it now reaches two focused bridge assertions instead.
+- Commit `c206f9e` is pushed and has fresh iOS/unsigned-IPA Actions running. Do not claim Stage 2A complete until iOS XCTest is green.
+
+### Rollback
+- Revert `c206f9e` and the preceding `ff96716`/`cbafada` correction commits to restore the prior bridge behavior.
