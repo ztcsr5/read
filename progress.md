@@ -605,3 +605,7 @@
 ### Testing
 - Ran `git diff --check` locally.
 - The complete phase batch requires GitHub Actions for compile/test and unsigned IPA validation; Windows cannot run Xcode locally.
+
+### Large-batch follow-up
+- Corrected frame-rate coordination again to use the SDK-supported `CALayer.preferredFrameRateRange` path after the runner showed that neither `UIWindowScene` nor `UIWindow` exposes the property in this toolchain.
+- Pushed the corrected batch as commit `91cfc1e`; new iOS and unsigned IPA runs are queued/in progress.
