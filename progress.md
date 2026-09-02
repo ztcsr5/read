@@ -851,3 +851,8 @@
 
 ### Rollback
 - Revert the phase commit and remove `BookshelfGroupPersistence.swift` / `SearchResultFilter.swift` plus their tests.
+
+### CI verification update
+- Commit `4a5ad8a` pushed to `codex/swift-v2-lifetime-reader`.
+- iOS build/XCTest Actions run `33657844603`: `Success`.
+- Unsigned IPA Actions run `33657844854`: `Success`; artifact `SourceReadSwift-unsigned-ipa`, 5.2 MB, SHA-256 `a79c6c7b252e25f071d752bc9bc07b663189615f61f41e8158a355c15b5b0a9f`.
