@@ -17,6 +17,9 @@ struct SourceReadSwiftApp: App {
                 .onAppear {
                     FrameRateCoordinator.apply()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: UIScene.didActivateNotification)) { notification in
+                    FrameRateCoordinator.apply(to: notification.object as? UIScene)
+                }
                 .onChange(of: scenePhase) { phase in
                     guard phase == .active else { return }
                     FrameRateCoordinator.apply()

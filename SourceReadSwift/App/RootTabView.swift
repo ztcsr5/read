@@ -6,18 +6,21 @@ struct RootTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ZStack {
-                BookshelfView()
-                    .opacity(selectedTab == 0 ? 1 : 0)
-                    .allowsHitTesting(selectedTab == 0)
-
-                DiscoverView()
-                    .opacity(selectedTab == 1 ? 1 : 0)
-                    .allowsHitTesting(selectedTab == 1)
-
-                SettingsView()
-                    .opacity(selectedTab == 2 ? 1 : 0)
-                    .allowsHitTesting(selectedTab == 2)
+            // Only keep the active root alive.  The previous opacity-based
+            // stack rendered three complete navigation trees every frame,
+            // which was especially visible on long bookshelf lists.
+            Group {
+                switch selectedTab {
+                case 0:
+                    BookshelfView()
+                        .transition(.opacity)
+                case 1:
+                    DiscoverView()
+                        .transition(.opacity)
+                default:
+                    SettingsView()
+                        .transition(.opacity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.keyboard, edges: .bottom)

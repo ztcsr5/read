@@ -757,3 +757,18 @@
 ### Testing
 - Ran `git diff --check` locally.
 - Swift compile/XCTest and unsigned IPA remain pending GitHub Actions verification.
+
+## 2026-09-02 - Task: ProMotion frame-rate and root-tree performance phase
+
+### What was done
+- Applied a scene-level `CAFrameRateRange` of 60...120 Hz on iOS 15+ and re-applied it on scene activation, while retaining `CADisableMinimumFrameDurationOnPhone` for ProMotion eligibility.
+- Replaced the opacity-based root tab stack with an active-tab-only view tree. The prior implementation kept three complete `NavigationStack` hierarchies alive and rendered them every update, a direct source of dropped frames on long shelves and discovery lists.
+- Kept the range adaptive: 60 Hz devices are not asked for an unsupported rate, and iOS can still downshift under thermal/idle conditions.
+
+### Testing
+- `git diff --check` passes locally.
+- Windows host has no Swift/Xcode; compile, XCTest and unsigned IPA remain GitHub Actions gates.
+- A real 120 Hz claim still requires ProMotion hardware/Instruments evidence; this change only establishes the native request and removes avoidable SwiftUI work.
+
+### Rollback
+- Revert this phase commit to restore the previous root tab stack and scene frame-rate behavior.

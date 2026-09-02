@@ -1,9 +1,11 @@
+import QuartzCore
 import UIKit
 
-/// Coordinates high-refresh capability for active iOS windows.
-/// `CADisableMinimumFrameDurationOnPhone` lets SwiftUI use ProMotion. This type
-/// detects the active native ceiling and records it without forcing unsupported
-/// or SDK-version-specific frame-rate APIs.
+/// Coordinates the frame-rate budget for active iOS windows.
+/// `CADisableMinimumFrameDurationOnPhone` is declared in Info.plist and this
+/// scene-level range keeps ProMotion devices on the native 120 Hz path while
+/// remaining valid on 60 Hz hardware. UIKit may still adapt down when the
+/// scene is idle or thermally constrained.
 enum FrameRateCoordinator {
     static func apply(to scene: UIScene? = nil) {
         let scenes: [UIWindowScene]
@@ -21,10 +23,18 @@ enum FrameRateCoordinator {
         let maximum = windowScene.screen.maximumFramesPerSecond
         guard maximum > 0 else { return }
 
+        let minimum = min(maximum, 60)
         let preferred = min(maximum, 120)
+        if #available(iOS 15.0, *) {
+            windowScene.preferredFrameRateRange = CAFrameRateRange(
+                minimum: Float(minimum),
+                maximum: Float(preferred),
+                preferred: Float(preferred)
+            )
+        }
         PerformanceSignpost.event(
             "frame.rate",
-            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
+            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) min=\(minimum) preferred=\(preferred)"
         )
     }
 }
