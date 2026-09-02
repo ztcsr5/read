@@ -1,3 +1,13 @@
+## 2026-09-02 - Task: RSS cache management and settings parity phase
+
+### What was done
+- Added a visible Settings action for clearing RSS feed cache alongside chapter cache.
+- Added source/article count summary for RSS cache so users can see retained offline data before clearing it.
+- Kept RSS cache source-scoped and best-effort; clearing it does not affect read/favorite state.
+
+### Testing
+- Ran `git diff --check` locally.
+- GitHub Actions remains the compile/test and unsigned IPA gate.
 ## 2026-09-02 - Task: RSS offline cache phase
 
 ### What was done

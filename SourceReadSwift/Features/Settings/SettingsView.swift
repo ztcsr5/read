@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("settings.themeMode") private var themeModeRawValue = ThemeMode.system.rawValue
     @State private var cacheSize = "无缓存"
+    @State private var rssCacheSize = "无缓存"
 
     private var themeMode: ThemeMode {
         get { ThemeMode(rawValue: themeModeRawValue) ?? .system }
@@ -73,6 +74,19 @@ struct SettingsView: View {
                         }
                     }
 
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        appState.rssFeedCacheStore.removeAll()
+                        rssCacheSize = "无缓存"
+                    } label: {
+                        HStack {
+                            Label("清理 RSS 缓存", systemImage: "newspaper.trash")
+                            Spacer()
+                            Text(rssCacheSize)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     NavigationLink {
                         ReadingHistoryView()
                     } label: {
@@ -132,6 +146,7 @@ struct SettingsView: View {
                 updateCacheSummary()
                 appState.chapterContentCacheStore.removeExpired()
                 updateCacheSummary()
+                updateRSSCacheSummary()
             }
         }
     }
@@ -141,6 +156,11 @@ struct SettingsView: View {
         cacheSize = chapters == 0
             ? "无缓存"
             : "\(chapters) 章 / \(byteCountText(appState.chapterContentCacheStore.estimatedByteCount))"
+    }
+
+    private func updateRSSCacheSummary() {
+        let count = appState.rssFeedCacheStore.entries.reduce(0) { $0 + $1.articles.count }
+        rssCacheSize = count == 0 ? "无缓存" : "(count) 篇 / (appState.rssFeedCacheStore.entries.count) 源"
     }
 
     private func byteCountText(_ bytes: Int) -> String {
