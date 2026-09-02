@@ -1,3 +1,13 @@
+## 2026-09-02 - Task: Reader automation boundary and speech queue phase
+
+### What was done
+- Added a deterministic `ReaderAutomationPolicy` so automatic scroll advances to the next chapter at the current chapter boundary when one exists, and only stops at the final chapter.
+- Added a testable `ReaderSpeechQueue` used by `ReaderSpeechController`; empty paragraphs are filtered consistently and `currentParagraphIndex` now reports the segment currently spoken.
+- Added CI unit coverage for in-chapter advancement, next-chapter transition, final-chapter stop, and speech queue indexing.
+
+### Testing
+- Ran `git diff --check` locally.
+- Windows cannot run Swift/Xcode; GitHub Actions remains the compile/test gate.
 ## 2026-06-27 - Task: Restart Swift against Flutter product baseline
 
 ### What was done

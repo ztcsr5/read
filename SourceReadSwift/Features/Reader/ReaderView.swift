@@ -608,6 +608,12 @@ struct ReaderView: View {
                         toggleSpeech()
                         showSettings = false
                     }
+                    if speechController.isSpeaking {
+                        toolButton(icon: "stop.fill", title: "停止") {
+                            speechController.stop()
+                            showSettings = false
+                        }
+                    }
                     toolButton(icon: autoScrollEnabled ? "pause.fill" : "play.fill", title: autoScrollEnabled ? "暂停" : "自动") {
                         toggleAutoScroll()
                         showSettings = false
@@ -1335,11 +1341,18 @@ struct ReaderView: View {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 await MainActor.run {
                     guard autoScrollEnabled else { return }
-                    let maxIndex = maximumReaderTarget
-                    if autoScrollTarget >= maxIndex {
+                    switch ReaderAutomationPolicy.decision(
+                        currentTarget: autoScrollTarget,
+                        maximumTarget: maximumReaderTarget,
+                        canAdvanceChapter: canSelectRelativeChapter(offset: 1)
+                    ) {
+                    case .advance(let target):
+                        autoScrollTarget = target
+                    case .nextChapter:
                         stopAutoScroll()
-                    } else {
-                        autoScrollTarget += 1
+                        selectRelativeChapter(offset: 1)
+                    case .stop:
+                        stopAutoScroll()
                     }
                 }
             }
@@ -1594,8 +1607,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     @Published var currentParagraphIndex = -1
 
     private let synthesizer = AVSpeechSynthesizer()
-    private var paragraphs: [String] = []
-    private var nextIndex = 0
+    private var queue = ReaderSpeechQueue()
     private var rate: Float = 0.52
 
     override init() {
@@ -1605,8 +1617,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
 
     func speak(title: String, paragraphs: [String], rate: Float) {
         stop()
-        self.paragraphs = [title] + paragraphs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        self.nextIndex = 0
+        queue.reset(title: title, paragraphs: paragraphs)
         self.rate = rate
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true, options: [])
@@ -1634,20 +1645,18 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         isSpeaking = false
         isPaused = false
         currentParagraphIndex = -1
-        paragraphs = []
-        nextIndex = 0
+        queue.clear()
     }
 
     private func speakNext() {
-        guard nextIndex < paragraphs.count else {
+        guard let segment = queue.dequeue() else {
             stop()
             return
         }
-        currentParagraphIndex = nextIndex - 1
-        let utterance = AVSpeechUtterance(string: paragraphs[nextIndex])
+        currentParagraphIndex = segment.index
+        let utterance = AVSpeechUtterance(string: segment.text)
         utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
         utterance.rate = rate
-        nextIndex += 1
         synthesizer.speak(utterance)
     }
 
