@@ -639,7 +639,7 @@ final class JSCoreRuntime {
         function __jsonRuleString(documentText, rule) {
           return __jsonRuleValues(documentText, rule).map(function(value) {
             return value == null ? '' : (typeof value === 'object' ? JSON.stringify(value) : String(value));
-          }).join('\n');
+          }).join('\\n');
         }
         function __jsonRuleList(documentText, rule) {
           return __asJavaList(__jsonRuleValues(documentText, rule).map(function(value) {
