@@ -911,3 +911,22 @@
 
 ### Rollback
 - Revert the phase commit to remove the bookmark/offline-management views, backup/restore APIs, cache-management APIs and book-detail download controls while preserving the previous source/reader engine.
+
+## 2026-09-03 - Task: iOS 16 CI compatibility closure
+
+### Scope
+- Replaced the iOS 17-only `ContentUnavailableView` in source diagnostic history with an iOS 16-compatible empty state.
+- Corrected `SettingsView` to use the Xcode/iOS 16-compatible non-optional `fileExporter` overload.
+- Removed the CI-incompatible `CALayer.preferredFrameRateRange` call; high-refresh remains enabled through `CADisableMinimumFrameDurationOnPhone` while UIKit/SwiftUI selects the device-supported cadence.
+
+### CI verification
+- Commit `3cdac84` pushed to `codex/swift-v2-lifetime-reader`.
+- iOS build/XCTest Actions run `33667244188`: success.
+- Unsigned IPA Actions run `33667244128`: success; artifact `SourceReadSwift-unsigned-ipa` produced.
+
+### Unverified
+- Windows host cannot run Xcode or XCTest locally.
+- Sustained 120 Hz still requires ProMotion hardware/Instruments; this phase only proves the app no longer imposes a 60 Hz floor.
+
+### Rollback
+- Revert commits `3cdac84` and `36cee2a` to restore the previous exporter, empty-state and frame-rate implementation.
