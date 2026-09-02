@@ -51,18 +51,20 @@ struct SourceDiagnosticHistoryView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
-                ToolbarItemGroup(placement: .confirmationAction) {
-                    Button {
-                        UIPasteboard.general.string = appState.sourceDiagnosticHistoryStore.exportText(for: source)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
+                ToolbarItem(placement: .confirmationAction) {
+                    HStack(spacing: 12) {
+                        Button {
+                            UIPasteboard.general.string = appState.sourceDiagnosticHistoryStore.exportText(for: source)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
+                        .accessibilityLabel("复制诊断历史")
+                        Button("清空", role: .destructive) {
+                            appState.sourceDiagnosticHistoryStore.clear(for: source)
+                        }
+                        .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
                     }
-                    .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
-                    .accessibilityLabel("复制诊断历史")
-                    Button("清空", role: .destructive) {
-                        appState.sourceDiagnosticHistoryStore.clear(for: source)
-                    }
-                    .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
                 }
             }
         }
