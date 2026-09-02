@@ -11,6 +11,24 @@
 - Windows 只做源码、测试、静态检查和 Git 操作；Xcode 编译/测试由 GitHub Actions 完成。
 - 不宣称真机 120 FPS，直到 ProMotion 真机实测；CI 只证明编译与测试。
 
+## 当前执行口令（2026-09-02）
+
+- 主路线固定为原生 Swift/SwiftUI，不再回退到 Flutter 运行时。
+- 交付按“大阶段”推进：阶段内连续施工，阶段末一次性提交、推送和跑 Actions。
+- 高刷新目标为“允许 ProMotion 设备使用系统最高刷新率，并清理阅读热路径掉帧源”；只有拿到 ProMotion 真机或 Instruments 证据后，才把 120 Hz 写成实测结论。
+- Windows 端负责源码、fixture、静态检查、Git；GitHub Actions 负责 Xcode 编译、XCTest 和 unsigned IPA。
+- 每次阶段回报只包含：提交 SHA、Actions run、artifact、已验证项、未验证项和下一阶段入口。
+
+## 大阶段验收门槛
+
+每个阶段必须同时满足以下条件才算“阶段完成”：
+
+1. 代码和测试变更通过 `git diff --check`。
+2. iOS workflow 的 build/test 成功；失败必须读取 annotations 后修复并重跑。
+3. unsigned IPA workflow 成功并产出可下载 artifact。
+4. `progress.md` 记录本阶段范围、证据、未验证项和回滚点。
+5. 不得把“代码已提交”或“Actions 已排队”写成“功能已验收”。
+
 ## 阶段 1：性能与内容基础闭环
 
 状态：进行中
@@ -20,6 +38,14 @@
 - EPUB：路径编码、OPF/spine、正文抽取、目录、缓存、阅读进度。
 - RSS：Feed/Atom 列表、文章详情阅读、HTML 正文抽取、失败 fallback。
 - 验收：Actions 编译、单元测试、unsigned IPA；保留性能 signpost。
+
+### 阶段 1.1：高刷与阅读热路径（当前优先）
+
+- 保留 `CADisableMinimumFrameDurationOnPhone = true` 和 `FrameRateCoordinator`，确保 ProMotion 设备不被应用主动锁到 60 Hz。
+- 以 signpost、主线程任务、分页/布局、图片解码和网络回调为观测点，逐个消除阅读页长任务。
+- 禁止在滚动/翻页热路径执行同步磁盘 IO、整本重排版和重复 JSON/HTML 解析。
+- 对自动翻页、朗读高亮、章节切换增加状态互斥，避免多个定时器或任务重复驱动 UI。
+- 验收分两层：CI 证明编译/测试；真机或 Instruments 再证明实际 120 Hz/帧时间。
 
 ## 阶段 2：书源诊断与规则编辑
 
@@ -41,6 +67,13 @@
 - 补齐批量书源诊断和数据恢复。
 - 做长列表、键盘、文件选择器、网络失败、重复点击等回归。
 - 完成 release workflow、artifact 摘要和自签安装说明。
+
+## 执行顺序锁定
+
+1. 先收口当前 Actions（iOS build/test + unsigned IPA），不在失败未定位前扩大代码面。
+2. 再做 RSS 完整化和书源测试闭环，保证内容链路可诊断、可缓存、可恢复。
+3. 再做阅读器朗读/自动翻页的状态机和章节自动衔接。
+4. 最后按 Flutter parity ledger 做产品收尾、回归矩阵和发布包装。
 
 ## 每阶段固定验收
 
