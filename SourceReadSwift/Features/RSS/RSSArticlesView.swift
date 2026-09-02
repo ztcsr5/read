@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RSSArticlesView: View {
+    @EnvironmentObject private var appState: AppState
     let source: RSSSource
 
     @State private var articles: [RSSArticlePreview] = []
@@ -48,7 +49,11 @@ struct RSSArticlesView: View {
                         NavigationLink {
                             RSSArticleReaderView(article: article)
                         } label: {
-                            RSSArticleRow(article: article)
+                            RSSArticleRow(
+                                article: article,
+                                isRead: appState.rssArticleStateStore.isRead(article),
+                                isFavorite: appState.rssArticleStateStore.isFavorite(article)
+                            )
                         }
                     }
                 }
@@ -103,13 +108,22 @@ struct RSSArticlesView: View {
 
 private struct RSSArticleRow: View {
     let article: RSSArticlePreview
+    let isRead: Bool
+    let isFavorite: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(article.title)
+            HStack(alignment: .top, spacing: 8) {
+                Text(article.title)
                 .font(.headline)
                 .foregroundStyle(.primary)
                 .lineLimit(2)
+                if isFavorite {
+                    Image(systemName: "star.fill")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                }
+            }
 
             if let pubDate = article.pubDate {
                 Text(pubDate)
@@ -128,6 +142,11 @@ private struct RSSArticleRow: View {
                 Label("打开文章阅读", systemImage: "book")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.accent)
+            }
+            if isRead {
+                Text("已读")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 6)

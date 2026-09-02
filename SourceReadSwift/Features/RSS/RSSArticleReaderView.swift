@@ -2,6 +2,7 @@ import SwiftSoup
 import SwiftUI
 
 struct RSSArticleReaderView: View {
+    @EnvironmentObject private var appState: AppState
     let article: RSSArticlePreview
 
     @State private var paragraphs: [String] = []
@@ -55,6 +56,19 @@ struct RSSArticleReaderView: View {
             }
         }
         .task { await load() }
+        .onAppear {
+            appState.rssArticleStateStore.markRead(article)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    appState.rssArticleStateStore.toggleFavorite(article)
+                } label: {
+                    Image(systemName: appState.rssArticleStateStore.isFavorite(article) ? "star.fill" : "star")
+                        .foregroundStyle(appState.rssArticleStateStore.isFavorite(article) ? .yellow : .primary)
+                }
+            }
+        }
     }
 
     @MainActor

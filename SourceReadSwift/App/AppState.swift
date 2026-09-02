@@ -7,6 +7,7 @@ final class AppState: ObservableObject {
     let bookshelfStore: BookshelfStore
     let purifyRuleStore: PurifyRuleStore
     let chapterContentCacheStore: ChapterContentCacheStore
+    let rssArticleStateStore: RSSArticleStateStore
     let sourceHealthStore: SourceHealthStore
     let sourceWritingServer: LightweightHTTPServer
     private let injectedEngine: SourceEngine?
@@ -37,6 +38,7 @@ final class AppState: ObservableObject {
         bookshelfStore: BookshelfStore? = nil,
         purifyRuleStore: PurifyRuleStore? = nil,
         chapterContentCacheStore: ChapterContentCacheStore? = nil,
+        rssArticleStateStore: RSSArticleStateStore? = nil,
         sourceHealthStore: SourceHealthStore? = nil,
         engine: SourceEngine? = nil
     ) {
@@ -44,6 +46,7 @@ final class AppState: ObservableObject {
         self.bookshelfStore = bookshelfStore ?? BookshelfStore()
         self.purifyRuleStore = purifyRuleStore ?? PurifyRuleStore()
         self.chapterContentCacheStore = chapterContentCacheStore ?? ChapterContentCacheStore()
+        self.rssArticleStateStore = rssArticleStateStore ?? RSSArticleStateStore()
         self.sourceHealthStore = sourceHealthStore ?? SourceHealthStore()
         self.sourceWritingServer = LightweightHTTPServer()
         self.injectedEngine = engine
