@@ -8,7 +8,10 @@ final class LegadoFixtureTests: XCTestCase {
             "legado-html-pagination-source", "legado-post-source", "legado-jxnode-source"
         ]
         for name in names {
-            let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "Fixtures"))
+            let url = try XCTUnwrap(
+                Bundle(for: Self.self).url(forResource: name, withExtension: "json", subdirectory: "Fixtures")
+                    ?? Bundle(for: Self.self).url(forResource: name, withExtension: "json")
+            )
             let source = try JSONDecoder().decode(BookSource.self, from: Data(contentsOf: url))
             XCTAssertFalse(source.bookSourceName.isEmpty, name)
             XCTAssertNotNil(source.searchUrl, name)

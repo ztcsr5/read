@@ -19,8 +19,12 @@ struct RuleEditorValidator {
             let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { continue }
             if field == "searchUrl", !value.hasPrefix("@js:"), !value.contains("{{") {
-                if URL(string: value) == nil {
+                guard let url = URL(string: value),
+                      let scheme = url.scheme?.lowercased(),
+                      ["http", "https"].contains(scheme),
+                      !value.contains(where: { $0.isWhitespace }) else {
                     issues.append(.init(field: field, message: "搜索 URL 不是有效地址或模板"))
+                    continue
                 }
             }
             if field.hasPrefix("rule"), value.contains("<js>") && !value.contains("</js>") {

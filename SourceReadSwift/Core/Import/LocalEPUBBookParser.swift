@@ -103,6 +103,13 @@ struct LocalEPUBBookParser {
             let values = try nodes.map { try $0.text().trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             if !values.isEmpty {
+                if values.count == 1,
+                   let body = try document.body()?.text().trimmingCharacters(in: .whitespacesAndNewlines),
+                   body.count > values[0].count,
+                   body.hasPrefix(values[0]) {
+                    let directText = String(body.dropFirst(values[0].count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !directText.isEmpty { return values + [directText] }
+                }
                 return values
             }
             let body = try document.body()?.text().trimmingCharacters(in: .whitespacesAndNewlines)
