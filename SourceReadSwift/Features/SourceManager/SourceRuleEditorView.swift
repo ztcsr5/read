@@ -12,6 +12,9 @@ struct SourceRuleEditorView: View {
     @State private var contentRule: String
     @State private var selectedSection = 0
     @State private var issues: [RuleValidationIssue] = []
+    @State private var previewSample = "<html><body><article><h1>示例书名</h1><p class=\"content\">示例正文</p></article></body></html>"
+    @State private var previewOutput = ""
+    @State private var isPreviewing = false
 
     init(source: BookSource, onSave: @escaping (BookSource) -> Void, onCancel: @escaping () -> Void) {
         self.source = source
@@ -47,6 +50,36 @@ struct SourceRuleEditorView: View {
                         .font(.system(.footnote, design: .monospaced))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+                Section {
+                    TextEditor(text: $previewSample)
+                        .frame(minHeight: 120)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button {
+                        runLocalPreview()
+                    } label: {
+                        Label(isPreviewing ? "预览中…" : "用本地样本预览", systemImage: "play.circle")
+                    }
+                    .disabled(isPreviewing || previewSample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if !previewOutput.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("预览结果")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(previewOutput)
+                                .font(.system(.footnote, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+                } header: {
+                    Text("本地样本预览（不联网）")
+                } footer: {
+                    Text("输入脱敏 HTML/JSON 样本，单步执行当前规则；预览不会保存书源或 Cookie。")
                 }
                 if !issues.isEmpty {
                     Section("校验结果") {
@@ -91,6 +124,32 @@ struct SourceRuleEditorView: View {
         case 1: return $detailRule
         case 2: return $tocRule
         default: return $contentRule
+        }
+    }
+
+    private func runLocalPreview() {
+        isPreviewing = true
+        let sample = previewSample
+        let text: String
+        switch selectedSection {
+        case 0: text = searchRule
+        case 1: text = detailRule
+        case 2: text = tocRule
+        default: text = contentRule
+        }
+        let stage: RulePreviewEvaluator.Stage
+        switch selectedSection {
+        case 0: stage = .search
+        case 1: stage = .detail
+        case 2: stage = .toc
+        default: stage = .content
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let output = RulePreviewEvaluator().evaluate(sample: sample, ruleText: text, stage: stage)
+            DispatchQueue.main.async {
+                previewOutput = output
+                isPreviewing = false
+            }
         }
     }
 
