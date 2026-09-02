@@ -230,7 +230,7 @@ final class LegadoNativeBridgeTests: XCTestCase {
             [before, removed, after, java.digestHex('abc','SHA-256'), java.HMacHex('abc','HmacSHA1','key'), head.statusCode, head.header('x-test'), java.ajaxBytes('https://example.com/a').length].join('|');
         """)
         guard case .success(let value) = result else { return XCTFail("expected success") }
-        XCTAssertEqual(value, "cached|true||ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|de7c9b85b8b78aa6bc8deaf7f63dee46|204|ok|3")
+        XCTAssertEqual(value, "cached|true||ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|4fd0b215276ef12f2b3e4c8ecac2811498b656fc|204|ok|3")
     }
 
     func testImportScriptExecutesDataURLScript() throws {

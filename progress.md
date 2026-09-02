@@ -1,3 +1,20 @@
+## 2026-09-03 - Task: Legado JS bridge compatibility phase CI correction
+
+### What was done
+- Expanded the JavaScriptCore Legado bridge with `java.ajaxBytes`, `java.head`, `java.getStrResponse`, `java.getResponseCode`, `java.cacheFile`, `java.deleteFile`, `java.importScript`, digest and HMAC helpers.
+- Added persistent sandbox-scoped file cache operations and preserved HEAD directives through request parsing/building.
+- Added regression coverage for cache/delete, HEAD metadata, byte responses, SHA/HMAC, data-URL script imports, and HEAD request construction.
+- Corrected the HMAC-SHA1 fixture expectation after CI showed CryptoKit's standard `HMAC<SHA1>` output.
+
+### Testing
+- `git diff --check` passed locally with only existing Windows LF-to-CRLF warnings.
+- JavaScript prelude extracted from `JSCoreRuntime.swift` and passed `node --check`.
+- GitHub Actions unsigned IPA run `33651545077` passed.
+- GitHub Actions iOS build passed, but XCTest run `33651543584` failed only because the test expected a non-standard HMAC-SHA1 value; the fixture is corrected and will be rerun.
+- Windows cannot run Swift/Xcode locally; Actions remains the authoritative compile/test gate.
+
+### Rollback
+- Revert the bridge commit and this progress entry together if the phase needs to be backed out.
 ## 2026-09-02 - Task: CI failure correction pass
 
 ### What was done
@@ -788,3 +805,4 @@
 
 ### Rollback
 - Revert the phase commit to restore the prior speech lifecycle behavior and frame-rate coordinator implementation.
+
