@@ -788,6 +788,16 @@ struct SourceManagerView: View {
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
 
+                if state.source.loginUrl?.nilIfEmpty != nil {
+                    Button {
+                        sourceLogin = state.source
+                    } label: {
+                        Label("先打开登录/验证页", systemImage: "lock.open")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
                 Button {
                     Task { await runSourceTest() }
                 } label: {
