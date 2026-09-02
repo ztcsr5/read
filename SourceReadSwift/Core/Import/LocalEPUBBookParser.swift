@@ -106,7 +106,8 @@ struct LocalEPUBBookParser {
     }
 
     private func normalizeEPUBPath(basePath: String, href: String) -> String {
-        let cleanHref = href.components(separatedBy: "#").first ?? href
+        let rawHref = href.components(separatedBy: "#").first ?? href
+        let cleanHref = rawHref.removingPercentEncoding ?? rawHref
         if basePath == "." || basePath == "/" || basePath.isEmpty {
             return cleanHref
         }

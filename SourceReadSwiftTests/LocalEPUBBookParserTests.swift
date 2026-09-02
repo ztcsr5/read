@@ -61,6 +61,22 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testParsesPercentEncodedSpinePathAndBrFallback() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("encoded.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>"#, to: archive)
+        try add("OEBPS/book.opf", text: #"<package><metadata><dc:title>Encoded</dc:title></metadata><manifest><item id="c" href="chap%20one.xhtml"/></manifest><spine><itemref idref="c"/></spine></package>"#, to: archive)
+        try add("OEBPS/chap one.xhtml", text: #"<html><body><h1>One</h1>Line A<br/>Line B</body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.title, "Encoded")
+        XCTAssertEqual(book.chapters.first?.title, "One")
+        XCTAssertTrue(book.chapters.first?.paragraphs.contains("Line A Line B") == true)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
         let data = Data(text.utf8)
         try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { position, size in
