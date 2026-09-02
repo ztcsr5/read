@@ -772,3 +772,19 @@
 
 ### Rollback
 - Revert this phase commit to restore the previous root tab stack and scene frame-rate behavior.
+
+## 2026-09-02 - Task: Reader speech lifecycle and cross-chapter handoff phase
+
+### What was done
+- Completed the pending reader speech handoff slice for both remote source books and local multi-chapter books: when the current chapter finishes, the owner advances to the next chapter and persists the new reading position.
+- Added foreground/background lifecycle handling so speech pauses only when the scene caused the pause, then resumes on return; automatic scrolling is stopped while inactive to prevent runaway work.
+- Routed speech completion back through the main actor and reset lifecycle state when switching reader modes or starting automatic scroll, avoiding stale callbacks and mixed playback modes.
+- Applied the SDK-compatible `CALayer.preferredFrameRateRange` ProMotion request from the recovered CI correction commit; the earlier `UIWindowScene` API is no longer present.
+
+### Testing
+- Ran `git diff --check` locally.
+- Windows host has no Swift/Xcode; compile, XCTest, and unsigned IPA remain GitHub Actions gates.
+- The latest unsigned-IPA run for `8d7fbc5` exposed the obsolete `UIWindowScene.preferredFrameRateRange` API; this phase includes the layer-based correction and must be re-run in Actions before claiming build success.
+
+### Rollback
+- Revert the phase commit to restore the prior speech lifecycle behavior and frame-rate coordinator implementation.

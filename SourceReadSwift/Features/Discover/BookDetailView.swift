@@ -242,6 +242,13 @@ struct ChapterLoadingView: View {
                     },
                     onCacheNextChapters: {
                         Task { await cacheNextChaptersFromReader() }
+                    },
+                    onSpeechFinished: {
+                        guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
+                        currentChapter = next
+                        content = nil
+                        errorMessage = nil
+                        isUsingStaleCache = false
                     }
                 )
             } else if let errorMessage {

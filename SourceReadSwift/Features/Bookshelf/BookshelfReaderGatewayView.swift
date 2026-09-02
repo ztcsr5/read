@@ -149,6 +149,17 @@ struct BookshelfReaderGatewayView: View {
                     chapterTitle: chapter.title,
                     totalChapters: chapters.count
                 )
+            },
+            onSpeechFinished: {
+                let nextIndex = safeIndex + 1
+                guard chapters.indices.contains(nextIndex) else { return }
+                selectedLocalChapterIndex = nextIndex
+                appState.bookshelfStore.updateReadingProgress(
+                    bookID: book.id,
+                    chapterIndex: nextIndex,
+                    chapterTitle: chapters[nextIndex].title,
+                    totalChapters: chapters.count
+                )
             }
         )
     }
