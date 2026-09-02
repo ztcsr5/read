@@ -971,3 +971,10 @@
 
 ### Rollback
 - Revert commits `ee03ec6` through `fc1c596` to restore the prior JS bridge while preserving the previously shipped RSS/EPUB phase.
+
+### CI correction update
+
+- Commit `a3e6bc4` pushed after iOS JavaScriptCore annotations showed `ReferenceError: Can't find variable: java` during bridge tests.
+- Root cause was unsafe fresh-context namespace initialization (`var java = java || {}` and the same pattern for `cookie`, `CryptoJS`, and `Packages`); JavaScriptCore evaluates the undeclared right-hand identifier differently from a browser/Node environment.
+- Replaced those initializers with `typeof`-guarded conditional initialization so a clean JSContext creates the Legado namespaces before installing helper methods.
+- iOS build/XCTest run `33679123051`: success. Unsigned IPA run `33679122964`: still pending at the time of this update.
