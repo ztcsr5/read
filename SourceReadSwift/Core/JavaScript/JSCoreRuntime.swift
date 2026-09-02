@@ -453,10 +453,14 @@ final class JSCoreRuntime {
         }
 
         let prelude = """
-        var java = java || {};
+        // JavaScriptCore throws when an undeclared identifier is read on the
+        // right-hand side of `var java = java || {}`.  Android/Legado scripts
+        // expect these namespaces to be created on a fresh context, so guard
+        // every root namespace with `typeof` before reusing an existing value.
+        var java = (typeof java === 'undefined' || java === null) ? {} : java;
         // SourceRead's JSON/HTML hybrid helper.  Keep both constructor and
         // factory spellings used by Android Legado sources.
-        var JXNode = JXNode || function(value) { return __nativeJXNode.create(value); };
+        var JXNode = (typeof JXNode === 'undefined' || JXNode === null) ? function(value) { return __nativeJXNode.create(value); } : JXNode;
         JXNode.create = function(value) { return __nativeJXNode.create(value); };
         var jxNode = function(value) { return __nativeJXNode.create(value); };
         java.urlEncode = function(value) { return __native_urlEncode(String(value)); };
@@ -931,7 +935,7 @@ final class JSCoreRuntime {
         java.startBrowserAwait = function() { return ''; };
         java.webView = function() { return ''; };
         java.openUrl = java.startBrowser;
-        var cookie = cookie || {};
+        var cookie = (typeof cookie === 'undefined' || cookie === null) ? {} : cookie;
         cookie.getCookie = java.getCookie;
         cookie.getKey = function(url, key) {
           var name = String(key || '');
@@ -1103,7 +1107,7 @@ final class JSCoreRuntime {
         function setContent(value) { return java.setContent(value); }
         function put(key, value) { return java.put(key, value); }
         function get(key, fallback) { return java.getStr(key, fallback); }
-        var CryptoJS = CryptoJS || {};
+        var CryptoJS = (typeof CryptoJS === 'undefined' || CryptoJS === null) ? {} : CryptoJS;
         function __cryptoText(value) {
           if (value && value.__text !== undefined) return String(value.__text);
           return String(value);
@@ -1163,7 +1167,7 @@ final class JSCoreRuntime {
           parse: function(value) { return __cryptoWordArray(__native_base64Decode(String(value)), 'base64'); },
           stringify: function(value) { return __native_base64Encode(__cryptoText(value)); }
         };
-        var Packages = Packages || {};
+        var Packages = (typeof Packages === 'undefined' || Packages === null) ? {} : Packages;
         Packages.org = Packages.org || {};
         Packages.org.jsoup = Packages.org.jsoup || {};
         Packages.java = Packages.java || {};
