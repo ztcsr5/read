@@ -1,7 +1,7 @@
 import Foundation
 import SwiftSoup
 
-struct RSSArticlePreview: Identifiable, Hashable, Sendable {
+struct RSSArticlePreview: Identifiable, Codable, Hashable, Sendable {
     var id: String { [sourceURL ?? "", title, link ?? "", pubDate ?? ""].joined(separator: "|") }
     let sourceURL: String?
     let title: String

@@ -1,3 +1,13 @@
+## 2026-09-02 - Task: RSS offline cache phase
+
+### What was done
+- Added `RSSFeedCacheStore` with Application Support persistence, source-scoped replacement/removal, bounded retention, and best-effort disk writes.
+- RSS article lists now restore cached articles immediately, refresh in the background, save successful responses, and keep cached content visible on network failure.
+- Added Codable article previews and regression coverage for reload and source-scoped deletion.
+
+### Testing
+- Ran `git diff --check` locally.
+- GitHub Actions is the Swift compile/XCTest and unsigned IPA gate.
 ## 2026-09-02 - Task: EPUB cover and local-book metadata phase
 
 ### What was done

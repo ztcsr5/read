@@ -76,6 +76,9 @@ struct RSSArticlesView: View {
             }
         }
         .task {
+            if let cached = appState.rssFeedCacheStore.articles(for: source.sourceUrl) {
+                articles = cached
+            }
             await loadArticles(force: false)
         }
     }
@@ -100,8 +103,13 @@ struct RSSArticlesView: View {
                 errorMessage = "已加载响应，但没有识别到 RSS/Atom 文章。"
             }
             articles = Array(parsed.prefix(100))
+            appState.rssFeedCacheStore.save(articles, sourceURL: source.sourceUrl)
         } catch {
-            errorMessage = error.localizedDescription
+            if articles.isEmpty {
+                errorMessage = error.localizedDescription
+            } else {
+                errorMessage = "网络不可用，正在显示缓存文章"
+            }
         }
     }
 }
