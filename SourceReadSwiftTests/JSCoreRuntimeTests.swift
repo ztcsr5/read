@@ -5,7 +5,7 @@ final class JSCoreRuntimeTests: XCTestCase {
     func testNativeUrlEncodeBridge() throws {
         let result = JSCoreRuntime().evaluate("java.urlEncode('斗破苍穹&a=1')")
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertTrue(value.contains("%"))
         XCTAssertFalse(value.contains("&"))
@@ -14,7 +14,7 @@ final class JSCoreRuntimeTests: XCTestCase {
     func testNativeBase64Bridge() throws {
         let result = JSCoreRuntime().evaluate("java.base64Decode(java.base64Encode('abc'))")
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, "abc")
     }
@@ -42,7 +42,7 @@ final class JSCoreRuntimeTests: XCTestCase {
         let result = JSCoreRuntime().evaluate(script)
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(
             value,

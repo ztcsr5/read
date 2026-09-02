@@ -10,7 +10,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         let result = runtime.evaluate("java.ajax('https://example.com/a')")
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, "loaded:https://example.com/a")
     }
@@ -28,7 +28,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         )
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, #"{"url":"https://example.com/a"}|https://example.com/a"#)
     }
@@ -41,7 +41,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         let result = runtime.evaluate("java.post('https://example.com/a', 'q=1')")
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, "https://example.com/a@Body:q=1")
     }
@@ -54,7 +54,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         let result = runtime.evaluate("java.post('https://example.com/a', 'q=1', {'X-Test':'1'})")
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, #"https://example.com/a@Header:{"X-Test":"1"}@Body:q=1"#)
     }
@@ -73,7 +73,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         )
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, #"https://example.com/a@Header:{"X-Test":"1"}@Body:keyword=a%26b&page=2"#)
     }
@@ -91,7 +91,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         )
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, "abc")
     }
@@ -110,7 +110,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         )
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, #"https://example.com/a@Header:{"X-Test":"1"}"#)
     }
@@ -131,7 +131,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         )
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, #"https://example.com/a@Header:{"User-Agent":"Reader","X-Test":"1"}"#)
     }
@@ -152,7 +152,7 @@ final class JSCoreNetworkBridgeTests: XCTestCase {
         )
 
         guard case .success(let value) = result else {
-            return XCTFail("expected success")
+            return XCTFail("expected success: \(result)")
         }
         XCTAssertEqual(value, #"https://example.com/a@Header:{"X-Test":"1"}@Body:keyword=a%26b"#)
     }
