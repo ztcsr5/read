@@ -1,3 +1,4 @@
+import QuartzCore
 import UIKit
 
 /// Coordinates high-refresh capability for active iOS windows.
@@ -21,10 +22,17 @@ enum FrameRateCoordinator {
         guard maximum > 0 else { return }
 
         let preferred = min(maximum, 120)
-        // `CADisableMinimumFrameDurationOnPhone` in Info.plist enables ProMotion
-        // for SwiftUI. SwiftUI/UIKit choose the actual pacing from this device
-        // ceiling; we record it for diagnostics without driving a wasteful dummy
-        // display link on the main thread.
+        // `CADisableMinimumFrameDurationOnPhone` enables ProMotion on iPhone.
+        // CALayer is the SDK-stable point for expressing the preferred range;
+        // SwiftUI then schedules work against the active window's layer.
+        let range = CAFrameRateRange(
+            minimum: maximum >= 120 ? 80 : maximum,
+            maximum: preferred,
+            preferred: preferred
+        )
+        for window in windowScene.windows {
+            window.layer.preferredFrameRateRange = range
+        }
         PerformanceSignpost.event(
             "frame.rate",
             "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
