@@ -319,8 +319,8 @@ final class LegadoNativeBridgeTests: XCTestCase {
 
     func testSourceBookChapterGetterAliasesSurviveVariableInjection() throws {
         let source = BookSource(bookSourceName: "Fixture", bookSourceUrl: "https://example.com/source", searchUrl: "https://example.com")
-        let book = SearchBook(name: "Book", author: "Author", coverUrl: nil, bookUrl: "https://example.com/book", sourceName: "Fixture", sourceUrl: source.bookSourceUrl)
-        let chapter = BookChapter(title: "Chapter 1", url: "https://example.com/chapter", bookUrl: book.bookUrl, index: 4)
+        let book = SearchBook(name: "Book", author: "Author", coverUrl: nil, bookUrl: "https://example.com/book", sourceName: "Fixture", sourceUrl: source.bookSourceUrl, intro: nil)
+        let chapter = BookChapter(title: "Chapter 1", url: "https://example.com/chapter", bookUrl: book.bookUrl, index: 4, isVip: false)
         let runtime = JSCoreRuntime()
         let result = runtime.evaluate("[source.getName(), source.getUrl(), book.getName(), book.getAuthor(), book.getTocUrl(), chapter.getName(), chapter.getIndex()].join('|')", variables: ["source": source, "book": book, "chapter": chapter])
         guard case .success(let value) = result else { return XCTFail("expected success") }
