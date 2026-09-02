@@ -393,7 +393,9 @@ struct ReaderView: View {
             }
             .onChange(of: speechController.currentParagraphIndex) { target in
                 guard target >= 0 else { return }
-                persistReadingPosition(paragraphIndexOverride: target)
+                // Speech can advance once per paragraph. Do not serialize the
+                // whole bookshelf synchronously on the display frame path.
+                scheduleReadingPositionPersistence(paragraphIndex: target)
                 withAnimation(.easeInOut(duration: 0.35)) {
                     proxy.scrollTo(target, anchor: .center)
                 }
@@ -544,16 +546,7 @@ struct ReaderView: View {
     }
 
     private var paragraphTrackingStride: Int {
-        switch content.paragraphs.count {
-        case 0...180:
-            return 1
-        case 181...600:
-            return 3
-        case 601...1_500:
-            return 5
-        default:
-            return 8
-        }
+        ReaderPerformancePolicy.paragraphTrackingStride(paragraphCount: content.paragraphs.count)
     }
 
     private var readerOverlay: some View {
@@ -1499,7 +1492,7 @@ struct ReaderView: View {
     private func scheduleReadingPositionPersistence(paragraphIndex: Int) {
         positionPersistTask?.cancel()
         positionPersistTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: ReaderPerformancePolicy.positionPersistenceDebounceNanoseconds)
             guard !Task.isCancelled else { return }
             persistReadingPosition(paragraphIndexOverride: paragraphIndex)
             positionPersistTask = nil
