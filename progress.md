@@ -806,3 +806,24 @@
 ### Rollback
 - Revert the phase commit to restore the prior speech lifecycle behavior and frame-rate coordinator implementation.
 
+## 2026-09-03 - Task: Reader automation state machine and high-refresh hot-path phase
+
+### What was done
+
+- Added a generation-based `ReaderPlaybackStateMachine`/coordinator shared by auto-scroll and speech. Stale timers and speech completion callbacks are now rejected after a mode switch, stop, scene transition, or chapter handoff.
+- Made speech chapter handoff actually continue playback: source-backed and local multi-chapter readers now request one-shot speech autoplay after the next chapter content appears.
+- Kept speech, auto-scroll, scene lifecycle, and reader-mode transitions mutually exclusive; stopping speech clears queued completion callbacks and stale queue state.
+- Debounced reading-position persistence from page/scroll target changes so bookshelf JSON serialization is removed from the immediate paging/auto-scroll hot path.
+- Prevented duplicate chapter preload workers and cancel them when the chapter reader disappears, reducing competing network/cache work during navigation.
+
+### Testing
+
+- `git diff --check` passes locally.
+- Added deterministic XCTest coverage for playback generation invalidation and speech pause/resume transitions.
+- Windows host has no Swift/Xcode; iOS compile, XCTest, and unsigned IPA remain GitHub Actions gates.
+- Actual ProMotion frame pacing still requires iPhone Pro/Instruments evidence; CI cannot prove sustained 120 FPS.
+
+### Rollback
+
+- Revert this phase commit to restore the previous reader automation, persistence timing, and preload behavior.
+

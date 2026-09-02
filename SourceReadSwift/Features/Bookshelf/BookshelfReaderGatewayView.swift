@@ -11,6 +11,7 @@ struct BookshelfReaderGatewayView: View {
     @State private var errorMessage: String?
     @State private var showSourceSwitcher = false
     @State private var sourceSwitchState = SourceSwitchState()
+    @State private var autoplaySpeechAfterHandoff = false
 
     private var currentBook: BookshelfBook {
         appState.bookshelfStore.book(id: book.id) ?? book
@@ -153,6 +154,7 @@ struct BookshelfReaderGatewayView: View {
             onSpeechFinished: {
                 let nextIndex = safeIndex + 1
                 guard chapters.indices.contains(nextIndex) else { return }
+                autoplaySpeechAfterHandoff = true
                 selectedLocalChapterIndex = nextIndex
                 appState.bookshelfStore.updateReadingProgress(
                     bookID: book.id,
@@ -160,8 +162,13 @@ struct BookshelfReaderGatewayView: View {
                     chapterTitle: chapters[nextIndex].title,
                     totalChapters: chapters.count
                 )
+            },
+            autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+            onSpeechAutoplayConsumed: {
+                autoplaySpeechAfterHandoff = false
             }
         )
+        .id("reader-\(book.id)-\(safeIndex)")
     }
 
     private func resumeReading() async {

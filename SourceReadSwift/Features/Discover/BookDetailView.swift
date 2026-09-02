@@ -213,6 +213,8 @@ struct ChapterLoadingView: View {
     @State private var errorMessage: String?
     @State private var isUsingStaleCache = false
     @State private var isCachingNext = false
+    @State private var autoplaySpeechAfterHandoff = false
+    @State private var preloadTask: Task<Void, Never>?
     @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
 
     private var effectiveChapter: BookChapter {
@@ -245,10 +247,15 @@ struct ChapterLoadingView: View {
                     },
                     onSpeechFinished: {
                         guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
+                        autoplaySpeechAfterHandoff = true
                         currentChapter = next
                         content = nil
                         errorMessage = nil
                         isUsingStaleCache = false
+                    },
+                    autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+                    onSpeechAutoplayConsumed: {
+                        autoplaySpeechAfterHandoff = false
                     }
                 )
             } else if let errorMessage {
@@ -274,6 +281,10 @@ struct ChapterLoadingView: View {
             Task {
                 await load(force: true)
             }
+        }
+        .onDisappear {
+            preloadTask?.cancel()
+            preloadTask = nil
         }
     }
 
@@ -326,6 +337,7 @@ struct ChapterLoadingView: View {
     private func preloadNextChapters(after chapter: BookChapter, source: BookSource, purifyRules: [String]) {
         let count = ReaderPreloadPolicy.clamp(preloadChapterCount)
         guard count > 0 else { return }
+        guard preloadTask == nil else { return }
         let nextChapters = chapters
             .filter { $0.index > chapter.index }
             .sorted { $0.index < $1.index }
@@ -339,11 +351,13 @@ struct ChapterLoadingView: View {
             }
         guard !nextChapters.isEmpty else { return }
         let engine = appState.engine
-        Task {
+        preloadTask = Task {
             for next in nextChapters {
+                guard !Task.isCancelled else { return }
                 let result = await AsyncTimeout.run(seconds: 10) {
                     await engine.getContent(source: source, chapter: next)
                 } ?? .failure(.network("Preload timed out"))
+                guard !Task.isCancelled else { return }
                 if case .success(let loaded) = result {
                     await MainActor.run {
                         appState.chapterContentCacheStore.save(
@@ -353,6 +367,9 @@ struct ChapterLoadingView: View {
                         )
                     }
                 }
+            }
+            await MainActor.run {
+                preloadTask = nil
             }
         }
     }

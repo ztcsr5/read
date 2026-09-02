@@ -20,6 +20,10 @@ struct ReaderView: View {
     /// screen can swap in the next chapter without coupling the speech engine
     /// to navigation or networking.
     var onSpeechFinished: (() -> Void)? = nil
+    /// Used by the chapter owner to continue speech after an automatic
+    /// chapter handoff. It is intentionally one-shot and consumed on appear.
+    var autoplaySpeechOnAppear: Bool = false
+    var onSpeechAutoplayConsumed: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -43,6 +47,7 @@ struct ReaderView: View {
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
     @State private var speechPausedForScene = false
+    @StateObject private var playbackCoordinator = ReaderPlaybackCoordinator()
     @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 19
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
@@ -236,6 +241,12 @@ struct ReaderView: View {
             scheduleSleepTimer()
             appState.bookshelfStore.markReaderOpened(bookID: bookID)
             persistReadingPosition()
+            if autoplaySpeechOnAppear {
+                onSpeechAutoplayConsumed?()
+                DispatchQueue.main.async {
+                    beginSpeechPlayback()
+                }
+            }
         }
         .onDisappear {
             positionPersistTask?.cancel()
@@ -244,6 +255,7 @@ struct ReaderView: View {
             sleepTimerTask?.cancel()
             sleepTimerTask = nil
             speechController.stop()
+            playbackCoordinator.stop()
             restoreIdleTimerPreference()
             appState.isTabChromeHidden = false
             appState.bookshelfStore.recordReadingSession(
@@ -261,30 +273,38 @@ struct ReaderView: View {
             if phase != .active {
                 autoScrollTask?.cancel()
                 autoScrollTask = nil
-                if autoScrollEnabled { autoScrollEnabled = false }
+                if autoScrollEnabled {
+                    autoScrollEnabled = false
+                    playbackCoordinator.stop()
+                }
                 if speechController.isSpeaking && !speechController.isPaused {
                     speechController.pause()
+                    playbackCoordinator.pauseSpeech()
                     speechPausedForScene = true
                 }
             } else if speechPausedForScene && speechController.isPaused {
                 speechController.resume()
+                playbackCoordinator.resumeSpeech()
                 speechPausedForScene = false
             }
         }
         .onChange(of: autoScrollTarget) { _ in
-            persistReadingPosition()
+            // Persisting the whole bookshelf serializes JSON to disk. Debounce
+            // target changes so paging/auto-scroll stays on the rendering path.
+            scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
         }
             .onChange(of: readerModeRawValue) { _ in
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 stopAutoScroll()
                 speechController.stop()
+                playbackCoordinator.stop()
                 speechPausedForScene = false
                 autoScrollTarget = initialAutoScrollTarget()
         }
-        .onChange(of: readerPageCacheKey) { _ in
+            .onChange(of: readerPageCacheKey) { _ in
             rebuildPagedBlocksCache()
             autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
-            persistReadingPosition()
+            scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
         }
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showOverlay)
         .animation(.spring(response: 0.3, dampingFraction: 0.88), value: showSettings)
@@ -1327,20 +1347,30 @@ struct ReaderView: View {
     private func toggleSpeech() {
         if speechController.isPaused {
             speechController.resume()
+            playbackCoordinator.resumeSpeech()
             speechPausedForScene = false
         } else if speechController.isSpeaking {
             speechController.pause()
+            playbackCoordinator.pauseSpeech()
         } else {
-            stopAutoScroll()
-            speechController.onFinished = { [onSpeechFinished] in
-                guard let onSpeechFinished else { return }
-                Task { @MainActor in
-                    onSpeechFinished()
-                }
-            }
-            speechPausedForScene = false
-            speechController.speak(title: content.title, paragraphs: content.paragraphs, rate: Float(ttsRate))
+            beginSpeechPlayback()
         }
+    }
+
+    private func beginSpeechPlayback() {
+        stopAutoScroll()
+        let coordinator = playbackCoordinator
+        let token = coordinator.beginSpeech()
+        speechController.onFinished = { [onSpeechFinished] in
+            guard let onSpeechFinished else { return }
+            Task { @MainActor in
+                guard coordinator.accepts(token, for: .speech(generation: token)) else { return }
+                coordinator.stop()
+                onSpeechFinished()
+            }
+        }
+        speechPausedForScene = false
+        speechController.speak(title: content.title, paragraphs: content.paragraphs, rate: Float(ttsRate))
     }
 
     private func toggleAutoScroll() {
@@ -1358,11 +1388,15 @@ struct ReaderView: View {
         autoScrollEnabled = true
         autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
         let delay = autoScrollDelay
-        autoScrollTask = Task {
+        let coordinator = playbackCoordinator
+        let token = coordinator.beginAutoScroll()
+        autoScrollTask = Task { [weak coordinator] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 await MainActor.run {
-                    guard autoScrollEnabled else { return }
+                    guard let coordinator,
+                          coordinator.accepts(token, for: .autoScroll(generation: token)),
+                          autoScrollEnabled else { return }
                     switch ReaderAutomationPolicy.decision(
                         currentTarget: autoScrollTarget,
                         maximumTarget: maximumReaderTarget,
@@ -1385,6 +1419,9 @@ struct ReaderView: View {
         autoScrollEnabled = false
         autoScrollTask?.cancel()
         autoScrollTask = nil
+        if case .autoScroll = playbackCoordinator.mode {
+            playbackCoordinator.stop()
+        }
     }
 
     private func scheduleSleepTimer() {
@@ -1631,6 +1668,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     private let synthesizer = AVSpeechSynthesizer()
     private var queue = ReaderSpeechQueue()
     private var rate: Float = 0.52
+    private var activeUtterance: AVSpeechUtterance?
     var onFinished: (() -> Void)?
 
     override init() {
@@ -1639,7 +1677,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     }
 
     func speak(title: String, paragraphs: [String], rate: Float) {
-        stop()
+        stop(clearCompletion: false)
         queue.reset(title: title, paragraphs: paragraphs)
         self.rate = rate
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
@@ -1664,7 +1702,15 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     }
 
     func stop() {
+        stop(clearCompletion: true)
+    }
+
+    private func stop(clearCompletion: Bool) {
         synthesizer.stopSpeaking(at: .immediate)
+        activeUtterance = nil
+        if clearCompletion {
+            onFinished = nil
+        }
         isSpeaking = false
         isPaused = false
         currentParagraphIndex = -1
@@ -1687,22 +1733,27 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         let utterance = AVSpeechUtterance(string: segment.text)
         utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
         utterance.rate = rate
+        activeUtterance = utterance
         synthesizer.speak(utterance)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
-            guard let self, self.isSpeaking else { return }
+            guard let self, self.isSpeaking, self.activeUtterance === utterance else { return }
+            self.activeUtterance = nil
             self.speakNext()
         }
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, self.activeUtterance === utterance else { return }
+            self.activeUtterance = nil
             self.isSpeaking = false
             self.isPaused = false
             self.currentParagraphIndex = -1
+            self.queue.clear()
+            self.onFinished = nil
         }
     }
 }

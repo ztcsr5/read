@@ -33,4 +33,24 @@ final class ReaderAutomationPolicyTests: XCTestCase {
         XCTAssertNil(queue.dequeue())
         XCTAssertTrue(queue.isFinished)
     }
+
+    @MainActor
+    func testPlaybackStateRejectsStaleGenerationAfterStop() {
+        let coordinator = ReaderPlaybackCoordinator()
+        let token = coordinator.beginAutoScroll()
+        XCTAssertTrue(coordinator.accepts(token, for: .autoScroll(generation: token)))
+        coordinator.stop()
+        XCTAssertFalse(coordinator.accepts(token, for: .autoScroll(generation: token)))
+    }
+
+    @MainActor
+    func testPlaybackStateTransitionsSpeechPauseAndResume() {
+        let coordinator = ReaderPlaybackCoordinator()
+        let token = coordinator.beginSpeech()
+        coordinator.pauseSpeech()
+        XCTAssertEqual(coordinator.mode, .pausedSpeech(generation: token))
+        coordinator.resumeSpeech()
+        XCTAssertEqual(coordinator.mode, .speech(generation: token))
+        XCTAssertTrue(coordinator.accepts(token, for: .speech(generation: token)))
+    }
 }

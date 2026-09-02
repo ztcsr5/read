@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Deterministic decisions for automatic reader advancement.
 /// Kept independent from SwiftUI so chapter-boundary behavior is testable on CI.
@@ -21,6 +22,78 @@ struct ReaderAutomationPolicy {
             return canAdvanceChapter ? .nextChapter : .stop
         }
         return .advance(to: currentTarget + 1)
+    }
+}
+
+/// The small, deterministic state machine shared by the reader's automation
+/// controls.  Keeping the transitions outside SwiftUI prevents an old timer,
+/// speech callback, or scene lifecycle event from reviving a newer session.
+enum ReaderPlaybackMode: Equatable {
+    case idle
+    case autoScroll(generation: Int)
+    case speech(generation: Int)
+    case pausedSpeech(generation: Int)
+}
+
+struct ReaderPlaybackStateMachine: Equatable {
+    private(set) var mode: ReaderPlaybackMode = .idle
+    private(set) var generation: Int = 0
+
+    mutating func beginAutoScroll() -> Int {
+        generation &+= 1
+        mode = .autoScroll(generation: generation)
+        return generation
+    }
+
+    mutating func beginSpeech() -> Int {
+        generation &+= 1
+        mode = .speech(generation: generation)
+        return generation
+    }
+
+    mutating func pauseSpeech() {
+        if case .speech(let token) = mode {
+            mode = .pausedSpeech(generation: token)
+        }
+    }
+
+    mutating func resumeSpeech() {
+        if case .pausedSpeech(let token) = mode {
+            mode = .speech(generation: token)
+        }
+    }
+
+    mutating func stop() {
+        generation &+= 1
+        mode = .idle
+    }
+
+    func accepts(_ token: Int, for expectedMode: ReaderPlaybackMode) -> Bool {
+        guard token == generation else { return false }
+        switch (mode, expectedMode) {
+        case (.autoScroll(let active), .autoScroll):
+            return active == token
+        case (.speech(let active), .speech), (.pausedSpeech(let active), .pausedSpeech):
+            return active == token
+        default:
+            return false
+        }
+    }
+}
+
+final class ReaderPlaybackCoordinator: ObservableObject {
+    @Published private(set) var state = ReaderPlaybackStateMachine()
+
+    var mode: ReaderPlaybackMode { state.mode }
+
+    func beginAutoScroll() -> Int { state.beginAutoScroll() }
+    func beginSpeech() -> Int { state.beginSpeech() }
+    func pauseSpeech() { state.pauseSpeech() }
+    func resumeSpeech() { state.resumeSpeech() }
+    func stop() { state.stop() }
+
+    func accepts(_ token: Int, for expectedMode: ReaderPlaybackMode) -> Bool {
+        state.accepts(token, for: expectedMode)
     }
 }
 
