@@ -45,7 +45,11 @@ struct RSSArticlesView: View {
             } else {
                 Section("文章") {
                     ForEach(articles) { article in
-                        RSSArticleRow(article: article)
+                        NavigationLink {
+                            RSSArticleReaderView(article: article)
+                        } label: {
+                            RSSArticleRow(article: article)
+                        }
                     }
                 }
             }
@@ -120,9 +124,10 @@ private struct RSSArticleRow: View {
                     .lineLimit(3)
             }
 
-            if let link = article.link, let url = URL(string: link) {
-                Link("打开原文", destination: url)
+            if article.link != nil {
+                Label("打开文章阅读", systemImage: "book")
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
             }
         }
         .padding(.vertical, 6)

@@ -592,3 +592,16 @@
 ### CI correction
 - The first CI run caught an API mismatch: `preferredFrameRateRange` belongs on `UIWindow` for this deployment/toolchain, not `UIWindowScene`.
 - The coordinator now applies the `CAFrameRateRange` to every active window in the scene; this keeps the native route and restores Xcode compatibility before the next phase batch.
+
+## 2026-09-02 - Task: Phase 1 large-batch content and performance slice
+
+### What was done
+- Kept delivery at the requested large-phase granularity instead of shipping isolated micro-fixes.
+- Added an RSS article reader page: article rows now navigate into native reading, fetch the linked article, extract readable HTML paragraphs, and retain feed description fallback when the original page is unavailable.
+- Added `RSSArticleContentParser` with SwiftSoup extraction for article/main/content containers and readable headings, paragraphs, lists, and blockquotes.
+- Added RSS article-body regression coverage.
+- Corrected the high-refresh implementation to the Xcode-supported `UIWindow.preferredFrameRateRange` API after CI caught the scene-level mismatch.
+
+### Testing
+- Ran `git diff --check` locally.
+- The complete phase batch requires GitHub Actions for compile/test and unsigned IPA validation; Windows cannot run Xcode locally.

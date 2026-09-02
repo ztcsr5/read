@@ -1,4 +1,5 @@
 import Foundation
+import SwiftSoup
 
 struct RSSArticlePreview: Identifiable, Hashable, Sendable {
     var id: String { [title, link ?? "", pubDate ?? ""].joined(separator: "|") }
@@ -60,5 +61,34 @@ struct RSSFeedParser {
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&quot;", with: "\"")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+struct RSSArticleContentParser {
+    func parseParagraphs(from html: String) -> [String] {
+        do {
+            let document = try SwiftSoup.parse(html)
+            let candidates = try document.select("article, main, .entry-content, .post-content, .article-content, body").array()
+            let nodes: [Element]
+            if let container = candidates.first {
+                nodes = try container.select("h1, h2, h3, p, li, blockquote").array()
+            } else {
+                nodes = try document.select("h1, h2, h3, p, li, blockquote").array()
+            }
+            let paragraphs = try nodes.compactMap { node -> String? in
+                let value = try node.text().trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.nilIfEmpty
+            }
+            if !paragraphs.isEmpty { return paragraphs }
+            let fallback = try (candidates.first?.text() ?? document.text())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return [fallback].filter { !$0.isEmpty }
+        } catch {
+            return html
+                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
     }
 }
