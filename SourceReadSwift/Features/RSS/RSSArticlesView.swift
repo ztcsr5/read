@@ -106,7 +106,10 @@ struct RSSArticlesView: View {
             var request = URLRequest(url: url)
             request.setValue("Mozilla/5.0 SourceReadSwift", forHTTPHeaderField: "User-Agent")
             request.setValue("application/rss+xml,application/atom+xml,application/xml,text/xml,text/plain,*/*", forHTTPHeaderField: "Accept")
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
+                throw URLError(.badServerResponse)
+            }
             let text = ResponseTextDecoder().decode(data: data, headers: [:])
             let parsed = RSSFeedParser().parseArticles(from: text, sourceURL: source.sourceUrl)
             didLoadFeed = true

@@ -748,3 +748,12 @@
 ### Testing
 - Ran `git diff --check` locally.
 - GitHub Actions remains the authoritative Swift compile/XCTest/unsigned-IPA gate.
+## 2026-09-02 - Task: RSS HTTP status handling
+
+### What was done
+- RSS feed and article requests now treat non-2xx/3xx HTTP responses as failures instead of parsing error pages as valid content.
+- Existing cache fallback and retry UI therefore activate for server errors while successful empty feeds remain distinguishable.
+
+### Testing
+- Ran `git diff --check` locally.
+- Swift compile/XCTest and unsigned IPA remain pending GitHub Actions verification.

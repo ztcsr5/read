@@ -94,7 +94,10 @@ struct RSSArticleReaderView: View {
         do {
             var request = URLRequest(url: url)
             request.setValue("Mozilla/5.0 SourceReadSwift", forHTTPHeaderField: "User-Agent")
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) {
+                throw URLError(.badServerResponse)
+            }
             let html = ResponseTextDecoder().decode(data: data, headers: [:])
             paragraphs = RSSArticleContentParser().parseParagraphs(from: html)
             if paragraphs.isEmpty, let description = article.description {
