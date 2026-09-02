@@ -965,8 +965,9 @@
 
 ### Testing
 - `git diff --check` passed locally; JavaScript prelude passed `node --check`.
-- Swift/Xcode compilation, XCTest and unsigned IPA are pending GitHub Actions for commit `ee03ec6`; GitHub REST polling is currently rate-limited on the Windows host.
+- Initial Actions runs for `ee03ec6` and follow-up fixes exposed Swift multiline-string escape errors in the JSONPath/URL regex literals (`33671765317`, `33671765324`, `33672567894`, `33673404489`). Those literals were replaced with escape-free parsing logic; commit `fc1c596` is the current CI candidate.
+- Swift/Xcode compilation, XCTest and unsigned IPA for `fc1c596` are pending GitHub Actions; GitHub REST polling is rate-limited on the Windows host, so the workflow page is the evidence source.
 - Windows cannot validate JavaScriptCore runtime ABI on iOS or sustained ProMotion pacing; those remain Actions/device evidence items.
 
 ### Rollback
-- Revert commit `ee03ec6` to restore the prior JS bridge while preserving the previously shipped RSS/EPUB phase.
+- Revert commits `ee03ec6` through `fc1c596` to restore the prior JS bridge while preserving the previously shipped RSS/EPUB phase.
