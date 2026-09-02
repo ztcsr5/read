@@ -663,14 +663,15 @@ final class JSCoreRuntime {
           // clearly HTML/JSON or the second value clearly looks like a rule.
           var first = String(input == null ? '' : input);
           var second = String(rule == null ? '' : rule);
-          var looksLikeDocument = /^\s*(?:<[^>]+>|[\[{])/.test(first);
-          var looksLikeRule = /[.#@>$\[\]:]/.test(second) || second.indexOf('$.') === 0;
+          var firstTrimmed = first.trim ? first.trim() : first;
+          var looksLikeDocument = firstTrimmed.charAt(0) === '<' || firstTrimmed.charAt(0) === '[' || firstTrimmed.charAt(0) === '{';
+          var looksLikeRule = second.indexOf('.') >= 0 || second.indexOf('#') >= 0 || second.indexOf('@') >= 0 || second.indexOf('>') >= 0 || second.indexOf('$') === 0 || second.indexOf('[') >= 0 || second.indexOf(':') >= 0;
           if (!looksLikeDocument && !looksLikeRule) {
             var stored = java.get(first);
             return stored === '' ? second : String(stored);
           }
-          if ((input && typeof input === 'object') || (/^\s*[\[{]/.test(first) && /^\$/.test(second))) {
-            if (/^\$/.test(second)) return __jsonRuleString(input, second);
+          if ((input && typeof input === 'object') || ((firstTrimmed.charAt(0) === '[' || firstTrimmed.charAt(0) === '{') && second.charAt(0) === '$')) {
+            if (second.charAt(0) === '$') return __jsonRuleString(input, second);
           }
           return __native_getString(String(input), String(rule), __defaultBaseUrl());
         };
