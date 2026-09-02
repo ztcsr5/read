@@ -11,6 +11,7 @@ final class JSCoreRuntime {
     private let ruleHostBridge: LegadoRuleHostBridge
     private let jsoupBridge: LegadoJsoupBridge
     private let jxNodeFactory: LegadoJXNodeFactoryBridge
+    private var baseBridgeError: String? = nil
 
     init(
         ajaxHandler: ((String) -> String)? = nil,
@@ -35,6 +36,9 @@ final class JSCoreRuntime {
     }
 
     func evaluate(_ script: String, variables: [String: Any] = [:]) -> Result<String, SourceEngineError> {
+        if let baseBridgeError {
+            return .failure(.javascript("Legado bridge prelude failed: \(baseBridgeError)"))
+        }
         executionContext.bind(variables)
         context.exception = nil
         for (key, value) in variables {
@@ -1495,7 +1499,12 @@ final class JSCoreRuntime {
         };
         function importClass(_) { return undefined; }
         """
+        context.exception = nil
         context.evaluateScript(prelude)
+        if let exception = context.exception {
+            baseBridgeError = exception.toString()
+            context.exception = nil
+        }
     }
 
     private func requestText(url: String, body: String?, headers explicitHeaders: String, includeStoredBody: Bool) -> String {
