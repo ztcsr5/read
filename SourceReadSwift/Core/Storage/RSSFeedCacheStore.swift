@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct RSSFeedCacheEntry: Codable, Hashable, Sendable {
     let sourceURL: String
