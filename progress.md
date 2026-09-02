@@ -978,3 +978,16 @@
 - Root cause was unsafe fresh-context namespace initialization (`var java = java || {}` and the same pattern for `cookie`, `CryptoJS`, and `Packages`); JavaScriptCore evaluates the undeclared right-hand identifier differently from a browser/Node environment.
 - Replaced those initializers with `typeof`-guarded conditional initialization so a clean JSContext creates the Legado namespaces before installing helper methods.
 - iOS build/XCTest run `33679123051`: success. Unsigned IPA run `33679122964`: still pending at the time of this update.
+## 2026-09-03 - Task: Legado JS bridge namespace parse correction (CI rerun pending)
+
+### What was done
+- Replaced the remaining `var namespace = namespace || {}` declarations in the JavaScriptCore prelude with `typeof`-guarded assignments.
+- This avoids JavaScriptCore's declaration/hoisting interaction on a fresh `JSContext`, which was still surfacing as `SyntaxError: Unexpected EOF` in the bridge XCTest suite despite Node syntax validation passing.
+
+### Testing
+- `git diff --check` passed locally (Windows reports only existing LF-to-CRLF normalization warnings).
+- GitHub Actions has been triggered by commit `cbafada`; iOS XCTest must reach success before Stage 2A is accepted. Unsigned IPA remains a separate gate.
+- Windows cannot run Swift/Xcode or prove JavaScriptCore runtime behavior; sustained 120 Hz still requires ProMotion device/Instruments evidence.
+
+### Rollback
+- Revert commit `cbafada` to restore the previous prelude namespace declarations.
