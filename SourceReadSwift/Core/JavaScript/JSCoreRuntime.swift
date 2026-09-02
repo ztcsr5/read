@@ -34,7 +34,7 @@ final class JSCoreRuntime {
         installNativeClosures()
         // Declare the compatibility roots in a tiny standalone script first.
         // JavaScriptCore can reject a first-read of an undeclared global inside
-        // the large prelude; predeclaring them keeps the later `var x = x ||` 
+        // the large prelude; predeclaring them keeps the later `var x = x ||`
         // aliases source-compatible without relying on browser semantics.
         context.evaluateScript("var java = {}; var cookie = {}; var CryptoJS = {}; var Packages = {}; var JXNode = function(value) { return __nativeJXNode.create(value); };")
         installBaseBridge()
