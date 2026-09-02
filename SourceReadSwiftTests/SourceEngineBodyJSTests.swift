@@ -3,6 +3,31 @@ import XCTest
 @testable import SourceReadSwift
 
 final class SourceEngineBodyJSTests: XCTestCase {
+    func testLoginCheckJsClassifiesSuccessfulResult() async throws {
+        let source = BookSource(
+            bookSourceName: "Login fixture",
+            bookSourceUrl: "https://source.example.com",
+            loginCheckJs: "true"
+        )
+        let engine = LegadoSourceEngine(network: StaticSourceNetworkClient(body: ""))
+        let result = await engine.verifyLogin(source: source)
+        guard case .success(let verification) = result else { return XCTFail("expected login verification") }
+        XCTAssertEqual(verification.status, .passed)
+        XCTAssertFalse(verification.cookiePresent)
+    }
+
+    func testLoginCheckJsClassifiesMissingLogin() async throws {
+        let source = BookSource(
+            bookSourceName: "Login fixture",
+            bookSourceUrl: "https://source.example.com",
+            loginCheckJs: "false"
+        )
+        let engine = LegadoSourceEngine(network: StaticSourceNetworkClient(body: ""))
+        let result = await engine.verifyLogin(source: source)
+        guard case .success(let verification) = result else { return XCTFail("expected login verification") }
+        XCTAssertEqual(verification.status, .requiresLogin)
+    }
+
     func testContentAppliesBodyJsBeforeParsing() async throws {
         let source = BookSource(
             bookSourceName: "BodyJS",

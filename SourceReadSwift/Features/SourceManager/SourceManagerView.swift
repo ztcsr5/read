@@ -19,6 +19,8 @@ struct SourceManagerView: View {
     @State private var sourceTest: SourceTestState?
     @State private var batchCheck: SourceBatchCheckState?
     @State private var sourceLogin: BookSource?
+    @State private var sourceHistory: BookSource?
+    @State private var rssEditor: RSSSource?
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
     @State private var pendingDeleteBookSourceURLs: Set<String> = []
@@ -137,6 +139,22 @@ struct SourceManagerView: View {
             }
             .sheet(item: $sourceLogin) { source in
                 SourceLoginView(source: source, cookieStore: appState.sourceCookieStore)
+            }
+            .sheet(item: $sourceHistory) { source in
+                SourceDiagnosticHistoryView(source: source)
+                    .environmentObject(appState)
+            }
+            .sheet(item: $rssEditor) { source in
+                RSSSourceEditorView(source: source) { updated in
+                    do {
+                        _ = try appState.sourceStore.upsertRSSSource(updated)
+                        importError = nil
+                        importMessage = "RSS 已保存：\(updated.sourceName)"
+                    } catch {
+                        importMessage = nil
+                        importError = "RSS 保存失败：\(error.localizedDescription)"
+                    }
+                }
             }
             .alert("删除选中的书源？", isPresented: Binding(
                 get: { !pendingDeleteBookSourceURLs.isEmpty },
@@ -362,6 +380,9 @@ struct SourceManagerView: View {
                 Button("测试书源") {
                     sourceTest = SourceTestState(source: source)
                 }
+                Button("诊断历史") {
+                    sourceHistory = source
+                }
                 Button("编辑 JSON") {
                     sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source))
                 }
@@ -515,6 +536,9 @@ struct SourceManagerView: View {
                 }
                 Button("查看 JSON") {
                     jsonPreview = SourceJSONPreview(title: source.sourceName, json: prettyJSON(source))
+                }
+                Button("编辑 RSS") {
+                    rssEditor = source
                 }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.removeRSS(sourceURLs: [source.sourceUrl])
@@ -1015,6 +1039,33 @@ struct SourceManagerView: View {
         sourceTest = state
 
         let engine = appState.engine
+        var loginNote = ""
+        if state.source.loginCheckJs?.nilIfEmpty != nil {
+            let loginResult = await AsyncTimeout.run(seconds: 10) {
+                await engine.verifyLogin(source: state.source)
+            } ?? .failure(.network("Login check timed out"))
+            switch loginResult {
+            case .success(let verification):
+                let health = verification.healthStatus
+                loginNote = "\n[\(verification.status.displayTitle)] 登录检查：\(verification.message)（Cookie：\(verification.cookiePresent ? "present" : "absent")）"
+                appState.sourceDiagnosticHistoryStore.record(
+                    source: state.source,
+                    stage: "login",
+                    status: health,
+                    message: verification.message,
+                    resultCount: 0
+                )
+            case .failure(let error):
+                loginNote = "\n[WARN] 登录检查失败：\(error.displayMessage)"
+                appState.sourceDiagnosticHistoryStore.record(
+                    source: state.source,
+                    stage: "login",
+                    status: .warning,
+                    message: error.displayMessage,
+                    resultCount: 0
+                )
+            }
+        }
         let searchStartedAt = Date()
         let result = await AsyncTimeout.run(seconds: 10) {
             await engine.searchBooks(source: state.source, keyword: keyword, page: 1)
@@ -1026,8 +1077,16 @@ struct SourceManagerView: View {
             let preview = books.prefix(10).enumerated().map { index, book in
                 "\(index + 1). \(book.name) | \(book.author ?? "未知作者")\n   \(book.bookUrl)"
             }.joined(separator: "\n")
-            var output = sourceTestHeader(source: state.source, keyword: keyword)
+            var output = sourceTestHeader(source: state.source, keyword: keyword) + loginNote
             output += "\n\n[PASS] 搜索：\(books.count) 条结果（\(elapsedMilliseconds(since: searchStartedAt))）"
+            appState.sourceDiagnosticHistoryStore.record(
+                source: state.source,
+                stage: "search",
+                status: books.isEmpty ? .warning : .passed,
+                message: books.isEmpty ? "搜索请求成功但列表为空" : "搜索通过：\(books.count) 条结果",
+                elapsedMilliseconds: Int(Date().timeIntervalSince(searchStartedAt) * 1_000),
+                resultCount: books.count
+            )
             if preview.isEmpty {
                 output += "\n[WARN] 搜索请求成功但列表为空。建议检查 keyword/page 占位符、搜索规则列表选择器或接口返回结构。"
             } else {
@@ -1059,6 +1118,7 @@ struct SourceManagerView: View {
                             switch contentResult {
                             case .success(let content):
                                 output += "\n[PASS] 正文：\(content.paragraphs.count) 段（\(elapsedMilliseconds(since: contentStartedAt))）"
+                                appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "content", status: content.paragraphs.isEmpty ? .warning : .passed, message: "正文：\(content.paragraphs.count) 段", elapsedMilliseconds: Int(Date().timeIntervalSince(contentStartedAt) * 1_000), resultCount: content.paragraphs.count)
                                 if content.paragraphs.isEmpty {
                                     output += "\n[WARN] 正文解析为空。建议检查 ruleContent.content / content 正则清洗是否过度。"
                                 } else {
@@ -1066,21 +1126,25 @@ struct SourceManagerView: View {
                                 }
                             case .failure(let error):
                                 output += sourceTestFailure(stage: "正文", error: error)
+                                appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "content", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(contentStartedAt) * 1_000))
                             }
                         } else {
                             output += "\n[WARN] 目录为空，无法验证正文。建议检查 ruleToc.chapterList / chapterName / chapterUrl。"
                         }
                     case .failure(let error):
                         output += sourceTestFailure(stage: "目录", error: error)
+                        appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "toc", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(chapterStartedAt) * 1_000))
                     }
                 case .failure(let error):
                     output += sourceTestFailure(stage: "详情", error: error)
+                    appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "detail", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(detailStartedAt) * 1_000))
                 }
             }
             latest.output = output
         case .failure(let error):
-            latest.output = sourceTestHeader(source: state.source, keyword: keyword)
+            latest.output = sourceTestHeader(source: state.source, keyword: keyword) + loginNote
                 + sourceTestFailure(stage: "搜索", error: error)
+            appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "search", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(searchStartedAt) * 1_000))
         }
         sourceTest = latest
     }
@@ -1109,6 +1173,20 @@ struct SourceManagerView: View {
 
         let engine = appState.engine
         for source in state.sources {
+            var loginMessage = ""
+            if source.loginCheckJs?.nilIfEmpty != nil {
+                let loginResult = await AsyncTimeout.run(seconds: 10) {
+                    await engine.verifyLogin(source: source)
+                } ?? .failure(.network("Login check timed out"))
+                switch loginResult {
+                case .success(let verification):
+                    loginMessage = "登录检查：\(verification.message)"
+                    appState.sourceDiagnosticHistoryStore.record(source: source, stage: "batch.login", status: verification.status.healthStatus, message: verification.message)
+                case .failure(let error):
+                    loginMessage = "登录检查失败：\(error.displayMessage)"
+                    appState.sourceDiagnosticHistoryStore.record(source: source, stage: "batch.login", status: .warning, message: error.displayMessage)
+                }
+            }
             let result = await AsyncTimeout.run(seconds: 10) {
                 await engine.searchBooks(source: source, keyword: keyword, page: 1)
             } ?? .failure(.network("Search timed out"))
@@ -1120,6 +1198,7 @@ struct SourceManagerView: View {
                 var message = books.isEmpty
                     ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
                     : "搜索通过：\(books.count) 条结果。"
+                if !loginMessage.isEmpty { message += " \(loginMessage)" }
                 if state.deepCheckFirstResult, let first = books.first {
                     let deep = await batchDeepCheckFirstResult(source: source, book: first)
                     status = deep.status
@@ -1140,8 +1219,16 @@ struct SourceManagerView: View {
                     keyword: keyword,
                     resultCount: books.count
                 )
+                appState.sourceDiagnosticHistoryStore.record(
+                    source: source,
+                    stage: "batch.search",
+                    status: status.healthStatus,
+                    message: message,
+                    resultCount: books.count
+                )
             case .failure(let error):
-                let message = "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
+                var message = "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
+                if !loginMessage.isEmpty { message += " \(loginMessage)" }
                 let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
                 latest.results.append(
                     SourceBatchCheckResult(
@@ -1157,6 +1244,12 @@ struct SourceManagerView: View {
                     message: message,
                     keyword: keyword,
                     resultCount: 0
+                )
+                appState.sourceDiagnosticHistoryStore.record(
+                    source: source,
+                    stage: "batch.search",
+                    status: classified,
+                    message: message
                 )
             }
             batchCheck = latest

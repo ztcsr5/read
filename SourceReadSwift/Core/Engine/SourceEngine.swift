@@ -5,6 +5,53 @@ protocol SourceEngine: Sendable {
     func getBookDetail(source: BookSource, book: SearchBook) async -> Result<BookDetail, SourceEngineError>
     func getChapterList(source: BookSource, book: BookDetail) async -> Result<[BookChapter], SourceEngineError>
     func getContent(source: BookSource, chapter: BookChapter) async -> Result<ChapterContent, SourceEngineError>
+    func verifyLogin(source: BookSource) async -> Result<SourceLoginVerification, SourceEngineError>
+}
+
+struct SourceLoginVerification: Equatable, Sendable {
+    enum Status: String, Sendable, Equatable {
+        case notConfigured
+        case passed
+        case requiresLogin
+        case verificationRequired
+        case blocked
+        case warning
+    }
+
+    let status: Status
+    let message: String
+    let cookiePresent: Bool
+}
+
+extension SourceLoginVerification.Status {
+    var displayTitle: String {
+        switch self {
+        case .notConfigured: return "INFO"
+        case .passed: return "PASS"
+        case .requiresLogin: return "LOGIN"
+        case .verificationRequired: return "VERIFY"
+        case .blocked: return "BLOCKED"
+        case .warning: return "WARN"
+        }
+    }
+
+    var healthStatus: SourceHealthStatus {
+        switch self {
+        case .notConfigured: return .warning
+        case .passed: return .passed
+        case .requiresLogin: return .requiresLogin
+        case .verificationRequired: return .verificationRequired
+        case .blocked: return .blocked
+        case .warning: return .warning
+        }
+    }
+}
+
+extension SourceEngine {
+    /// Engines that do not expose a login check remain fully source-compatible.
+    func verifyLogin(source: BookSource) async -> Result<SourceLoginVerification, SourceEngineError> {
+        .success(SourceLoginVerification(status: .notConfigured, message: "未配置 loginCheckJs", cookiePresent: false))
+    }
 }
 
 final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
@@ -166,6 +213,64 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             await emitFailure(error, stage: "content.load", source: source, details: ["url": request.url.absoluteString])
             return .failure(error)
         }
+    }
+
+    func verifyLogin(source: BookSource) async -> Result<SourceLoginVerification, SourceEngineError> {
+        guard let script = source.loginCheckJs?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
+            return .success(SourceLoginVerification(status: .notConfigured, message: "未配置 loginCheckJs", cookiePresent: false))
+        }
+        guard let baseURL = URL(string: source.bookSourceUrl),
+              ["http", "https"].contains(baseURL.scheme?.lowercased() ?? "") else {
+            return .failure(.invalidSource("书源 URL 无法用于登录检查"))
+        }
+        let cookieHeader = await cookieStore.cookieHeader(for: baseURL)
+        let context = RuleExecutionContext(
+            initialValues: [
+                "source": source,
+                "baseUrl": baseURL.absoluteString,
+                "cookieHeader": cookieHeader ?? ""
+            ],
+            networkHandler: { encoded in
+                SynchronousSourceLoader().load(urlText: encoded, source: source, cookieHeader: cookieHeader)
+            },
+            responseHandler: { encoded in
+                SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: cookieHeader)
+            },
+            logHandler: { [diagnostics] message in
+                Task { await diagnostics.emit(.init(level: .info, stage: "loginCheck.js", sourceName: source.bookSourceName, message: message)) }
+            }
+        )
+        let runtime = JSCoreRuntime(executionContext: context)
+        let evaluated = runtime.evaluate(script, variables: [
+            "source": source,
+            "baseUrl": baseURL.absoluteString,
+            "cookieHeader": cookieHeader ?? ""
+        ])
+        let value: String
+        switch evaluated {
+        case .success(let output):
+            value = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .failure(let error):
+            return .failure(error)
+        }
+        let normalized = value.lowercased()
+        let status: SourceLoginVerification.Status
+        if normalized.isEmpty || ["false", "0", "null", "undefined", "未登录", "请登录"].contains(normalized) {
+            status = .requiresLogin
+        } else if ["cloudflare", "captcha", "challenge", "安全验证", "人机验证"].contains(where: normalized.contains) {
+            status = .verificationRequired
+        } else if ["403", "429", "forbidden", "blocked", "拒绝访问"].contains(where: normalized.contains) {
+            status = .blocked
+        } else if ["true", "1", "ok", "success", "已登录", "登录成功"].contains(normalized) {
+            status = .passed
+        } else {
+            status = .warning
+        }
+        return .success(SourceLoginVerification(
+            status: status,
+            message: value.isEmpty ? "loginCheckJs 返回空值" : "loginCheckJs 返回：\(value.prefix(160))",
+            cookiePresent: !(cookieHeader?.isEmpty ?? true)
+        ))
     }
 
     private func loadWithOptionalWebViewFallback(

@@ -873,3 +873,18 @@
 
 ### Rollback
 - Revert this phase commit to restore the previous three-state source health model, isolated engine cookie store, and source manager behavior.
+## 2026-09-03 - Task: Source login verification, diagnostic history and RSS editor phase (in progress)
+
+### Scope
+- Added persistent, source-scoped diagnostic history with stage, status, timing, result count and bounded retention.
+- Added a native diagnostic-history sheet with copy/clear actions.
+- Added `SourceEngine.verifyLogin` and Legado `loginCheckJs` execution using the shared Cookie store; login/verification/block results now participate in source tests and batch checks.
+- Added RSS source editor parity for feed URL, list/content rules, pagination, media fields, CSS and enable/Cookie settings.
+
+### Testing
+- `git diff --check` passed locally; Windows reports only existing LF-to-CRLF normalization warnings.
+- Swift/Xcode compilation, XCTest and unsigned IPA are pending GitHub Actions after this phase commit.
+- Windows cannot prove iOS runtime behavior or sustained 120 Hz; ProMotion validation remains a real-device/Instruments task.
+
+### Rollback
+- Revert this phase commit to remove login verification, diagnostic history and RSS editor changes while preserving the prior source health model and login WebView.

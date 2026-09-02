@@ -111,6 +111,12 @@ final class SourceStore: ObservableObject {
         lastError = nil
     }
 
+    @discardableResult
+    func upsertRSSSource(_ source: RSSSource) throws -> RSSSource {
+        try importRSSSources([source])
+        return source
+    }
+
     func importCatalogs(_ imported: [SourceCatalog]) throws {
         let valid = imported.filter {
             !$0.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
