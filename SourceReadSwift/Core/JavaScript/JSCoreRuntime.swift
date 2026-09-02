@@ -603,12 +603,14 @@ final class JSCoreRuntime {
         function __jsonRuleValues(documentText, rule) {
           var root;
           try { root = typeof documentText === 'object' ? documentText : JSON.parse(String(documentText || '')); } catch (_) { return []; }
-          var path = String(rule || '').replace(/^\$\.?/, '');
+          var path = String(rule || '');
+          if (path.indexOf('$.') === 0) path = path.substring(2);
+          else if (path.charAt(0) === '$') path = path.substring(1);
           if (!path) return [root];
-          var tokens = path.match(/(?:[^.[\]]+|\[(?:'([^']+)'|"([^"]+)"|(\d+)|\*)\])/g) || [];
+          var tokens = path.replace(/\[/g, '.').replace(/\]/g, '').split('.').filter(function(token) { return token !== ''; });
           var values = [root];
           for (var t = 0; t < tokens.length; t++) {
-            var token = tokens[t].replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '');
+            var token = tokens[t].replace(/^['"]|['"]$/g, '');
             var next = [];
             for (var v = 0; v < values.length; v++) {
               var current = values[v];
