@@ -10,7 +10,19 @@ struct SourceDiagnosticHistoryView: View {
         NavigationStack {
             Group {
                 if appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty {
-                    ContentUnavailableView("暂无诊断历史", systemImage: "clock.arrow.circlepath", description: Text("从书源测试页执行一次完整链路后，这里会保留最近记录。"))
+                    VStack(spacing: 10) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                        Text("暂无诊断历史")
+                            .font(.headline)
+                        Text("从书源测试页执行一次完整链路后，这里会保留最近记录。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
                         Section {

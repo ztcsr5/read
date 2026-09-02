@@ -1,4 +1,3 @@
-import QuartzCore
 import UIKit
 
 /// Coordinates high-refresh capability for active iOS windows.
@@ -23,20 +22,11 @@ enum FrameRateCoordinator {
         guard maximum > 0 else { return }
 
         let preferred = min(maximum, 120)
-        // The Info.plist flag removes the iPhone 60 Hz floor.  The layer range
-        // is the SDK-stable way to ask UIKit/SwiftUI for the highest available
-        // cadence while still allowing the system to adapt for thermal and
-        // power conditions.
-        if #available(iOS 15.0, *) {
-            let range = CAFrameRateRange(
-                minimum: Float(maximum >= 120 ? 80 : maximum),
-                maximum: Float(preferred),
-                preferred: Float(preferred)
-            )
-            for window in windowScene.windows {
-                window.layer.preferredFrameRateRange = range
-            }
-        }
+        // `CADisableMinimumFrameDurationOnPhone` (Info.plist) is the
+        // deployment-safe switch available to this project's iOS 16 SDK. It
+        // removes the app-imposed 60 Hz floor; UIKit/SwiftUI then selects the
+        // highest supported cadence. Avoid SDK-specific frame-rate range APIs
+        // here because the CI toolchain does not expose them consistently.
         PerformanceSignpost.event(
             "frame.rate",
             "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"

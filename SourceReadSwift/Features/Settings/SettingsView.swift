@@ -183,7 +183,7 @@ struct SettingsView: View {
             .fileExporter(
                 isPresented: $showBackupExporter,
                 document: $backupDocument,
-                contentType: .json,
+                contentTypes: [.json],
                 defaultFilename: "SourceReadSwift-bookshelf-backup"
             ) { result in
                 switch result {
