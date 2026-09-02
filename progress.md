@@ -730,3 +730,12 @@
 
 ### Rollback
 - Revert the RSS cache/retry commit and this progress entry together.
+## 2026-09-02 - Task: Source diagnostic timing visibility
+
+### What was done
+- Extended the single-source diagnostic chain to report per-stage elapsed time for search, detail, table of contents, and content.
+- Kept the existing full chain and timeout boundaries intact; timing is appended to PASS lines without changing source execution semantics.
+
+### Testing
+- Ran `git diff --check` locally.
+- iOS compile/XCTest and unsigned IPA remain GitHub Actions gates.

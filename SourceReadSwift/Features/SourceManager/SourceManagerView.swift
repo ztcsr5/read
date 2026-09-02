@@ -993,6 +993,7 @@ struct SourceManagerView: View {
         sourceTest = state
 
         let engine = appState.engine
+        let searchStartedAt = Date()
         let result = await AsyncTimeout.run(seconds: 10) {
             await engine.searchBooks(source: state.source, keyword: keyword, page: 1)
         } ?? .failure(.network("Search timed out"))
@@ -1004,7 +1005,7 @@ struct SourceManagerView: View {
                 "\(index + 1). \(book.name) | \(book.author ?? "未知作者")\n   \(book.bookUrl)"
             }.joined(separator: "\n")
             var output = sourceTestHeader(source: state.source, keyword: keyword)
-            output += "\n\n[PASS] 搜索：\(books.count) 条结果"
+            output += "\n\n[PASS] 搜索：\(books.count) 条结果（\(elapsedMilliseconds(since: searchStartedAt))）"
             if preview.isEmpty {
                 output += "\n[WARN] 搜索请求成功但列表为空。建议检查 keyword/page 占位符、搜索规则列表选择器或接口返回结构。"
             } else {
@@ -1014,25 +1015,28 @@ struct SourceManagerView: View {
                 output += "\n\n正在验证首条结果详情..."
                 latest.output = output
                 sourceTest = latest
+                let detailStartedAt = Date()
                 let detailResult = await AsyncTimeout.run(seconds: 10) {
                     await engine.getBookDetail(source: state.source, book: first)
                 } ?? .failure(.network("Detail test timed out"))
                 switch detailResult {
                 case .success(let detail):
-                    output += "\n[PASS] 详情：\(detail.name)"
+                    output += "\n[PASS] 详情：\(detail.name)（\(elapsedMilliseconds(since: detailStartedAt))）"
+                    let chapterStartedAt = Date()
                     let chapterResult = await AsyncTimeout.run(seconds: 10) {
                         await engine.getChapterList(source: state.source, book: detail)
                     } ?? .failure(.network("Chapter test timed out"))
                     switch chapterResult {
                     case .success(let chapters):
-                        output += "\n[PASS] 目录：\(chapters.count) 章"
+                        output += "\n[PASS] 目录：\(chapters.count) 章（\(elapsedMilliseconds(since: chapterStartedAt))）"
                         if let chapter = chapters.first {
+                            let contentStartedAt = Date()
                             let contentResult = await AsyncTimeout.run(seconds: 10) {
                                 await engine.getContent(source: state.source, chapter: chapter)
                             } ?? .failure(.network("Content test timed out"))
                             switch contentResult {
                             case .success(let content):
-                                output += "\n[PASS] 正文：\(content.paragraphs.count) 段"
+                                output += "\n[PASS] 正文：\(content.paragraphs.count) 段（\(elapsedMilliseconds(since: contentStartedAt))）"
                                 if content.paragraphs.isEmpty {
                                     output += "\n[WARN] 正文解析为空。建议检查 ruleContent.content / content 正则清洗是否过度。"
                                 } else {
@@ -1152,6 +1156,11 @@ struct SourceManagerView: View {
 
         正在执行链路：搜索 -> 详情 -> 目录 -> 正文
         """
+    }
+
+    private func elapsedMilliseconds(since startedAt: Date) -> String {
+        let milliseconds = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+        return "耗时 \(milliseconds) ms"
     }
 
     private func sourceRuleCoverage(_ source: BookSource) -> String {
