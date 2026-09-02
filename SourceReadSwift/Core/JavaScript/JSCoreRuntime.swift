@@ -32,6 +32,11 @@ final class JSCoreRuntime {
         context.setObject(jsoupBridge, forKeyedSubscript: "__nativeJsoup" as NSString)
         context.setObject(jxNodeFactory, forKeyedSubscript: "__nativeJXNode" as NSString)
         installNativeClosures()
+        // Declare the compatibility roots in a tiny standalone script first.
+        // JavaScriptCore can reject a first-read of an undeclared global inside
+        // the large prelude; predeclaring them keeps the later `var x = x ||` 
+        // aliases source-compatible without relying on browser semantics.
+        context.evaluateScript("var java = {}; var cookie = {}; var CryptoJS = {}; var Packages = {}; var JXNode = function(value) { return __nativeJXNode.create(value); };")
         installBaseBridge()
     }
 
@@ -461,11 +466,10 @@ final class JSCoreRuntime {
         // right-hand side of `var java = java || {}`.  Android/Legado scripts
         // expect these namespaces to be created on a fresh context, so guard
         // every root namespace with `typeof` before reusing an existing value.
-        this.java = this.java || {};
-        var java = this.java;
+        var java = java || {};
         // SourceRead's JSON/HTML hybrid helper.  Keep both constructor and
         // factory spellings used by Android Legado sources.
-        var JXNode = function(value) { return __nativeJXNode.create(value); };
+        var JXNode = JXNode || function(value) { return __nativeJXNode.create(value); };
         JXNode.create = function(value) { return __nativeJXNode.create(value); };
         var jxNode = function(value) { return __nativeJXNode.create(value); };
         java.urlEncode = function(value) { return __native_urlEncode(String(value)); };
@@ -940,8 +944,7 @@ final class JSCoreRuntime {
         java.startBrowserAwait = function() { return ''; };
         java.webView = function() { return ''; };
         java.openUrl = java.startBrowser;
-        this.cookie = this.cookie || {};
-        var cookie = this.cookie;
+        var cookie = cookie || {};
         cookie.getCookie = java.getCookie;
         cookie.getKey = function(url, key) {
           var name = String(key || '');
@@ -1113,8 +1116,7 @@ final class JSCoreRuntime {
         function setContent(value) { return java.setContent(value); }
         function put(key, value) { return java.put(key, value); }
         function get(key, fallback) { return java.getStr(key, fallback); }
-        this.CryptoJS = this.CryptoJS || {};
-        var CryptoJS = this.CryptoJS;
+        var CryptoJS = CryptoJS || {};
         function __cryptoText(value) {
           if (value && value.__text !== undefined) return String(value.__text);
           return String(value);
@@ -1174,8 +1176,7 @@ final class JSCoreRuntime {
           parse: function(value) { return __cryptoWordArray(__native_base64Decode(String(value)), 'base64'); },
           stringify: function(value) { return __native_base64Encode(__cryptoText(value)); }
         };
-        this.Packages = this.Packages || {};
-        var Packages = this.Packages;
+        var Packages = Packages || {};
         Packages.org = Packages.org || {};
         Packages.org.jsoup = Packages.org.jsoup || {};
         Packages.java = Packages.java || {};
@@ -1502,16 +1503,6 @@ final class JSCoreRuntime {
           getElements: function(rule) { __nativeRule.setContent(__defaultHtml()); return __nativeRule.getElements(String(rule || '')); }
         };
         function importClass(_) { return undefined; }
-        // JavaScriptCore may evaluate this prelude in a transient eval scope;
-        // publish the compatibility roots explicitly so later evaluateScript
-        // calls (the actual source rule) can resolve java/org/Packages.
-        this.java = java;
-        this.cookie = cookie;
-        this.CryptoJS = CryptoJS;
-        this.Packages = Packages;
-        this.org = Packages.org;
-        this.javax = Packages.javax;
-        this.android = Packages.android;
         """
         context.exception = nil
         context.evaluateScript(prelude)
