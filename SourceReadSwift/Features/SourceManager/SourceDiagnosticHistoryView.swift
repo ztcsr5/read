@@ -51,7 +51,7 @@ struct SourceDiagnosticHistoryView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .confirmationAction) {
                     Button {
                         UIPasteboard.general.string = appState.sourceDiagnosticHistoryStore.exportText(for: source)
                     } label: {
@@ -59,8 +59,6 @@ struct SourceDiagnosticHistoryView: View {
                     }
                     .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
                     .accessibilityLabel("复制诊断历史")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
                     Button("清空", role: .destructive) {
                         appState.sourceDiagnosticHistoryStore.clear(for: source)
                     }
