@@ -47,4 +47,9 @@ final class RSSFeedParserTests: XCTestCase {
         XCTAssertEqual(article?.pubDate, "2026-06-21T10:00:00Z")
         XCTAssertEqual(article?.description, "Atom summary")
     }
+
+    func testExtractsArticleBodyParagraphs() {
+        let html = "<html><body><nav>Menu</nav><article><h1>Title</h1><p>First</p><p>Second <b>part</b></p></article></body></html>"
+        XCTAssertEqual(RSSArticleContentParser().parseParagraphs(from: html), ["Title", "First", "Second part"])
+    }
 }
