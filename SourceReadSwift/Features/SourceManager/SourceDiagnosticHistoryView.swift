@@ -14,8 +14,20 @@ struct SourceDiagnosticHistoryView: View {
                 } else {
                     List {
                         Section {
-                            Text(source.bookSourceName).font(.headline)
-                            Text(source.bookSourceUrl).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(source.bookSourceName).font(.headline)
+                                    Text(source.bookSourceUrl).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                                Spacer()
+                                Button { UIPasteboard.general.string = appState.sourceDiagnosticHistoryStore.exportText(for: source) } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .accessibilityLabel("复制诊断历史")
+                                Button("清空", role: .destructive) {
+                                    appState.sourceDiagnosticHistoryStore.clear(for: source)
+                                }
+                            }
                         }
                         ForEach(appState.sourceDiagnosticHistoryStore.records(for: source)) { entry in
                             VStack(alignment: .leading, spacing: 5) {
@@ -47,25 +59,11 @@ struct SourceDiagnosticHistoryView: View {
             }
             .navigationTitle("诊断历史")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    HStack(spacing: 12) {
-                        Button {
-                            UIPasteboard.general.string = appState.sourceDiagnosticHistoryStore.exportText(for: source)
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                        }
-                        .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
-                        .accessibilityLabel("复制诊断历史")
-                        Button("清空", role: .destructive) {
-                            appState.sourceDiagnosticHistoryStore.clear(for: source)
-                        }
-                        .disabled(appState.sourceDiagnosticHistoryStore.records(for: source).isEmpty)
-                    }
-                }
+            .safeAreaInset(edge: .bottom) {
+                Button("关闭") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
             }
         }
     }
