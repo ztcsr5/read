@@ -1,3 +1,12 @@
+## 2026-09-02 - Task: CI failure correction pass
+
+### What was done
+- Retrieved GitHub Actions annotations for the failed iOS run and fixed three concrete regressions: strict HTTP(S) validation for malformed search URLs, EPUB body text after a heading/`br`, and fixture resource lookup when XcodeGen flattens the resource bundle.
+- Pushed the correction as `e17b7df`; unsigned IPA had already passed on the preceding build, while iOS XCTest is rerunning on the corrected head.
+
+### Testing
+- Ran `git diff --check` locally.
+- Awaiting Actions verification for `e17b7df`.
 ## 2026-09-02 - Task: RSS cache management and settings parity phase
 
 ### What was done
