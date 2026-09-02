@@ -13,6 +13,36 @@ struct ChapterContentCacheEntry: Identifiable, Codable, Hashable, Sendable {
     let purifySignature: String
     let cachedAt: Date
 
+    /// Keep the memberwise construction stable across Swift toolchains.  A
+    /// defaulted stored property is not consistently exposed by synthesized
+    /// initializers when the project is generated on a different Xcode
+    /// version, which previously broke the device/IPA workflow at this call
+    /// site.  The explicit initializer also preserves backwards-compatible
+    /// decoding of cache files that predate `chapterIndex`.
+    init(
+        key: String,
+        sourceURL: String,
+        chapterURL: String,
+        bookURL: String,
+        chapterIndex: Int? = nil,
+        title: String,
+        paragraphs: [String],
+        nextContentUrl: String?,
+        purifySignature: String,
+        cachedAt: Date
+    ) {
+        self.key = key
+        self.sourceURL = sourceURL
+        self.chapterURL = chapterURL
+        self.bookURL = bookURL
+        self.chapterIndex = chapterIndex
+        self.title = title
+        self.paragraphs = paragraphs
+        self.nextContentUrl = nextContentUrl
+        self.purifySignature = purifySignature
+        self.cachedAt = cachedAt
+    }
+
     var estimatedByteCount: Int {
         title.utf8.count
             + chapterURL.utf8.count
