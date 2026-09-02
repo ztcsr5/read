@@ -823,6 +823,12 @@
 - Windows host has no Swift/Xcode; iOS compile, XCTest, and unsigned IPA remain GitHub Actions gates.
 - Actual ProMotion frame pacing still requires iPhone Pro/Instruments evidence; CI cannot prove sustained 120 FPS.
 
+### Verification update
+
+- Commit `0b0c5b1` pushed to `codex/swift-v2-lifetime-reader`.
+- iOS Actions run `33654845722`: completed `success` (XCTest/build).
+- Unsigned IPA Actions run `33654845696`: completed `success`; artifact `SourceReadSwift-unsigned-ipa` is present and not expired (5,383,325 bytes).
+
 ### Rollback
 
 - Revert this phase commit to restore the previous reader automation, persistence timing, and preload behavior.
