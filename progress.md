@@ -701,3 +701,16 @@
 
 ### Next
 - Continue autonomous work from the high-refresh/readability phase without requiring another approval checkpoint.
+## 2026-09-02 - Task: RSS Atom link resolution hardening
+
+### What was done
+- Added Atom `<link>` selection that skips `self`/`enclosure` links and prefers `rel="alternate"` HTML article URLs.
+- Added relative URL resolution against the feed URL for RSS and Atom entries.
+- Added regression tests for alternate-link priority and relative RSS links.
+
+### Testing
+- Ran `git diff --check` locally.
+- Xcode/XCTest remain delegated to GitHub Actions on the Windows host.
+
+### Next
+- Continue the RSS/source diagnostic large phase after the new Actions run reports.
