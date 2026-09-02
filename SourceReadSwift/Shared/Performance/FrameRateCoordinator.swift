@@ -1,7 +1,8 @@
 import UIKit
 
-/// Requests the highest refresh rate supported by each active iOS window.
-/// ProMotion devices may reach 120 Hz; fixed-refresh devices keep their native ceiling.
+/// Coordinates high-refresh capability for active iOS windows.
+/// `CADisableMinimumFrameDurationOnPhone` lets SwiftUI use ProMotion; this type
+/// detects and records the native ceiling without forcing unsupported rates.
 enum FrameRateCoordinator {
     static func apply(to scene: UIScene? = nil) {
         let scenes: [UIWindowScene]
