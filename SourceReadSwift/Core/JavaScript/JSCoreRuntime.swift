@@ -1232,37 +1232,51 @@ final class JSCoreRuntime {
         Packages.java.net.URL = Packages.java.net.URL || function(value, baseValue) {
           var raw = String(value == null ? '' : value);
           var base = String(baseValue == null ? '' : baseValue);
-          if (base && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw)) {
+          function hasScheme(value) { var marker = value.indexOf('://'); return marker > 0 && /^[A-Za-z]/.test(value.substring(0, marker)); }
+          if (base && !hasScheme(raw)) {
             try {
               if (raw.charAt(0) === '/') {
-                var baseOrigin = base.match(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\/]+)/);
-                raw = baseOrigin ? baseOrigin[1] + raw : raw;
+                var schemeEnd = base.indexOf('://'), pathStart = base.indexOf('/', schemeEnd + 3);
+                raw = schemeEnd > 0 ? base.substring(0, pathStart > 0 ? pathStart : base.length) + raw : raw;
               } else {
-                raw = base.replace(/[#?].*$/, '').replace(/\/[^\/]*$/, '/') + raw;
+                var cleanBase = base.split('#')[0].split('?')[0], slash = cleanBase.lastIndexOf('/');
+                raw = (slash >= 0 ? cleanBase.substring(0, slash + 1) : cleanBase + '/') + raw;
               }
-              var origin = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\/]+)(\/.*)?$/);
-              if (origin && origin[2]) {
-                var parts = origin[2].split('/'), normalized = [];
+              var originEnd = raw.indexOf('/', raw.indexOf('://') + 3);
+              if (originEnd > 0) {
+                var originText = raw.substring(0, originEnd), parts = raw.substring(originEnd).split('/'), normalized = [];
                 for (var p = 0; p < parts.length; p++) {
                   if (!parts[p] || parts[p] === '.') continue;
                   if (parts[p] === '..') { if (normalized.length) normalized.pop(); }
                   else normalized.push(parts[p]);
                 }
-                raw = origin[1] + '/' + normalized.join('/');
+                raw = originText + '/' + normalized.join('/');
               }
             } catch (_) {}
           }
-          var parsed = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/:?#]+)(?::(\\d+))?([^?#]*)(?:\\?([^#]*))?(?:#(.*))?/);
+          var schemeEnd = raw.indexOf('://'), authorityEnd = schemeEnd > 0 ? raw.length : -1;
+          var slashPos = schemeEnd > 0 ? raw.indexOf('/', schemeEnd + 3) : -1;
+          var queryPos = schemeEnd > 0 ? raw.indexOf('?', schemeEnd + 3) : -1;
+          var hashPos = schemeEnd > 0 ? raw.indexOf('#', schemeEnd + 3) : -1;
+          if (slashPos >= 0) authorityEnd = Math.min(authorityEnd, slashPos);
+          if (queryPos >= 0) authorityEnd = Math.min(authorityEnd, queryPos);
+          if (hashPos >= 0) authorityEnd = Math.min(authorityEnd, hashPos);
+          var scheme = schemeEnd > 0 ? raw.substring(0, schemeEnd) : '', authority = schemeEnd > 0 ? raw.substring(schemeEnd + 3, authorityEnd) : '';
+          var host = authority, port = -1, colon = authority.lastIndexOf(':');
+          if (colon > 0 && /^\d+$/.test(authority.substring(colon + 1))) { port = Number(authority.substring(colon + 1)); host = authority.substring(0, colon); }
+          var pathPart = schemeEnd > 0 ? raw.substring(authorityEnd) : raw, hash = pathPart.indexOf('#'), query = pathPart.indexOf('?');
+          var pathOnly = pathPart; if (query >= 0) pathOnly = pathPart.substring(0, query); else if (hash >= 0) pathOnly = pathPart.substring(0, hash);
+          var queryOnly = query >= 0 ? pathPart.substring(query + 1, hash >= 0 ? hash : pathPart.length) : '', refOnly = hash >= 0 ? pathPart.substring(hash + 1) : '';
           this.toString = function() { return raw; };
           this.toExternalForm = this.toString;
-          this.getProtocol = function() { return parsed ? parsed[1] : ''; };
-          this.getHost = function() { return parsed ? parsed[2] : ''; };
-          this.getPort = function() { return parsed && parsed[3] ? Number(parsed[3]) : -1; };
-          this.getPath = function() { return parsed ? (parsed[4] || '') : ''; };
-          this.getQuery = function() { return parsed ? (parsed[5] || '') : ''; };
-          this.getRef = function() { return parsed ? (parsed[6] || '') : ''; };
-          this.getFile = function() { return (this.getPath() || '') + (parsed && parsed[5] ? '?' + parsed[5] : ''); };
-          this.getAuthority = function() { return parsed ? parsed[2] + (parsed[3] ? ':' + parsed[3] : '') : ''; };
+          this.getProtocol = function() { return scheme; };
+          this.getHost = function() { return host; };
+          this.getPort = function() { return port; };
+          this.getPath = function() { return pathOnly || ''; };
+          this.getQuery = function() { return queryOnly; };
+          this.getRef = function() { return refOnly; };
+          this.getFile = function() { return (this.getPath() || '') + (queryOnly ? '?' + queryOnly : ''); };
+          this.getAuthority = function() { return authority; };
           this.openConnection = function() { return __makeConnect(raw); };
         };
         if (typeof URL === 'undefined') URL = Packages.java.net.URL;
