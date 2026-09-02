@@ -3,6 +3,7 @@ import Foundation
 enum SourceHTTPMethod: String, Sendable {
     case get = "GET"
     case post = "POST"
+    case head = "HEAD"
 }
 
 struct SourceRequest: Sendable {
@@ -49,7 +50,7 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
         do {
             let (data, response) = try await session.data(for: urlRequest)
             guard let http = response as? HTTPURLResponse else {
-                return .failure(.network("\u{54cd}\u{5e94}\u{4e0d}\u{662f} HTTPURLResponse"))
+                return .failure(.network("响应不是 HTTPURLResponse"))
             }
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key)] = String(describing: item.value)

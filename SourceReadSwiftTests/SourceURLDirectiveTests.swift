@@ -95,4 +95,15 @@ final class SourceURLDirectiveTests: XCTestCase {
         XCTAssertEqual(directive.method, .post)
         XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "page=2&q=test")
     }
+
+    func testParseJSONHeadDirectiveWithoutBody() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/health,{"method":"HEAD","headers":{"X-Probe":"1"}}"#
+        )
+
+        XCTAssertEqual(directive.urlText, "https://example.com/health")
+        XCTAssertEqual(directive.method, .head)
+        XCTAssertNil(directive.body)
+        XCTAssertEqual(directive.headers["X-Probe"], "1")
+    }
 }

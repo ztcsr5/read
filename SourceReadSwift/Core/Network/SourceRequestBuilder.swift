@@ -32,7 +32,9 @@ struct SourceRequestBuilder {
         let body = directive.body ?? sourceOptions.body
         let method: SourceHTTPMethod = {
             if directive.method == .post { return .post }
+            if directive.method == .head { return .head }
             if sourceOptions.method == .post { return .post }
+            if sourceOptions.method == .head { return .head }
             if body != nil { return .post }
             return .get
         }()
@@ -126,14 +128,13 @@ struct SourceRequestBuilder {
         var headers: [String: String] = [:]
 
         func apply(_ object: [String: Any]) {
-            if let methodText = object["method"] as? String, methodText.uppercased() == "POST" {
-                method = .post
-            }
-            if let methodText = object["httpMethod"] as? String, methodText.uppercased() == "POST" {
-                method = .post
-            }
-            if let methodText = object["type"] as? String, methodText.uppercased() == "POST" {
-                method = .post
+            for key in ["method", "httpMethod", "type"] {
+                guard let methodText = object[key] as? String else { continue }
+                switch methodText.uppercased() {
+                case "POST": method = .post
+                case "HEAD": method = .head
+                default: break
+                }
             }
             if let nested = object["headers"] as? [String: Any] {
                 headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })

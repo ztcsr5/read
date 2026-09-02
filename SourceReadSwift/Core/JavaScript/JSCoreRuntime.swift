@@ -176,6 +176,15 @@ final class JSCoreRuntime {
             let digest = HMAC<SHA256>.authenticationCode(for: Data(value.utf8), using: secret)
             return digest.map { String(format: "%02x", $0) }.joined()
         }
+        let digestHex: @convention(block) (String, String) -> String = { value, algorithm in
+            Self.digestHex(value: value, algorithm: algorithm)
+        }
+        let hmacHex: @convention(block) (String, String, String) -> String = { value, algorithm, key in
+            Self.hmacHex(value: value, algorithm: algorithm, key: key)
+        }
+        let hmacBase64: @convention(block) (String, String, String) -> String = { value, algorithm, key in
+            Self.hmacBase64(value: value, algorithm: algorithm, key: key)
+        }
         let hexEncode: @convention(block) (String) -> String = { value in
             Data(value.utf8).map { String(format: "%02x", $0) }.joined()
         }
@@ -248,6 +257,15 @@ final class JSCoreRuntime {
             }
             let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
             return ["body": body, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
+        }
+        let ajaxBytes: @convention(block) (String, String) -> NSArray = { url, headers in
+            guard let runtime = weakSelf else { return [] }
+            let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
+            if let response = runtime.executionContext.responseHandler?(requestText) {
+                return response.data.map { NSNumber(value: $0) } as NSArray
+            }
+            let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
+            return Array(body.utf8).map { NSNumber(value: $0) } as NSArray
         }
         let ajax: @convention(block) (String, String) -> String = { url, headers in
             let requestText = weakSelf?.requestText(url: url, body: nil, headers: headers, includeStoredBody: false) ?? url
@@ -327,6 +345,9 @@ final class JSCoreRuntime {
         context.setObject(sha1, forKeyedSubscript: "__native_sha1" as NSString)
         context.setObject(sha256, forKeyedSubscript: "__native_sha256" as NSString)
         context.setObject(hmacSHA256, forKeyedSubscript: "__native_hmacSHA256" as NSString)
+        context.setObject(digestHex, forKeyedSubscript: "__native_digestHex" as NSString)
+        context.setObject(hmacHex, forKeyedSubscript: "__native_hmacHex" as NSString)
+        context.setObject(hmacBase64, forKeyedSubscript: "__native_hmacBase64" as NSString)
         context.setObject(hexEncode, forKeyedSubscript: "__native_hexEncode" as NSString)
         context.setObject(hexDecode, forKeyedSubscript: "__native_hexDecode" as NSString)
         context.setObject(timeFormat, forKeyedSubscript: "__native_timeFormat" as NSString)
@@ -335,6 +356,7 @@ final class JSCoreRuntime {
         context.setObject(countElements, forKeyedSubscript: "__native_countElements" as NSString)
         context.setObject(ajax, forKeyedSubscript: "__native_ajax" as NSString)
         context.setObject(ajaxResponse, forKeyedSubscript: "__native_ajaxResponse" as NSString)
+        context.setObject(ajaxBytes, forKeyedSubscript: "__native_ajaxBytes" as NSString)
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
         context.setObject(postResponse, forKeyedSubscript: "__native_postResponse" as NSString)
         context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
@@ -378,6 +400,13 @@ final class JSCoreRuntime {
         java.SHA1 = java.sha1;
         java.sha256 = function(value) { return __native_sha256(String(value)); };
         java.SHA256 = java.sha256;
+        java.digestHex = function(value, algorithm) { return __native_digestHex(String(value || ''), String(algorithm || 'sha256')); };
+        java.sha256Encode = function(value) { return java.digestHex(value, 'sha256'); };
+        java.sha1Encode = function(value) { return java.digestHex(value, 'sha1'); };
+        java.sha512Encode = function(value) { return java.digestHex(value, 'sha512'); };
+        java.HMacHex = function(value, algorithm, key) { return __native_hmacHex(String(value || ''), String(algorithm || 'HmacSHA1'), String(key || '')); };
+        java.hmacSHA256 = function(value, key) { return java.HMacHex(value, 'HmacSHA256', key); };
+        java.HMacBase64 = function(value, algorithm, key) { return __native_hmacBase64(String(value || ''), String(algorithm || 'HmacSHA1'), String(key || '')); };
         java.timeFormat = function(timestamp, format) {
           return __native_timeFormat(Number(timestamp), String(format || 'yyyy-MM-dd HH:mm:ss'));
         };
@@ -581,6 +610,41 @@ final class JSCoreRuntime {
         java.post = function(url, body, headers) {
           var target = String(url);
           return __bridgeResponse('', target, __native_postResponse(target, __bridgeString(body || ''), __bridgeString(headers || '')));
+        };
+        java.ajaxBytes = function(url, headers) {
+          return __asJavaList(__native_ajaxBytes(String(url || ''), __bridgeString(headers || '')));
+        };
+        java.head = function(url, headers) {
+          var target = String(url || '') + ',{"method":"HEAD","headers":' + __bridgeString(headers || {}) + '}';
+          return __bridgeResponse('', String(url || ''), __native_ajaxResponse(target, ''));
+        };
+        java.getStrResponse = function(url, rule) {
+          var response = java.ajax(url);
+          var body = response && response.body ? String(response.body()) : String(response || '');
+          if (rule == null || String(rule || '') === '') return body;
+          return __native_getString(body, String(rule), String(typeof baseUrl === 'undefined' ? url : baseUrl));
+        };
+        java.getResponseCode = function(url, headers) {
+          return Number(java.ajax(url, headers).statusCode || 0);
+        };
+        java.cacheFile = function(path, content) {
+          return __nativeLegado.invoke({ method: 'cacheFile', args: [String(path || ''), content == null ? '' : String(content)] });
+        };
+        java.deleteFile = function(path) {
+          return !!__nativeLegado.invoke({ method: 'deleteFile', args: [String(path || '')] });
+        };
+        java.importScript = function(scriptOrUrl) {
+          var value = String(scriptOrUrl || '');
+          if (/^data:/i.test(value)) {
+            var comma = value.indexOf(',');
+            if (comma >= 0) value = value.substring(comma + 1);
+            try { value = decodeURIComponent(value); } catch (_) {}
+          } else if (/^https?:/i.test(value)) {
+            value = String(java.ajax(value).body() || '');
+          }
+          if (!value.trim()) return '';
+          (0, eval)(value);
+          return value;
         };
         java.ajaxAll = function(urls, headers) {
           var values = [];
@@ -1164,6 +1228,45 @@ final class JSCoreRuntime {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._*")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func digestHex(value: String, algorithm: String) -> String {
+        let normalized = algorithm.lowercased().replacingOccurrences(of: "-", with: "")
+        let data = Data(value.utf8)
+        switch normalized {
+        case "md5": return Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        case "sha1": return Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        case "sha384": return SHA384.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        case "sha512": return SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        default: return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+    }
+
+    private static func hmacHex(value: String, algorithm: String, key: String) -> String {
+        let normalized = algorithm.lowercased().replacingOccurrences(of: "hmac", with: "").replacingOccurrences(of: "-", with: "")
+        let message = Data(value.utf8)
+        let secret = SymmetricKey(data: Data(key.utf8))
+        let bytes: [UInt8]
+        switch normalized {
+        case "sha1": bytes = Array(HMAC<Insecure.SHA1>.authenticationCode(for: message, using: secret))
+        case "sha384": bytes = Array(HMAC<SHA384>.authenticationCode(for: message, using: secret))
+        case "sha512": bytes = Array(HMAC<SHA512>.authenticationCode(for: message, using: secret))
+        default: bytes = Array(HMAC<SHA256>.authenticationCode(for: message, using: secret))
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func hmacBase64(value: String, algorithm: String, key: String) -> String {
+        let hex = hmacHex(value: value, algorithm: algorithm, key: key)
+        var bytes: [UInt8] = []
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let end = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<end], radix: 16) else { return "" }
+            bytes.append(byte)
+            index = end
+        }
+        return Data(bytes).base64EncodedString()
     }
 
     private static func extractString(from document: Document, rule: String, baseUrl: URL?) throws -> String {

@@ -38,6 +38,25 @@ final class BookSourceTests: XCTestCase {
         XCTAssertEqual(request.method, .get)
     }
 
+    func testSearchRequestPreservesHeadDirective() {
+        let source = BookSource(
+            bookSourceName: "HEAD Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: #"https://example.com/health, {"method":"HEAD","headers":{"X-Probe":"1"}}"#
+        )
+
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "ignored",
+            page: 1
+        )
+
+        XCTAssertEqual(request.method, .head)
+        XCTAssertNil(request.body)
+        XCTAssertEqual(request.headers["X-Probe"], "1")
+    }
+
     func testEncodeDecodeBookSourceRoundTrip() throws {
         let source = BookSource(
             bookSourceName: "Test Source",

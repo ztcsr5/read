@@ -188,6 +188,14 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
                 RuleExecutionContext.bridgeString(arguments.first),
                 charset: arguments.count > 1 ? RuleExecutionContext.bridgeString(arguments[1]) : nil
             )
+        case "cacheFile":
+            guard let path = arguments.first else { return "" }
+            return services.cacheFile(
+                RuleExecutionContext.bridgeString(path),
+                content: RuleExecutionContext.bridgeString(arguments.count > 1 ? arguments[1] : "")
+            )
+        case "deleteFile":
+            return services.deleteFile(RuleExecutionContext.bridgeString(arguments.first))
         case "getZipStringContent":
             guard arguments.count >= 2 else { return "" }
             return services.zipString(

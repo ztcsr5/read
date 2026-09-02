@@ -206,6 +206,40 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(value, "A")
     }
 
+
+
+    func testExpandedJavaCompatibilitySurface() throws {
+        let context = RuleExecutionContext(responseHandler: { encoded in
+            let isHead = encoded.contains("HEAD")
+            let body = isHead ? "" : "abc"
+            return SourceResponse(
+                url: URL(string: "https://example.com/final")!,
+                statusCode: isHead ? 204 : 200,
+                headers: ["X-Test": "ok"],
+                body: body,
+                data: Data(body.utf8)
+            )
+        })
+        let runtime = JSCoreRuntime(executionContext: context)
+        let result = runtime.evaluate("""
+            java.cacheFile('compat.txt', 'cached');
+            var before = String.fromCharCode.apply(null, java.readFile('compat.txt'));
+            var removed = java.deleteFile('compat.txt');
+            var after = java.readTxtFile('compat.txt');
+            var head = java.head('https://example.com/head', {'X-Head':'1'});
+            [before, removed, after, java.digestHex('abc','SHA-256'), java.HMacHex('abc','HmacSHA1','key'), head.statusCode, head.header('x-test'), java.ajaxBytes('https://example.com/a').length].join('|');
+        """)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "cached|true||ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad|de7c9b85b8b78aa6bc8deaf7f63dee46|204|ok|3")
+    }
+
+    func testImportScriptExecutesDataURLScript() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("java.importScript('data:text/javascript,function imported(){return \"ok\";}'); imported();")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "ok")
+    }
+
     func testNativeModelBridgesAreInjectedForJavaScriptRules() throws {
         let chapter = BookChapter(title: "VIP 1", url: "https://example.com/1", bookUrl: "https://example.com", index: 0, isVip: true)
         let runtime = JSCoreRuntime()

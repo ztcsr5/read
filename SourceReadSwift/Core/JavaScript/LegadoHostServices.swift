@@ -147,6 +147,35 @@ final class LegadoHostServices {
         return decodeText(data, charset: charset)
     }
 
+    /// Legado's cacheFile is a small persistent file cache, not just an in-memory
+    /// variable. Keep it inside the per-app sandbox so sources can share helper
+    /// data without escaping the application container.
+    @discardableResult
+    func cacheFile(_ path: String, content: String) -> String {
+        guard let url = resolvedURL(path, createParent: true) else { return "" }
+        do {
+            try Data(content.utf8).write(to: url, options: .atomic)
+            return content
+        } catch {
+            executionContext.log("cacheFile failed: \(error.localizedDescription)")
+            return ""
+        }
+    }
+
+    @discardableResult
+    func deleteFile(_ path: String) -> Bool {
+        guard let url = resolvedURL(path) else { return false }
+        do {
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+            return true
+        } catch {
+            executionContext.log("deleteFile failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func downloadFile(_ rawURL: String, path: String) -> String {
         guard let sourceURL = URL(string: rawURL), let destination = resolvedURL(path, createParent: true) else { return "" }
         let semaphore = DispatchSemaphore(value: 0)
