@@ -18,6 +18,7 @@ struct SourceManagerView: View {
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
     @State private var batchCheck: SourceBatchCheckState?
+    @State private var sourceLogin: BookSource?
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
     @State private var pendingDeleteBookSourceURLs: Set<String> = []
@@ -133,6 +134,9 @@ struct SourceManagerView: View {
             }
             .sheet(item: $batchCheck) { state in
                 batchCheckSheet(state)
+            }
+            .sheet(item: $sourceLogin) { source in
+                SourceLoginView(source: source, cookieStore: appState.sourceCookieStore)
             }
             .alert("删除选中的书源？", isPresented: Binding(
                 get: { !pendingDeleteBookSourceURLs.isEmpty },
@@ -363,6 +367,11 @@ struct SourceManagerView: View {
                 }
                 Button("规则编辑") {
                     sourceRuleEditor = source
+                }
+                if source.loginUrl?.nilIfEmpty != nil {
+                    Button("打开登录页") {
+                        sourceLogin = source
+                    }
                 }
                 Button("删除", role: .destructive) {
                     appState.sourceStore.remove(source)
@@ -857,6 +866,9 @@ struct SourceManagerView: View {
                         sourceCheckSummaryPill(title: "PASS", count: current.passedCount, color: .green)
                         sourceCheckSummaryPill(title: "WARN", count: current.warningCount, color: .orange)
                         sourceCheckSummaryPill(title: "FAIL", count: current.failedCount, color: .red)
+                        sourceCheckSummaryPill(title: "LOGIN", count: current.loginRequiredCount, color: .orange)
+                        sourceCheckSummaryPill(title: "VERIFY", count: current.verificationRequiredCount, color: .purple)
+                        sourceCheckSummaryPill(title: "BLOCK", count: current.blockedCount, color: .red.opacity(0.8))
                         Spacer()
                         Text("\(current.checkedCount)/\(current.sources.count)")
                             .font(.caption.weight(.bold))
@@ -929,7 +941,7 @@ struct SourceManagerView: View {
             "Source batch check",
             "keyword: \(state.keyword)",
             "checked: \(state.checkedCount)/\(state.sources.count)",
-            "pass: \(state.passedCount), warn: \(state.warningCount), fail: \(state.failedCount)"
+            "pass: \(state.passedCount), warn: \(state.warningCount), fail: \(state.failedCount), login: \(state.loginRequiredCount), verify: \(state.verificationRequiredCount), blocked: \(state.blockedCount)"
         ]
         for result in state.results {
             lines.append("")
@@ -1120,17 +1132,18 @@ struct SourceManagerView: View {
                 )
             case .failure(let error):
                 let message = "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
+                let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
                 latest.results.append(
                     SourceBatchCheckResult(
                         sourceName: source.bookSourceName,
                         sourceURL: source.bookSourceUrl,
-                        status: .failed,
+                        status: SourceBatchCheckStatus(classified),
                         message: message
                     )
                 )
                 appState.sourceHealthStore.record(
                     source: source,
-                    status: .failed,
+                    status: classified,
                     message: message,
                     keyword: keyword,
                     resultCount: 0
@@ -1232,13 +1245,13 @@ struct SourceManagerView: View {
                     }
                     return (.passed, "深测通过：详情/目录/正文均可用，正文 \(content.paragraphs.count) 段。")
                 case .failure(let error):
-                    return (.failed, "深测正文失败：\(error.displayMessage)")
+                    return (SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content")), "深测正文失败：\(error.displayMessage)")
                 }
             case .failure(let error):
-                return (.failed, "深测目录失败：\(error.displayMessage)")
+                return (SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc")), "深测目录失败：\(error.displayMessage)")
             }
         case .failure(let error):
-            return (.failed, "深测详情失败：\(error.displayMessage)")
+            return (SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail")), "深测详情失败：\(error.displayMessage)")
         }
     }
 
@@ -1378,6 +1391,9 @@ private struct SourceBatchCheckState: Identifiable, Sendable {
     var passedCount: Int { results.filter { $0.status == .passed }.count }
     var warningCount: Int { results.filter { $0.status == .warning }.count }
     var failedCount: Int { results.filter { $0.status == .failed }.count }
+    var loginRequiredCount: Int { results.filter { $0.status == .requiresLogin }.count }
+    var verificationRequiredCount: Int { results.filter { $0.status == .verificationRequired }.count }
+    var blockedCount: Int { results.filter { $0.status == .blocked }.count }
 }
 
 private struct SourceBatchCheckResult: Identifiable, Sendable {
@@ -1394,6 +1410,9 @@ private extension SourceHealthStatus {
         case .passed: return "上次通过"
         case .warning: return "上次警告"
         case .failed: return "上次失败"
+        case .requiresLogin: return "需要登录"
+        case .verificationRequired: return "需要验证"
+        case .blocked: return "被拦截"
         }
     }
 
@@ -1402,6 +1421,9 @@ private extension SourceHealthStatus {
         case .passed: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .failed: return "xmark.circle.fill"
+        case .requiresLogin: return "person.crop.circle.badge.exclamationmark"
+        case .verificationRequired: return "shield.lefthalf.filled.badge.exclamationmark"
+        case .blocked: return "hand.raised.slash.fill"
         }
     }
 
@@ -1410,6 +1432,9 @@ private extension SourceHealthStatus {
         case .passed: return .green
         case .warning: return .orange
         case .failed: return .red
+        case .requiresLogin: return .orange
+        case .verificationRequired: return .purple
+        case .blocked: return .red.opacity(0.8)
         }
     }
 }
@@ -1418,12 +1443,29 @@ private enum SourceBatchCheckStatus: Equatable, Sendable {
     case passed
     case warning
     case failed
+    case requiresLogin
+    case verificationRequired
+    case blocked
+
+    init(_ status: SourceHealthStatus) {
+        switch status {
+        case .passed: self = .passed
+        case .warning: self = .warning
+        case .failed: self = .failed
+        case .requiresLogin: self = .requiresLogin
+        case .verificationRequired: self = .verificationRequired
+        case .blocked: self = .blocked
+        }
+    }
 
     var healthStatus: SourceHealthStatus {
         switch self {
         case .passed: return .passed
         case .warning: return .warning
         case .failed: return .failed
+        case .requiresLogin: return .requiresLogin
+        case .verificationRequired: return .verificationRequired
+        case .blocked: return .blocked
         }
     }
 
@@ -1432,6 +1474,9 @@ private enum SourceBatchCheckStatus: Equatable, Sendable {
         case .passed: return "PASS"
         case .warning: return "WARN"
         case .failed: return "FAIL"
+        case .requiresLogin: return "LOGIN"
+        case .verificationRequired: return "VERIFY"
+        case .blocked: return "BLOCKED"
         }
     }
 
@@ -1440,6 +1485,9 @@ private enum SourceBatchCheckStatus: Equatable, Sendable {
         case .passed: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.triangle.fill"
         case .failed: return "xmark.circle.fill"
+        case .requiresLogin: return "person.crop.circle.badge.exclamationmark"
+        case .verificationRequired: return "shield.lefthalf.filled.badge.exclamationmark"
+        case .blocked: return "hand.raised.slash.fill"
         }
     }
 
@@ -1448,6 +1496,9 @@ private enum SourceBatchCheckStatus: Equatable, Sendable {
         case .passed: return .green
         case .warning: return .orange
         case .failed: return .red
+        case .requiresLogin: return .orange
+        case .verificationRequired: return .purple
+        case .blocked: return .red.opacity(0.8)
         }
     }
 }

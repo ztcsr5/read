@@ -4,6 +4,9 @@ enum SourceHealthStatus: String, Codable, Sendable {
     case passed
     case warning
     case failed
+    case requiresLogin
+    case verificationRequired
+    case blocked
 }
 
 struct SourceHealthRecord: Identifiable, Codable, Equatable, Sendable {

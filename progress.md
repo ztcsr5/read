@@ -856,3 +856,20 @@
 - Commit `4a5ad8a` pushed to `codex/swift-v2-lifetime-reader`.
 - iOS build/XCTest Actions run `33657844603`: `Success`.
 - Unsigned IPA Actions run `33657844854`: `Success`; artifact `SourceReadSwift-unsigned-ipa`, 5.2 MB, SHA-256 `a79c6c7b252e25f071d752bc9bc07b663189615f61f41e8158a355c15b5b0a9f`.
+## 2026-09-03 - Task: Source diagnosis classification and native login phase
+
+### What was done
+- Expanded persisted source health states beyond pass/warn/fail: `requiresLogin`, `verificationRequired`, and `blocked`.
+- Added deterministic `SourceDiagnosticClassifier` so batch checks distinguish authentication, challenge/CAPTCHA, access-block/rate-limit, timeout, empty-result, and generic failures.
+- Batch source diagnostics now show/export the additional categories and persist the classified status for each source.
+- Exposed one shared `SourceCookieStore` from `AppState` and injected it into the Legado engine, preventing login cookies from being isolated from subsequent URLSession requests.
+- Added a native `SourceLoginView` with `WKWebView` login/verification flow; cookies are synchronized into the shared source engine cookie store after page navigation.
+- Added XCTest coverage for deterministic login/verification/block classification.
+
+### Testing
+- `git diff --check` passed locally (Windows reports only existing LF-to-CRLF normalization warnings).
+- Windows host has no Swift/Xcode/XcodeGen; iOS compile, XCTest, and unsigned IPA remain GitHub Actions gates.
+- This phase does not claim login success against any external source; the app-side WebView-to-cookie handoff is covered by code path and the classifier by unit tests.
+
+### Rollback
+- Revert this phase commit to restore the previous three-state source health model, isolated engine cookie store, and source manager behavior.

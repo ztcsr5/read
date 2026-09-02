@@ -11,6 +11,7 @@ final class AppState: ObservableObject {
     let rssFeedCacheStore: RSSFeedCacheStore
     let rssArticleContentCacheStore: RSSArticleContentCacheStore
     let sourceHealthStore: SourceHealthStore
+    let sourceCookieStore: SourceCookieStore
     let sourceWritingServer: LightweightHTTPServer
     private let injectedEngine: SourceEngine?
     private var cancellables: Set<AnyCancellable> = []
@@ -19,6 +20,7 @@ final class AppState: ObservableObject {
             return injectedEngine
         }
         return LegadoSourceEngine(
+            cookieStore: sourceCookieStore,
             diagnostics: DiagnosticSink { event in
                 Task { @MainActor [weak self] in
                     self?.record(event)
@@ -44,6 +46,7 @@ final class AppState: ObservableObject {
         rssFeedCacheStore: RSSFeedCacheStore? = nil,
         rssArticleContentCacheStore: RSSArticleContentCacheStore? = nil,
         sourceHealthStore: SourceHealthStore? = nil,
+        sourceCookieStore: SourceCookieStore? = nil,
         engine: SourceEngine? = nil
     ) {
         self.sourceStore = sourceStore ?? SourceStore()
@@ -54,6 +57,7 @@ final class AppState: ObservableObject {
         self.rssFeedCacheStore = rssFeedCacheStore ?? RSSFeedCacheStore()
         self.rssArticleContentCacheStore = rssArticleContentCacheStore ?? RSSArticleContentCacheStore()
         self.sourceHealthStore = sourceHealthStore ?? SourceHealthStore()
+        self.sourceCookieStore = sourceCookieStore ?? SourceCookieStore()
         self.sourceWritingServer = LightweightHTTPServer()
         self.injectedEngine = engine
         bindChildStores()
