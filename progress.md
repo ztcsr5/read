@@ -954,3 +954,19 @@
 - iOS Build/XCTest run `33668904541`: completed successfully.
 - Unsigned IPA run `33668904593`: completed successfully; artifact `SourceReadSwift-unsigned-ipa`, 5.46 MB, SHA-256 `a785861066f95383b10b4d38e2130efd4bfa2239322d5ef88797aa2fd15f360b`.
 - Sustained 120 Hz and external RSS/EPUB source behavior remain device/network validation items.
+
+## 2026-09-03 - Task: Legado JS compatibility surface expansion phase
+
+### Scope
+- Expanded the native JavaScriptCore bridge with Flutter/Legado utility aliases: `getStr`, `getJson`, `putJson`, `postForm`, byte/Base64/Hex conversion and charset-aware Java String bytes.
+- Added native byte-oriented digest/HMAC bridges so non-ASCII UTF-8 source rules do not pass through lossy `String.fromCharCode` conversion.
+- Added Java/Android facade coverage for URL resolution, `MessageDigest`, `Mac/SecretKeySpec`, `ByteArrayInputStream`, collections, regex and source/book/chapter getter aliases.
+- Added `docs/legado-js-compatibility-matrix.md` and XCTest coverage for relative URLs, non-ASCII crypto, charset-aware strings and form requests.
+
+### Testing
+- `git diff --check` passed locally; JavaScript prelude passed `node --check`.
+- Swift/Xcode compilation, XCTest and unsigned IPA are pending GitHub Actions for commit `ee03ec6`; GitHub REST polling is currently rate-limited on the Windows host.
+- Windows cannot validate JavaScriptCore runtime ABI on iOS or sustained ProMotion pacing; those remain Actions/device evidence items.
+
+### Rollback
+- Revert commit `ee03ec6` to restore the prior JS bridge while preserving the previously shipped RSS/EPUB phase.
