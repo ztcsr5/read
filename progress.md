@@ -947,3 +947,10 @@
 
 ### Rollback
 - Revert the phase commit and this entry to restore the prior RSS preview/cache schema and EPUB chapter-title behavior; old cache files remain readable because new fields are optional.
+
+### CI verification update
+
+- Commit `298021d` pushed to `codex/swift-v2-lifetime-reader`.
+- iOS Build/XCTest run `33668904541`: completed successfully.
+- Unsigned IPA run `33668904593`: completed successfully; artifact `SourceReadSwift-unsigned-ipa`, 5.46 MB, SHA-256 `a785861066f95383b10b4d38e2130efd4bfa2239322d5ef88797aa2fd15f360b`.
+- Sustained 120 Hz and external RSS/EPUB source behavior remain device/network validation items.
