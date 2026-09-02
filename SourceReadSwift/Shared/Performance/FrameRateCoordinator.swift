@@ -1,4 +1,3 @@
-import QuartzCore
 import UIKit
 
 /// Requests the highest refresh rate supported by each active iOS window.
@@ -20,11 +19,14 @@ enum FrameRateCoordinator {
         let maximum = windowScene.screen.maximumFramesPerSecond
         guard maximum > 0 else { return }
 
-        let preferred = Float(min(maximum, 120))
-        let minimum = Float(maximum >= 120 ? 80 : maximum)
-        let range = CAFrameRateRange(minimum: minimum, maximum: preferred, preferred: preferred)
-        for window in windowScene.windows {
-            window.preferredFrameRateRange = range
-        }
+        let preferred = min(maximum, 120)
+        // `CADisableMinimumFrameDurationOnPhone` in Info.plist enables ProMotion
+        // for SwiftUI. SwiftUI/UIKit choose the actual pacing from this device
+        // ceiling; we record it for diagnostics without driving a wasteful dummy
+        // display link on the main thread.
+        PerformanceSignpost.event(
+            "frame.rate",
+            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
+        )
     }
 }
