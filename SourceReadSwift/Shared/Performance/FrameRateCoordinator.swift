@@ -22,10 +22,9 @@ enum FrameRateCoordinator {
 
         let preferred = Float(min(maximum, 120))
         let minimum = Float(maximum >= 120 ? 80 : maximum)
-        windowScene.preferredFrameRateRange = CAFrameRateRange(
-            minimum: minimum,
-            maximum: preferred,
-            preferred: preferred
-        )
+        let range = CAFrameRateRange(minimum: minimum, maximum: preferred, preferred: preferred)
+        for window in windowScene.windows {
+            window.preferredFrameRateRange = range
+        }
     }
 }

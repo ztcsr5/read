@@ -588,3 +588,7 @@
 ### Notes
 - This is the first performance foundation slice; it does not claim a measured 120 FPS result yet.
 - The coordinator is intentionally conservative on non-ProMotion devices and does not force unsupported refresh rates.
+
+### CI correction
+- The first CI run caught an API mismatch: `preferredFrameRateRange` belongs on `UIWindow` for this deployment/toolchain, not `UIWindowScene`.
+- The coordinator now applies the `CAFrameRateRange` to every active window in the scene; this keeps the native route and restores Xcode compatibility before the next phase batch.
