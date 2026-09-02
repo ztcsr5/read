@@ -1352,29 +1352,29 @@ final class JSCoreRuntime {
           compile: function(pattern) {
             return {
               matcher: function(input) {
-                var re; try { re = new RegExp(String(pattern), 'g'); } catch (_) { re = new RegExp('a^', 'g'); }
+                var re; try { re = new RegExp(String(pattern)); } catch (e) { re = new RegExp('a^'); }
                 var text = String(input || '');
+                var offset = 0;
                 var lastMatch = null;
                 var lastStart = -1;
                 var lastEnd = -1;
-                var matcher;
-                var reset = function() { re.lastIndex = 0; lastMatch = null; lastStart = -1; lastEnd = -1; return matcher; };
-                var find = function() {
-                  var match = re.exec(text);
-                  if (!match) { lastMatch = null; lastStart = -1; lastEnd = -1; return false; }
-                  lastMatch = match; lastStart = match.index; lastEnd = match.index + match[0].length; return true;
-                };
-                matcher = {
-                  find: find,
+                var matcher = {
+                  find: function() {
+                    var match = re.exec(text.substring(offset));
+                    if (!match) { lastMatch = null; lastStart = -1; lastEnd = -1; return false; }
+                    lastMatch = match; lastStart = offset + match.index; lastEnd = lastStart + match[0].length;
+                    offset = lastEnd > offset ? lastEnd : offset + 1;
+                    return true;
+                  },
                   matches: function() {
-                    var full; try { full = new RegExp('^(?:' + String(pattern) + ')$'); } catch (_) { return false; }
+                    var full; try { full = new RegExp('^(?:' + String(pattern) + ')$'); } catch (e) { return false; }
                     var match = full.exec(text); lastMatch = match; lastStart = match ? 0 : -1; lastEnd = match ? text.length : -1; return !!match;
                   },
-                  reset: reset,
+                  reset: function() { offset = 0; lastMatch = null; lastStart = -1; lastEnd = -1; return matcher; },
                   group: function(index) { var slot = index == null ? 0 : Number(index); return lastMatch && lastMatch[slot] != null ? String(lastMatch[slot]) : ''; },
                   groupCount: function() { return lastMatch ? Math.max(0, lastMatch.length - 1) : 0; },
-                  start: function(index) { return lastMatch ? (index == null || Number(index) === 0 ? lastStart : lastStart) : -1; },
-                  end: function(index) { return lastMatch ? (index == null || Number(index) === 0 ? lastEnd : lastEnd) : -1; }
+                  start: function(index) { return lastMatch ? lastStart : -1; },
+                  end: function(index) { return lastMatch ? lastEnd : -1; }
                 };
                 return matcher;
               }
