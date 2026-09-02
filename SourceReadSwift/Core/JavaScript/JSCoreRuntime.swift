@@ -83,6 +83,11 @@ final class JSCoreRuntime {
                 let injectScript = """
                 if (typeof source !== 'undefined' && source !== null) {
                     source.getKey = function() { return source.key || source.bookSourceUrl || source.sourceUrl || ''; };
+                    source.sourceUrl = source.sourceUrl || source.bookSourceUrl || source.key || '';
+                    source.sourceName = source.sourceName || source.bookSourceName || '';
+                    source.getName = function() { return source.bookSourceName || source.sourceName || ''; };
+                    source.getUrl = function() { return source.bookSourceUrl || source.sourceUrl || source.key || ''; };
+                    source.getSourceUrl = source.getUrl;
                     source.getVariable = function(key) {
                         if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('source.variable.' + String(key));
                         return source.variable || java.getVar('source.variable') || '';
@@ -95,11 +100,18 @@ final class JSCoreRuntime {
                     source.getVariableMap = function() {
                         var parsed = {};
                         try { parsed = JSON.parse(source.getVariable() || '{}'); } catch (_) {}
-                        return { get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; } };
+                        return {
+                          get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; },
+                          put: function(k, v) { parsed[String(k)] = v; source.setVariable(JSON.stringify(parsed)); return v; },
+                          remove: function(k) { var old = parsed[String(k)]; delete parsed[String(k)]; source.setVariable(JSON.stringify(parsed)); return old == null ? null : old; },
+                          containsKey: function(k) { return Object.prototype.hasOwnProperty.call(parsed, String(k)); },
+                          isEmpty: function() { return Object.keys(parsed).length === 0; }
+                        };
                     };
                     source.getLoginInfoMap = function() { return { get: function(k) { return java.getVar('source.login.' + String(k || '')); } }; };
                     source.putLoginHeader = function(k, v) { return java.put('source.loginHeader.' + String(k || ''), v == null ? '' : String(v)); };
                     source.getLoginHeader = function(k) { return java.getVar('source.loginHeader.' + String(k || '')); };
+                    source.putVariable = source.setVariable;
                 }
                 """
                 context.evaluateScript(injectScript)
@@ -110,11 +122,24 @@ final class JSCoreRuntime {
                         if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('book.variable.' + String(key));
                         return book.variable || java.getVar('book.variable') || '';
                     };
+                    book.name = book.name || book.title || '';
+                    book.title = book.title || book.name || '';
+                    book.bookUrl = book.bookUrl || book.url || '';
+                    book.url = book.url || book.bookUrl || '';
+                    book.tocUrl = book.tocUrl || book.bookUrl || book.url || '';
+                    book.getName = function() { return book.name || book.title || ''; };
+                    book.getTitle = book.getName;
+                    book.getAuthor = function() { return book.author || ''; };
+                    book.getBookUrl = function() { return book.bookUrl || book.url || ''; };
+                    book.getUrl = book.getBookUrl;
+                    book.getTocUrl = function() { return book.tocUrl || book.bookUrl || book.url || ''; };
+                    book.getOrigin = function() { return book.origin || book.bookSourceUrl || ''; };
                     book.setVariable = function(key, value) {
                         if (arguments.length > 1) return java.put('book.variable.' + String(key), value == null ? '' : String(value));
                         book.variable = key == null ? '' : String(key);
                         return java.put('book.variable', book.variable);
                     };
+                    book.putVariable = book.setVariable;
                 }
                 """
                 context.evaluateScript(injectScript)
@@ -155,9 +180,58 @@ final class JSCoreRuntime {
         let base64Encode: @convention(block) (String) -> String = { value in
             Data(value.utf8).base64EncodedString()
         }
+        let base64EncodeBytes: @convention(block) (NSArray) -> String = { values in
+            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            return Data(bytes).base64EncodedString()
+        }
         let base64Decode: @convention(block) (String) -> String = { value in
             guard let data = Data(base64Encoded: value) else { return "" }
             return String(data: data, encoding: .utf8) ?? ""
+        }
+        let base64DecodeBytes: @convention(block) (String) -> NSArray = { value in
+            guard let data = Data(base64Encoded: value) else { return [] }
+            return data.map { NSNumber(value: $0) } as NSArray
+        }
+        let stringToBytes: @convention(block) (String) -> NSArray = { value in
+            Data(value.utf8).map { NSNumber(value: $0) } as NSArray
+        }
+        let stringToBytesCharset: @convention(block) (String, String) -> NSArray = { value, charset in
+            Self.data(for: value, charset: charset).map { NSNumber(value: $0) } as NSArray
+        }
+        let bytesToString: @convention(block) (NSArray) -> String = { values in
+            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            return String(data: Data(bytes), encoding: .utf8) ?? ""
+        }
+        let bytesToStringCharset: @convention(block) (NSArray, String) -> String = { values, charset in
+            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            return Self.string(from: Data(bytes), charset: charset)
+        }
+        let digestBytes: @convention(block) (NSArray, String) -> NSArray = { values, algorithm in
+            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            let data = Data(bytes)
+            let normalized = algorithm.lowercased().replacingOccurrences(of: "-", with: "")
+            let digest: [UInt8]
+            switch normalized {
+            case "md5": digest = Array(Insecure.MD5.hash(data: data))
+            case "sha1": digest = Array(Insecure.SHA1.hash(data: data))
+            case "sha384": digest = Array(SHA384.hash(data: data))
+            case "sha512": digest = Array(SHA512.hash(data: data))
+            default: digest = Array(SHA256.hash(data: data))
+            }
+            return digest.map { NSNumber(value: $0) } as NSArray
+        }
+        let hmacBytes: @convention(block) (NSArray, String, NSArray) -> NSArray = { values, algorithm, keyValues in
+            let message = Data(values.compactMap { ($0 as? NSNumber)?.uint8Value })
+            let key = SymmetricKey(data: Data(keyValues.compactMap { ($0 as? NSNumber)?.uint8Value }))
+            let normalized = algorithm.lowercased().replacingOccurrences(of: "hmac", with: "").replacingOccurrences(of: "-", with: "")
+            let bytes: [UInt8]
+            switch normalized {
+            case "sha1": bytes = Array(HMAC<Insecure.SHA1>.authenticationCode(for: message, using: key))
+            case "sha384": bytes = Array(HMAC<SHA384>.authenticationCode(for: message, using: key))
+            case "sha512": bytes = Array(HMAC<SHA512>.authenticationCode(for: message, using: key))
+            default: bytes = Array(HMAC<SHA256>.authenticationCode(for: message, using: key))
+            }
+            return bytes.map { NSNumber(value: $0) } as NSArray
         }
         let md5: @convention(block) (String) -> String = { value in
             let digest = Insecure.MD5.hash(data: Data(value.utf8))
@@ -340,7 +414,15 @@ final class JSCoreRuntime {
         context.setObject(urlEncode, forKeyedSubscript: "__native_urlEncode" as NSString)
         context.setObject(urlDecode, forKeyedSubscript: "__native_urlDecode" as NSString)
         context.setObject(base64Encode, forKeyedSubscript: "__native_base64Encode" as NSString)
+        context.setObject(base64EncodeBytes, forKeyedSubscript: "__native_base64EncodeBytes" as NSString)
         context.setObject(base64Decode, forKeyedSubscript: "__native_base64Decode" as NSString)
+        context.setObject(base64DecodeBytes, forKeyedSubscript: "__native_base64DecodeBytes" as NSString)
+        context.setObject(stringToBytes, forKeyedSubscript: "__native_stringToBytes" as NSString)
+        context.setObject(stringToBytesCharset, forKeyedSubscript: "__native_stringToBytesCharset" as NSString)
+        context.setObject(bytesToString, forKeyedSubscript: "__native_bytesToString" as NSString)
+        context.setObject(bytesToStringCharset, forKeyedSubscript: "__native_bytesToStringCharset" as NSString)
+        context.setObject(digestBytes, forKeyedSubscript: "__native_digestBytes" as NSString)
+        context.setObject(hmacBytes, forKeyedSubscript: "__native_hmacBytes" as NSString)
         context.setObject(md5, forKeyedSubscript: "__native_md5" as NSString)
         context.setObject(sha1, forKeyedSubscript: "__native_sha1" as NSString)
         context.setObject(sha256, forKeyedSubscript: "__native_sha256" as NSString)
@@ -384,13 +466,62 @@ final class JSCoreRuntime {
         java.encodeURIComponent = java.urlEncode;
         java.decodeURI = function(value) { return __native_urlDecode(String(value)); };
         java.decodeURIComponent = java.decodeURI;
-        java.base64Encode = function(value) { return __native_base64Encode(String(value)); };
+        java.base64Encode = function(value) {
+          if (value && typeof value !== 'string' && value.length != null) return __native_base64EncodeBytes(value);
+          return __native_base64Encode(String(value));
+        };
         java.base64Decode = function(value) { return __native_base64Decode(String(value)); };
+        java.base64DecodeToByteArray = function(value) { return __asJavaList(__native_base64DecodeBytes(String(value || ''))); };
         java.base64DecodeToString = java.base64Decode;
         java.base64Decoder = java.base64Decode;
         java.base64 = java.base64Encode;
         java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
+        java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
+        java.bytesToStr = function(value) {
+          var list = value && value.length != null ? value : [];
+          return String(__native_bytesToString(list) || '');
+        };
+        java.hexEncodeToString = function(value) {
+          var list = value && value.length != null ? value : __native_stringToBytes(String(value || ''));
+          var out = '';
+          for (var i = 0; i < list.length; i++) { var h = Number(list[i]).toString(16); out += h.length < 2 ? '0' + h : h; }
+          return out;
+        };
+        java.hexDecodeToString = function(value) {
+          var text = String(value || '').replace(/\s+/g, '');
+          if (text.length % 2) return '';
+          var bytes = [];
+          for (var i = 0; i < text.length; i += 2) {
+            var n = parseInt(text.substring(i, i + 2), 16);
+            if (isNaN(n)) return '';
+            bytes.push(n);
+          }
+          return String(__native_bytesToString(bytes) || '');
+        };
+        java.getStr = function(key, fallback) {
+          var value = java.get(key);
+          if (value === '' && arguments.length > 1) return String(fallback == null ? '' : fallback);
+          return value == null ? '' : String(value);
+        };
+        java.getJson = function(value, fallback) {
+          if (value !== null && typeof value === 'object') return value;
+          try { return JSON.parse(String(value == null ? '' : value)); }
+          catch (_) {
+            if (arguments.length > 1 && fallback !== undefined) {
+              if (fallback !== null && typeof fallback === 'object') return fallback;
+              try { return JSON.parse(String(fallback)); } catch (_) {}
+            }
+            return {};
+          }
+        };
+        java.putJson = function(key, value) { return java.put(String(key || ''), JSON.stringify(value == null ? {} : value)); };
+        java.postForm = function(url, body, headers) {
+          var merged = {};
+          if (headers && typeof headers === 'object') for (var k in headers) merged[k] = headers[k];
+          if (!merged['Content-Type'] && !merged['content-type']) merged['Content-Type'] = 'application/x-www-form-urlencoded';
+          return java.post(url, body == null ? '' : body, merged);
+        };
         java.md5 = function(value) { return __native_md5(String(value)); };
         java.md5Encode = java.md5;
         java.md5Encode16 = function(value) { return java.md5(value).substring(8, 24); };
@@ -456,11 +587,9 @@ final class JSCoreRuntime {
           };
         }
         if (!String.prototype.getBytes) {
-          String.prototype.getBytes = function() {
-            var text = String(this);
-            var bytes = [];
-            for (var i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i) & 0xff);
-            return bytes;
+          String.prototype.getBytes = function(charset) {
+            var name = charset == null ? '' : String(charset);
+            return __asJavaList(name ? __native_stringToBytesCharset(String(this), name) : __native_stringToBytes(String(this)));
           };
         }
         function __asJavaList(list) {
@@ -470,6 +599,37 @@ final class JSCoreRuntime {
           list.size = function() { return list.length; };
           list.isEmpty = function() { return list.length === 0; };
           return list;
+        }
+        function __jsonRuleValues(documentText, rule) {
+          var root;
+          try { root = typeof documentText === 'object' ? documentText : JSON.parse(String(documentText || '')); } catch (_) { return []; }
+          var path = String(rule || '').replace(/^\$\.?/, '');
+          if (!path) return [root];
+          var tokens = path.match(/(?:[^.[\]]+|\[(?:'([^']+)'|"([^"]+)"|(\d+)|\*)\])/g) || [];
+          var values = [root];
+          for (var t = 0; t < tokens.length; t++) {
+            var token = tokens[t].replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '');
+            var next = [];
+            for (var v = 0; v < values.length; v++) {
+              var current = values[v];
+              if (token === '*') {
+                if (current && typeof current.length === 'number') for (var i = 0; i < current.length; i++) next.push(current[i]);
+                else if (current && typeof current === 'object') for (var key in current) next.push(current[key]);
+              } else if (current != null && current[token] !== undefined) next.push(current[token]);
+            }
+            values = next;
+          }
+          return values;
+        }
+        function __jsonRuleString(documentText, rule) {
+          return __jsonRuleValues(documentText, rule).map(function(value) {
+            return value == null ? '' : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+          }).join('\n');
+        }
+        function __jsonRuleList(documentText, rule) {
+          return __asJavaList(__jsonRuleValues(documentText, rule).map(function(value) {
+            return value == null ? '' : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+          }));
         }
         if (!Array.prototype.get) {
           Array.prototype.get = function(index) { return this[Number(index)]; };
@@ -496,12 +656,33 @@ final class JSCoreRuntime {
           if (arguments.length <= 1 || typeof rule === 'boolean') {
             return __native_getString(__defaultHtml(), String(input), __defaultBaseUrl());
           }
+          // Flutter/Legado also uses getString(key, default). Only treat the
+          // two-argument form as a parser overload when the first value is
+          // clearly HTML/JSON or the second value clearly looks like a rule.
+          var first = String(input == null ? '' : input);
+          var second = String(rule == null ? '' : rule);
+          var looksLikeDocument = /^\s*(?:<[^>]+>|[\[{])/.test(first);
+          var looksLikeRule = /[.#@>$\[\]:]/.test(second) || second.indexOf('$.') === 0;
+          if (!looksLikeDocument && !looksLikeRule) {
+            var stored = java.get(first);
+            return stored === '' ? second : String(stored);
+          }
+          if ((input && typeof input === 'object') || (/^\s*[\[{]/.test(first) && /^\$/.test(second))) {
+            if (/^\$/.test(second)) return __jsonRuleString(input, second);
+          }
           return __native_getString(String(input), String(rule), __defaultBaseUrl());
+        };
+        java.getStringWithDefault = function(input, rule, fallback) {
+          var value = java.getString(input, rule);
+          return value === '' && fallback != null ? String(fallback) : value;
         };
         java.getStringList = function(input, rule) {
           var useDefaultHtml = arguments.length <= 1 || typeof rule === 'boolean';
           var pageHtml = useDefaultHtml ? __defaultHtml() : String(input);
           var actualRule = useDefaultHtml ? String(input) : String(rule);
+          if (!useDefaultHtml && ((input && typeof input === 'object') || (/^\s*[\[{]/.test(pageHtml) && /^\$/.test(actualRule)))) {
+            if (/^\$/.test(actualRule)) return __jsonRuleList(input, actualRule);
+          }
           var list = __native_getStringList(pageHtml, actualRule, __defaultBaseUrl());
           var out = [];
           for (var i = 0; i < list.length; i++) out.push(String(list[i]));
@@ -746,6 +927,7 @@ final class JSCoreRuntime {
         java.startBrowser = function() { return ''; };
         java.startBrowserAwait = function() { return ''; };
         java.webView = function() { return ''; };
+        java.openUrl = java.startBrowser;
         var cookie = cookie || {};
         cookie.getCookie = java.getCookie;
         cookie.getKey = function(url, key) {
@@ -799,6 +981,11 @@ final class JSCoreRuntime {
         function __installSourceAndBook() {
           if (typeof source === 'undefined' || source === null) source = {};
           source.getKey = function() { return source.key || source.bookSourceUrl || source.sourceUrl || ''; };
+          source.sourceUrl = source.sourceUrl || source.bookSourceUrl || source.key || '';
+          source.sourceName = source.sourceName || source.bookSourceName || '';
+          source.getName = function() { return source.bookSourceName || source.sourceName || ''; };
+          source.getUrl = function() { return source.bookSourceUrl || source.sourceUrl || source.key || ''; };
+          source.getSourceUrl = source.getUrl;
           source.getVariable = function(key) {
             if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('source.variable.' + String(key));
             return source.variable || java.getVar('source.variable') || '';
@@ -826,12 +1013,25 @@ final class JSCoreRuntime {
           }; };
           source.putLoginHeader = function(k, v) { return java.put('source.loginHeader.' + String(k || ''), v == null ? '' : String(v)); };
           source.getLoginHeader = function(k) { return java.getVar('source.loginHeader.' + String(k || '')); };
+          source.putVariable = source.setVariable;
           if (typeof book === 'undefined' || book === null) book = {};
+          book.name = book.name || book.title || '';
+          book.title = book.title || book.name || '';
+          book.bookUrl = book.bookUrl || book.url || '';
+          book.url = book.url || book.bookUrl || '';
+          book.tocUrl = book.tocUrl || book.bookUrl || book.url || '';
+          book.getName = function() { return book.name || book.title || ''; };
+          book.getTitle = book.getName;
+          book.getAuthor = function() { return book.author || ''; };
+          book.getBookUrl = function() { return book.bookUrl || book.url || ''; };
+          book.getUrl = book.getBookUrl;
+          book.getTocUrl = function() { return book.tocUrl || book.bookUrl || book.url || ''; };
+          book.getOrigin = function() { return book.origin || book.bookSourceUrl || ''; };
           book.getVariable = function(key) {
             if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('book.variable.' + String(key));
             return book.variable || java.getVar('book.variable') || '';
           };
-          book.setVariable = function(key, value) {
+                    book.setVariable = function(key, value) {
             if (arguments.length > 1) return java.put('book.variable.' + String(key), value == null ? '' : String(value));
             book.variable = key == null ? '' : String(key);
             return java.put('book.variable', book.variable);
@@ -844,6 +1044,18 @@ final class JSCoreRuntime {
             containsKey: function(k) { return book.getVariable(k) !== ''; }
           };
           if (typeof chapter === 'undefined' || chapter === null) chapter = {};
+          chapter.name = chapter.name || chapter.title || '';
+          chapter.title = chapter.title || chapter.name || '';
+          chapter.chapterUrl = chapter.chapterUrl || chapter.url || '';
+          chapter.url = chapter.url || chapter.chapterUrl || '';
+          chapter.chapterIndex = chapter.chapterIndex == null ? (chapter.index || 0) : chapter.chapterIndex;
+          chapter.index = chapter.index == null ? chapter.chapterIndex : chapter.index;
+          chapter.getName = function() { return chapter.name || chapter.title || ''; };
+          chapter.getTitle = chapter.getName;
+          chapter.getUrl = function() { return chapter.url || chapter.chapterUrl || ''; };
+          chapter.getChapterUrl = chapter.getUrl;
+          chapter.getIndex = function() { return chapter.index || chapter.chapterIndex || 0; };
+          chapter.getChapterIndex = chapter.getIndex;
           chapter.getVariable = function(key) {
             if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('chapter.variable.' + String(key));
             return chapter.variable || java.getVar('chapter.variable') || '';
@@ -874,6 +1086,20 @@ final class JSCoreRuntime {
         function sha1(value) { return java.sha1(value); }
         function atob(value) { return java.base64Decode(value); }
         function btoa(value) { return java.base64Encode(value); }
+        function getStr(key, fallback) { return java.getStr(key, fallback); }
+        function getJson(value, fallback) { return java.getJson(value, fallback); }
+        function putJson(key, value) { return java.putJson(key, value); }
+        function strToBytes(value) { return java.strToBytes(value); }
+        function bytesToStr(value) { return java.bytesToStr(value); }
+        function hexEncodeToString(value) { return java.hexEncodeToString(value); }
+        function hexDecodeToString(value) { return java.hexDecodeToString(value); }
+        function getString(input, rule) { return java.getString(input, rule); }
+        function getStringList(input, rule) { return java.getStringList(input, rule); }
+        function getElements(input, rule) { return java.getElements(input, rule); }
+        function getElement(rule) { return java.getElement(rule); }
+        function setContent(value) { return java.setContent(value); }
+        function put(key, value) { return java.put(key, value); }
+        function get(key, fallback) { return java.getStr(key, fallback); }
         var CryptoJS = CryptoJS || {};
         function __cryptoText(value) {
           if (value && value.__text !== undefined) return String(value.__text);
@@ -939,7 +1165,28 @@ final class JSCoreRuntime {
         Packages.org.jsoup = Packages.org.jsoup || {};
         Packages.java = Packages.java || {};
         Packages.java.lang = Packages.java.lang || {};
-        Packages.java.lang.String = Packages.java.lang.String || function(value) { return new String(String(value || '')); };
+        Packages.java.lang.String = Packages.java.lang.String || function(value, charset) {
+          if (value && typeof value !== 'string' && value.length != null) {
+            var decoded = charset == null ? __native_bytesToString(value) : __native_bytesToStringCharset(value, String(charset));
+            var result = new String(String(decoded || ''));
+            result.getBytes = function(charset) {
+              var name = charset == null ? '' : String(charset);
+              return __asJavaList(name ? __native_stringToBytesCharset(String(result), name) : __native_stringToBytes(String(result)));
+            };
+            return result;
+          }
+          var result = new String(String(value == null ? '' : value));
+          result.getBytes = function(charset) {
+            var name = charset == null ? '' : String(charset);
+            return __asJavaList(name ? __native_stringToBytesCharset(String(result), name) : __native_stringToBytes(String(result)));
+          };
+          return result;
+        };
+        Packages.java.lang.String.valueOf = function(value) { return String(value == null ? 'null' : value); };
+        Packages.java.lang.String.format = function(format) {
+          var args = Array.prototype.slice.call(arguments, 1), index = 0;
+          return String(format || '').replace(/%[sdif]/g, function() { return String(args[index++]); });
+        };
         Packages.java.lang.Integer = Packages.java.lang.Integer || {
           parseInt: function(value, radix) { var n = parseInt(String(value || ''), Number(radix || 10)); return isNaN(n) ? 0 : n; },
           valueOf: function(value) { return Number(value || 0); }
@@ -967,17 +1214,85 @@ final class JSCoreRuntime {
           this.toString = function() { return this.__parts.join(''); };
         };
         Packages.java.lang.Thread = Packages.java.lang.Thread || { sleep: function(_) {} };
+        Packages.java.lang.System = Packages.java.lang.System || {
+          currentTimeMillis: java.currentTimeMillis,
+          nanoTime: function() { return Date.now() * 1000000; }
+        };
+        Packages.java.io = Packages.java.io || {};
+        Packages.java.io.ByteArrayInputStream = Packages.java.io.ByteArrayInputStream || function(value) {
+          var bytes = value && value.length != null ? Array.prototype.slice.call(value) : [];
+          this.read = function() { return bytes.length ? bytes.shift() : -1; };
+          this.available = function() { return bytes.length; };
+          this.close = function() {};
+        };
+        Packages.java.net = Packages.java.net || {};
+        Packages.java.net.URL = Packages.java.net.URL || function(value, baseValue) {
+          var raw = String(value == null ? '' : value);
+          var base = String(baseValue == null ? '' : baseValue);
+          if (base && !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw)) {
+            try {
+              if (raw.charAt(0) === '/') {
+                var baseOrigin = base.match(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\/]+)/);
+                raw = baseOrigin ? baseOrigin[1] + raw : raw;
+              } else {
+                raw = base.replace(/[#?].*$/, '').replace(/\/[^\/]*$/, '/') + raw;
+              }
+              var origin = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\/]+)(\/.*)?$/);
+              if (origin && origin[2]) {
+                var parts = origin[2].split('/'), normalized = [];
+                for (var p = 0; p < parts.length; p++) {
+                  if (!parts[p] || parts[p] === '.') continue;
+                  if (parts[p] === '..') { if (normalized.length) normalized.pop(); }
+                  else normalized.push(parts[p]);
+                }
+                raw = origin[1] + '/' + normalized.join('/');
+              }
+            } catch (_) {}
+          }
+          var parsed = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/:?#]+)(?::(\d+))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/);
+          this.toString = function() { return raw; };
+          this.toExternalForm = this.toString;
+          this.getProtocol = function() { return parsed ? parsed[1] : ''; };
+          this.getHost = function() { return parsed ? parsed[2] : ''; };
+          this.getPort = function() { return parsed && parsed[3] ? Number(parsed[3]) : -1; };
+          this.getPath = function() { return parsed ? (parsed[4] || '') : ''; };
+          this.getQuery = function() { return parsed ? (parsed[5] || '') : ''; };
+          this.getRef = function() { return parsed ? (parsed[6] || '') : ''; };
+          this.getFile = function() { return (this.getPath() || '') + (parsed && parsed[5] ? '?' + parsed[5] : ''); };
+          this.getAuthority = function() { return parsed ? parsed[2] + (parsed[3] ? ':' + parsed[3] : '') : ''; };
+          this.openConnection = function() { return __makeConnect(raw); };
+        };
+        if (typeof URL === 'undefined') URL = Packages.java.net.URL;
         Packages.java.util = Packages.java.util || {};
         Packages.java.util.UUID = Packages.java.util.UUID || { randomUUID: java.randomUUID };
         Packages.java.util.Base64 = Packages.java.util.Base64 || {
-          encodeToString: function(value) { return java.base64Encode(value && value.join ? String.fromCharCode.apply(null, value) : String(value || '')); },
-          decode: function(value) {
-            var text = java.base64Decode(value);
-            var out = [];
-            for (var i = 0; i < text.length; i++) out.push(text.charCodeAt(i));
-            return out;
+          encodeToString: function(value) { return value && value.length != null ? __native_base64EncodeBytes(value) : java.base64Encode(String(value || '')); },
+          decode: function(value) { return java.base64DecodeToByteArray(value); }
+        };
+        Packages.java.security = Packages.java.security || {};
+        Packages.java.security.MessageDigest = Packages.java.security.MessageDigest || {
+          getInstance: function(algorithm) {
+            var name = String(algorithm || 'SHA-256');
+            return { digest: function(value) { return __asJavaList(__native_digestBytes(value && value.length != null ? value : [], name)); } };
           }
         };
+        Packages.javax = Packages.javax || {};
+        Packages.javax.crypto = Packages.javax.crypto || {};
+        Packages.javax.crypto.spec = Packages.javax.crypto.spec || {};
+        Packages.javax.crypto.spec.SecretKeySpec = Packages.javax.crypto.spec.SecretKeySpec || function(value, algorithm) {
+          this.bytes = value && value.length != null ? Array.prototype.slice.call(value) : [];
+          this.algorithm = String(algorithm || 'HmacSHA1');
+          this.getEncoded = function() { return this.bytes; };
+        };
+        Packages.javax.crypto.Mac = Packages.javax.crypto.Mac || {
+          getInstance: function(algorithm) {
+            var state = { key: [], algorithm: String(algorithm || 'HmacSHA1') };
+            return { init: function(secret) { state.key = secret && secret.bytes ? secret.bytes : secret; }, doFinal: function(value) {
+              return __asJavaList(__native_hmacBytes(value && value.length != null ? value : [], state.algorithm, state.key && state.key.length != null ? state.key : []));
+            }};
+          }
+        };
+        var javax = Packages.javax;
         Packages.java.util.HashMap = Packages.java.util.HashMap || function() {
           this.__map = {};
           this.put = function(key, value) { var k = String(key); var old = this.__map[k]; this.__map[k] = value; return old == null ? null : old; };
@@ -986,14 +1301,24 @@ final class JSCoreRuntime {
           this.containsKey = function(key) { return Object.prototype.hasOwnProperty.call(this.__map, String(key)); };
           this.isEmpty = function() { return Object.keys(this.__map).length === 0; };
           this.size = function() { return Object.keys(this.__map).length; };
+          this.clear = function() { this.__map = {}; };
+          this.keySet = function() { return __asJavaList(Object.keys(this.__map)); };
+          this.values = function() { var out = []; for (var k in this.__map) out.push(this.__map[k]); return __asJavaList(out); };
+          this.entrySet = function() { var out = []; for (var k in this.__map) { (function(key, value) { out.push({ getKey: function() { return key; }, getValue: function() { return value; } }); })(k, this.__map[k]); } return __asJavaList(out); };
           this.toString = function() { return JSON.stringify(this.__map); };
         };
         Packages.java.util.ArrayList = Packages.java.util.ArrayList || function() {
           var values = [];
+          if (arguments.length && arguments[0] && arguments[0].length != null) values = Array.prototype.slice.call(arguments[0]);
           this.add = function(value) { values.push(value); return true; };
+          this.addAll = function(other) { if (other && other.length != null) for (var i = 0; i < other.length; i++) values.push(other[i]); else if (other && other.toArray) values = values.concat(other.toArray()); return true; };
           this.get = function(index) { return values[Number(index)]; };
           this.set = function(index, value) { var old = values[Number(index)]; values[Number(index)] = value; return old; };
           this.remove = function(index) { return values.splice(Number(index), 1)[0]; };
+          this.contains = function(value) { return values.indexOf(value) >= 0; };
+          this.clear = function() { values = []; };
+          this.first = function() { return values.length ? values[0] : null; };
+          this.last = function() { return values.length ? values[values.length - 1] : null; };
           this.size = function() { return values.length; };
           this.isEmpty = function() { return values.length === 0; };
           this.toArray = function() { return values.slice(); };
@@ -1015,6 +1340,7 @@ final class JSCoreRuntime {
         Packages.android.os = Packages.android.os || { Build: { MODEL: 'iPhone', MANUFACTURER: 'Apple', BRAND: 'Apple' } };
         Packages.android.text = Packages.android.text || { TextUtils: { isEmpty: function(value) { return value == null || String(value).length === 0; } } };
         Packages.android.util = Packages.android.util || { Base64: Packages.java.util.Base64 };
+        var android = Packages.android;
         Packages.util = Packages.java.util;
         java.lang = Packages.java.lang;
         java.util = Packages.java.util;
@@ -1102,6 +1428,13 @@ final class JSCoreRuntime {
             return __nativeJsoup.parse(String(html));
           },
           connect: __makeConnect
+        };
+        java.jsoup = java.jsoup || {
+          parse: function(html, baseUrlValue) { return Packages.org.jsoup.Jsoup.parse(String(html || ''), baseUrlValue); },
+          select: function(html, selector) { return Packages.org.jsoup.Jsoup.parse(String(html || '')).select(String(selector || '')); },
+          selectFirst: function(html, selector) { return java.jsoup.select(html, selector).first(); },
+          getAttr: function(html, selector, attr) { return java.jsoup.selectFirst(html, selector).attr(String(attr || '')); },
+          clean: function(html) { return __native_getString(String(html || ''), 'body@text', __defaultBaseUrl()); }
         };
         var ruleResolver = {
           chapter: (typeof chapter === 'undefined' ? null : chapter),
@@ -1228,6 +1561,30 @@ final class JSCoreRuntime {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._*")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func data(for value: String, charset: String) -> Data {
+        switch normalizedCharset(charset) {
+        case "utf16", "utf16le": return value.data(using: .utf16LittleEndian) ?? Data(value.utf8)
+        case "utf16be": return value.data(using: .utf16BigEndian) ?? Data(value.utf8)
+        case "ascii": return value.data(using: .ascii) ?? Data(value.utf8)
+        case "latin1", "iso88591": return value.data(using: .isoLatin1) ?? Data(value.utf8)
+        default: return Data(value.utf8)
+        }
+    }
+
+    private static func string(from data: Data, charset: String) -> String {
+        switch normalizedCharset(charset) {
+        case "utf16", "utf16le": return String(data: data, encoding: .utf16LittleEndian) ?? ""
+        case "utf16be": return String(data: data, encoding: .utf16BigEndian) ?? ""
+        case "ascii": return String(data: data, encoding: .ascii) ?? ""
+        case "latin1", "iso88591": return String(data: data, encoding: .isoLatin1) ?? ""
+        default: return String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+
+    private static func normalizedCharset(_ charset: String) -> String {
+        charset.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
     }
 
     private static func digestHex(value: String, algorithm: String) -> String {

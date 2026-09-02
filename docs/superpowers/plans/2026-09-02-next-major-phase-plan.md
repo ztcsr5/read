@@ -54,6 +54,13 @@
 - 规则编辑器支持分组编辑、语法校验、本地样本预览、单步执行、日志和导出。
 - 书源详情测试支持搜索→详情→目录→正文完整链路。
 
+### 阶段 2A：Legado JS compatibility gap audit（当前已开工）
+
+- 对齐 Flutter `LegadoJsEngine` 的高频兼容面：`getStr/getJson/putJson`、默认值语义、字节/Base64/Hex 转换、`postForm/openUrl`、全局 helper。
+- 补齐常见 Java/Android 命名空间占位：`java.net.URL`、`java.security.MessageDigest`、`javax.crypto.Mac/SecretKeySpec`、`java.io.ByteArrayInputStream`。
+- 保留原生 SwiftSoup/JavaScriptCore 路线，不引入 Flutter runtime；所有网络通过现有 `RuleExecutionContext` mock/handler。
+- 以 fixture + XCTest 锁定 API 行为，阶段末统一提交、推送并跑 iOS build/XCTest 与 unsigned IPA Actions。
+
 ## 阶段 3：阅读器高级能力
 
 - `AVSpeechSynthesizer` 朗读控制器。

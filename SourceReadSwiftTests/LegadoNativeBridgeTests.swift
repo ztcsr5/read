@@ -247,4 +247,83 @@ final class LegadoNativeBridgeTests: XCTestCase {
         guard case .success(let value) = result else { return XCTFail("expected success") }
         XCTAssertEqual(value, "VIP 1|true")
     }
+
+    func testFlutterLegadoUtilityAliasesAndJavaPackages() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("""
+            var bytes = java.strToBytes('abc');
+            var b64 = java.base64Encode(bytes);
+            var url = new Packages.java.net.URL('https://example.com/a?q=1');
+            var digest = Packages.java.security.MessageDigest.getInstance('SHA-256').digest(bytes);
+            var key = new Packages.javax.crypto.spec.SecretKeySpec(java.strToBytes('key'), 'HmacSHA1');
+            var mac = Packages.javax.crypto.Mac.getInstance('HmacSHA1'); mac.init(key);
+            [java.bytesToStr(java.base64DecodeToByteArray(b64)), b64, url.getHost(), url.getPath(), url.getQuery(), digest.length, mac.doFinal(bytes).length].join('|');
+        """)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "abc|YWJj|example.com|/a|q=1|32|20")
+    }
+
+    func testJavaCryptoBridgesPreserveNonASCIIBytesAndRelativeURLs() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("""
+            var bytes = java.strToBytes('你好');
+            var digest = Packages.java.security.MessageDigest.getInstance('SHA-256').digest(bytes);
+            var key = new Packages.javax.crypto.spec.SecretKeySpec(java.strToBytes('密钥'), 'HmacSHA1');
+            var mac = Packages.javax.crypto.Mac.getInstance('HmacSHA1'); mac.init(key);
+            var relative = new Packages.java.net.URL('../chapter-2', 'https://example.com/books/1/');
+            [digest.length, mac.doFinal(bytes).length, relative.toString(), relative.getPath()].join('|');
+        """)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "32|20|https://example.com/books/chapter-2|/books/chapter-2")
+    }
+
+    func testJavaStringCharsetAwareGetBytesAndConstructor() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("""
+            var utf16 = 'A'.getBytes('UTF-16LE');
+            var restored = new Packages.java.lang.String(utf16, 'UTF-16LE');
+            restored.toString() + '|' + utf16.length + '|' + java.bytesToStr(java.strToBytes('A'));
+        """)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "A|2|A")
+    }
+
+    func testPostFormUsesFormEncodingAndHeaderBridge() throws {
+        let context = RuleExecutionContext(responseHandler: { encoded in
+            XCTAssertTrue(encoded.contains("@Body:a%3D1%26q%3Dhello%20world") || encoded.contains("@Body:a=1&q=hello world"))
+            XCTAssertTrue(encoded.localizedCaseInsensitiveContains("Content-Type"))
+            return SourceResponse(
+                url: URL(string: "https://example.com/form")!,
+                statusCode: 201,
+                headers: [:],
+                body: "created",
+                data: Data("created".utf8)
+            )
+        })
+        let runtime = JSCoreRuntime(executionContext: context)
+        let result = runtime.evaluate("java.postForm('https://example.com/form', 'a=1&q=hello%20world').statusCode + '|' + java.postForm('https://example.com/form', 'a=1').body()")
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "201|created")
+    }
+
+    func testGetStrGetJsonAndGetStringDefaultSemantics() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("""
+            java.put('cache-key', 'cached');
+            var json = java.getJson('{"title":"One"}');
+            [java.getStr('cache-key', 'fallback'), java.getStr('missing', 'fallback'), json.title, java.getString('missing', 'default')].join('|');
+        """)
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "cached|fallback|One|default")
+    }
+
+    func testSourceBookChapterGetterAliasesSurviveVariableInjection() throws {
+        let source = BookSource(bookSourceName: "Fixture", bookSourceUrl: "https://example.com/source", searchUrl: "https://example.com")
+        let book = SearchBook(name: "Book", author: "Author", coverUrl: nil, bookUrl: "https://example.com/book", sourceName: "Fixture", sourceUrl: source.bookSourceUrl)
+        let chapter = BookChapter(title: "Chapter 1", url: "https://example.com/chapter", bookUrl: book.bookUrl, index: 4)
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("[source.getName(), source.getUrl(), book.getName(), book.getAuthor(), book.getTocUrl(), chapter.getName(), chapter.getIndex()].join('|')", variables: ["source": source, "book": book, "chapter": chapter])
+        guard case .success(let value) = result else { return XCTFail("expected success") }
+        XCTAssertEqual(value, "Fixture|https://example.com/source|Book|Author|https://example.com/book|Chapter 1|4")
+    }
 }
