@@ -823,6 +823,10 @@
 - Windows host has no Swift/Xcode; iOS compile, XCTest, and unsigned IPA remain GitHub Actions gates.
 - Actual ProMotion frame pacing still requires iPhone Pro/Instruments evidence; CI cannot prove sustained 120 FPS.
 
+### Follow-up stability fix
+
+- Reader content views now receive a chapter URL identity, guaranteeing SwiftUI tears down the prior speech/scroll session before rendering a handed-off chapter. This prevents stale `ReaderView` state from surviving a remote chapter transition.
+
 ### Verification update
 
 - Commit `0b0c5b1` pushed to `codex/swift-v2-lifetime-reader`.

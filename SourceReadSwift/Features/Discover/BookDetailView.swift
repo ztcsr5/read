@@ -258,6 +258,7 @@ struct ChapterLoadingView: View {
                         autoplaySpeechAfterHandoff = false
                     }
                 )
+                .id("reader-\(effectiveChapter.url)")
             } else if let errorMessage {
                 chapterLoadErrorView(errorMessage)
             } else {
