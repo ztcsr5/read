@@ -607,7 +607,7 @@ final class JSCoreRuntime {
           if (path.indexOf('$.') === 0) path = path.substring(2);
           else if (path.charAt(0) === '$') path = path.substring(1);
           if (!path) return [root];
-          var tokens = path.replace(/\[/g, '.').replace(/\]/g, '').split('.').filter(function(token) { return token !== ''; });
+          var tokens = path.split('[').join('.').split(']').join('').split('.').filter(function(token) { return token !== ''; });
           var values = [root];
           for (var t = 0; t < tokens.length; t++) {
             var token = tokens[t].replace(/^['"]|['"]$/g, '');
