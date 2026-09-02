@@ -688,3 +688,16 @@
 
 ### Notes
 - `FrameRateCoordinator` intentionally only records the device ceiling and relies on `CADisableMinimumFrameDurationOnPhone`; the current SDK does not expose a compile-safe frame-rate range property. Documentation must not claim a forced 120 FPS result until ProMotion hardware measurement exists.
+## 2026-09-02 - Task: Lock autonomous major-phase execution plan
+
+### What was done
+- Locked the native Swift/SwiftUI route and large-phase delivery cadence in `docs/superpowers/plans/2026-09-02-next-major-phase-plan.md`.
+- Added explicit phase gates: iOS build/test, unsigned IPA artifact, `git diff --check`, progress evidence, and no false completion claims while Actions are only queued.
+- Fixed execution order: close current CI first, then RSS/source diagnostics, reader automation, and Flutter parity/product wrap-up.
+
+### Testing
+- Ran `git diff --check` locally.
+- GitHub Actions was triggered for this documentation checkpoint; build/test and IPA conclusions remain pending until the runs finish.
+
+### Next
+- Continue autonomous work from the high-refresh/readability phase without requiring another approval checkpoint.
