@@ -86,4 +86,27 @@ final class RSSFeedParserTests: XCTestCase {
         XCTAssertEqual(article?.imageURL, "https://example.com/images/cover.jpg")
         XCTAssertEqual(article?.id.hasPrefix("https://example.com/feed|"), true)
     }
+
+    func testExtractsEmbeddedContentHTMLAndDublinCoreDate() {
+        let xml = """
+        <rss xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><item>
+          <title>Embedded</title><link>/embedded</link>
+          <dc:date>2026-09-03T10:00:00Z</dc:date>
+          <description><![CDATA[Short summary]]></description>
+          <content:encoded><![CDATA[<article><h1>Embedded title</h1><p>Full body</p></article>]]></content:encoded>
+        </item></channel></rss>
+        """
+        let article = RSSFeedParser().parseArticles(from: xml, sourceURL: "https://example.com/feed").first
+        XCTAssertEqual(article?.pubDate, "2026-09-03T10:00:00Z")
+        XCTAssertEqual(article?.description, "Short summary")
+        XCTAssertEqual(article?.contentHTML, "<article><h1>Embedded title</h1><p>Full body</p></article>")
+        XCTAssertEqual(RSSArticleContentParser().parseParagraphs(from: article?.contentHTML ?? ""), ["Embedded title", "Full body"])
+    }
+
+    func testDecodesLegacyArticlePreviewWithoutEmbeddedHTML() throws {
+        let data = Data(#"{"title":"Legacy","link":null,"pubDate":null,"description":"Body","sourceURL":null,"imageURL":null}"#.utf8)
+        let article = try JSONDecoder().decode(RSSArticlePreview.self, from: data)
+        XCTAssertEqual(article.title, "Legacy")
+        XCTAssertNil(article.contentHTML)
+    }
 }

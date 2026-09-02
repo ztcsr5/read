@@ -930,3 +930,20 @@
 
 ### Rollback
 - Revert commits `3cdac84` and `36cee2a` to restore the previous exporter, empty-state and frame-rate implementation.
+
+## 2026-09-03 - Task: RSS embedded content and EPUB navigation hardening phase
+
+### Scope
+- Added `RSSArticlePreview.contentHTML` with backward-compatible Codable decoding for older feed caches.
+- RSS parser now preserves `content:encoded`/`content` HTML separately from the plain-text summary and recognizes Atom/Dublin Core `dc:date`.
+- RSS article cache stores embedded HTML when available; the reader renders cached/feed-provided HTML-derived paragraphs before remote-page fallback and still keeps the existing description fallback.
+- EPUB parser now accepts single-quoted or case-variant `container.xml` paths and reads EPUB3 navigation/NCX labels to provide stable chapter titles even when XHTML headings differ.
+- Added RSS and EPUB regression fixtures for embedded HTML, legacy Codable data, `dc:date`, and EPUB3 navigation labels.
+
+### Testing
+- `git diff --check` passed locally (Windows reports only existing LF-to-CRLF normalization warnings).
+- Windows host cannot run Swift/Xcode; iOS build/XCTest and unsigned IPA remain GitHub Actions gates.
+- Sustained 120 Hz still requires ProMotion hardware/Instruments evidence; this phase does not claim a measured frame rate.
+
+### Rollback
+- Revert the phase commit and this entry to restore the prior RSS preview/cache schema and EPUB chapter-title behavior; old cache files remain readable because new fields are optional.

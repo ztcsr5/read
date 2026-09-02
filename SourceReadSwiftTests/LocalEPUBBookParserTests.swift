@@ -109,6 +109,21 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testUsesEPUB3NavigationLabelsForChapterTitles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("nav.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>"#, to: archive)
+        try add("OEBPS/book.opf", text: #"<package><metadata><dc:title>Nav Book</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>"#, to: archive)
+        try add("OEBPS/nav.xhtml", text: #"<html><body><nav epub:type="toc"><ol><li><a href="chapter.xhtml#start">目录标题</a></li></ol></nav></body></html>"#, to: archive)
+        try add("OEBPS/chapter.xhtml", text: #"<html><body><h1>页面标题</h1><p>正文</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.chapters.first?.title, "目录标题")
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
         try add(path, data: Data(text.utf8), to: archive)
     }

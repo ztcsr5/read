@@ -25,7 +25,7 @@ struct RSSArticleReaderView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if isLoading {
+                if isLoading && paragraphs.isEmpty {
                     ProgressView("正在加载文章")
                         .frame(maxWidth: .infinity, minHeight: 180)
                 } else if let errorMessage {
@@ -80,12 +80,23 @@ struct RSSArticleReaderView: View {
 
     @MainActor
     private func load() async {
+        if let cachedHTML = appState.rssArticleContentCacheStore.contentHTML(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) {
+            let cachedParagraphs = RSSArticleContentParser().parseParagraphs(from: cachedHTML)
+            if !cachedParagraphs.isEmpty {
+                paragraphs = cachedParagraphs
+                showingCachedContent = true
+            }
+        }
         if let cached = appState.rssArticleContentCacheStore.paragraphs(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) {
-            paragraphs = cached
+            if paragraphs.isEmpty { paragraphs = cached }
             showingCachedContent = true
         }
         guard let link = article.link, let url = URL(string: link) else {
-            paragraphs = article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
+            if paragraphs.isEmpty {
+                paragraphs = article.contentHTML.map { RSSArticleContentParser().parseParagraphs(from: $0) }
+                    ?? article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) }
+                    ?? []
+            }
             return
         }
         isLoading = true
@@ -104,12 +115,14 @@ struct RSSArticleReaderView: View {
                 paragraphs = RSSArticleContentParser().parseParagraphs(from: description)
             }
             if !paragraphs.isEmpty {
-                appState.rssArticleContentCacheStore.save(paragraphs, for: article)
+                appState.rssArticleContentCacheStore.save(paragraphs, for: article, contentHTML: article.contentHTML ?? html)
                 showingCachedContent = false
             }
         } catch {
             if paragraphs.isEmpty {
-                paragraphs = article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
+                paragraphs = article.contentHTML.map { RSSArticleContentParser().parseParagraphs(from: $0) }
+                    ?? article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) }
+                    ?? []
             }
             if paragraphs.isEmpty {
                 errorMessage = error.localizedDescription

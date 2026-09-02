@@ -9,14 +9,32 @@ struct RSSArticlePreview: Identifiable, Codable, Hashable, Sendable {
     let pubDate: String?
     let description: String?
     let imageURL: String?
+    /// Raw feed-provided HTML (usually content:encoded). Kept separately from
+    /// the plain-text summary so the reader can render the embedded article
+    /// when the linked page is unavailable.
+    let contentHTML: String?
 
-    init(title: String, link: String?, pubDate: String?, description: String?, sourceURL: String? = nil, imageURL: String? = nil) {
+    init(title: String, link: String?, pubDate: String?, description: String?, sourceURL: String? = nil, imageURL: String? = nil, contentHTML: String? = nil) {
         self.sourceURL = sourceURL
         self.title = title
         self.link = link
         self.pubDate = pubDate
         self.description = description
         self.imageURL = imageURL
+        self.contentHTML = contentHTML
+    }
+
+    private enum CodingKeys: String, CodingKey { case sourceURL, title, link, pubDate, description, imageURL, contentHTML }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceURL = try container.decodeIfPresent(String.self, forKey: .sourceURL)
+        title = try container.decode(String.self, forKey: .title)
+        link = try container.decodeIfPresent(String.self, forKey: .link)
+        pubDate = try container.decodeIfPresent(String.self, forKey: .pubDate)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
+        contentHTML = try container.decodeIfPresent(String.self, forKey: .contentHTML)
     }
 }
 
@@ -36,10 +54,11 @@ struct RSSFeedParser {
             return RSSArticlePreview(
                 title: title,
                 link: firstLink(in: item, baseURL: sourceURL) ?? firstXMLValue(in: item, tags: ["guid"]),
-                pubDate: firstXMLValue(in: item, tags: ["pubDate", "published", "updated"]),
-                description: firstXMLValue(in: item, tags: ["description", "summary", "content"]),
+                pubDate: firstXMLValue(in: item, tags: ["pubDate", "published", "updated", "dc:date"]),
+                description: firstXMLValue(in: item, tags: ["description", "summary"]),
                 sourceURL: sourceURL,
-                imageURL: firstImageURL(in: item, baseURL: sourceURL)
+                imageURL: firstImageURL(in: item, baseURL: sourceURL),
+                contentHTML: firstRawXMLValue(in: item, tags: ["content:encoded", "content"])
             )
         }
     }
@@ -127,6 +146,29 @@ struct RSSFeedParser {
                       match.numberOfRanges > 1,
                       let valueRange = Range(match.range(at: 1), in: text) else { continue }
                 let value = cleanFeedText(String(text[valueRange]))
+                if !value.isEmpty { return value }
+            }
+        }
+        return nil
+    }
+
+    private func firstRawXMLValue(in text: String, tags: [String]) -> String? {
+        for tag in tags {
+            let escaped = NSRegularExpression.escapedPattern(for: tag)
+            let patterns = [
+                "<\(escaped)(?:\\s[^>]*)?><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></\(escaped)>",
+                "<\(escaped)(?:\\s[^>]*)?>([\\s\\S]*?)</\(escaped)>"
+            ]
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                      let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text)),
+                      let valueRange = Range(match.range(at: 1), in: text) else { continue }
+                let value = String(text[valueRange])
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                    .replacingOccurrences(of: "&lt;", with: "<")
+                    .replacingOccurrences(of: "&gt;", with: ">")
+                    .replacingOccurrences(of: "&quot;", with: "\"")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !value.isEmpty { return value }
             }
         }
