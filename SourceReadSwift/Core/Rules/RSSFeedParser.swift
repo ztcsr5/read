@@ -105,7 +105,7 @@ struct RSSFeedParser {
 
     private func resolveURL(_ value: String, baseURL: String?) -> String {
         let trimmed = cleanFeedText(value)
-        guard let base = baseURL.flatMap(URL.init(string:)),
+        guard let base = baseURL.flatMap({ URL(string: $0) }),
               let resolved = URL(string: trimmed, relativeTo: base)?.absoluteURL else {
             return trimmed
         }
