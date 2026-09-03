@@ -1159,3 +1159,24 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the performance/LAN follow-up commit and this entry to restore the previous display-link floor, reader cache key, RSS bookkeeping cadence and web writer page/API routing.
+
+## 2026-09-03 - Stage 2D bounded source diagnostics acceleration
+
+### Implemented
+
+- Batch book-source diagnostics now use bounded fan-out (four sources per batch) instead of strict serial execution.
+- Each source keeps the full Search -> Detail -> TOC -> Content deep-check chain, with results restored to the original source order.
+- Login, health and diagnostic-history records remain written on the main actor after each completed outcome.
+- Deep checks now run inside the source task, so slow detail/TOC/content requests no longer serialize all other sources in the same batch.
+- Dismissing the sheet or leaving Source Manager cancels the active diagnostic task; cancellation is checked between batches and outcomes.
+- CI workflow concurrency now cancels superseded pushes on the same branch, and checkout uses `actions/checkout@v5` to reduce queue waste.
+
+### Testing
+
+- `git diff --check` passed locally (Windows reports only existing LF-to-CRLF normalization warnings).
+- The preceding `e46c79a` workflow badges report passing for both iOS and unsigned IPA; the newest commit is `f2a8991` and its Actions runs are the active authoritative gate.
+- Windows cannot run Xcode/XCTest or prove sustained 120 Hz; ProMotion + Instruments evidence remains required for frame cadence.
+
+### Rollback
+
+- Revert `f2a8991`, `e46c79a`, `6004aad`, `11f30a5` and `4547111` together to restore serial diagnostics and the previous CI workflow behavior.
