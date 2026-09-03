@@ -38,7 +38,7 @@ final class SourceEngineFixturePipelineTests: XCTestCase {
         XCTAssertEqual(chapters.first?.url, chapterURL)
 
         let content = try await unwrap(engine.getContent(source: source, chapter: try XCTUnwrap(chapters.first)))
-        XCTAssertEqual(content.paragraphs, ["第一段", "第二段"])
+        XCTAssertEqual(content.paragraphs, ["第一段 第二段"])
         XCTAssertEqual(network.requestedURLs, [searchURL, bookURL, "https://fixture.example/book/html-1/toc", chapterURL])
     }
 
