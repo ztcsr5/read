@@ -1386,7 +1386,8 @@ struct SourceManagerView: View {
                         await Self.evaluateBatchSource(
                             source: source,
                             keyword: keyword,
-                            engine: engine
+                            engine: engine,
+                            deepCheck: deepCheck
                         )
                     }
                 }
@@ -1394,8 +1395,7 @@ struct SourceManagerView: View {
                 for await outcome in group {
                     guard var latest = batchCheck else { return }
                     var result = outcome.result
-                    if deepCheck, let first = outcome.firstBook {
-                        let deep = await batchDeepCheckFirstResult(source: outcome.source, book: first)
+                    if let deep = outcome.deepCheck {
                         result = SourceBatchCheckResult(
                             sourceName: result.sourceName,
                             sourceURL: result.sourceURL,
@@ -1431,10 +1431,18 @@ struct SourceManagerView: View {
                     appState.sourceDiagnosticHistoryStore.record(
                         source: outcome.source,
                         stage: "batch.search",
-                        status: result.status.healthStatus,
-                        message: result.message,
+                        status: outcome.result.status.healthStatus,
+                        message: outcome.result.message,
                         resultCount: outcome.resultCount
                     )
+                    if let deep = outcome.deepCheck {
+                        appState.sourceDiagnosticHistoryStore.record(
+                            source: outcome.source,
+                            stage: "batch.deep",
+                            status: deep.status.healthStatus,
+                            message: deep.message
+                        )
+                    }
                 }
             }
         }
@@ -1447,7 +1455,8 @@ struct SourceManagerView: View {
     private static func evaluateBatchSource(
         source: BookSource,
         keyword: String,
-        engine: SourceEngine
+        engine: SourceEngine,
+        deepCheck: Bool
     ) async -> BatchCheckOutcome {
         var loginMessage = ""
         var login: BatchLoginOutcome?
@@ -1476,12 +1485,22 @@ struct SourceManagerView: View {
                 ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
                 : "搜索通过：\(books.count) 条结果。"
             if !loginMessage.isEmpty { message += " \(loginMessage)" }
+            let deepOutcome: BatchDeepCheckOutcome?
+            if deepCheck, let firstBook = books.first {
+                deepOutcome = await Self.batchDeepCheckFirstResult(
+                    source: source,
+                    book: firstBook,
+                    engine: engine
+                )
+            } else {
+                deepOutcome = nil
+            }
             return BatchCheckOutcome(
                 source: source,
                 result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message),
                 resultCount: books.count,
-                firstBook: books.first,
-                login: login
+                login: login,
+                deepCheck: deepOutcome
             )
         case .failure(let error):
             var message = "\(error.displayMessage)"
@@ -1491,8 +1510,8 @@ struct SourceManagerView: View {
                 source: source,
                 result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message),
                 resultCount: 0,
-                firstBook: nil,
-                login: login
+                login: login,
+                deepCheck: nil
             )
         }
     }
@@ -1560,8 +1579,7 @@ struct SourceManagerView: View {
         }
     }
 
-    private func batchDeepCheckFirstResult(source: BookSource, book: SearchBook) async -> (status: SourceBatchCheckStatus, message: String) {
-        let engine = appState.engine
+    private static func batchDeepCheckFirstResult(source: BookSource, book: SearchBook, engine: SourceEngine) async -> BatchDeepCheckOutcome {
         let detailResult = await AsyncTimeout.run(seconds: 10) {
             await engine.getBookDetail(source: source, book: book)
         } ?? .failure(.network("Detail deep check timed out"))
@@ -1573,7 +1591,7 @@ struct SourceManagerView: View {
             switch chapterResult {
             case .success(let chapters):
                 guard let firstChapter = chapters.first else {
-                    return (.warning, "深测：详情通过，但目录为空。")
+                    return BatchDeepCheckOutcome(status: .warning, message: "深测：详情通过，但目录为空。")
                 }
                 let contentResult = await AsyncTimeout.run(seconds: 10) {
                     await engine.getContent(source: source, chapter: firstChapter)
@@ -1581,17 +1599,17 @@ struct SourceManagerView: View {
                 switch contentResult {
                 case .success(let content):
                     if content.paragraphs.isEmpty {
-                        return (.warning, "深测：详情/目录通过，但正文为空。")
+                        return BatchDeepCheckOutcome(status: .warning, message: "深测：详情/目录通过，但正文为空。")
                     }
-                    return (.passed, "深测通过：详情/目录/正文均可用，正文 \(content.paragraphs.count) 段。")
+                    return BatchDeepCheckOutcome(status: .passed, message: "深测通过：详情/目录/正文均可用，正文 \(content.paragraphs.count) 段。")
                 case .failure(let error):
-                    return (SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content")), "深测正文失败：\(error.displayMessage)")
+                    return BatchDeepCheckOutcome(status: SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content")), message: "深测正文失败：\(error.displayMessage)")
                 }
             case .failure(let error):
-                return (SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc")), "深测目录失败：\(error.displayMessage)")
+                return BatchDeepCheckOutcome(status: SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc")), message: "深测目录失败：\(error.displayMessage)")
             }
         case .failure(let error):
-            return (SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail")), "深测详情失败：\(error.displayMessage)")
+            return BatchDeepCheckOutcome(status: SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail")), message: "深测详情失败：\(error.displayMessage)")
         }
     }
 
@@ -2075,8 +2093,13 @@ private struct BatchCheckOutcome: Sendable {
     let source: BookSource
     let result: SourceBatchCheckResult
     let resultCount: Int
-    let firstBook: SearchBook?
     let login: BatchLoginOutcome?
+    let deepCheck: BatchDeepCheckOutcome?
+}
+
+private struct BatchDeepCheckOutcome: Sendable {
+    let status: SourceBatchCheckStatus
+    let message: String
 }
 
 private extension SourceHealthStatus {
