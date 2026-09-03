@@ -24,6 +24,12 @@ struct SourceManagerView: View {
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
     @State private var pendingDeleteBookSourceURLs: Set<String> = []
+    @State private var isManagingCatalogs = false
+    @State private var selectedCatalogURLs: Set<String> = []
+    @State private var pendingDeleteCatalogURLs: Set<String> = []
+    @State private var isManagingRSS = false
+    @State private var selectedRSSURLs: Set<String> = []
+    @State private var pendingDeleteRSSURLs: Set<String> = []
 
     private var filteredBookSources: [BookSource] {
         let keyword = normalizedSearchText
@@ -56,6 +62,38 @@ struct SourceManagerView: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private var currentTabCount: Int {
+        switch selectedTab {
+        case .bookSources: return appState.sourceStore.sources.count
+        case .catalogs: return appState.sourceStore.catalogs.count
+        case .rss: return appState.sourceStore.rssSources.count
+        }
+    }
+
+    private var isManagingCurrentTab: Bool {
+        switch selectedTab {
+        case .bookSources: return isManagingBookSources
+        case .catalogs: return isManagingCatalogs
+        case .rss: return isManagingRSS
+        }
+    }
+
+    private func toggleManagementForCurrentTab() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            switch selectedTab {
+            case .bookSources:
+                isManagingBookSources.toggle()
+                if !isManagingBookSources { selectedBookSourceURLs.removeAll() }
+            case .catalogs:
+                isManagingCatalogs.toggle()
+                if !isManagingCatalogs { selectedCatalogURLs.removeAll() }
+            case .rss:
+                isManagingRSS.toggle()
+                if !isManagingRSS { selectedRSSURLs.removeAll() }
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -76,14 +114,9 @@ struct SourceManagerView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    if selectedTab == .bookSources, !appState.sourceStore.sources.isEmpty {
-                        Button(isManagingBookSources ? "完成" : "管理") {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                isManagingBookSources.toggle()
-                                if !isManagingBookSources {
-                                    selectedBookSourceURLs.removeAll()
-                                }
-                            }
+                    if currentTabCount > 0 {
+                        Button(isManagingCurrentTab ? "完成" : "管理") {
+                            toggleManagementForCurrentTab()
                         }
                     }
                 }
@@ -171,6 +204,32 @@ struct SourceManagerView: View {
             } message: {
                 Text("将删除 \(pendingDeleteBookSourceURLs.count) 个书源。此操作不会删除书架里的书，但对应书籍可能需要换源后才能继续加载。")
             }
+            .alert("删除选中的书源仓库？", isPresented: Binding(
+                get: { !pendingDeleteCatalogURLs.isEmpty },
+                set: { if !$0 { pendingDeleteCatalogURLs.removeAll() } }
+            )) {
+                Button("取消", role: .cancel) { pendingDeleteCatalogURLs.removeAll() }
+                Button("删除", role: .destructive) {
+                    appState.sourceStore.removeCatalogs(urls: pendingDeleteCatalogURLs)
+                    selectedCatalogURLs.removeAll()
+                    pendingDeleteCatalogURLs.removeAll()
+                }
+            } message: {
+                Text("将删除 \(pendingDeleteCatalogURLs.count) 个书源仓库，已经导入的书源不会被删除。")
+            }
+            .alert("删除选中的 RSS？", isPresented: Binding(
+                get: { !pendingDeleteRSSURLs.isEmpty },
+                set: { if !$0 { pendingDeleteRSSURLs.removeAll() } }
+            )) {
+                Button("取消", role: .cancel) { pendingDeleteRSSURLs.removeAll() }
+                Button("删除", role: .destructive) {
+                    appState.sourceStore.removeRSS(sourceURLs: pendingDeleteRSSURLs)
+                    selectedRSSURLs.removeAll()
+                    pendingDeleteRSSURLs.removeAll()
+                }
+            } message: {
+                Text("将删除 \(pendingDeleteRSSURLs.count) 个 RSS 源及其入口，已缓存的文章内容不受影响。")
+            }
             .sheet(isPresented: $showFileImporter) {
                 UniversalDocumentPicker(
                     contentTypes: [
@@ -250,7 +309,11 @@ struct SourceManagerView: View {
         .onChange(of: selectedTab) { _ in
             searchText = ""
             isManagingBookSources = false
+            isManagingCatalogs = false
+            isManagingRSS = false
             selectedBookSourceURLs.removeAll()
+            selectedCatalogURLs.removeAll()
+            selectedRSSURLs.removeAll()
         }
     }
 
@@ -305,15 +368,22 @@ struct SourceManagerView: View {
     private var catalogContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader(title: "书源仓库", count: appState.sourceStore.catalogs.count)
+            if isManagingCatalogs {
+                catalogBatchToolbar
+            }
             if appState.sourceStore.catalogs.isEmpty {
                 EmptyStateCard(systemImage: "square.stack", title: "暂无书源仓库", message: "导入仓库 JSON 后会显示在这里")
             } else if filteredCatalogs.isEmpty {
                 CenterTextEmptyState("没有匹配的仓库", minHeight: 220)
             } else {
-                LazyVStack(spacing: 10) {
-                    ForEach(filteredCatalogs) { catalog in
-                        catalogRow(catalog)
-                    }
+                    LazyVStack(spacing: 10) {
+                        ForEach(filteredCatalogs) { catalog in
+                            if isManagingCatalogs {
+                                selectableCatalogRow(catalog)
+                            } else {
+                                catalogRow(catalog)
+                            }
+                        }
                 }
             }
         }
@@ -322,20 +392,27 @@ struct SourceManagerView: View {
     private var rssContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader(title: "RSS", count: appState.sourceStore.rssSources.count)
+            if isManagingRSS {
+                rssBatchToolbar
+            }
             if appState.sourceStore.rssSources.isEmpty {
                 EmptyStateCard(systemImage: "newspaper", title: "暂无 RSS", message: "导入 RSS/Atom JSON 后会显示在这里")
             } else if filteredRSSSources.isEmpty {
                 CenterTextEmptyState("没有匹配的 RSS", minHeight: 220)
             } else {
-                LazyVStack(spacing: 10) {
-                    ForEach(filteredRSSSources) { source in
-                        NavigationLink {
-                            RSSArticlesView(source: source)
-                        } label: {
-                            rssRow(source)
+                    LazyVStack(spacing: 10) {
+                        ForEach(filteredRSSSources) { source in
+                            if isManagingRSS {
+                                selectableRSSRow(source)
+                            } else {
+                                NavigationLink {
+                                    RSSArticlesView(source: source)
+                                } label: {
+                                    rssRow(source)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
-                    }
                 }
             }
         }
@@ -444,6 +521,68 @@ struct SourceManagerView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    private var catalogBatchToolbar: some View {
+        batchToolbar(
+            selectedCount: selectedCatalogURLs.count,
+            visibleIDs: Set(filteredCatalogs.map(\.url)),
+            onSelect: { selectedCatalogURLs = $0 },
+            onEnable: { appState.sourceStore.setCatalogsEnabled(true, for: selectedCatalogURLs); selectedCatalogURLs.removeAll() },
+            onDisable: { appState.sourceStore.setCatalogsEnabled(false, for: selectedCatalogURLs); selectedCatalogURLs.removeAll() },
+            onDelete: { pendingDeleteCatalogURLs = selectedCatalogURLs }
+        )
+    }
+
+    private var rssBatchToolbar: some View {
+        batchToolbar(
+            selectedCount: selectedRSSURLs.count,
+            visibleIDs: Set(filteredRSSSources.map(\.sourceUrl)),
+            onSelect: { selectedRSSURLs = $0 },
+            onEnable: { appState.sourceStore.setRSSEnabled(true, for: selectedRSSURLs); selectedRSSURLs.removeAll() },
+            onDisable: { appState.sourceStore.setRSSEnabled(false, for: selectedRSSURLs); selectedRSSURLs.removeAll() },
+            onDelete: { pendingDeleteRSSURLs = selectedRSSURLs }
+        )
+    }
+
+    private func batchToolbar(
+        selectedCount: Int,
+        visibleIDs: Set<String>,
+        onSelect: @escaping (Set<String>) -> Void,
+        onEnable: @escaping () -> Void,
+        onDisable: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button("全选") { onSelect(visibleIDs) }
+                Button("反选") { onSelect(visibleIDs.subtracting(currentSelectionForTab)) }
+                Button("清空") { onSelect([]) }
+                Spacer()
+                Text("已选 \(selectedCount)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 10) {
+                Button("启用", action: onEnable)
+                Button("停用", action: onDisable)
+                Button("删除", role: .destructive, action: onDelete)
+            }
+            .disabled(selectedCount == 0)
+            .buttonStyle(.bordered)
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(12)
+        .background(AppTheme.elevatedCard)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var currentSelectionForTab: Set<String> {
+        switch selectedTab {
+        case .bookSources: return selectedBookSourceURLs
+        case .catalogs: return selectedCatalogURLs
+        case .rss: return selectedRSSURLs
+        }
+    }
+
     private func selectableBookSourceRow(_ source: BookSource) -> some View {
         Button {
             if selectedBookSourceURLs.contains(source.bookSourceUrl) {
@@ -482,6 +621,69 @@ struct SourceManagerView: View {
             .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 5)
         }
         .buttonStyle(.plain)
+    }
+
+    private func selectableCatalogRow(_ catalog: SourceCatalog) -> some View {
+        selectableSourceRow(
+            id: catalog.url,
+            title: catalog.name,
+            subtitle: catalog.importUrl ?? catalog.url,
+            enabled: catalog.enabled,
+            badges: ["仓库", catalog.importedCount > 0 ? "已导入 \(catalog.importedCount)" : nil].compactMap { $0 },
+            selected: selectedCatalogURLs.contains(catalog.url),
+            onToggle: {
+                if selectedCatalogURLs.contains(catalog.url) { selectedCatalogURLs.remove(catalog.url) }
+                else { selectedCatalogURLs.insert(catalog.url) }
+            }
+        )
+    }
+
+    private func selectableRSSRow(_ source: RSSSource) -> some View {
+        selectableSourceRow(
+            id: source.sourceUrl,
+            title: source.sourceName,
+            subtitle: source.sourceUrl,
+            enabled: source.enabled,
+            badges: ["RSS", "文章"],
+            selected: selectedRSSURLs.contains(source.sourceUrl),
+            onToggle: {
+                if selectedRSSURLs.contains(source.sourceUrl) { selectedRSSURLs.remove(source.sourceUrl) }
+                else { selectedRSSURLs.insert(source.sourceUrl) }
+            }
+        )
+    }
+
+    private func selectableSourceRow(
+        id: String,
+        title: String,
+        subtitle: String,
+        enabled: Bool,
+        badges: [String],
+        selected: Bool,
+        onToggle: @escaping () -> Void
+    ) -> some View {
+        Button(action: onToggle) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? AppTheme.accent : .secondary)
+                    .frame(width: 32, height: 44)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    HStack(spacing: 8) {
+                        statusBadge(enabled ? "启用" : "停用", color: enabled ? .green : .gray)
+                        ForEach(badges, id: \.self) { statusBadge($0, color: .blue) }
+                    }
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(AppTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("选择 \(title)")
     }
 
     private func catalogRow(_ catalog: SourceCatalog) -> some View {
