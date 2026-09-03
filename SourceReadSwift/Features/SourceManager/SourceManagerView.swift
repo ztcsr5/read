@@ -1062,7 +1062,7 @@ struct SourceManagerView: View {
     private func batchCheckSheet(_ state: SourceBatchCheckState) -> some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text("将按顺序测试 \(state.sources.count) 个书源。默认会在搜索通过后继续验证首条结果的详情、目录和正文，避免只测搜索造成假绿。")
+                Text("将并发测试 \(state.sources.count) 个书源（每批最多 4 个）。默认会在搜索通过后继续验证首条结果的详情、目录和正文，避免只测搜索造成假绿。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -1374,92 +1374,126 @@ struct SourceManagerView: View {
         batchCheck = state
 
         let engine = appState.engine
-        for source in state.sources {
-            var loginMessage = ""
-            if source.loginCheckJs?.nilIfEmpty != nil {
-                let loginResult = await AsyncTimeout.run(seconds: 10) {
-                    await engine.verifyLogin(source: source)
-                } ?? .failure(.network("Login check timed out"))
-                switch loginResult {
-                case .success(let verification):
-                    loginMessage = "登录检查：\(verification.message)"
-                    appState.sourceDiagnosticHistoryStore.record(source: source, stage: "batch.login", status: verification.status.healthStatus, message: verification.message)
-                case .failure(let error):
-                    loginMessage = "登录检查失败：\(error.displayMessage)"
-                    appState.sourceDiagnosticHistoryStore.record(source: source, stage: "batch.login", status: .warning, message: error.displayMessage)
+        let deepCheck = state.deepCheckFirstResult
+        // Network-bound diagnostics used to run strictly serially. Keep a
+        // small bounded fan-out so a bad source cannot make a 30-source check
+        // feel frozen, while avoiding an unbounded request burst.
+        for batch in state.sources.chunked(into: 4) {
+            guard batchCheck != nil else { return }
+            await withTaskGroup(of: BatchCheckOutcome.self) { group in
+                for source in batch {
+                    group.addTask {
+                        await Self.evaluateBatchSource(
+                            source: source,
+                            keyword: keyword,
+                            engine: engine
+                        )
+                    }
+                }
+
+                for await outcome in group {
+                    guard var latest = batchCheck else { return }
+                    var result = outcome.result
+                    if deepCheck, let first = outcome.firstBook {
+                        let deep = await batchDeepCheckFirstResult(source: outcome.source, book: first)
+                        result = SourceBatchCheckResult(
+                            sourceName: result.sourceName,
+                            sourceURL: result.sourceURL,
+                            status: deep.status,
+                            message: "\(result.message) \(deep.message)"
+                        )
+                    }
+                    latest.checkedCount += 1
+                    latest.results.append(result)
+                    latest.results.sort { lhs, rhs in
+                        let left = state.sources.firstIndex { $0.bookSourceUrl == lhs.sourceURL } ?? Int.max
+                        let right = state.sources.firstIndex { $0.bookSourceUrl == rhs.sourceURL } ?? Int.max
+                        return left < right
+                    }
+                    batchCheck = latest
+
+                    if let login = outcome.login {
+                        appState.sourceDiagnosticHistoryStore.record(
+                            sourceURL: result.sourceURL,
+                            sourceName: result.sourceName,
+                            stage: "batch.login",
+                            status: login.status,
+                            message: login.message
+                        )
+                    }
+                    appState.sourceHealthStore.record(
+                        source: outcome.source,
+                        status: result.status.healthStatus,
+                        message: result.message,
+                        keyword: keyword,
+                        resultCount: outcome.resultCount
+                    )
+                    appState.sourceDiagnosticHistoryStore.record(
+                        source: outcome.source,
+                        stage: "batch.search",
+                        status: result.status.healthStatus,
+                        message: result.message,
+                        resultCount: outcome.resultCount
+                    )
                 }
             }
-            let result = await AsyncTimeout.run(seconds: 10) {
-                await engine.searchBooks(source: source, keyword: keyword, page: 1)
-            } ?? .failure(.network("Search timed out"))
-            guard var latest = batchCheck else { return }
-            latest.checkedCount += 1
-            switch result {
-            case .success(let books):
-                var status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
-                var message = books.isEmpty
-                    ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
-                    : "搜索通过：\(books.count) 条结果。"
-                if !loginMessage.isEmpty { message += " \(loginMessage)" }
-                if state.deepCheckFirstResult, let first = books.first {
-                    let deep = await batchDeepCheckFirstResult(source: source, book: first)
-                    status = deep.status
-                    message += " \(deep.message)"
-                }
-                latest.results.append(
-                    SourceBatchCheckResult(
-                        sourceName: source.bookSourceName,
-                        sourceURL: source.bookSourceUrl,
-                        status: status,
-                        message: message
-                    )
-                )
-                appState.sourceHealthStore.record(
-                    source: source,
-                    status: status.healthStatus,
-                    message: message,
-                    keyword: keyword,
-                    resultCount: books.count
-                )
-                appState.sourceDiagnosticHistoryStore.record(
-                    source: source,
-                    stage: "batch.search",
-                    status: status.healthStatus,
-                    message: message,
-                    resultCount: books.count
-                )
-            case .failure(let error):
-                var message = "\(error.displayMessage)；建议：\(sourceTestAdvice(stage: "搜索", error: error))"
-                if !loginMessage.isEmpty { message += " \(loginMessage)" }
-                let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
-                latest.results.append(
-                    SourceBatchCheckResult(
-                        sourceName: source.bookSourceName,
-                        sourceURL: source.bookSourceUrl,
-                        status: SourceBatchCheckStatus(classified),
-                        message: message
-                    )
-                )
-                appState.sourceHealthStore.record(
-                    source: source,
-                    status: classified,
-                    message: message,
-                    keyword: keyword,
-                    resultCount: 0
-                )
-                appState.sourceDiagnosticHistoryStore.record(
-                    source: source,
-                    stage: "batch.search",
-                    status: classified,
-                    message: message
-                )
-            }
-            batchCheck = latest
         }
 
         guard var finished = batchCheck else { return }
         finished.isRunning = false
         batchCheck = finished
+    }
+
+    private static func evaluateBatchSource(
+        source: BookSource,
+        keyword: String,
+        engine: SourceEngine
+    ) async -> BatchCheckOutcome {
+        var loginMessage = ""
+        var login: BatchLoginOutcome?
+        if source.loginCheckJs?.nilIfEmpty != nil {
+            let loginResult = await AsyncTimeout.run(seconds: 10) {
+                await engine.verifyLogin(source: source)
+            } ?? .failure(.network("Login check timed out"))
+            switch loginResult {
+            case .success(let verification):
+                loginMessage = "登录检查：\(verification.message)"
+                login = BatchLoginOutcome(status: verification.status.healthStatus, message: verification.message)
+            case .failure(let error):
+                loginMessage = "登录检查失败：\(error.displayMessage)"
+                login = BatchLoginOutcome(status: .warning, message: error.displayMessage)
+            }
+        }
+
+        let result = await AsyncTimeout.run(seconds: 10) {
+            await engine.searchBooks(source: source, keyword: keyword, page: 1)
+        } ?? .failure(.network("Search timed out"))
+
+        switch result {
+        case .success(let books):
+            var status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
+            var message = books.isEmpty
+                ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
+                : "搜索通过：\(books.count) 条结果。"
+            if !loginMessage.isEmpty { message += " \(loginMessage)" }
+            return BatchCheckOutcome(
+                source: source,
+                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message),
+                resultCount: books.count,
+                firstBook: books.first,
+                login: login
+            )
+        case .failure(let error):
+            var message = "\(error.displayMessage)"
+            if !loginMessage.isEmpty { message += " \(loginMessage)" }
+            let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
+            return BatchCheckOutcome(
+                source: source,
+                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message),
+                resultCount: 0,
+                login: login
+            )
+        }
     }
 
     private func sourceTestHeader(source: BookSource, keyword: String) -> String {
@@ -2029,6 +2063,19 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
     let sourceURL: String
     let status: SourceBatchCheckStatus
     let message: String
+}
+
+private struct BatchLoginOutcome: Sendable {
+    let status: SourceHealthStatus
+    let message: String
+}
+
+private struct BatchCheckOutcome: Sendable {
+    let source: BookSource
+    let result: SourceBatchCheckResult
+    let resultCount: Int
+    let firstBook: SearchBook?
+    let login: BatchLoginOutcome?
 }
 
 private extension SourceHealthStatus {
