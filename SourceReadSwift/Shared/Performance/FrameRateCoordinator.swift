@@ -6,6 +6,8 @@ import QuartzCore
 /// requests the active native ceiling through the window layer, and records it
 /// without forcing unsupported rates on 60 Hz hardware.
 enum FrameRateCoordinator {
+    private static var drivers: [String: HighRefreshDisplayLinkDriver] = [:]
+
     static func apply(to scene: UIScene? = nil) {
         let scenes: [UIWindowScene]
         if let windowScene = scene as? UIWindowScene {
@@ -30,17 +32,47 @@ enum FrameRateCoordinator {
         // here because the CI toolchain does not expose them consistently.
         if maximum >= 80 {
             let ceiling = Float(min(maximum, 120))
-            windowScene.windows.forEach { window in
-                window.preferredFrameRateRange = CAFrameRateRange(
-                    minimum: 80,
-                    maximum: ceiling,
-                    preferred: ceiling
-                )
-            }
+            let sceneID = windowScene.session.persistentIdentifier
+            let driver = drivers[sceneID] ?? HighRefreshDisplayLinkDriver()
+            driver.start(maximumFramesPerSecond: ceiling)
+            drivers[sceneID] = driver
         }
         PerformanceSignpost.event(
             "frame.rate",
             "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
         )
+    }
+}
+
+/// A lightweight display-link request keeps UIKit's active render cadence at
+/// the native ProMotion ceiling. iOS still throttles static screens and
+/// unsupported devices, while scrolling/interactive animations can reach
+/// 80-120 Hz instead of being pinned to 60 Hz.
+private final class HighRefreshDisplayLinkDriver: NSObject {
+    private var displayLink: CADisplayLink?
+
+    func start(maximumFramesPerSecond: Float) {
+        if let displayLink {
+            displayLink.preferredFrameRateRange = CAFrameRateRange(
+                minimum: min(80, maximumFramesPerSecond),
+                maximum: maximumFramesPerSecond,
+                preferred: maximumFramesPerSecond
+            )
+            return
+        }
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.preferredFrameRateRange = CAFrameRateRange(
+            minimum: min(80, maximumFramesPerSecond),
+            maximum: maximumFramesPerSecond,
+            preferred: maximumFramesPerSecond
+        )
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func tick() {}
+
+    deinit {
+        displayLink?.invalidate()
     }
 }
