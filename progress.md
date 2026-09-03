@@ -1074,3 +1074,28 @@
 - Finish source visual test/detail UX and batch operations for RSS/catalogs.
 - Continue reader rendering profiling and validate actual 120 Hz on a ProMotion device; CI cannot prove sustained frame cadence.
 - Add UI-test coverage for settings dismissal, chapter navigation chrome, LAN web import and bottom safe-area behavior.
+
+## 2026-09-03 - Stage 2C reader/UI closure checkpoint
+
+### Completed in this checkpoint
+
+- Commit `07d641d`: reader settings dismissal, chapter-selection reader chrome persistence, native large-title shells for Home/Discover, and auto-scroll animation tuning.
+- Commit `553cc38`: fixed Swift argument ordering and split `BookDetailView` reader construction to satisfy the iOS compiler. Both iOS and unsigned IPA workflows passed.
+- Commit `cd13c29`: added batch enable/disable/delete/test management for book sources, source catalogs and RSS sources.
+- Commit `aca9418`: added a compact source health card and visual source-detail sheet with Search -> Detail -> TOC -> Content stage indicators and direct test/rule/JSON actions.
+
+### CI evidence
+
+- iOS: https://github.com/ztcsr5/read/actions/runs/33733422198 (success)
+- Unsigned IPA: https://github.com/ztcsr5/read/actions/runs/33733422113 (success)
+
+### Current phase status
+
+- Stage 2A (JS bridge): closed.
+- Stage 2B (source pipeline): closed.
+- Stage 2C (reader/data/source-management polish): active, with the reader and source-management closure now green in CI.
+- Stage 2D (EPUB/RSS reader depth, rule-editor UX, search productization and performance profiling): next major phase, not yet started as a full phase.
+
+### Verification note
+
+Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests and unsigned IPA packaging; sustained 120 Hz still requires a ProMotion device + Instruments trace.
