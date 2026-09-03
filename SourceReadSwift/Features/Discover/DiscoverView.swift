@@ -523,19 +523,11 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     private func filtered(_ books: [SearchBook], keyword: String) -> [SearchBook] {
-        var seenIDs = Set<String>()
-        let uniqueBooks = books.filter { book in
-            let hasName = !book.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return hasName && seenIDs.insert(book.id).inserted
-        }
-        guard matchMode == .exact else { return uniqueBooks }
-        let exactMatches = uniqueBooks.filter { book in
-            book.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                .localizedCaseInsensitiveCompare(keyword) == .orderedSame
-                || (book.author?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .localizedCaseInsensitiveCompare(keyword) == .orderedSame)
-        }
-        return exactMatches
+        SearchBookMatcher.filteredAndRanked(
+            books,
+            keyword: keyword,
+            exact: matchMode == .exact
+        )
     }
 }
 
