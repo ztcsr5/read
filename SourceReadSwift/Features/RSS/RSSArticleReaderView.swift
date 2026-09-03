@@ -54,7 +54,7 @@ struct RSSArticleReaderView: View {
         if paragraphs.indices.contains(speechController.currentParagraphIndex) {
             return speechController.currentParagraphIndex
         }
-        return paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil
+        return autoScrollEnabled && paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil
     }
 
     private var nativeScrollRequestKey: String {
@@ -75,6 +75,10 @@ struct RSSArticleReaderView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { readerControls }
         .task(id: "\(currentArticle.id)|\(reloadToken.uuidString)") { await load(currentArticle) }
         .onAppear { appState.rssArticleStateStore.markRead(currentArticle) }
+        .onChange(of: currentArticle.id) { _ in
+            resetReaderSession()
+            appState.rssArticleStateStore.markRead(currentArticle)
+        }
         .onDisappear { stopAutoScroll(); speechController.stop() }
         .toolbar { readerToolbar }
     }
@@ -107,7 +111,6 @@ struct RSSArticleReaderView: View {
                     onVisibleParagraph: { index in
                         guard !autoScrollEnabled, paragraphs.indices.contains(index), index != visibleParagraphIndex else { return }
                         visibleParagraphIndex = index
-                        autoScrollTarget = index
                     }
                 )
                 .ignoresSafeArea(.container, edges: .bottom)
