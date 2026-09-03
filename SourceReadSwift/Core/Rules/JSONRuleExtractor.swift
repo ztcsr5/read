@@ -388,6 +388,11 @@ struct JSONRuleExtractor {
             output.removeFirst() // `$..name` -> `..name`, tokenizer emits `**`.
             return output
         }
+        if output.hasPrefix("$.") {
+            output.removeFirst(2)
+        } else if output.hasPrefix("$") {
+            output.removeFirst()
+        }
         output = output
             .replacingOccurrences(of: #"(?i)@put:\{[^}]*\}"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?i)@get:\{([^}]*)\}"#, with: "$1", options: .regularExpression)
@@ -409,7 +414,10 @@ struct JSONRuleExtractor {
                 .filter { !$0.isEmpty && !$0.hasPrefix("@") }
                 .joined(separator: ".")
         }
-        if let atIndex = output.lastIndex(of: "@"), atIndex != output.startIndex {
+        // `@` inside a JSONPath predicate denotes the current element and
+        // must not be rewritten as Legado's `@field` suffix operator.
+        if !output.contains("[?"),
+           let atIndex = output.lastIndex(of: "@"), atIndex != output.startIndex {
             output.replaceSubrange(atIndex...atIndex, with: ".")
         }
         output = output.replacingOccurrences(of: #"\[['"]?([^'"\]]+)['"]?\]"#, with: ".$1", options: .regularExpression)

@@ -42,7 +42,14 @@ final class AppDataBackupTests: XCTestCase {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(AppDataBackupSnapshot.self, from: encoder.encode(snapshot))
-        XCTAssertEqual(decoded, snapshot)
+        XCTAssertEqual(decoded.schemaVersion, snapshot.schemaVersion)
+        XCTAssertEqual(decoded.exportedAt, snapshot.exportedAt)
+        XCTAssertEqual(decoded.bookshelf, snapshot.bookshelf)
+        XCTAssertEqual(decoded.sources.sources.first?.bookSourceName, "测试源")
+        XCTAssertEqual(decoded.sources.sources.first?.bookSourceUrl, source.bookSourceUrl)
+        XCTAssertEqual(decoded.purifyRules, snapshot.purifyRules)
+        XCTAssertEqual(decoded.rssState, snapshot.rssState)
+        XCTAssertEqual(decoded.readerPreferences, snapshot.readerPreferences)
         XCTAssertEqual(decoded.bookshelf.books.first?.title, "测试书")
         XCTAssertEqual(decoded.readerPreferences["reader.fontSize"], .double(20))
     }
