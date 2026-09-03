@@ -295,7 +295,7 @@ struct JSONRuleExtractor {
             return matches.isEmpty ? nil : matches
         }
 
-        if let filter = filterPredicate(part), let array = current as? [Any] {
+        if let filter = filterPredicate(part), let array = arrayValues(current) {
             let filtered = array.filter { matchesPredicate($0, filter: filter) }
             return walk(filtered, parts: parts, index: index + 1)
         }
@@ -309,7 +309,7 @@ struct JSONRuleExtractor {
             return walk(value, parts: parts, index: index + 1)
         }
 
-        if let array = current as? [Any] {
+        if let array = arrayValues(current) {
             if part == "*" {
                 return walk(array, parts: parts, index: index + 1)
             }
@@ -336,8 +336,23 @@ struct JSONRuleExtractor {
 
     private func children(of value: Any) -> [Any] {
         if let dict = value as? [String: Any] { return Array(dict.values) }
-        if let array = value as? [Any] { return array }
+        if let array = arrayValues(value) { return array }
         return []
+    }
+
+    /// Swift does not guarantee that a nested `[[String: Any]]` value can be
+    /// conditionally cast to `[Any]` on every Foundation bridge. Normalizing
+    /// both representations here keeps JSONPath filters and wildcards from
+    /// silently falling back to recursive dictionary collection.
+    private func arrayValues(_ value: Any) -> [Any]? {
+        if let array = value as? [Any] { return array }
+        if let dictionaries = value as? [[String: Any]] {
+            return dictionaries.map { $0 as Any }
+        }
+        if let nsArray = value as? NSArray {
+            return nsArray.map { $0 }
+        }
+        return nil
     }
 
     private func appendFlattened(_ value: Any, to output: inout [Any]) {

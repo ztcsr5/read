@@ -31,18 +31,18 @@ final class AppDataBackupTests: XCTestCase {
             addedAt: fixedDate
         )
         let bookshelf = BookshelfBackupSnapshot(
+            exportedAt: fixedDate,
             books: [book],
-            groups: [BookshelfGroup(id: "g1", name: "默认", sortOrder: 0, createdAt: fixedDate)],
-            exportedAt: fixedDate
+            groups: [BookshelfGroup(id: "g1", name: "默认", sortOrder: 0, createdAt: fixedDate)]
         )
         let source = BookSource(bookSourceName: "测试源", bookSourceUrl: "https://source.example")
         let snapshot = AppDataBackupSnapshot(
+            exportedAt: fixedDate,
             bookshelf: bookshelf,
             sources: SourceLibrarySnapshot(sources: [source]),
             purifyRules: [PurifyRule(id: "rule-1", pattern: "广告")],
             rssState: RSSArticleStateSnapshot(readIDs: ["r1"], favoriteIDs: ["r2"]),
-            readerPreferences: ["reader.fontSize": .double(20), "reader.mode": .string("paged")],
-            exportedAt: fixedDate
+            readerPreferences: ["reader.fontSize": .double(20), "reader.mode": .string("paged")]
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -58,6 +58,6 @@ final class AppDataBackupTests: XCTestCase {
         XCTAssertEqual(decoded.rssState, snapshot.rssState)
         XCTAssertEqual(decoded.readerPreferences, snapshot.readerPreferences)
         XCTAssertEqual(decoded.bookshelf.books.first?.title, "测试书")
-        XCTAssertEqual(decoded.readerPreferences["reader.fontSize"], .double(20))
+        XCTAssertEqual(decoded.readerPreferences["reader.fontSize"], BackupPreferenceValue.double(20))
     }
 }
