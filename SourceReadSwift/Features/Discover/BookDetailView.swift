@@ -327,6 +327,7 @@ struct ChapterLoadingView: View {
     @State private var isUsingStaleCache = false
     @State private var isCachingNext = false
     @State private var autoplaySpeechAfterHandoff = false
+    @State private var showReaderChromeAfterChapterSelection = false
     @State private var preloadTask: Task<Void, Never>?
     @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
 
@@ -350,6 +351,7 @@ struct ChapterLoadingView: View {
                         dismiss()
                     },
                     onSelectChapter: { selected in
+                        showReaderChromeAfterChapterSelection = true
                         currentChapter = selected
                         content = nil
                         errorMessage = nil
@@ -370,6 +372,7 @@ struct ChapterLoadingView: View {
                         isUsingStaleCache = false
                     },
                     autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+                    initialOverlayVisible: showReaderChromeAfterChapterSelection,
                     onSpeechAutoplayConsumed: {
                         autoplaySpeechAfterHandoff = false
                     }

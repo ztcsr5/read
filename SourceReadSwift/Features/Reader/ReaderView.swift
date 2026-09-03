@@ -28,6 +28,10 @@ struct ReaderView: View {
     /// chapter handoff. It is intentionally one-shot and consumed on appear.
     var autoplaySpeechOnAppear: Bool = false
     var onSpeechAutoplayConsumed: (() -> Void)? = nil
+    /// Keeps the reader controls visible when navigation originated in the
+    /// chapter list. A fresh chapter view otherwise starts with the chrome
+    /// hidden and can be mistaken for the root tab UI.
+    var initialOverlayVisible: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -233,6 +237,7 @@ struct ReaderView: View {
                     .transition(.opacity)
 
                 settingsPanel
+                    .zIndex(2)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -248,6 +253,7 @@ struct ReaderView: View {
         }
         .onAppear {
             appState.acquireTabChromeHidden(owner: tabChromeOwner)
+            showOverlay = initialOverlayVisible
             sessionStartedAt = Date()
             rebuildPagedBlocksCache()
             autoScrollTarget = initialAutoScrollTarget()
@@ -396,7 +402,11 @@ struct ReaderView: View {
             .coordinateSpace(name: "readerScroll")
             .onChange(of: autoScrollTarget) { target in
                 guard content.paragraphs.indices.contains(target) else { return }
-                withAnimation(.easeInOut(duration: 0.45)) {
+                // Advance on the same cadence as the timer. A short fixed
+                // animation made auto-scroll appear to do nothing between
+                // jumps; matching the configured interval produces a
+                // continuous, readable movement on 60/90/120 Hz displays.
+                withAnimation(.linear(duration: max(autoScrollDelay * 0.9, 0.25))) {
                     proxy.scrollTo(target, anchor: .top)
                 }
             }
@@ -740,10 +750,27 @@ struct ReaderView: View {
             Spacer()
 
             VStack(spacing: 16) {
-                Capsule()
-                    .fill(Color.secondary.opacity(0.35))
-                    .frame(width: 38, height: 5)
-                    .padding(.top, 10)
+                HStack {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.35))
+                        .frame(width: 38, height: 5)
+                    Spacer()
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            showSettings = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(Color.secondary.opacity(0.12), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("关闭阅读设置")
+                }
+                .padding(.top, 10)
+                .padding(.horizontal)
 
                 Picker("设置", selection: $settingsTab) {
                     Text("外观").tag(0)
@@ -1095,7 +1122,10 @@ struct ReaderView: View {
                     ForEach(filteredChapters) { chapter in
                         Button {
                             showChapterList = false
-                            showOverlay = false
+                            // Keep the reader chrome visible after a chapter
+                            // switch. Hiding it here made the next reader
+                            // render look like the root/home menu.
+                            showOverlay = true
                             onSelectChapter?(chapter)
                         } label: {
                             HStack(spacing: 12) {

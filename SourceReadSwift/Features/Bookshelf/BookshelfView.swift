@@ -25,24 +25,6 @@ struct BookshelfView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 30) {
-                    PodcastLargeTitleBar(title: "主页") {
-                        HStack(spacing: 18) {
-                            Button {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                showFileImporter = true
-                            } label: {
-                                Image(systemName: "folder.badge.plus")
-                                    .font(.system(size: 22, weight: .semibold))
-                                    .foregroundStyle(AppTheme.accent)
-                                    .frame(width: 46, height: 46)
-                                    .glassCircle()
-                            }
-                            .buttonStyle(PressableScaleButtonStyle())
-                            .accessibilityLabel("导入本地书籍")
-                        }
-                    }
-                    .padding(.top, 18)
-
                     readingSection
                     updatesSection
                     shelfSection
@@ -54,8 +36,23 @@ struct BookshelfView: View {
                 await refreshBookshelf()
             }
             .background(bookshelfBackdrop)
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            // Native large-title navigation gives the bounded collapse shown
+            // in the reference: large at the top, compact and centered after
+            // scrolling, rather than letting a custom title drift forever.
+            .navigationTitle("主页")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showFileImporter = true
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                    .accessibilityLabel("导入本地书籍")
+                }
+            }
             .alert("本地导入", isPresented: Binding(
                 get: { importMessage != nil },
                 set: { if !$0 { importMessage = nil } }

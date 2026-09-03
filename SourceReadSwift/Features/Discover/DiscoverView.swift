@@ -10,9 +10,6 @@ struct DiscoverView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
-                    PodcastLargeTitleBar(title: "发现") { EmptyView() }
-                        .padding(.top, 18)
-
                     bookSearchTab
 
                     Color.clear.frame(height: 100)
@@ -25,8 +22,8 @@ struct DiscoverView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .pageBackground()
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("发现")
+            .navigationBarTitleDisplayMode(.large)
             .task {
                 viewModel.bind(appState: appState)
             }

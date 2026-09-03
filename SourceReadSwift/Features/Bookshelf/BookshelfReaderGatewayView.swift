@@ -15,6 +15,7 @@ struct BookshelfReaderGatewayView: View {
     @State private var showSourceSwitcher = false
     @State private var sourceSwitchState = SourceSwitchState()
     @State private var autoplaySpeechAfterHandoff = false
+    @State private var showReaderChromeAfterChapterSelection = false
     @State private var didApplyInitialBookmark = false
     @State private var didApplyInitialChapter = false
     @State private var requestedChapterIndex: Int?
@@ -175,6 +176,7 @@ struct BookshelfReaderGatewayView: View {
                 dismiss()
             },
             onSelectChapter: { chapter in
+                showReaderChromeAfterChapterSelection = true
                 selectedLocalChapterIndex = chapter.index
                 appState.bookshelfStore.updateReadingProgress(
                     bookID: book.id,
@@ -196,6 +198,7 @@ struct BookshelfReaderGatewayView: View {
                 )
             },
             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+            initialOverlayVisible: showReaderChromeAfterChapterSelection,
             onSpeechAutoplayConsumed: {
                 autoplaySpeechAfterHandoff = false
             }
