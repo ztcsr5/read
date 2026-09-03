@@ -1099,3 +1099,19 @@
 ### Verification note
 
 Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests and unsigned IPA packaging; sustained 120 Hz still requires a ProMotion device + Instruments trace.
+
+## 2026-09-03 - Stage 2D kickoff: search and source UX
+
+### Implemented
+
+- Added `SearchBookMatcher` for normalized exact matching (full-width compatibility, title marks and whitespace normalization), fuzzy filtering and deterministic ranking.
+- Search now removes duplicate source/book IDs while keeping cross-source alternatives visible for source switching.
+- Added XCTest coverage for exact normalization, fuzzy noise filtering/ranking and duplicate suppression.
+- Source management now supports batch enable/disable/delete for book sources, catalogs and RSS, plus a visual source-detail sheet that exposes Search -> Detail -> TOC -> Content readiness and actions.
+
+### Next in Stage 2D
+
+- Add UI-testable reader settings/chapter/朗读/auto-scroll flows.
+- Deepen EPUB/RSS reader navigation and article caching interactions.
+- Expand rule editor with field-level help and stage preview diagnostics.
+- Keep CI green before each large-phase handoff.
