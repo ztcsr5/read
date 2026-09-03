@@ -8,6 +8,10 @@ struct NativeReaderTextView: UIViewRepresentable {
     let title: String
     var subtitle: String? = nil
     let paragraphs: [String]
+    /// A caller-provided revision lets the native surface detect edits to a
+    /// paragraph in the middle of a long chapter without hashing that chapter
+    /// during every SwiftUI body evaluation. It is optional for existing call sites.
+    var contentFingerprint: String? = nil
     let fontSize: Double
     let lineSpacing: Double
     let pagePadding: Double
@@ -61,7 +65,8 @@ struct NativeReaderTextView: UIViewRepresentable {
             title: title,
             subtitle: subtitle,
             paragraphs: paragraphs,
-            contentFingerprint: [title, subtitle ?? "", String(paragraphs.count), String(paragraphs.first?.hashValue ?? 0), String(paragraphs.last?.hashValue ?? 0)].joined(separator: "|"),
+            contentFingerprint: contentFingerprint?.nilIfEmpty
+                ?? [title, subtitle ?? "", String(paragraphs.count), String(paragraphs.first?.hashValue ?? 0), String(paragraphs.last?.hashValue ?? 0)].joined(separator: "|"),
             fontSize: fontSize,
             lineSpacing: lineSpacing,
             pagePadding: pagePadding,
@@ -113,6 +118,7 @@ struct NativeReaderTextView: UIViewRepresentable {
         private var configuration: Configuration?
         private var paragraphRanges: [NSRange] = []
         private var lastHighlightedParagraph = -1
+        private var lastHighlightColor: UIColor?
         private var lastScrollRequestKey: String?
         private var lastVisibleParagraph = -1
         private var lastVisibleUpdateAt = Date.distantPast
@@ -142,6 +148,8 @@ struct NativeReaderTextView: UIViewRepresentable {
                 if contentChanged {
                     lastScrollRequestKey = nil
                 }
+                lastVisibleParagraph = -1
+                lastVisibleUpdateAt = .distantPast
             }
             guard let scrollTarget,
                   newConfiguration.paragraphs.indices.contains(scrollTarget),
@@ -151,9 +159,11 @@ struct NativeReaderTextView: UIViewRepresentable {
         }
 
         func updateHighlight(_ paragraphIndex: Int, in textView: UITextView, color: UIColor) {
-            guard paragraphIndex != lastHighlightedParagraph else { return }
+            let colorChanged = lastHighlightColor?.isEqual(color) != true
+            guard paragraphIndex != lastHighlightedParagraph || colorChanged else { return }
             let previous = lastHighlightedParagraph
             lastHighlightedParagraph = paragraphIndex
+            lastHighlightColor = color
             guard let configuration else { return }
             textView.textStorage.beginEditing()
             if paragraphRanges.indices.contains(previous) {

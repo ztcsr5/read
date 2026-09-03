@@ -1180,6 +1180,26 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert `f2a8991`, `e46c79a`, `6004aad`, `11f30a5` and `4547111` together to restore serial diagnostics and the previous CI workflow behavior.
+
+## 2026-09-03 - Stage 2D consolidated reader/source experience pass
+
+### Implemented
+
+- Source switching now searches enabled alternatives in bounded six-source fan-out batches instead of strict serial execution; each request keeps its 10-second timeout, cancellation checks and deterministic source-name ordering.
+- Reader content revisions are passed into the native TextKit surface so refreshed middle paragraphs rebuild correctly without hashing the full chapter on every body evaluation.
+- Reader and RSS auto-scroll delays are clamped to safe persisted values (0.25–30 seconds), preventing malformed preferences from creating a busy loop or an effectively frozen animation.
+- Native reader highlighting reacts to theme/highlight-color changes even when the spoken paragraph index is unchanged; paged reading reserves footer space so the last lines remain reachable.
+- Discover exact/fuzzy mode can be changed after results arrive by reusing the raw result set rather than issuing another network search.
+- Rule editor validation is grouped by field, explains empty local-preview matches, clears stale errors when drafts change, and exposes the issue count directly in the save action.
+
+### Verification
+
+- `git diff --check` passes; Windows only reports the repository's existing LF-to-CRLF normalization warnings.
+- CI remains the authoritative Swift compile/XCTest and unsigned IPA gate; Windows cannot run Xcode/UIKit or measure sustained ProMotion cadence.
+
+### Next
+
+- Push this consolidated pass once, wait for both GitHub Actions workflows, then review the unsigned IPA artifact and CI diagnostics before starting the next EPUB/RSS depth phase.
 ## 2026-09-03 - Task: Native TextKit reader performance and 120 Hz interaction pass
 
 ### What was done

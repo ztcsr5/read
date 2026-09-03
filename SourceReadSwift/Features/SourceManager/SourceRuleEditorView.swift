@@ -15,6 +15,7 @@ struct SourceRuleEditorView: View {
     @State private var previewSample = "<html><body><article><h1>示例书名</h1><p class=\"content\">示例正文</p></article></body></html>"
     @State private var previewOutput = ""
     @State private var isPreviewing = false
+    @State private var validationBlocked = false
 
     init(source: BookSource, onSave: @escaping (BookSource) -> Void, onCancel: @escaping () -> Void) {
         self.source = source
@@ -75,7 +76,7 @@ struct SourceRuleEditorView: View {
                             Text("预览结果")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
-                            Text(previewOutput)
+                            Text(previewMessage)
                                 .font(.system(.footnote, design: .monospaced))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,11 +91,21 @@ struct SourceRuleEditorView: View {
                 }
                 if !issues.isEmpty {
                     Section("校验结果") {
-                        ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
-                            Label(issue.message, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .font(.footnote)
+                        ForEach(groupedIssues, id: \.field) { group in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(fieldTitle(group.field))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(Array(group.messages.enumerated()), id: \.offset) { _, message in
+                                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                        .font(.footnote)
+                                }
+                            }
                         }
+                        Text("修正上面的字段后可再次校验并保存。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section("说明") {
@@ -103,25 +114,68 @@ struct SourceRuleEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .onChange(of: searchURL) { _ in clearValidation() }
+            .onChange(of: searchRule) { _ in clearValidation() }
+            .onChange(of: detailRule) { _ in clearValidation() }
+            .onChange(of: tocRule) { _ in clearValidation() }
+            .onChange(of: contentRule) { _ in clearValidation() }
             .navigationTitle("规则编辑 · \(source.bookSourceName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: onCancel) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("校验并保存") {
-                        let drafts = [
-                            "searchUrl": searchURL,
-                            "ruleSearch": searchRule,
-                            "ruleBookInfo": detailRule,
-                            "ruleToc": tocRule,
-                            "ruleContent": contentRule
-                        ]
+                    Button {
+                        let drafts = currentDrafts
                         issues = RuleEditorValidator().validate(source: source, drafts: drafts)
+                        validationBlocked = !issues.isEmpty
                         guard issues.isEmpty else { return }
                         onSave(source.updatingRules(searchURL: searchURL, search: searchRule, detail: detailRule, toc: tocRule, content: contentRule))
+                    } label: {
+                        Label(validationBlocked ? "修正后重试 (\(issues.count))" : "校验并保存", systemImage: validationBlocked ? "exclamationmark.triangle" : "checkmark")
                     }
+                    .disabled(isPreviewing)
                 }
             }
+        }
+    }
+
+    private var currentDrafts: [String: String] {
+        [
+            "searchUrl": searchURL,
+            "ruleSearch": searchRule,
+            "ruleBookInfo": detailRule,
+            "ruleToc": tocRule,
+            "ruleContent": contentRule
+        ]
+    }
+
+    private var groupedIssues: [ValidationGroup] {
+        let grouped = Dictionary(grouping: issues, by: \.field)
+        return grouped.keys.sorted().map { field in
+            ValidationGroup(field: field, messages: grouped[field, default: []].map(\.message))
+        }
+    }
+
+    private var previewMessage: String {
+        guard previewOutput == "未提取到结果" else { return previewOutput }
+        return "未提取到结果。请检查当前阶段规则、样本字段和选择器是否匹配。"
+    }
+
+    private func fieldTitle(_ field: String) -> String {
+        switch field {
+        case "searchUrl": return "搜索 URL"
+        case "ruleSearch": return "搜索规则"
+        case "ruleBookInfo": return "详情规则"
+        case "ruleToc": return "目录规则"
+        case "ruleContent": return "正文规则"
+        default: return field
+        }
+    }
+
+    private func clearValidation() {
+        if !issues.isEmpty || validationBlocked {
+            issues = []
+            validationBlocked = false
         }
     }
 
@@ -176,4 +230,10 @@ struct SourceRuleEditorView: View {
               let value = String(data: data, encoding: .utf8) else { return "" }
         return value
     }
+}
+
+private struct ValidationGroup: Identifiable {
+    let field: String
+    let messages: [String]
+    var id: String { field }
 }

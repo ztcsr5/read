@@ -9,6 +9,7 @@ struct RSSArticleReaderView: View {
     @State private var paragraphs: [String] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var contentFingerprint = ""
     @State private var showingCachedContent = false
     @State private var visibleParagraphIndex = 0
     @State private var autoScrollEnabled = false
@@ -93,6 +94,7 @@ struct RSSArticleReaderView: View {
                     title: currentArticle.title,
                     subtitle: currentArticle.pubDate,
                     paragraphs: paragraphs,
+                    contentFingerprint: contentFingerprint,
                     fontSize: fontSize,
                     lineSpacing: lineSpacing,
                     pagePadding: pagePadding,
@@ -106,7 +108,7 @@ struct RSSArticleReaderView: View {
                     currentParagraphIndex: speechController.currentParagraphIndex,
                     scrollTarget: nativeScrollTarget,
                     scrollRequestKey: nativeScrollRequestKey,
-                    animatedScrollDuration: autoScrollEnabled ? max(autoScrollDelay * 0.9, 0.25) : 0.28,
+                    animatedScrollDuration: autoScrollEnabled ? max(ReaderAutomationPolicy.clampedDelay(autoScrollDelay) * 0.9, 0.25) : 0.28,
                     textSelectionEnabled: true,
                     onVisibleParagraph: { index in
                         guard !autoScrollEnabled, paragraphs.indices.contains(index), index != visibleParagraphIndex else { return }
@@ -176,7 +178,7 @@ struct RSSArticleReaderView: View {
     }
 
     private func resetReaderSession() {
-        stopAutoScroll(); speechController.stop(); paragraphs = []; errorMessage = nil; showingCachedContent = false; visibleParagraphIndex = 0; autoScrollTarget = 0; lastVisibleParagraphUpdateAt = .distantPast
+        stopAutoScroll(); speechController.stop(); paragraphs = []; contentFingerprint = ""; errorMessage = nil; showingCachedContent = false; visibleParagraphIndex = 0; autoScrollTarget = 0; lastVisibleParagraphUpdateAt = .distantPast
     }
 
     private func toggleSpeech() {
@@ -188,7 +190,7 @@ struct RSSArticleReaderView: View {
     private func startAutoScroll() {
         guard !paragraphs.isEmpty else { return }
         speechController.stop(); autoScrollEnabled = true; autoScrollTarget = min(max(visibleParagraphIndex, 0), paragraphs.count - 1)
-        let delay = autoScrollDelay
+        let delay = ReaderAutomationPolicy.clampedDelay(autoScrollDelay)
         autoScrollTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -205,10 +207,16 @@ struct RSSArticleReaderView: View {
         isLoading = true; errorMessage = nil; showingCachedContent = false; defer { isLoading = false }
         if let cachedHTML = appState.rssArticleContentCacheStore.contentHTML(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) {
             let cached = RSSArticleContentParser().parseParagraphs(from: cachedHTML)
-            if !cached.isEmpty { paragraphs = cached; showingCachedContent = true }
+            if !cached.isEmpty { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
         }
-        if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) { paragraphs = cached; showingCachedContent = true }
-        guard let link = article.link, let url = URL(string: link) else { if paragraphs.isEmpty { paragraphs = fallbackParagraphs(for: article) }; return }
+        if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
+        guard let link = article.link, let url = URL(string: link) else {
+            if paragraphs.isEmpty {
+                paragraphs = fallbackParagraphs(for: article)
+                contentFingerprint = makeContentFingerprint(paragraphs, articleID: article.id)
+            }
+            return
+        }
         do {
             var request = URLRequest(url: url); request.setValue("Mozilla/5.0 SourceReadSwift", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -216,12 +224,26 @@ struct RSSArticleReaderView: View {
             try Task.checkCancellation()
             let html = ResponseTextDecoder().decode(data: data, headers: [:])
             let parsed = RSSArticleContentParser().parseParagraphs(from: html)
-            if !parsed.isEmpty { paragraphs = parsed; appState.rssArticleContentCacheStore.save(parsed, for: article, contentHTML: article.contentHTML ?? html); showingCachedContent = false }
+            if !parsed.isEmpty { paragraphs = parsed; contentFingerprint = makeContentFingerprint(parsed, articleID: article.id); appState.rssArticleContentCacheStore.save(parsed, for: article, contentHTML: article.contentHTML ?? html); showingCachedContent = false }
         } catch is CancellationError { return }
-        catch { if paragraphs.isEmpty { paragraphs = fallbackParagraphs(for: article) }; if paragraphs.isEmpty { errorMessage = error.localizedDescription } else { showingCachedContent = true } }
+        catch {
+            if paragraphs.isEmpty {
+                paragraphs = fallbackParagraphs(for: article)
+                contentFingerprint = makeContentFingerprint(paragraphs, articleID: article.id)
+            }
+            if paragraphs.isEmpty { errorMessage = error.localizedDescription } else { showingCachedContent = true }
+        }
     }
 
     private func fallbackParagraphs(for article: RSSArticlePreview) -> [String] {
         article.contentHTML.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
+    }
+
+    private func makeContentFingerprint(_ values: [String], articleID: String) -> String {
+        var hasher = Hasher()
+        hasher.combine(articleID)
+        hasher.combine(values.count)
+        for value in values { hasher.combine(value) }
+        return String(hasher.finalize())
     }
 }

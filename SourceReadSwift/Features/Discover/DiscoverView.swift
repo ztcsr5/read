@@ -58,6 +58,9 @@ struct DiscoverView: View {
                 matchModePicker
                 resultFilterPicker
             }
+            .onChange(of: viewModel.matchMode) { _ in
+                viewModel.applyMatchMode()
+            }
 
             Text("搜索结果")
                 .font(.system(size: 20, weight: .bold))
@@ -247,6 +250,8 @@ final class DiscoverViewModel: ObservableObject {
     private weak var appState: AppState?
     private var activeSearchID: UUID?
     private var searchTask: Task<Void, Never>?
+    private var activeKeyword = ""
+    private var rawResults: [SearchBook] = []
 
     func bind(appState: AppState) {
         self.appState = appState
@@ -273,10 +278,18 @@ final class DiscoverViewModel: ObservableObject {
         results = SearchResultFilter.apply(unfilteredResults, query: resultFilter, scope: resultFilterScope)
     }
 
+    func applyMatchMode() {
+        guard !activeKeyword.isEmpty, !rawResults.isEmpty else { return }
+        unfilteredResults = filtered(rawResults, keyword: activeKeyword)
+        totalResultCount = rawResults.count
+        applyResultFilter()
+    }
+
     func search() async {
         guard let appState else { return }
         let keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else { return }
+        activeKeyword = keyword
 
         let searchID = UUID()
         activeSearchID = searchID
@@ -284,6 +297,7 @@ final class DiscoverViewModel: ObservableObject {
         errorMessage = nil
         results = []
         unfilteredResults = []
+        rawResults = []
         resultFilter = ""
         resultFilterScope = .all
         totalResultCount = 0
@@ -330,6 +344,7 @@ final class DiscoverViewModel: ObservableObject {
                         if !books.isEmpty {
                             hitSources.insert(source.bookSourceUrl)
                             allBooks.append(contentsOf: books)
+                            rawResults = allBooks
                             totalResultCount = allBooks.count
                             hitSourceCount = hitSources.count
                         }

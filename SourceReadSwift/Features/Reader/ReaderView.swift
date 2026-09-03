@@ -56,6 +56,7 @@ struct ReaderView: View {
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
     @State private var lastVisibleParagraphUpdateAt = Date.distantPast
+    @State private var readerContentFingerprint = ""
     @State private var speechPausedForScene = false
     @StateObject private var playbackCoordinator = ReaderPlaybackCoordinator()
     @StateObject private var speechController = ReaderSpeechController()
@@ -273,6 +274,7 @@ struct ReaderView: View {
             showOverlay = initialOverlayVisible
             sessionStartedAt = Date()
             rebuildPagedBlocksCache()
+            readerContentFingerprint = makeContentFingerprint(content)
             autoScrollTarget = initialAutoScrollTarget()
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             applyIdleTimerPreference()
@@ -331,15 +333,21 @@ struct ReaderView: View {
             // target changes so paging/auto-scroll stays on the rendering path.
             scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
         }
-            .onChange(of: readerModeRawValue) { _ in
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                stopAutoScroll()
-                speechController.stop()
-                playbackCoordinator.stop()
-                speechPausedForScene = false
-                autoScrollTarget = initialAutoScrollTarget()
+        .onChange(of: content) { updatedContent in
+            // Chapter handoff normally recreates the reader, but keeping a
+            // revision here also handles cache refreshes that replace text in
+            // place (including edits to a middle paragraph).
+            readerContentFingerprint = makeContentFingerprint(updatedContent)
         }
-            .onChange(of: readerPageCacheKey) { _ in
+        .onChange(of: readerModeRawValue) { _ in
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            stopAutoScroll()
+            speechController.stop()
+            playbackCoordinator.stop()
+            speechPausedForScene = false
+            autoScrollTarget = initialAutoScrollTarget()
+        }
+        .onChange(of: readerPageCacheKey) { _ in
             rebuildPagedBlocksCache()
             autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
             scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
@@ -397,6 +405,7 @@ struct ReaderView: View {
         NativeReaderTextView(
             title: content.title,
             paragraphs: content.paragraphs,
+            contentFingerprint: readerContentFingerprint,
             fontSize: fontSize,
             lineSpacing: lineSpacing,
             pagePadding: pagePadding,
@@ -412,7 +421,7 @@ struct ReaderView: View {
                 ? speechController.currentParagraphIndex
                 : (content.paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil),
             scrollRequestKey: nativeScrollRequestKey,
-            animatedScrollDuration: autoScrollEnabled ? max(autoScrollDelay * 0.9, 0.25) : 0.35,
+            animatedScrollDuration: autoScrollEnabled ? max(ReaderAutomationPolicy.clampedDelay(autoScrollDelay) * 0.9, 0.25) : 0.35,
             textSelectionEnabled: textSelectionEnabled,
             onVisibleParagraph: { index in
                 updateVisibleParagraph(index)
@@ -514,10 +523,25 @@ struct ReaderView: View {
                     ForEach(page.paragraphs, id: \.index) { entry in
                         paragraphText(entry.text, index: entry.index)
                     }
+                    // The bottom chrome floats above the page. Keep the final
+                    // lines scrollable instead of letting controls cover them.
+                    Color.clear.frame(height: CGFloat(footerHeight))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private func makeContentFingerprint(_ value: ChapterContent) -> String {
+        var hasher = Hasher()
+        hasher.combine(value.chapter.id)
+        hasher.combine(value.title)
+        hasher.combine(value.nextContentUrl ?? "")
+        hasher.combine(value.paragraphs.count)
+        for paragraph in value.paragraphs {
+            hasher.combine(paragraph)
+        }
+        return String(hasher.finalize())
     }
 
     private func pageSurface<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -1443,7 +1467,7 @@ struct ReaderView: View {
         stopAutoScroll()
         autoScrollEnabled = true
         autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
-        let delay = autoScrollDelay
+        let delay = ReaderAutomationPolicy.clampedDelay(autoScrollDelay)
         let coordinator = playbackCoordinator
         let token = coordinator.beginAutoScroll()
         autoScrollTask = Task { [weak coordinator] in

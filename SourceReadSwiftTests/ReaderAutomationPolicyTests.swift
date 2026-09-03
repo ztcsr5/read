@@ -24,6 +24,13 @@ final class ReaderAutomationPolicyTests: XCTestCase {
         )
     }
 
+    func testAutoScrollDelayIsSafeForPersistedValues() {
+        XCTAssertEqual(ReaderAutomationPolicy.clampedDelay(.nan), 2.0)
+        XCTAssertEqual(ReaderAutomationPolicy.clampedDelay(.infinity), 2.0)
+        XCTAssertEqual(ReaderAutomationPolicy.clampedDelay(-10), 0.25)
+        XCTAssertEqual(ReaderAutomationPolicy.clampedDelay(120), 30)
+    }
+
     func testSpeechQueueFiltersEmptySegmentsAndPreservesIndexes() {
         var queue = ReaderSpeechQueue()
         queue.reset(title: " Title ", paragraphs: ["", "第一段", "  ", "第二段"])
