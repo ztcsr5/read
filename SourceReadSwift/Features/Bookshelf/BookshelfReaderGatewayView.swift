@@ -198,10 +198,10 @@ struct BookshelfReaderGatewayView: View {
                 )
             },
             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
-            initialOverlayVisible: showReaderChromeAfterChapterSelection,
             onSpeechAutoplayConsumed: {
                 autoplaySpeechAfterHandoff = false
-            }
+            },
+            initialOverlayVisible: showReaderChromeAfterChapterSelection
         )
         .id("reader-\(book.id)-\(safeIndex)")
     }

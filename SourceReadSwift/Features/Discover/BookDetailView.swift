@@ -338,46 +338,7 @@ struct ChapterLoadingView: View {
     var body: some View {
         Group {
             if let loadedContent = content {
-                ReaderView(
-                    bookID: bookID ?? "\(sourceUrl)|\(chapter.bookUrl)",
-                    content: loadedContent,
-                    chapterIndex: effectiveChapter.index,
-                    totalChapters: totalChapters,
-                    chapters: chapters,
-                    statusMessage: isUsingStaleCache ? "网络加载失败，正在显示本地缓存副本" : nil,
-                    extraToolbarActions: extraToolbarActions,
-                    onRequestSourceSwitch: onRequestSourceSwitch,
-                    onRequestBookDetail: {
-                        dismiss()
-                    },
-                    onSelectChapter: { selected in
-                        showReaderChromeAfterChapterSelection = true
-                        currentChapter = selected
-                        content = nil
-                        errorMessage = nil
-                        isUsingStaleCache = false
-                    },
-                    onRefreshChapter: {
-                        Task { await load(force: true, ignoreCache: true) }
-                    },
-                    onCacheNextChapters: {
-                        Task { await cacheNextChaptersFromReader() }
-                    },
-                    onSpeechFinished: {
-                        guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
-                        autoplaySpeechAfterHandoff = true
-                        currentChapter = next
-                        content = nil
-                        errorMessage = nil
-                        isUsingStaleCache = false
-                    },
-                    autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
-                    initialOverlayVisible: showReaderChromeAfterChapterSelection,
-                    onSpeechAutoplayConsumed: {
-                        autoplaySpeechAfterHandoff = false
-                    }
-                )
-                .id("reader-\(effectiveChapter.url)")
+                readerView(loadedContent)
             } else if let errorMessage {
                 chapterLoadErrorView(errorMessage)
             } else {
@@ -492,6 +453,47 @@ struct ChapterLoadingView: View {
                 preloadTask = nil
             }
         }
+    }
+
+    private func readerView(_ loadedContent: ChapterContent) -> some View {
+        ReaderView(
+            bookID: bookID ?? "\(sourceUrl)|\(chapter.bookUrl)",
+            content: loadedContent,
+            chapterIndex: effectiveChapter.index,
+            totalChapters: totalChapters,
+            chapters: chapters,
+            statusMessage: isUsingStaleCache ? "网络加载失败，正在显示本地缓存副本" : nil,
+            extraToolbarActions: extraToolbarActions,
+            onRequestSourceSwitch: onRequestSourceSwitch,
+            onRequestBookDetail: { dismiss() },
+            onSelectChapter: { selected in
+                showReaderChromeAfterChapterSelection = true
+                currentChapter = selected
+                content = nil
+                errorMessage = nil
+                isUsingStaleCache = false
+            },
+            onRefreshChapter: {
+                Task { await load(force: true, ignoreCache: true) }
+            },
+            onCacheNextChapters: {
+                Task { await cacheNextChaptersFromReader() }
+            },
+            onSpeechFinished: {
+                guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
+                autoplaySpeechAfterHandoff = true
+                currentChapter = next
+                content = nil
+                errorMessage = nil
+                isUsingStaleCache = false
+            },
+            autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+            onSpeechAutoplayConsumed: {
+                autoplaySpeechAfterHandoff = false
+            },
+            initialOverlayVisible: showReaderChromeAfterChapterSelection
+        )
+        .id("reader-\(effectiveChapter.url)")
     }
 
     private func cacheNextChapters(after chapter: BookChapter, source: BookSource, purifyRules: [String]) async {
