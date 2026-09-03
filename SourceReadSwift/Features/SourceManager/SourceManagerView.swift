@@ -18,6 +18,7 @@ struct SourceManagerView: View {
     @State private var jsonPreview: SourceJSONPreview?
     @State private var sourceTest: SourceTestState?
     @State private var batchCheck: SourceBatchCheckState?
+    @State private var batchCheckTask: Task<Void, Never>?
     @State private var sourceLogin: BookSource?
     @State private var sourceHistory: BookSource?
     @State private var sourceVisualDetail: BookSource?
@@ -169,6 +170,10 @@ struct SourceManagerView: View {
             }
             .sheet(item: $batchCheck) { state in
                 batchCheckSheet(state)
+            }
+            .onDisappear {
+                batchCheckTask?.cancel()
+                batchCheckTask = nil
             }
             .sheet(item: $sourceLogin) { source in
                 SourceLoginView(source: source, cookieStore: appState.sourceCookieStore)
@@ -1082,7 +1087,11 @@ struct SourceManagerView: View {
                 HStack {
                     Button {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        Task { await runBatchSourceCheck() }
+                        batchCheckTask?.cancel()
+                        batchCheckTask = Task { @MainActor in
+                            await runBatchSourceCheck()
+                            batchCheckTask = nil
+                        }
                     } label: {
                         Label(batchCheck?.isRunning == true ? "测试中..." : "开始批量测试", systemImage: "play.circle")
                             .frame(maxWidth: .infinity)
@@ -1155,7 +1164,11 @@ struct SourceManagerView: View {
                     .disabled((batchCheck ?? state).results.isEmpty)
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { batchCheck = nil }
+                    Button("关闭") {
+                        batchCheckTask?.cancel()
+                        batchCheckTask = nil
+                        batchCheck = nil
+                    }
                 }
             }
         }
@@ -1379,6 +1392,7 @@ struct SourceManagerView: View {
         // small bounded fan-out so a bad source cannot make a 30-source check
         // feel frozen, while avoiding an unbounded request burst.
         for batch in state.sources.chunked(into: 4) {
+            guard !Task.isCancelled else { return }
             guard batchCheck != nil else { return }
             await withTaskGroup(of: BatchCheckOutcome.self) { group in
                 for source in batch {
@@ -1393,6 +1407,10 @@ struct SourceManagerView: View {
                 }
 
                 for await outcome in group {
+                    guard !Task.isCancelled else {
+                        group.cancelAll()
+                        return
+                    }
                     guard var latest = batchCheck else { return }
                     var result = outcome.result
                     if let deep = outcome.deepCheck {
