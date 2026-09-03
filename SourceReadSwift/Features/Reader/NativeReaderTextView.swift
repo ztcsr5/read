@@ -78,7 +78,7 @@ struct NativeReaderTextView: UIViewRepresentable {
 
     struct Configuration: Equatable {
         let title: String
-        let subtitle: String? = nil
+        let subtitle: String?
         let paragraphs: [String]
         let contentFingerprint: String
         let fontSize: Double
