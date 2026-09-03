@@ -173,6 +173,22 @@ struct DiscoverView: View {
                 }
             }
 
+            if !viewModel.sourceFailures.isEmpty {
+                DisclosureGroup("有 \(viewModel.sourceFailures.count) 个源未返回结果") {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(viewModel.sourceFailures, id: \.self) { failure in
+                            Text(failure)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+
             ForEach(viewModel.results) { book in
                 searchResultCard(book)
             }
@@ -227,6 +243,7 @@ final class DiscoverViewModel: ObservableObject {
     @Published var hitSourceCount = 0
     @Published var checkedSourceCount = 0
     @Published var totalResultCount = 0
+    @Published var sourceFailures: [String] = []
 
     private weak var appState: AppState?
     private var activeSearchID: UUID?
@@ -260,6 +277,7 @@ final class DiscoverViewModel: ObservableObject {
         resultFilter = ""
         resultFilterScope = .all
         totalResultCount = 0
+        sourceFailures = []
         hitSourceCount = 0
         checkedSourceCount = 0
         defer {
@@ -303,7 +321,9 @@ final class DiscoverViewModel: ObservableObject {
                             hitSourceCount = hitSources.count
                         }
                     case .failure(let error):
-                        failures.append("\(source.bookSourceName): \(error.displayMessage)")
+                        let message = "\(source.bookSourceName): \(error.displayMessage)"
+                        failures.append(message)
+                        sourceFailures = Array(failures.suffix(40))
                     }
                     if checkedSourceCount % 6 == 0 || !allBooks.isEmpty && checkedSourceCount % 3 == 0 {
                         unfilteredResults = filtered(allBooks, keyword: keyword)
