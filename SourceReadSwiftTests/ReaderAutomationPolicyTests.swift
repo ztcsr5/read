@@ -34,6 +34,15 @@ final class ReaderAutomationPolicyTests: XCTestCase {
         XCTAssertTrue(queue.isFinished)
     }
 
+    func testSpeechQueueStartsAtVisibleParagraphWithoutReplayingChapterStart() {
+        var queue = ReaderSpeechQueue()
+        queue.reset(title: "标题", paragraphs: ["第一段", "第二段", "第三段"], startParagraphIndex: 1)
+
+        XCTAssertEqual(queue.dequeue()?.index, 1)
+        XCTAssertEqual(queue.dequeue()?.index, 2)
+        XCTAssertNil(queue.dequeue())
+    }
+
     @MainActor
     func testPlaybackStateRejectsStaleGenerationAfterStop() {
         let coordinator = ReaderPlaybackCoordinator()

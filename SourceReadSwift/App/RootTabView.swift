@@ -24,6 +24,13 @@ struct RootTabView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(.keyboard, edges: .bottom)
+            // Reserve space for the floating tab bar instead of letting the
+            // last row disappear underneath it on every root scroll view.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !appState.isTabChromeHidden {
+                    Color.clear.frame(height: 86)
+                }
+            }
 
             if !appState.isTabChromeHidden {
                 customTabBar

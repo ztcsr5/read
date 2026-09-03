@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BookshelfReaderGatewayView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     let book: BookshelfBook
     var initialBookmark: ReaderBookmark? = nil
     var initialChapterIndex: Int? = nil
@@ -170,6 +171,9 @@ struct BookshelfReaderGatewayView: View {
             chapterIndex: safeIndex,
             totalChapters: chapters.count,
             chapters: bookChapters,
+            onRequestBookDetail: {
+                dismiss()
+            },
             onSelectChapter: { chapter in
                 selectedLocalChapterIndex = chapter.index
                 appState.bookshelfStore.updateReadingProgress(

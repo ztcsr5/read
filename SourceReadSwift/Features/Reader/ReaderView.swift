@@ -13,6 +13,10 @@ struct ReaderView: View {
     var statusMessage: String?
     var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
     var onRequestSourceSwitch: (() -> Void)?
+    /// Opens the owning book detail screen from the reader's overflow menu.
+    /// When omitted, the reader simply closes so the caller's previous screen
+    /// remains the fallback detail context.
+    var onRequestBookDetail: (() -> Void)?
     var onSelectChapter: ((BookChapter) -> Void)?
     var onRefreshChapter: (() -> Void)?
     var onCacheNextChapters: (() -> Void)?
@@ -217,6 +221,16 @@ struct ReaderView: View {
             }
 
             if showSettings {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            showSettings = false
+                        }
+                    }
+                    .transition(.opacity)
+
                 settingsPanel
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -360,7 +374,7 @@ struct ReaderView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
                     Text(content.title)
-                        .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
+                        .font(.system(size: fontSize + 8, weight: .bold, design: .default))
                         .foregroundStyle(background.textColor)
                         .padding(.bottom, CGFloat(titleSpacing))
                         .id(-1)
@@ -477,7 +491,7 @@ struct ReaderView: View {
                 VStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
                     if page.includesTitle {
                         Text(content.title)
-                            .font(.system(size: fontSize + 8, weight: .bold, design: .serif))
+                            .font(.system(size: fontSize + 8, weight: .bold, design: .default))
                             .foregroundStyle(background.textColor)
                             .padding(.bottom, CGFloat(titleSpacing))
                             .readerSelectableText(textSelectionEnabled)
@@ -513,7 +527,7 @@ struct ReaderView: View {
 
     private func paragraphText(_ paragraph: String, index: Int) -> some View {
         Text(paragraph)
-            .font(.system(size: fontSize, weight: .regular, design: .serif))
+            .font(.system(size: fontSize, weight: .regular, design: .default))
             .foregroundStyle(background.textColor)
             .kerning(letterSpacing)
             .lineSpacing(lineSpacing)
@@ -581,9 +595,30 @@ struct ReaderView: View {
                     toggleCurrentBookmark(openList: false)
                 }
 
-                chromeIconButton(systemName: "ellipsis") {
-                    showSettings = true
+                Menu {
+                    Button {
+                        onRequestBookDetail?()
+                    } label: {
+                        Label("书籍详情", systemImage: "info.circle")
+                    }
+                    .disabled(onRequestBookDetail == nil)
+
+                    Button {
+                        showOverlay = false
+                        showSettings = false
+                        onRequestSourceSwitch?()
+                    } label: {
+                        Label("换源", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(onRequestSourceSwitch == nil)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                        .background(.thinMaterial, in: Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("书籍详情和换源")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -717,6 +752,19 @@ struct ReaderView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
 
+                HStack {
+                    Text(settingsTab == 0 ? "外观" : (settingsTab == 1 ? "排版" : "高级"))
+                        .font(.headline)
+                    Spacer()
+                    Button("完成") {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            showSettings = false
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+                .padding(.horizontal)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         switch settingsTab {
@@ -796,7 +844,7 @@ struct ReaderView: View {
                 .foregroundStyle(background.textColor.opacity(0.64))
 
             Text("夜色沉下来以后，文字应该安静、清楚、耐看。调整外观时，这里会立刻跟随字号、行距和背景变化。")
-                .font(.system(size: min(fontSize, 24), weight: .regular, design: .serif))
+                .font(.system(size: min(fontSize, 24), weight: .regular, design: .default))
                 .foregroundStyle(background.textColor)
                 .lineSpacing(lineSpacing)
                 .lineLimit(4)
@@ -843,64 +891,23 @@ struct ReaderView: View {
                 fontSize = min(32, fontSize + 1)
             }
 
-            Text("行高")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $lineSpacing, in: 2...18, step: 1)
-
-            Text("字距")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $letterSpacing, in: 0...4, step: 0.2)
-
-            Text("段距")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $paragraphSpacing, in: 8...32, step: 1)
-
-            Text("段首缩进")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $paragraphIndent, in: 0...40, step: 2)
-
-            Text("标题间距")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $titleSpacing, in: 0...36, step: 2)
-
-            Text("左右间距")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $pagePadding, in: 14...40, step: 1)
-
-            Text("底部留白")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $footerHeight, in: 48...180, step: 8)
+            readerValueSlider("行高", value: $lineSpacing, range: 2...18, step: 1, unit: "pt")
+            readerValueSlider("字距", value: $letterSpacing, range: 0...4, step: 0.2, unit: "pt")
+            readerValueSlider("段距", value: $paragraphSpacing, range: 8...32, step: 1, unit: "pt")
+            readerValueSlider("段首缩进", value: $paragraphIndent, range: 0...40, step: 2, unit: "pt")
+            readerValueSlider("标题间距", value: $titleSpacing, range: 0...36, step: 2, unit: "pt")
+            readerValueSlider("左右间距", value: $pagePadding, range: 14...40, step: 1, unit: "pt")
+            readerValueSlider("底部留白", value: $footerHeight, range: 48...180, step: 8, unit: "pt")
         }
     }
 
     private var advancedSettings: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("阅读模式")
-                .font(.subheadline.weight(.semibold))
+            Text("高级设置只保留不重复的阅读辅助功能。翻页、字号和自动翻页请在阅读器主菜单调整。")
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            Picker("阅读模式", selection: $readerModeRawValue) {
-                ForEach(ReaderMode.allCases) { mode in
-                    Text(mode.title).tag(mode.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
 
-            Text("朗读速度")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $ttsRate, in: 0.35...0.65, step: 0.01)
-
-            Text("自动滚动间隔")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $autoScrollDelay, in: 0.8...5.0, step: 0.2)
+            readerValueSlider("朗读速度", value: $ttsRate, range: 0.35...0.65, step: 0.01, unit: "倍速")
 
             Text("睡眠定时")
                 .font(.subheadline.weight(.semibold))
@@ -925,19 +932,46 @@ struct ReaderView: View {
                 preloadChapterCount = ReaderPreloadPolicy.clamp(preloadChapterCount + 1)
             }
 
-            HStack(spacing: 12) {
-                Button(autoScrollEnabled ? "停止自动滚动" : "开始自动滚动") {
-                    toggleAutoScroll()
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button(speechController.isPaused ? "继续朗读" : (speechController.isSpeaking ? "暂停朗读" : "开始朗读")) {
-                    toggleSpeech()
-                }
-                .buttonStyle(.bordered)
-            }
-
             tapZoneSettings
+        }
+    }
+
+    private func readerValueSlider(
+        _ title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        unit: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                TextField(
+                    title,
+                    text: Binding(
+                        get: {
+                            step < 1
+                                ? String(format: "%.2f", value.wrappedValue)
+                                : String(format: "%.0f", value.wrappedValue)
+                        },
+                        set: { raw in
+                            guard let parsed = Double(raw) else { return }
+                            value.wrappedValue = min(max(parsed, range.lowerBound), range.upperBound)
+                        }
+                    )
+                )
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 76)
+                Text(unit)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range, step: step)
         }
     }
 
@@ -1363,7 +1397,12 @@ struct ReaderView: View {
             }
         }
         speechPausedForScene = false
-        speechController.speak(title: content.title, paragraphs: content.paragraphs, rate: Float(ttsRate))
+        speechController.speak(
+            title: content.title,
+            paragraphs: content.paragraphs,
+            startParagraphIndex: currentParagraphIndexForPersistence(),
+            rate: Float(ttsRate)
+        )
     }
 
     private func toggleAutoScroll() {
@@ -1669,9 +1708,9 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         synthesizer.delegate = self
     }
 
-    func speak(title: String, paragraphs: [String], rate: Float) {
+    func speak(title: String, paragraphs: [String], startParagraphIndex: Int = 0, rate: Float) {
         stop(clearCompletion: false)
-        queue.reset(title: title, paragraphs: paragraphs)
+        queue.reset(title: title, paragraphs: paragraphs, startParagraphIndex: startParagraphIndex)
         self.rate = rate
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true, options: [])

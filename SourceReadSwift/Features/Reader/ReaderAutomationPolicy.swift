@@ -105,15 +105,19 @@ struct ReaderSpeechQueue: Equatable {
 
     var isFinished: Bool { nextIndex >= segments.count }
 
-    mutating func reset(title: String, paragraphs: [String]) {
+    mutating func reset(title: String, paragraphs: [String], startParagraphIndex: Int = 0) {
         segments = []
         paragraphIndexes = []
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedTitle.isEmpty {
+        let safeStart = min(max(startParagraphIndex, 0), max(paragraphs.count - 1, 0))
+        // The chapter title is useful only when playback starts at the actual
+        // chapter beginning. Starting TTS from a visible page must never jump
+        // back to the title or earlier paragraphs.
+        if safeStart == 0, !trimmedTitle.isEmpty {
             segments.append(trimmedTitle)
             paragraphIndexes.append(-1)
         }
-        for (index, paragraph) in paragraphs.enumerated() {
+        for (index, paragraph) in paragraphs.enumerated() where index >= safeStart {
             let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
             segments.append(trimmed)

@@ -313,6 +313,7 @@ struct BookDetailView: View {
 
 struct ChapterLoadingView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     let bookID: String?
     let sourceUrl: String
     let chapter: BookChapter
@@ -345,6 +346,9 @@ struct ChapterLoadingView: View {
                     statusMessage: isUsingStaleCache ? "网络加载失败，正在显示本地缓存副本" : nil,
                     extraToolbarActions: extraToolbarActions,
                     onRequestSourceSwitch: onRequestSourceSwitch,
+                    onRequestBookDetail: {
+                        dismiss()
+                    },
                     onSelectChapter: { selected in
                         currentChapter = selected
                         content = nil
