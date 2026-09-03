@@ -20,6 +20,7 @@ struct SourceManagerView: View {
     @State private var batchCheck: SourceBatchCheckState?
     @State private var sourceLogin: BookSource?
     @State private var sourceHistory: BookSource?
+    @State private var sourceVisualDetail: BookSource?
     @State private var rssEditor: RSSSource?
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
@@ -177,6 +178,15 @@ struct SourceManagerView: View {
                 SourceDiagnosticHistoryView(source: source)
                     .environmentObject(appState)
             }
+            .sheet(item: $sourceVisualDetail) { source in
+                SourceVisualDetailView(
+                    source: source,
+                    health: appState.sourceHealthStore.record(for: source),
+                    onTest: { sourceTest = SourceTestState(source: source) },
+                    onEditRules: { sourceRuleEditor = source },
+                    onEditJSON: { sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source)) }
+                )
+            }
             .sheet(item: $rssEditor) { source in
                 RSSSourceEditorView(source: source) { updated in
                     do {
@@ -278,21 +288,17 @@ struct SourceManagerView: View {
                     let enabled = appState.sourceStore.sources.filter(\.enabled)
                     batchCheck = SourceBatchCheckState(sources: enabled)
                 } label: {
-                    Label("一键检测启用书源", systemImage: "checkmark.seal")
-                        .frame(maxWidth: .infinity)
+                    Label("检测启用书源", systemImage: "checkmark.seal")
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
                 .disabled(appState.sourceStore.sources.filter(\.enabled).isEmpty)
-
-                Button {
-                    showImportSheet = true
-                } label: {
-                    Label("导入", systemImage: "tray.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
+                Spacer()
+                Text("导入请使用右上角 +")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Text("支持本地 JSON、URL、阅读分享链接、仓库导入、RSS 预览和书源搜索/详情/目录/正文链路测试。点击“导入”后可选择本地 JSON 文件。")
+            Text("支持 JSON、URL、阅读分享链接、仓库、RSS，以及搜索 → 详情 → 目录 → 正文全链路测试。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -447,6 +453,9 @@ struct SourceManagerView: View {
                 }
                 Button("测试书源") {
                     sourceTest = SourceTestState(source: source)
+                }
+                Button("可视化详情") {
+                    sourceVisualDetail = source
                 }
                 Button("诊断历史") {
                     sourceHistory = source
@@ -1664,6 +1673,96 @@ private struct SourceJSONEditorState: Identifiable {
     let id = UUID()
     let title: String
     var json: String
+}
+
+private struct SourceVisualDetailView: View {
+    let source: BookSource
+    let health: SourceHealthRecord?
+    let onTest: () -> Void
+    let onEditRules: () -> Void
+    let onEditJSON: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var stages: [(String, String, String, Bool)] {
+        [
+            ("搜索", "searchUrl", "magnifyingglass", source.searchUrl?.nilIfEmpty != nil && source.ruleSearch != nil),
+            ("详情", "ruleBookInfo", "doc.text.magnifyingglass", source.ruleBookInfo != nil),
+            ("目录", "ruleToc", "list.bullet.rectangle", source.ruleToc != nil),
+            ("正文", "ruleContent", "book.pages", source.ruleContent != nil)
+        ]
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(source.bookSourceName).font(.title2.bold())
+                        Text(source.bookSourceUrl).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        HStack(spacing: 8) {
+                            statusPill(source.enabled ? "启用" : "停用", color: source.enabled ? .green : .gray)
+                            if let health { statusPill(health.status.title, color: health.status.color) }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .podcastCard()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("可视化链路").font(.headline)
+                        ForEach(stages, id: \.1) { stage in
+                            HStack(spacing: 12) {
+                                Image(systemName: stage.2)
+                                    .frame(width: 28)
+                                    .foregroundStyle(stage.3 ? .green : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(stage.0).font(.subheadline.weight(.semibold))
+                                    Text(stage.1).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: stage.3 ? "checkmark.circle.fill" : "circle.dashed")
+                                    .foregroundStyle(stage.3 ? .green : .secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .podcastCard()
+
+                    VStack(spacing: 10) {
+                        Button { dismiss(); onTest() } label: {
+                            Label("运行全链路测试", systemImage: "play.circle.fill").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button { dismiss(); onEditRules() } label: {
+                            Label("编辑规则", systemImage: "slider.horizontal.3").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        Button { dismiss(); onEditJSON() } label: {
+                            Label("编辑 JSON", systemImage: "curlybraces").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding()
+            }
+            .pageBackground()
+            .navigationTitle("书源详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func statusPill(_ title: String, color: Color) -> some View {
+        Text(title)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(color)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
+    }
 }
 
 private struct SourceTestState: Identifiable, Sendable {
