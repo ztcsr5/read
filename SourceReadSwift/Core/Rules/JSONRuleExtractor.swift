@@ -380,6 +380,14 @@ struct JSONRuleExtractor {
 
     private func normalize(_ rule: String) -> String {
         var output = rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Preserve JSONPath recursive descent and filter/wildcard segments.
+        // The tokenizer understands these brackets directly; converting them
+        // to the legacy `.*` form would silently discard predicates such as
+        // `[?(@.hasContent)]` and make `$..bookList[*]` over-select nodes.
+        if output.hasPrefix("$..") || output.hasPrefix("$.") {
+            output.removeFirst() // keep the leading dots for `..` descent
+            return output
+        }
         output = output
             .replacingOccurrences(of: #"(?i)@put:\{[^}]*\}"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?i)@get:\{([^}]*)\}"#, with: "$1", options: .regularExpression)
