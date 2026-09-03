@@ -124,6 +124,26 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testSkipsNonLinearSpineAndPreservesMetadataAndNavigationFragment() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("linear.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="OEBPS/book.opf"/></rootfiles></container>"#, to: archive)
+        try add("OEBPS/book.opf", text: #"<package><metadata><dc:title>Linear</dc:title><dc:creator>A</dc:creator><dc:language>zh-CN</dc:language><dc:publisher>Pub</dc:publisher></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine><itemref idref="cover" linear="no"/><itemref idref="c1"/></spine></package>"#, to: archive)
+        try add("OEBPS/nav.xhtml", text: #"<nav><a href="chapter.xhtml#anchor">第一章</a></nav>"#, to: archive)
+        try add("OEBPS/cover.xhtml", text: #"<html><body><p>Cover only</p></body></html>"#, to: archive)
+        try add("OEBPS/chapter.xhtml", text: #"<html><body><h1>Chapter</h1><p id="anchor">Body</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.language, "zh-CN")
+        XCTAssertEqual(book.publisher, "Pub")
+        XCTAssertEqual(book.chapters.map(\.title), ["第一章"])
+        XCTAssertEqual(book.chapters.first?.navigationFragment, "anchor")
+        XCTAssertEqual(book.chapters.first?.sourcePath, "OEBPS/chapter.xhtml")
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
         try add(path, data: Data(text.utf8), to: archive)
     }
