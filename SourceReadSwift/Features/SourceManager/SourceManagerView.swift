@@ -1471,7 +1471,7 @@ struct SourceManagerView: View {
 
         switch result {
         case .success(let books):
-            var status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
+            let status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
             var message = books.isEmpty
                 ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
                 : "搜索通过：\(books.count) 条结果。"
@@ -2201,5 +2201,22 @@ private enum SourceManagerTab: String, CaseIterable, Identifiable {
         case .catalogs: return "仓库"
         case .rss: return "RSS"
         }
+    }
+}
+
+private extension Array {
+    /// Split source diagnostics into bounded batches without creating a
+    /// large task group or allowing an invalid batch size to loop forever.
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0, !isEmpty else { return isEmpty ? [] : [self] }
+        var result: [[Element]] = []
+        result.reserveCapacity((count + size - 1) / size)
+        var start = 0
+        while start < count {
+            let end = Swift.min(start + size, count)
+            result.append(Array(self[start..<end]))
+            start = end
+        }
+        return result
     }
 }
