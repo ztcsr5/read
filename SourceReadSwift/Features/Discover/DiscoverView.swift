@@ -12,7 +12,6 @@ struct DiscoverView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     bookSearchTab
 
-                    Color.clear.frame(height: 100)
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }

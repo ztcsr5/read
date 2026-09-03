@@ -55,6 +55,7 @@ struct ReaderView: View {
     @State private var sessionStartedAt = Date()
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
+    @State private var lastVisibleParagraphUpdateAt = Date.distantPast
     @State private var speechPausedForScene = false
     @StateObject private var playbackCoordinator = ReaderPlaybackCoordinator()
     @StateObject private var speechController = ReaderSpeechController()
@@ -160,10 +161,17 @@ struct ReaderView: View {
     }
 
     private var pagedBlocks: [ReaderPageBlock] {
-        if pagedBlocksCacheKey == readerPageCacheKey, !pagedBlocksCache.isEmpty {
+        // Keep the last page model while a settings change is being committed.
+        // SwiftUI may evaluate `body` several times before `.onChange` runs;
+        // rebuilding a long chapter in each pass was a major source of jank.
+        if !pagedBlocksCache.isEmpty {
             return pagedBlocksCache
         }
-        return buildReaderPageBlocks()
+        // A valid empty cache is still a cache (empty chapters are legal).
+        if pagedBlocksCacheKey == readerPageCacheKey { return pagedBlocksCache }
+        // Before `onAppear` seeds the cache, render a cheap placeholder rather
+        // than laying out every paragraph once per SwiftUI body evaluation.
+        return [ReaderPageBlock(id: 0, includesTitle: true, paragraphs: [])]
     }
 
     private var readerPageCacheKey: String {
@@ -1503,6 +1511,11 @@ struct ReaderView: View {
 
     private func updateVisibleParagraph(from positions: [ParagraphPosition]) {
         guard readerMode == .scroll, !autoScrollEnabled, !positions.isEmpty else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastVisibleParagraphUpdateAt) >= ReaderPerformancePolicy.visibleParagraphUpdateInterval else {
+            return
+        }
+        lastVisibleParagraphUpdateAt = now
         let topInset = CGFloat(pagePadding)
         let visible = positions
             .filter { $0.minY >= topInset }

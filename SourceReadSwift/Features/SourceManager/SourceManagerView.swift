@@ -104,7 +104,6 @@ struct SourceManagerView: View {
                     searchField
                     currentTabContent
                     importStatus
-                    Color.clear.frame(height: 80)
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
                 .padding(.top, 10)
@@ -186,6 +185,7 @@ struct SourceManagerView: View {
                     onEditRules: { sourceRuleEditor = source },
                     onEditJSON: { sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source)) }
                 )
+                .environmentObject(appState)
             }
             .sheet(item: $rssEditor) { source in
                 RSSSourceEditorView(source: source) { updated in
@@ -1676,12 +1676,16 @@ private struct SourceJSONEditorState: Identifiable {
 }
 
 private struct SourceVisualDetailView: View {
+    @EnvironmentObject private var appState: AppState
     let source: BookSource
     let health: SourceHealthRecord?
     let onTest: () -> Void
     let onEditRules: () -> Void
     let onEditJSON: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var diagnosticKeyword = "斗破苍穹"
+    @State private var dynamicResults: [SourceVisualDiagnosticStage] = []
+    @State private var isRunningDiagnostic = false
 
     private var stages: [(String, String, String, Bool)] {
         [
@@ -1690,6 +1694,18 @@ private struct SourceVisualDetailView: View {
             ("目录", "ruleToc", "list.bullet.rectangle", source.ruleToc != nil),
             ("正文", "ruleContent", "book.pages", source.ruleContent != nil)
         ]
+    }
+
+    private var latestDiagnostics: [String: SourceDiagnosticHistoryRecord] {
+        var result: [String: SourceDiagnosticHistoryRecord] = [:]
+        for record in appState.sourceDiagnosticHistoryStore.records(for: source) {
+            let stage = record.stage.lowercased()
+            for key in ["search", "detail", "toc", "content"]
+            where stage == key || stage.hasSuffix(".\(key)") {
+                if result[key] == nil { result[key] = record }
+            }
+        }
+        return result
     }
 
     var body: some View {
@@ -1723,6 +1739,42 @@ private struct SourceVisualDetailView: View {
                                     .foregroundStyle(stage.3 ? .green : .secondary)
                             }
                             .padding(.vertical, 4)
+                        }
+                    }
+                    .podcastCard()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("最近一次动态诊断").font(.headline)
+                            Spacer()
+                            Text(latestDiagnostics.isEmpty ? "未运行" : "按阶段记录")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        TextField("诊断关键词", text: $diagnosticKeyword)
+                            .textFieldStyle(.roundedBorder)
+                            .textInputAutocapitalization(.never)
+                        Button {
+                            runDynamicDiagnostic()
+                        } label: {
+                            HStack {
+                                Label(isRunningDiagnostic ? "诊断中…" : "运行 Search → Detail → TOC → Content", systemImage: "play.circle.fill")
+                                Spacer()
+                                if isRunningDiagnostic { ProgressView().controlSize(.small) }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isRunningDiagnostic || diagnosticKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if dynamicResults.isEmpty {
+                            ForEach(stages, id: \.1) { stage in
+                                diagnosticResultRow(stageKey: stage.1, title: stage.0, icon: stage.2)
+                            }
+                        } else {
+                            ForEach(dynamicResults) { result in
+                                dynamicDiagnosticResultRow(result)
+                            }
                         }
                     }
                     .podcastCard()
@@ -1763,6 +1815,186 @@ private struct SourceVisualDetailView: View {
             .background(color.opacity(0.14))
             .clipShape(Capsule())
     }
+
+    private func diagnosticResultRow(stageKey: String, title: String, icon: String) -> some View {
+        let record = latestDiagnostics[stageKey]
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: record?.status.systemImage ?? icon)
+                .foregroundStyle(record?.status.color ?? .secondary)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    if let record {
+                        Text(record.status.shortTitle)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(record.status.color)
+                        if let elapsed = record.elapsedMilliseconds {
+                            Text("\u{00b7} \(elapsed) ms").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        if record.resultCount > 0 {
+                            Text("\u{00b7} \(record.resultCount) \u{6761}").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("\u{5f85}\u{8fd0}\u{884c}").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Text(record?.message ?? "\u{8fd0}\u{884c}\u{5168}\u{94fe}\u{8def}\u{6d4b}\u{8bd5}\u{540e}\u{663e}\u{793a}\u{771f}\u{5b9e}\u{8bf7}\u{6c42}\u{3001}\u{89e3}\u{6790}\u{548c}\u{5931}\u{8d25}\u{5efa}\u{8bae}")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func dynamicDiagnosticResultRow(_ result: SourceVisualDiagnosticStage) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: result.status.systemImage)
+                .foregroundStyle(result.status.color)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(result.title).font(.subheadline.weight(.semibold))
+                    Text(result.status.shortTitle)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(result.status.color)
+                    Text("· \(result.elapsedMilliseconds) ms")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if result.resultCount > 0 {
+                        Text("· \(result.resultCount) 条")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(result.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func runDynamicDiagnostic() {
+        guard !isRunningDiagnostic else { return }
+        let keyword = diagnosticKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return }
+        isRunningDiagnostic = true
+        dynamicResults = []
+        Task { @MainActor in
+            await executeDynamicDiagnostic(keyword: keyword)
+            isRunningDiagnostic = false
+        }
+    }
+
+    @MainActor
+    private func executeDynamicDiagnostic(keyword: String) async {
+        let engine = appState.engine
+
+        func elapsed(_ startedAt: Date) -> Int {
+            max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+        }
+
+        func appendResult(
+            key: String,
+            title: String,
+            status: SourceHealthStatus,
+            message: String,
+            milliseconds: Int,
+            count: Int = 0
+        ) {
+            dynamicResults.append(SourceVisualDiagnosticStage(
+                key: key,
+                title: title,
+                status: status,
+                message: message,
+                elapsedMilliseconds: milliseconds,
+                resultCount: count
+            ))
+            appState.sourceDiagnosticHistoryStore.record(
+                source: source,
+                stage: key,
+                status: status,
+                message: message,
+                elapsedMilliseconds: milliseconds,
+                resultCount: count
+            )
+        }
+
+        let searchStartedAt = Date()
+        let search = await AsyncTimeout.run(seconds: 10) {
+            await engine.searchBooks(source: source, keyword: keyword, page: 1)
+        } ?? .failure(.network("Search timed out"))
+        switch search {
+        case .failure(let error):
+            let status = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
+            appendResult(key: "search", title: "搜索", status: status, message: error.displayMessage, milliseconds: elapsed(searchStartedAt))
+            return
+        case .success(let books):
+            let status: SourceHealthStatus = books.isEmpty ? .warning : .passed
+            appendResult(
+                key: "search",
+                title: "搜索",
+                status: status,
+                message: books.isEmpty ? "请求成功但结果为空；检查搜索规则和分页占位符。" : "搜索通过：\(books.count) 条结果。",
+                milliseconds: elapsed(searchStartedAt),
+                count: books.count
+            )
+            guard let first = books.first else { return }
+
+            let detailStartedAt = Date()
+            let detail = await AsyncTimeout.run(seconds: 10) {
+                await engine.getBookDetail(source: source, book: first)
+            } ?? .failure(.network("Detail timed out"))
+            switch detail {
+            case .failure(let error):
+                appendResult(key: "detail", title: "详情", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail"), message: error.displayMessage, milliseconds: elapsed(detailStartedAt))
+                return
+            case .success(let book):
+                appendResult(key: "detail", title: "详情", status: .passed, message: "详情通过：\(book.name)", milliseconds: elapsed(detailStartedAt), count: 1)
+
+                let tocStartedAt = Date()
+                let toc = await AsyncTimeout.run(seconds: 10) {
+                    await engine.getChapterList(source: source, book: book)
+                } ?? .failure(.network("TOC timed out"))
+                switch toc {
+                case .failure(let error):
+                    appendResult(key: "toc", title: "目录", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc"), message: error.displayMessage, milliseconds: elapsed(tocStartedAt))
+                    return
+                case .success(let chapters):
+                    let tocStatus: SourceHealthStatus = chapters.isEmpty ? .warning : .passed
+                    appendResult(key: "toc", title: "目录", status: tocStatus, message: chapters.isEmpty ? "目录为空；检查 chapterList/chapterUrl。" : "目录通过：\(chapters.count) 章。", milliseconds: elapsed(tocStartedAt), count: chapters.count)
+                    guard let firstChapter = chapters.first else { return }
+
+                    let contentStartedAt = Date()
+                    let content = await AsyncTimeout.run(seconds: 10) {
+                        await engine.getContent(source: source, chapter: firstChapter)
+                    } ?? .failure(.network("Content timed out"))
+                    switch content {
+                    case .failure(let error):
+                        appendResult(key: "content", title: "正文", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content"), message: error.displayMessage, milliseconds: elapsed(contentStartedAt))
+                    case .success(let chapterContent):
+                        let contentStatus: SourceHealthStatus = chapterContent.paragraphs.isEmpty ? .warning : .passed
+                        appendResult(key: "content", title: "正文", status: contentStatus, message: chapterContent.paragraphs.isEmpty ? "正文为空；检查 ruleContent.content 和净化规则。" : "正文通过：\(chapterContent.paragraphs.count) 段。", milliseconds: elapsed(contentStartedAt), count: chapterContent.paragraphs.count)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct SourceVisualDiagnosticStage: Identifiable {
+    let id = UUID()
+    let key: String
+    let title: String
+    let status: SourceHealthStatus
+    let message: String
+    let elapsedMilliseconds: Int
+    let resultCount: Int
 }
 
 private struct SourceTestState: Identifiable, Sendable {
@@ -1800,6 +2032,17 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
 }
 
 private extension SourceHealthStatus {
+    var shortTitle: String {
+        switch self {
+        case .passed: return "PASS"
+        case .warning: return "WARN"
+        case .failed: return "FAIL"
+        case .requiresLogin: return "LOGIN"
+        case .verificationRequired: return "VERIFY"
+        case .blocked: return "BLOCK"
+        }
+    }
+
     var title: String {
         switch self {
         case .passed: return "上次通过"

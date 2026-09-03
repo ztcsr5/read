@@ -28,7 +28,6 @@ struct BookshelfView: View {
                     readingSection
                     updatesSection
                     shelfSection
-                    Color.clear.frame(height: 110)
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
             }

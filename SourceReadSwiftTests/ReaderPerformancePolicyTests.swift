@@ -21,4 +21,9 @@ final class ReaderPerformancePolicyTests: XCTestCase {
     func testPersistenceDebounceIsLongerThanOneFrame() {
         XCTAssertGreaterThan(ReaderPerformancePolicy.positionPersistenceDebounceNanoseconds, 16_000_000)
     }
+
+    func testVisibleParagraphUpdatesAreThrottledBelowDisplayCadence() {
+        XCTAssertGreaterThanOrEqual(ReaderPerformancePolicy.visibleParagraphUpdateInterval, 0.05)
+        XCTAssertLessThan(ReaderPerformancePolicy.visibleParagraphUpdateInterval, 0.2)
+    }
 }

@@ -29,4 +29,9 @@ enum ReaderPerformancePolicy {
     /// is shared by scroll, paging and speech callbacks to keep disk I/O off
     /// the display frame path.
     static let positionPersistenceDebounceNanoseconds: UInt64 = 700_000_000
+
+    /// Visible-paragraph state is only used for resume/highlight bookkeeping;
+    /// it does not need to follow every display-link tick. Throttling this
+    /// update keeps PreferenceKey propagation off the 120 Hz rendering path.
+    static let visibleParagraphUpdateInterval: TimeInterval = 0.08
 }
