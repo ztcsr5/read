@@ -1006,3 +1006,29 @@
 
 ### Rollback
 - Revert `c206f9e` and the preceding `ff96716`/`cbafada` correction commits to restore the prior bridge behavior.
+
+## 2026-09-03 - Task: Stage 2A closure and Stage 2B source pipeline kickoff
+
+### Stage 2A CI closure
+
+- Commit `cd5ba53` is the current branch head and is synchronized to `origin/codex/swift-v2-lifetime-reader`.
+- iOS build/XCTest run `33694888232`: success.
+- Unsigned IPA run `33694888231`: success; artifact `SourceReadSwift-unsigned-ipa`, 5,764,868 bytes.
+- This closes Stage 2A. The JavaScriptCore prelude, Legado namespace initialization, chapter aliases and POST form bridge now have a green CI gate.
+
+### Stage 2B implementation started
+
+- Added deterministic end-to-end fixture coverage for HTML, JSON, JS, POST, paginated TOC/content, JXNode, headers/cookie/status and failure diagnostics in `SourceReadSwiftTests/SourceEngineFixturePipelineTests.swift`.
+- Added four-stage rule editor JSON round-trip, preview coverage and malformed JSON/JavaScript validation tests in `SourceReadSwiftTests/RuleEditorRoundTripTests.swift`.
+- Extended `RuleEditorValidator` to validate structured rule JSON and JavaScript syntax before save.
+- Extended `JSONRuleExtractor.list` to decode `JSON.stringify(...)` results returned by JavaScriptCore, a common Legado JS `bookList` pattern.
+
+### Testing
+
+- `git diff --check` passes locally; Windows reports only existing LF-to-CRLF normalization warnings.
+- Swift/Xcode compilation and XCTest for Stage 2B are pending the unified phase commit and GitHub Actions.
+- No real external source is contacted by the new tests. Sustained ProMotion 120 Hz remains a device/Instruments evidence item.
+
+### Rollback
+
+- Revert the Stage 2B phase commit to remove the new fixture pipeline, rule-editor test coverage, validator syntax checks and JSON-stringified JS list compatibility while preserving the green Stage 2A bridge.

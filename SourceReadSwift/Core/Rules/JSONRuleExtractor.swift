@@ -42,6 +42,24 @@ struct JSONRuleExtractor {
             if let dict = selected as? [String: Any] {
                 return [dict]
             }
+            // Legado's @js list rules commonly return JSON.stringify(...)
+            // rather than a native JS array.  JavaScriptCore bridges that
+            // result back to Swift as a String, so decode it before falling
+            // back to recursive dictionary discovery.  This keeps JS and
+            // JSON bookList rules behaviorally equivalent.
+            if let text = selected as? String,
+               let data = text.data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: data) {
+                if let array = decoded as? [[String: Any]] {
+                    return array
+                }
+                if let array = decoded as? [Any] {
+                    return array.compactMap { $0 as? [String: Any] }
+                }
+                if let dict = decoded as? [String: Any] {
+                    return [dict]
+                }
+            }
         }
         return collectDictionaries(object)
     }
