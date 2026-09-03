@@ -78,7 +78,7 @@ struct DiscoverView: View {
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
                 .onSubmit {
-                    Task { await viewModel.search() }
+                    viewModel.startSearch()
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .keyboard) {
@@ -246,14 +246,25 @@ final class DiscoverViewModel: ObservableObject {
 
     private weak var appState: AppState?
     private var activeSearchID: UUID?
+    private var searchTask: Task<Void, Never>?
 
     func bind(appState: AppState) {
         self.appState = appState
     }
 
     func cancelSearch() {
+        searchTask?.cancel()
+        searchTask = nil
         activeSearchID = nil
         isSearching = false
+    }
+
+    func startSearch() {
+        searchTask?.cancel()
+        searchTask = Task { @MainActor [weak self] in
+            await self?.search()
+            self?.searchTask = nil
+        }
     }
 
     func applyResultFilter() {
@@ -297,7 +308,7 @@ final class DiscoverViewModel: ObservableObject {
         var failures: [String] = []
 
         for batch in sources.chunked(into: 12) {
-            guard activeSearchID == searchID else { return }
+            guard activeSearchID == searchID, !Task.isCancelled else { return }
             await withTaskGroup(of: (BookSource, Result<[SearchBook], SourceEngineError>).self) { group in
                 for source in batch {
                     group.addTask {
@@ -309,7 +320,10 @@ final class DiscoverViewModel: ObservableObject {
                 }
 
                 for await (source, result) in group {
-                    guard activeSearchID == searchID else { continue }
+                    guard activeSearchID == searchID, !Task.isCancelled else {
+                        group.cancelAll()
+                        return
+                    }
                     checkedSourceCount += 1
                     switch result {
                     case .success(let books):
