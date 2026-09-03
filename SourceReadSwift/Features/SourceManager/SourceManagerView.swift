@@ -1491,6 +1491,7 @@ struct SourceManagerView: View {
                 source: source,
                 result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message),
                 resultCount: 0,
+                firstBook: nil,
                 login: login
             )
         }
