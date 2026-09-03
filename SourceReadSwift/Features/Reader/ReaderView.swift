@@ -10,6 +10,12 @@ struct ReaderView: View {
     let chapterIndex: Int
     let totalChapters: Int?
     var chapters: [BookChapter] = []
+    /// Optional EPUB3/NCX entries. Multiple entries may target different
+    /// fragments inside one normalized chapter.
+    var navigationEntries: [LocalTextNavigationEntry] = []
+    /// Explicit initial position used for fragment navigation. Stored reading
+    /// progress remains the fallback for ordinary chapter resumes.
+    var initialParagraphIndex: Int? = nil
     var statusMessage: String?
     var extraToolbarActions: () -> AnyView = { AnyView(EmptyView()) }
     var onRequestSourceSwitch: (() -> Void)?
@@ -18,6 +24,7 @@ struct ReaderView: View {
     /// remains the fallback detail context.
     var onRequestBookDetail: (() -> Void)?
     var onSelectChapter: ((BookChapter) -> Void)?
+    var onSelectNavigationEntry: ((LocalTextNavigationEntry) -> Void)?
     var onRefreshChapter: (() -> Void)?
     var onCacheNextChapters: (() -> Void)?
     /// Called after speech reaches the end of the current chapter. The owning
@@ -158,6 +165,17 @@ struct ReaderView: View {
         if tocReversed {
             result.reverse()
         }
+        return result
+    }
+
+    private var filteredNavigationEntries: [LocalTextNavigationEntry] {
+        let query = tocQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var result = navigationEntries.filter { entry in
+            query.isEmpty
+                || entry.title.lowercased().contains(query)
+                || entry.chapterIndex.map { String($0 + 1).contains(query) } == true
+        }
+        if tocReversed { result.reverse() }
         return result
     }
 
@@ -346,6 +364,10 @@ struct ReaderView: View {
             playbackCoordinator.stop()
             speechPausedForScene = false
             autoScrollTarget = initialAutoScrollTarget()
+        }
+        .onChange(of: initialParagraphIndex) { target in
+            guard let target, content.paragraphs.indices.contains(target) else { return }
+            jumpToParagraph(target)
         }
         .onChange(of: readerPageCacheKey) { _ in
             rebuildPagedBlocksCache()
@@ -1139,45 +1161,88 @@ struct ReaderView: View {
                 .padding(.top, 10)
 
             List {
-                if chapters.isEmpty {
+                if chapters.isEmpty && navigationEntries.isEmpty {
                     Text("当前章节没有可切换目录")
                         .foregroundStyle(.secondary)
-                } else if filteredChapters.isEmpty {
+                } else if filteredChapters.isEmpty && filteredNavigationEntries.isEmpty {
                     Text("没有匹配章节")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(filteredChapters) { chapter in
-                        Button {
-                            showChapterList = false
-                            // Keep the reader chrome visible after a chapter
-                            // switch. Hiding it here made the next reader
-                            // render look like the root/home menu.
-                            showOverlay = true
-                            onSelectChapter?(chapter)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Text("\(chapter.index + 1)")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(chapter.index == chapterIndex ? AppTheme.accent : .secondary)
-                                    .frame(width: 42, alignment: .leading)
-
-                                Text(chapter.title)
-                                    .foregroundStyle(chapter.index == chapterIndex ? AppTheme.accent : .primary)
-                                    .fontWeight(chapter.index == chapterIndex ? .semibold : .regular)
-                                    .lineLimit(1)
-
-                                Spacer()
-                                if chapter.index == chapterIndex {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(AppTheme.accent)
+                    if !filteredChapters.isEmpty {
+                        Section("章节") {
+                            ForEach(filteredChapters) { chapter in
+                                Button {
+                                    showChapterList = false
+                                    // Keep the reader chrome visible after a chapter
+                                    // switch. Hiding it here made the next reader
+                                    // render look like the root/home menu.
+                                    showOverlay = true
+                                    onSelectChapter?(chapter)
+                                } label: {
+                                    chapterRow(chapter)
                                 }
+                                .disabled(onSelectChapter == nil || chapter.index == chapterIndex)
                             }
                         }
-                        .disabled(onSelectChapter == nil || chapter.index == chapterIndex)
+                    }
+                    if !filteredNavigationEntries.isEmpty {
+                        Section("页面内目录") {
+                            ForEach(Array(filteredNavigationEntries.enumerated()), id: \.element) { offset, entry in
+                                Button {
+                                    showChapterList = false
+                                    showOverlay = true
+                                    onSelectNavigationEntry?(entry)
+                                } label: {
+                                    navigationEntryRow(entry, ordinal: offset)
+                                }
+                                .disabled(onSelectNavigationEntry == nil || entry.chapterIndex == nil)
+                            }
+                        }
                     }
                 }
             }
             .listStyle(.plain)
+        }
+    }
+
+    private func chapterRow(_ chapter: BookChapter) -> some View {
+        HStack(spacing: 12) {
+            Text("\(chapter.index + 1)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(chapter.index == chapterIndex ? AppTheme.accent : .secondary)
+                .frame(width: 42, alignment: .leading)
+            Text(chapter.title)
+                .foregroundStyle(chapter.index == chapterIndex ? AppTheme.accent : .primary)
+                .fontWeight(chapter.index == chapterIndex ? .semibold : .regular)
+                .lineLimit(1)
+            Spacer()
+            if chapter.index == chapterIndex {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+    }
+
+    private func navigationEntryRow(_ entry: LocalTextNavigationEntry, ordinal: Int) -> some View {
+        HStack(spacing: 12) {
+            Text("\(ordinal + 1)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.title)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let chapterIndex = entry.chapterIndex {
+                    Text("第 \(chapterIndex + 1) 章" + (entry.paragraphIndex.map { " · 第 \($0 + 1) 段" } ?? ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Image(systemName: "arrow.down.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -1562,10 +1627,16 @@ struct ReaderView: View {
     }
 
     private func initialAutoScrollTarget() -> Int {
-        guard let stored = appState.bookshelfStore.book(id: bookID),
-              stored.currentChapterIndex == chapterIndex,
-              let paragraphIndex = stored.currentParagraphIndex else {
-            return 0
+        let paragraphIndex: Int
+        if let initialParagraphIndex {
+            paragraphIndex = initialParagraphIndex
+        } else {
+            guard let stored = appState.bookshelfStore.book(id: bookID),
+                  stored.currentChapterIndex == chapterIndex,
+                  let storedParagraphIndex = stored.currentParagraphIndex else {
+                return 0
+            }
+            paragraphIndex = storedParagraphIndex
         }
         let safeParagraph = min(max(paragraphIndex, 0), max(content.paragraphs.count - 1, 0))
         visibleParagraphIndex = safeParagraph

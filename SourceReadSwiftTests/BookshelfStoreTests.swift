@@ -25,6 +25,41 @@ final class BookshelfStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testPersistsLocalNavigationEntriesAndDecodesLegacyBookshelfJSON() throws {
+        let navigation = LocalTextNavigationEntry(
+            title: "第二节",
+            sourcePath: "OPS/chapter.xhtml",
+            fragment: "two",
+            chapterIndex: 0,
+            paragraphIndex: 2
+        )
+        let localBook = LocalTextBook(
+            title: "Anchors",
+            author: "Local",
+            chapters: [
+                LocalTextChapter(title: "Chapter", paragraphs: ["One", "Two", "Three"], index: 0, sourcePath: "OPS/chapter.xhtml")
+            ],
+            navigationEntries: [navigation]
+        )
+        let book = BookshelfBook(localTextBook: localBook)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data = try encoder.encode(book)
+        let decoded = try decoder.decode(BookshelfBook.self, from: data)
+        XCTAssertEqual(decoded.localNavigationEntries, [navigation])
+
+        // Older bookshelf snapshots do not have localNavigationEntries; the
+        // custom decoder must keep them readable and leave the new field nil.
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "localNavigationEntries")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacyDecoded = try decoder.decode(BookshelfBook.self, from: legacyData)
+        XCTAssertNil(legacyDecoded.localNavigationEntries)
+    }
+
     func testTogglesBookmarks() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

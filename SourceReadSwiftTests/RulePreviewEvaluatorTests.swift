@@ -26,4 +26,18 @@ final class RulePreviewEvaluatorTests: XCTestCase {
             "规则为空"
         )
     }
+
+    func testPreviewReturnsStructuredStageAndMatchCount() {
+        let result = RulePreviewEvaluator().preview(
+            sample: "<article><p>A</p><p>B</p></article>",
+            ruleText: "article p@text",
+            stage: .content
+        )
+
+        XCTAssertEqual(result.stage, .content)
+        XCTAssertEqual(result.values, ["A", "B"])
+        XCTAssertEqual(result.matchedCount, 2)
+        XCTAssertTrue(result.hasMatches)
+        XCTAssertEqual(result.message, "A\nB")
+    }
 }

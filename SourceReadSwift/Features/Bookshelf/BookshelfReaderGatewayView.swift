@@ -20,6 +20,7 @@ struct BookshelfReaderGatewayView: View {
     @State private var didApplyInitialChapter = false
     @State private var requestedChapterIndex: Int?
     @State private var sourceSwitchSearchTrigger = 0
+    @State private var localNavigationRevision = 0
 
     private var currentBook: BookshelfBook {
         appState.bookshelfStore.book(id: book.id) ?? book
@@ -96,6 +97,10 @@ struct BookshelfReaderGatewayView: View {
         book.localChapters ?? []
     }
 
+    private var localNavigationEntries: [LocalTextNavigationEntry] {
+        currentBook.localNavigationEntries ?? []
+    }
+
     private func applyInitialBookmarkIfNeeded() {
         guard !didApplyInitialBookmark, let initialBookmark else { return }
         didApplyInitialBookmark = true
@@ -153,7 +158,7 @@ struct BookshelfReaderGatewayView: View {
         let requestedIndex = selectedLocalChapterIndex ?? requestedChapterIndex ?? currentBook.currentChapterIndex
         let safeIndex = min(max(requestedIndex, 0), max(chapters.count - 1, 0))
         let localChapter = chapters[safeIndex]
-        let bookChapters = chapters.map {
+        let fallbackChapters = chapters.map {
             BookChapter(
                 title: $0.title,
                 url: "\(book.bookURL)#\($0.index)",
@@ -162,17 +167,21 @@ struct BookshelfReaderGatewayView: View {
                 isVip: false
             )
         }
+        let storedParagraph = currentBook.currentChapterIndex == safeIndex ? currentBook.currentParagraphIndex : nil
+        let initialParagraphIndex = storedParagraph
         return ReaderView(
             bookID: book.id,
             content: ChapterContent(
-                chapter: bookChapters[safeIndex],
+                chapter: fallbackChapters[safeIndex],
                 title: localChapter.title,
                 paragraphs: localChapter.paragraphs,
                 nextContentUrl: nil
             ),
             chapterIndex: safeIndex,
             totalChapters: chapters.count,
-            chapters: bookChapters,
+            chapters: fallbackChapters,
+            navigationEntries: localNavigationEntries,
+            initialParagraphIndex: initialParagraphIndex,
             onRequestBookDetail: {
                 dismiss()
             },
@@ -184,6 +193,19 @@ struct BookshelfReaderGatewayView: View {
                     chapterIndex: chapter.index,
                     chapterTitle: chapter.title,
                     totalChapters: chapters.count
+                )
+            },
+            onSelectNavigationEntry: { entry in
+                guard let chapterIndex = entry.chapterIndex, chapters.indices.contains(chapterIndex) else { return }
+                showReaderChromeAfterChapterSelection = true
+                selectedLocalChapterIndex = chapterIndex
+                localNavigationRevision &+= 1
+                appState.bookshelfStore.updateReadingProgress(
+                    bookID: book.id,
+                    chapterIndex: chapterIndex,
+                    chapterTitle: entry.title,
+                    totalChapters: chapters.count,
+                    paragraphIndex: entry.paragraphIndex
                 )
             },
             onSpeechFinished: {
@@ -204,7 +226,7 @@ struct BookshelfReaderGatewayView: View {
             },
             initialOverlayVisible: showReaderChromeAfterChapterSelection
         )
-        .id("reader-\(book.id)-\(safeIndex)")
+        .id("reader-\(book.id)-\(safeIndex)-\(localNavigationRevision)")
     }
 
     private func resumeReading() async {

@@ -205,11 +205,14 @@ struct RSSArticleReaderView: View {
 
     @MainActor private func load(_ article: RSSArticlePreview) async {
         isLoading = true; errorMessage = nil; showingCachedContent = false; defer { isLoading = false }
-        if let cachedHTML = appState.rssArticleContentCacheStore.contentHTML(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) {
+        // Read stale entries too. A reader should remain useful offline; the
+        // network request below is still attempted and replaces the cache when
+        // fresh content is available.
+        if let cachedHTML = appState.rssArticleContentCacheStore.contentHTML(for: article) {
             let cached = RSSArticleContentParser().parseParagraphs(from: cachedHTML)
             if !cached.isEmpty { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
         }
-        if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article, maxAge: RSSFeedCacheStore.defaultMaxAge) { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
+        if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article) { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
         guard let link = article.link, let url = URL(string: link) else {
             if paragraphs.isEmpty {
                 paragraphs = fallbackParagraphs(for: article)

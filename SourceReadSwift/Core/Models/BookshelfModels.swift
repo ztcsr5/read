@@ -11,6 +11,9 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     var intro: String?
     var localContent: [String]?
     var localChapters: [LocalTextChapter]?
+    /// EPUB3/NCX navigation entries, including fragment links that point into
+    /// the same XHTML chapter. Optional keeps older bookshelf JSON decodable.
+    var localNavigationEntries: [LocalTextNavigationEntry]?
     var latestChapterTitle: String?
     var totalChapters: Int
     var seenTotalChapters: Int?
@@ -25,6 +28,42 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
     /// Optional user-managed bookshelf group. Nil means the default "全部" view.
     var groupName: String?
     var addedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, author, coverURL, sourceName, sourceURL, bookURL, intro,
+             localContent, localChapters, localNavigationEntries, latestChapterTitle,
+             totalChapters, seenTotalChapters, currentChapterIndex, currentChapterTitle,
+             currentParagraphIndex, bookmarks, lastReadAt, lastOpenedAt,
+             readingSessionCount, totalReadingSeconds, groupName, addedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        author = try c.decode(String.self, forKey: .author)
+        coverURL = try c.decodeIfPresent(String.self, forKey: .coverURL)
+        sourceName = try c.decode(String.self, forKey: .sourceName)
+        sourceURL = try c.decode(String.self, forKey: .sourceURL)
+        bookURL = try c.decode(String.self, forKey: .bookURL)
+        intro = try c.decodeIfPresent(String.self, forKey: .intro)
+        localContent = try c.decodeIfPresent([String].self, forKey: .localContent)
+        localChapters = try c.decodeIfPresent([LocalTextChapter].self, forKey: .localChapters)
+        localNavigationEntries = try c.decodeIfPresent([LocalTextNavigationEntry].self, forKey: .localNavigationEntries)
+        latestChapterTitle = try c.decodeIfPresent(String.self, forKey: .latestChapterTitle)
+        totalChapters = try c.decodeIfPresent(Int.self, forKey: .totalChapters) ?? 0
+        seenTotalChapters = try c.decodeIfPresent(Int.self, forKey: .seenTotalChapters)
+        currentChapterIndex = try c.decodeIfPresent(Int.self, forKey: .currentChapterIndex) ?? 0
+        currentChapterTitle = try c.decodeIfPresent(String.self, forKey: .currentChapterTitle)
+        currentParagraphIndex = try c.decodeIfPresent(Int.self, forKey: .currentParagraphIndex)
+        bookmarks = try c.decodeIfPresent([ReaderBookmark].self, forKey: .bookmarks)
+        lastReadAt = try c.decodeIfPresent(Date.self, forKey: .lastReadAt)
+        lastOpenedAt = try c.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
+        readingSessionCount = try c.decodeIfPresent(Int.self, forKey: .readingSessionCount)
+        totalReadingSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .totalReadingSeconds)
+        groupName = try c.decodeIfPresent(String.self, forKey: .groupName)
+        addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date()
+    }
 
     var readingProgress: Double {
         guard totalChapters > 0 else { return 0 }
@@ -46,6 +85,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         intro: String?,
         localContent: [String]? = nil,
         localChapters: [LocalTextChapter]? = nil,
+        localNavigationEntries: [LocalTextNavigationEntry]? = nil,
         latestChapterTitle: String? = nil,
         totalChapters: Int = 0,
         seenTotalChapters: Int? = nil,
@@ -70,6 +110,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
         self.intro = intro
         self.localContent = localContent
         self.localChapters = localChapters
+        self.localNavigationEntries = localNavigationEntries
         self.latestChapterTitle = latestChapterTitle
         self.totalChapters = totalChapters
         self.seenTotalChapters = seenTotalChapters
@@ -114,6 +155,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             intro: metadata.nilIfEmpty,
             localContent: nil,
             localChapters: localTextBook.chapters,
+            localNavigationEntries: localTextBook.navigationEntries.isEmpty ? nil : localTextBook.navigationEntries,
             latestChapterTitle: localTextBook.chapters.last?.title ?? "全文",
             totalChapters: max(localTextBook.chapters.count, 1),
             seenTotalChapters: max(localTextBook.chapters.count, 1),

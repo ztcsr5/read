@@ -4,6 +4,8 @@ import ZIPFoundation
 
 struct LocalEPUBBookParser {
     func parse(fileURL: URL) throws -> LocalTextBook {
+        let signpost = PerformanceSignpost.begin("epub.parse")
+        defer { PerformanceSignpost.end("epub.parse", id: signpost) }
         guard let archive = Archive(url: fileURL, accessMode: .read) else {
             throw LocalEPUBImportError.invalidArchive
         }
@@ -20,6 +22,7 @@ struct LocalEPUBBookParser {
         let manifest = manifestItems(from: opfXML)
         let spine = spineItems(from: opfXML)
         let tocEntries = tableOfContentsEntries(from: opfXML, manifest: manifest, basePath: basePath, archive: archive)
+        let navigation = allNavigationEntries(from: opfXML, manifest: manifest, basePath: basePath, archive: archive)
         let coverURL = extractCoverURL(
             from: opfXML,
             manifest: manifest,
@@ -31,11 +34,13 @@ struct LocalEPUBBookParser {
         let orderedIDs = spine.isEmpty
             ? manifest.filter { $0.mediaType.contains("xhtml") || $0.mediaType.contains("html") }.map(\.id)
             : (linearSpine.isEmpty ? spine.map(\.id) : linearSpine)
-        let chapters = try orderedIDs.enumerated().compactMap { index, id -> LocalTextChapter? in
+        var chapterHTMLByPath: [String: String] = [:]
+        let parsedChapters = try orderedIDs.enumerated().compactMap { index, id -> LocalTextChapter? in
             guard let item = manifest.first(where: { $0.id == id }) else { return nil }
             let href = item.href
             let path = normalizeEPUBPath(basePath: basePath, href: href)
             guard let html = try? stringEntry(path, in: archive) else { return nil }
+            chapterHTMLByPath[path] = html
             let paragraphs = paragraphs(from: html)
             guard !paragraphs.isEmpty else { return nil }
             let tocEntry = tocEntries[path]
@@ -47,17 +52,56 @@ struct LocalEPUBBookParser {
                 navigationFragment: tocEntry?.fragment
             )
         }
+        // A malformed/empty spine item can be skipped above. Reindex the
+        // surviving chapters so persisted progress and array navigation keep
+        // the same contiguous coordinate system.
+        let chapters = parsedChapters.enumerated().map { index, chapter in
+            LocalTextChapter(
+                title: chapter.title,
+                paragraphs: chapter.paragraphs,
+                index: index,
+                sourcePath: chapter.sourcePath,
+                navigationFragment: chapter.navigationFragment
+            )
+        }
         guard !chapters.isEmpty else {
             throw LocalEPUBImportError.emptyContent
         }
-        return LocalTextBook(
+        let chapterIndexesByPath = chapters.reduce(into: [String: Int]()) { result, chapter in
+            if let path = chapter.sourcePath, result[path] == nil { result[path] = chapter.index }
+        }
+        var paragraphIndexesByNavigationID: [String: Int] = [:]
+        for entry in navigation {
+            guard let fragment = entry.fragment else { continue }
+            let identity = entry.sourcePath + "#" + fragment
+            guard paragraphIndexesByNavigationID[identity] == nil,
+                  let html = chapterHTMLByPath[entry.sourcePath],
+                  let paragraphIndex = paragraphIndex(for: fragment, in: html) else { continue }
+            paragraphIndexesByNavigationID[identity] = paragraphIndex
+        }
+        var seenNavigation = Set<String>()
+        let navigationEntries: [LocalTextNavigationEntry] = navigation.compactMap { entry -> LocalTextNavigationEntry? in
+            let identity = entry.sourcePath + "#" + (entry.fragment ?? "")
+            guard seenNavigation.insert(identity).inserted else { return nil }
+            return LocalTextNavigationEntry(
+                title: entry.title,
+                sourcePath: entry.sourcePath,
+                fragment: entry.fragment,
+                chapterIndex: chapterIndexesByPath[entry.sourcePath],
+                paragraphIndex: entry.fragment.flatMap { paragraphIndexesByNavigationID[entry.sourcePath + "#" + $0] }
+            )
+        }
+        let book = LocalTextBook(
             title: metadata.title,
             author: metadata.author,
             chapters: chapters,
             coverURL: coverURL,
             language: metadata.language,
-            publisher: metadata.publisher
+            publisher: metadata.publisher,
+            navigationEntries: navigationEntries
         )
+        PerformanceSignpost.event("epub.parse.summary", "chapters=\(book.chapters.count), navigation=\(book.navigationEntries.count)")
+        return book
     }
 
     private func stringEntry(_ path: String, in archive: Archive) throws -> String {
@@ -147,28 +191,77 @@ struct LocalEPUBBookParser {
         return result
     }
 
+    /// Returns every EPUB2/EPUB3 navigation link, including multiple fragment
+    /// links into the same XHTML document. The chapter map above intentionally
+    /// keeps only the first label for backwards-compatible chapter titles.
+    private func allNavigationEntries(
+        from opf: String,
+        manifest: [ManifestItem],
+        basePath: String,
+        archive: Archive
+    ) -> [NavigationEntry] {
+        let tocID: String? = {
+            do {
+                let document = try SwiftSoup.parse(opf)
+                guard let element = try document.select("spine").first() else { return nil }
+                return try element.attr("toc").nilIfEmpty
+            } catch { return nil }
+        }()
+        let candidates = manifest.filter { item in
+            item.properties.split(separator: " ").contains { $0.lowercased() == "nav" }
+                || item.id == tocID
+                || item.mediaType == "application/x-dtbncx+xml"
+        }
+        var result: [NavigationEntry] = []
+        for item in candidates {
+            let path = normalizeEPUBPath(basePath: basePath, href: item.href)
+            let navigationBasePath = URL(fileURLWithPath: path).deletingLastPathComponent().relativePath
+            guard let raw = try? stringEntry(path, in: archive) else { continue }
+            if item.mediaType == "application/x-dtbncx+xml" || raw.range(of: "<navMap", options: .caseInsensitive) != nil {
+                result.append(contentsOf: ncxEntriesList(from: raw, basePath: navigationBasePath))
+            } else {
+                result.append(contentsOf: navEntriesList(from: raw, basePath: navigationBasePath))
+            }
+        }
+        return result
+    }
+
     private func navEntries(from html: String, basePath: String) -> [String: NavigationEntry] {
-        guard let document = try? SwiftSoup.parse(html),
-              let links = try? document.select("nav a").array() else { return [:] }
         var result: [String: NavigationEntry] = [:]
+        for entry in navEntriesList(from: html, basePath: basePath) where result[entry.sourcePath] == nil {
+            result[entry.sourcePath] = entry
+        }
+        return result
+    }
+
+    private func navEntriesList(from html: String, basePath: String) -> [NavigationEntry] {
+        guard let document = try? SwiftSoup.parse(html),
+              let links = try? document.select("nav a").array() else { return [] }
+        var result: [NavigationEntry] = []
         for link in links {
             do {
                 let href = try link.attr("href")
                 let label = try link.text().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !href.isEmpty, !label.isEmpty else { continue }
                 let path = normalizeEPUBPath(basePath: basePath, href: href)
-                if result[path] == nil {
-                    result[path] = NavigationEntry(title: label, fragment: fragment(from: href))
-                }
+                result.append(NavigationEntry(sourcePath: path, title: label, fragment: fragment(from: href)))
             } catch { continue }
         }
         return result
     }
 
     private func ncxEntries(from xml: String, basePath: String) -> [String: NavigationEntry] {
-        guard let document = try? SwiftSoup.parse(xml),
-              let points = try? document.select("navPoint").array() else { return [:] }
         var result: [String: NavigationEntry] = [:]
+        for entry in ncxEntriesList(from: xml, basePath: basePath) where result[entry.sourcePath] == nil {
+            result[entry.sourcePath] = entry
+        }
+        return result
+    }
+
+    private func ncxEntriesList(from xml: String, basePath: String) -> [NavigationEntry] {
+        guard let document = try? SwiftSoup.parse(xml),
+              let points = try? document.select("navPoint").array() else { return [] }
+        var result: [NavigationEntry] = []
         for point in points {
             do {
                 guard let content = try point.select("content").first(),
@@ -177,9 +270,7 @@ struct LocalEPUBBookParser {
                 let label = try text.text().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !src.isEmpty, !label.isEmpty else { continue }
                 let path = normalizeEPUBPath(basePath: basePath, href: src)
-                if result[path] == nil {
-                    result[path] = NavigationEntry(title: label, fragment: fragment(from: src))
-                }
+                result.append(NavigationEntry(sourcePath: path, title: label, fragment: fragment(from: src)))
             } catch { continue }
         }
         return result
@@ -206,6 +297,40 @@ struct LocalEPUBBookParser {
         } catch {
             return []
         }
+    }
+
+    /// Maps an EPUB fragment id/name to the paragraph index used by the
+    /// normalized chapter model. This is best effort: malformed XHTML or an
+    /// anchor outside a text block simply leaves the index nil.
+    private func paragraphIndex(for fragment: String, in html: String) -> Int? {
+        do {
+            let document = try SwiftSoup.parse(html)
+            let nodes = try document.select("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre").array()
+            var paragraphIndex = 0
+            for node in nodes {
+                let text = try node.text().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                let nodeID = try node.attr("id")
+                let nodeName = try node.attr("name")
+                if nodeID == fragment || nodeName == fragment {
+                    return paragraphIndex
+                }
+                // A number of EPUB generators put the anchor on an empty
+                // inline element inside the paragraph instead of on the
+                // block itself. Treat that anchor as the same paragraph
+                // target so fragment jumps do not silently land at the top.
+                let nestedAnchors = try node.select("[id], [name]").array()
+                if try nestedAnchors.contains(where: { anchor in
+                    try anchor.attr("id") == fragment || anchor.attr("name") == fragment
+                }) {
+                    return paragraphIndex
+                }
+                paragraphIndex += 1
+            }
+        } catch {
+            return nil
+        }
+        return nil
     }
 
     private func chapterTitle(from html: String) -> String? {
@@ -329,6 +454,7 @@ private struct SpineItem {
 }
 
 private struct NavigationEntry {
+    let sourcePath: String
     let title: String
     let fragment: String?
 }

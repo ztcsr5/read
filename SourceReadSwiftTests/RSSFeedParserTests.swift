@@ -109,4 +109,18 @@ final class RSSFeedParserTests: XCTestCase {
         XCTAssertEqual(article.title, "Legacy")
         XCTAssertNil(article.contentHTML)
     }
+
+    func testDeduplicatesRepeatedFeedItemsWithoutDroppingDistinctArticles() {
+        let xml = """
+        <rss><channel>
+          <item><title>Same</title><link>https://example.com/same</link></item>
+          <item><title>Same</title><link>https://example.com/same</link></item>
+          <item><title>Other</title><link>https://example.com/other</link></item>
+        </channel></rss>
+        """
+
+        let articles = RSSFeedParser().parseArticles(from: xml)
+
+        XCTAssertEqual(articles.map(\.title), ["Same", "Other"])
+    }
 }

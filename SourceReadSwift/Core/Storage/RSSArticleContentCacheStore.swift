@@ -63,6 +63,11 @@ final class RSSArticleContentCacheStore: ObservableObject {
         entries.first(where: { $0.articleID == article.id })?.cachedAt
     }
 
+    func isStale(for article: RSSArticlePreview, maxAge: TimeInterval = RSSFeedCacheStore.defaultMaxAge) -> Bool {
+        guard let cachedAt = cachedAt(for: article) else { return false }
+        return Date().timeIntervalSince(cachedAt) > max(0, maxAge)
+    }
+
     func save(_ paragraphs: [String], for article: RSSArticlePreview, contentHTML: String? = nil) {
         let normalized = paragraphs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

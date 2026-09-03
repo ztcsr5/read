@@ -40,6 +40,8 @@ struct RSSArticlePreview: Identifiable, Codable, Hashable, Sendable {
 
 struct RSSFeedParser {
     func parseArticles(from text: String, sourceURL: String? = nil) -> [RSSArticlePreview] {
+        let signpost = PerformanceSignpost.begin("rss.parse")
+        defer { PerformanceSignpost.end("rss.parse", id: signpost) }
         let itemPattern = text.range(of: "<entry", options: .caseInsensitive) == nil
             ? #"<item[\s\S]*?</item>"#
             : #"<entry[\s\S]*?</entry>"#
@@ -47,7 +49,7 @@ struct RSSFeedParser {
             return []
         }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return itemRegex.matches(in: text, range: range).compactMap { match in
+        let parsed: [RSSArticlePreview] = itemRegex.matches(in: text, range: range).compactMap { match -> RSSArticlePreview? in
             guard let itemRange = Range(match.range, in: text) else { return nil }
             let item = String(text[itemRange])
             guard let title = firstXMLValue(in: item, tags: ["title"]) else { return nil }
@@ -61,6 +63,13 @@ struct RSSFeedParser {
                 contentHTML: firstRawXMLValue(in: item, tags: ["content:encoded", "content"])
             )
         }
+        // Feeds often repeat an item in multiple channels/pages. Keep the
+        // first occurrence so list state, cache keys and read markers remain
+        // deterministic while preserving distinct source candidates.
+        var seen = Set<String>()
+        let result = parsed.filter { seen.insert($0.id).inserted }
+        PerformanceSignpost.event("rss.parse.summary", "articles=\(result.count)")
+        return result
     }
 
     private func firstImageURL(in text: String, baseURL: String?) -> String? {

@@ -37,6 +37,15 @@ final class RSSFeedCacheStore: ObservableObject {
         return entry.articles
     }
 
+    func cachedAt(for sourceURL: String) -> Date? {
+        entries.first(where: { $0.sourceURL == sourceURL })?.cachedAt
+    }
+
+    func isStale(sourceURL: String, maxAge: TimeInterval = RSSFeedCacheStore.defaultMaxAge) -> Bool {
+        guard let cachedAt = cachedAt(for: sourceURL) else { return false }
+        return Date().timeIntervalSince(cachedAt) > max(0, maxAge)
+    }
+
     func save(_ articles: [RSSArticlePreview], sourceURL: String) {
         let entry = RSSFeedCacheEntry(sourceURL: sourceURL, articles: Array(articles.prefix(100)), cachedAt: Date())
         entries.removeAll { $0.sourceURL == sourceURL }

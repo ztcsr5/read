@@ -1215,3 +1215,30 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 ### Rollback
 - Revert this entry and the native reader commit; the previous SwiftUI scroll implementation remains intact in `ReaderView.swift` history.
+## 2026-09-03 - Stage 2E EPUB/RSS/diagnostic hardening
+
+### Implemented
+
+- EPUB3/NCX fragment navigation is now retained as portable `LocalTextNavigationEntry` data, persisted in bookshelf records, shown as a page-level TOC, and restored to the mapped paragraph when selected.
+- EPUB parsing now caches chapter XHTML while building navigation mappings and emits `epub.parse`/`epub.parse.summary` signposts for import profiling.
+- RSS/Atom entries are deduplicated by stable article identity; stale feed and article caches remain readable offline while a background refresh is attempted.
+- RSS list/reader surfaces expose stale-cache state and share the native reader's system-font/spacing preferences.
+- Rule editor previews now return structured stage/value/count diagnostics while preserving the existing string API; changing stages clears stale preview output.
+- Added regression coverage for EPUB fragment jumps, RSS deduplication/stale cache behavior, structured rule previews, and bookshelf Codable round trips including legacy JSON without navigation fields.
+
+### Testing
+
+- `git diff --check` passed locally; Windows only reports the repository's existing LF-to-CRLF normalization warnings.
+- JavaScript/Swift sources were statically reviewed for changed initializer call sites and `ForEach` identifiers.
+- Windows cannot run Swift/Xcode/UIKit/XCTest; GitHub Actions remains the authoritative compile/test and unsigned IPA gate.
+- Sustained 120 Hz still requires a ProMotion device plus Instruments; no CI claim is made from configuration alone.
+
+### CI closure
+
+- iOS build/XCTest run `33767173262`: success.
+- Unsigned IPA run `33767173222`: success; artifact `SourceReadSwift-unsigned-ipa` (5,293,022 bytes, artifact id `9898178515`).
+- The first attempt (`33766530753`/`33766530756`) exposed Swift type-inference/guard syntax errors; those were fixed before this green run.
+
+### Rollback
+
+- Revert the single Stage 2E commit to restore the prior EPUB navigation, RSS cache freshness, rule-preview diagnostics, and bookshelf schema behavior; legacy bookshelf JSON remains readable because the new field is optional.

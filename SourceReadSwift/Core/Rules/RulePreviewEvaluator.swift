@@ -4,7 +4,7 @@ import Foundation
 /// network or persistent source state. This keeps the editor's preview path
 /// deterministic and makes rule debugging possible on-device/offline.
 struct RulePreviewEvaluator {
-    enum Stage: String, CaseIterable, Identifiable {
+    enum Stage: String, CaseIterable, Identifiable, Sendable {
         case search = "搜索"
         case detail = "详情"
         case toc = "目录"
@@ -22,23 +22,53 @@ struct RulePreviewEvaluator {
         }
     }
 
+    struct Result: Equatable, Sendable {
+        let stage: Stage
+        let values: [String]
+        let message: String
+
+        var matchedCount: Int { values.count }
+        var hasMatches: Bool { !values.isEmpty }
+    }
+
+    func preview(
+        sample: String,
+        ruleText: String,
+        stage: Stage,
+        baseURL: URL? = URL(string: "https://fixture.invalid/")
+    ) -> Result {
+        let trimmed = ruleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return Result(stage: stage, values: [], message: "规则为空")
+        }
+        let rule = parseRule(trimmed, preferredKeys: stage.preferredKeys)
+        guard !rule.isEmpty else {
+            return Result(stage: stage, values: [], message: "规则对象没有可执行字段")
+        }
+
+        let context = RuleExecutionContext()
+        let analyzer = LegadoRuleAnalyzer(executionContext: context)
+        let listValues = analyzer.stringList(content: sample, rule: rule, baseURL: baseURL)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !listValues.isEmpty {
+            return Result(stage: stage, values: listValues, message: listValues.joined(separator: "\n"))
+        }
+        let scalar = analyzer.string(content: sample, rule: rule, baseURL: baseURL)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if scalar.isEmpty {
+            return Result(stage: stage, values: [], message: "未提取到结果")
+        }
+        return Result(stage: stage, values: [scalar], message: scalar)
+    }
+
     func evaluate(
         sample: String,
         ruleText: String,
         stage: Stage,
         baseURL: URL? = URL(string: "https://fixture.invalid/")
     ) -> String {
-        let trimmed = ruleText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "规则为空" }
-        let rule = parseRule(trimmed, preferredKeys: stage.preferredKeys)
-        guard !rule.isEmpty else { return "规则对象没有可执行字段" }
-
-        let context = RuleExecutionContext()
-        let analyzer = LegadoRuleAnalyzer(executionContext: context)
-        let values = analyzer.stringList(content: sample, rule: rule, baseURL: baseURL)
-        if !values.isEmpty { return values.joined(separator: "\n") }
-        let value = analyzer.string(content: sample, rule: rule, baseURL: baseURL)
-        return value.isEmpty ? "未提取到结果" : value
+        preview(sample: sample, ruleText: ruleText, stage: stage, baseURL: baseURL).message
     }
 
     private func parseRule(_ text: String, preferredKeys: [String]) -> String {

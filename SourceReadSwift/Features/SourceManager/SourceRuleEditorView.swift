@@ -14,6 +14,8 @@ struct SourceRuleEditorView: View {
     @State private var issues: [RuleValidationIssue] = []
     @State private var previewSample = "<html><body><article><h1>示例书名</h1><p class=\"content\">示例正文</p></article></body></html>"
     @State private var previewOutput = ""
+    @State private var previewMatchCount = 0
+    @State private var previewStage: RulePreviewEvaluator.Stage?
     @State private var isPreviewing = false
     @State private var validationBlocked = false
 
@@ -73,7 +75,7 @@ struct SourceRuleEditorView: View {
                     .disabled(isPreviewing || previewSample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if !previewOutput.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("预览结果")
+                            Text(previewStage.map { "\($0.rawValue) · \(previewMatchCount) 条" } ?? "预览结果")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Text(previewMessage)
@@ -119,6 +121,7 @@ struct SourceRuleEditorView: View {
             .onChange(of: detailRule) { _ in clearValidation() }
             .onChange(of: tocRule) { _ in clearValidation() }
             .onChange(of: contentRule) { _ in clearValidation() }
+            .onChange(of: selectedSection) { _ in clearPreview() }
             .navigationTitle("规则编辑 · \(source.bookSourceName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -179,6 +182,12 @@ struct SourceRuleEditorView: View {
         }
     }
 
+    private func clearPreview() {
+        previewOutput = ""
+        previewMatchCount = 0
+        previewStage = nil
+    }
+
     private var currentRuleBinding: Binding<String> {
         switch selectedSection {
         case 0: return $searchRule
@@ -215,9 +224,11 @@ struct SourceRuleEditorView: View {
         default: stage = .content
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            let output = RulePreviewEvaluator().evaluate(sample: sample, ruleText: text, stage: stage)
+            let result = RulePreviewEvaluator().preview(sample: sample, ruleText: text, stage: stage)
             DispatchQueue.main.async {
-                previewOutput = output
+                previewOutput = result.message
+                previewMatchCount = result.matchedCount
+                previewStage = result.stage
                 isPreviewing = false
             }
         }

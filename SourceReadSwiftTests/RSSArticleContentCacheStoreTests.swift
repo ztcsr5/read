@@ -29,4 +29,18 @@ final class RSSArticleContentCacheStoreTests: XCTestCase {
         XCTAssertEqual(store.paragraphs(for: second), ["Two"])
         try? FileManager.default.removeItem(at: url)
     }
+
+    func testStaleContentRemainsReadableAndCanBeDetected() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rss-content-stale-\(UUID().uuidString).json")
+        let article = RSSArticlePreview(title: "Stale", link: "https://example.com/stale", pubDate: nil, description: nil)
+        let store = RSSArticleContentCacheStore(fileURL: url)
+        store.save(["Cached body"], for: article, contentHTML: "<p>Cached body</p>")
+
+        XCTAssertEqual(store.paragraphs(for: article), ["Cached body"])
+        XCTAssertEqual(store.contentHTML(for: article), "<p>Cached body</p>")
+        XCTAssertTrue(store.isStale(for: article, maxAge: -1))
+        XCTAssertNil(store.paragraphs(for: article, maxAge: -1))
+        XCTAssertNil(store.contentHTML(for: article, maxAge: -1))
+        try? FileManager.default.removeItem(at: url)
+    }
 }

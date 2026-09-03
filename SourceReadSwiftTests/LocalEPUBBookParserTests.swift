@@ -144,6 +144,44 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testPreservesMultipleEPUB3FragmentNavigationEntriesInOrder() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("fragment-navigation.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="OPS/package.opf"/></rootfiles></container>"#, to: archive)
+        try add("OPS/package.opf", text: #"<package><metadata><dc:title>Anchors</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="chapter" href="text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#, to: archive)
+        try add("OPS/nav.xhtml", text: #"<html><body><nav epub:type="toc"><ol><li><a href="text/chapter.xhtml#one">第一节</a></li><li><a href="text/chapter.xhtml#two">第二节</a></li></ol></nav></body></html>"#, to: archive)
+        try add("OPS/text/chapter.xhtml", text: #"<html><body><h1 id="one">One</h1><p>A</p><h2 id="two">Two</h2><p>B</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+
+        XCTAssertEqual(book.chapters.count, 1)
+        XCTAssertEqual(book.navigationEntries.map(\.title), ["第一节", "第二节"])
+        XCTAssertEqual(book.navigationEntries.map(\.sourcePath), ["OPS/text/chapter.xhtml", "OPS/text/chapter.xhtml"])
+        XCTAssertEqual(book.navigationEntries.map(\.fragment), ["one", "two"])
+        XCTAssertEqual(book.navigationEntries.compactMap(\.chapterIndex), [0, 0])
+        XCTAssertEqual(book.navigationEntries.compactMap(\.paragraphIndex), [0, 2])
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testMapsNestedAnchorFragmentToContainingParagraph() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("nested-anchor.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>"#, to: archive)
+        try add("book.opf", text: #"<package><metadata><dc:title>Nested</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" properties="nav"/><item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>"#, to: archive)
+        try add("nav.xhtml", text: #"<nav><a href="chapter.xhtml#anchor">正文入口</a></nav>"#, to: archive)
+        try add("chapter.xhtml", text: #"<html><body><h1>Chapter</h1><p><a id="anchor"></a>Body text</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+
+        XCTAssertEqual(book.navigationEntries.first?.title, "正文入口")
+        XCTAssertEqual(book.navigationEntries.first?.paragraphIndex, 1)
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
         try add(path, data: Data(text.utf8), to: archive)
     }

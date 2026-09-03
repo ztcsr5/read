@@ -8,6 +8,7 @@ struct RSSArticlesView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var didLoadFeed = false
+    @State private var showingStaleCache = false
 
     var body: some View {
         List {
@@ -53,6 +54,13 @@ struct RSSArticlesView: View {
                         .listRowBackground(Color.clear)
                 }
             } else {
+                if showingStaleCache {
+                    Section {
+                        Label("当前显示离线缓存，刷新后可获取最新文章", systemImage: "externaldrive.badge.clock")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
                 Section("文章") {
                     ForEach(articles) { article in
                         NavigationLink {
@@ -85,8 +93,9 @@ struct RSSArticlesView: View {
             }
         }
         .task {
-            if let cached = appState.rssFeedCacheStore.articles(for: source.sourceUrl, maxAge: RSSFeedCacheStore.defaultMaxAge) {
+            if let cached = appState.rssFeedCacheStore.articles(for: source.sourceUrl) {
                 articles = cached
+                showingStaleCache = appState.rssFeedCacheStore.isStale(sourceURL: source.sourceUrl)
             }
             await loadArticles(force: false)
         }
@@ -94,7 +103,7 @@ struct RSSArticlesView: View {
 
     @MainActor
     private func loadArticles(force: Bool) async {
-        guard force || articles.isEmpty else { return }
+        guard force || !didLoadFeed else { return }
         isLoading = true
         errorMessage = nil
         didLoadFeed = false
@@ -118,11 +127,13 @@ struct RSSArticlesView: View {
             }
             articles = Array(parsed.prefix(100))
             appState.rssFeedCacheStore.save(articles, sourceURL: source.sourceUrl)
+            showingStaleCache = false
         } catch {
             if articles.isEmpty {
                 errorMessage = error.localizedDescription
             } else {
-                errorMessage = "网络不可用，正在显示缓存文章"
+                errorMessage = "网络不可用，正在显示离线缓存文章"
+                showingStaleCache = true
             }
         }
     }

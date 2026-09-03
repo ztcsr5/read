@@ -75,6 +75,10 @@ struct LocalTextBook: Equatable {
     let coverURL: URL?
     let language: String?
     let publisher: String?
+    /// EPUB navigation entries in document order. Plain-text imports leave this empty.
+    /// Keeping the entries separate from chapters preserves multiple anchors that
+    /// point into one XHTML document and makes EPUB3 fragment navigation portable.
+    let navigationEntries: [LocalTextNavigationEntry]
 
     init(
         title: String,
@@ -82,7 +86,8 @@ struct LocalTextBook: Equatable {
         chapters: [LocalTextChapter],
         coverURL: URL? = nil,
         language: String? = nil,
-        publisher: String? = nil
+        publisher: String? = nil,
+        navigationEntries: [LocalTextNavigationEntry] = []
     ) {
         self.title = title
         self.author = author
@@ -90,10 +95,29 @@ struct LocalTextBook: Equatable {
         self.coverURL = coverURL
         self.language = language
         self.publisher = publisher
+        self.navigationEntries = navigationEntries
     }
 
     var paragraphs: [String] {
         chapters.flatMap(\.paragraphs)
+    }
+}
+
+struct LocalTextNavigationEntry: Codable, Hashable, Sendable, Equatable {
+    let title: String
+    let sourcePath: String
+    let fragment: String?
+    let chapterIndex: Int?
+    /// Best-effort paragraph offset for fragment links inside an XHTML file.
+    /// Nil means the target could not be mapped without changing the source text.
+    let paragraphIndex: Int?
+
+    init(title: String, sourcePath: String, fragment: String? = nil, chapterIndex: Int? = nil, paragraphIndex: Int? = nil) {
+        self.title = title
+        self.sourcePath = sourcePath
+        self.fragment = fragment
+        self.chapterIndex = chapterIndex
+        self.paragraphIndex = paragraphIndex
     }
 }
 
