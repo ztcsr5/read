@@ -223,7 +223,7 @@ struct SourceCatalog: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-struct SourceLibrarySnapshot: Codable, Sendable {
+struct SourceLibrarySnapshot: Codable, Hashable, Sendable {
     var sources: [BookSource]
     var rssSources: [RSSSource]
     var catalogs: [SourceCatalog]
