@@ -204,48 +204,178 @@ struct JSONRuleExtractor {
     }
 
     private func valueForSinglePath(from object: Any, path: String) -> Any? {
-        var current: Any? = object
-        let parts = tokenize(path)
-
-        for part in parts {
-            guard let existing = current else { return nil }
-            if let dict = existing as? [String: Any] {
-                current = dict[part] ?? dict[part.lowercased()] ?? dict[part.uppercased()]
-            } else if let array = existing as? [Any], let index = Int(part) {
-                let resolvedIndex = index < 0 ? array.count + index : index
-                guard array.indices.contains(resolvedIndex) else { return nil }
-                current = array[resolvedIndex]
-            } else if let array = existing as? [Any], part == "*" {
-                current = array
-            } else if let array = existing as? [Any] {
-                let mapped = array.compactMap { element -> Any? in
-                    guard let dict = element as? [String: Any] else { return nil }
-                    return dict[part] ?? dict[part.lowercased()] ?? dict[part.uppercased()]
-                }
-                current = mapped.reduce(into: [Any]()) { result, value in
-                    if let array = value as? [Any] {
-                        result.append(contentsOf: array)
-                    } else {
-                        result.append(value)
-                    }
-                }
-            } else {
-                return nil
-            }
-        }
-        return current
+        walk(object, parts: tokenize(path), index: 0)
     }
 
     private func tokenize(_ path: String) -> [String] {
-        path
-            .components(separatedBy: ".")
-            .flatMap { part in
-                part
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .components(separatedBy: "/")
+        // Keep JSONPath's recursive descent (`..name`), wildcard and filter
+        // segments intact. A plain components(separatedBy:) loses the empty
+        // segment that distinguishes `..` from `.`, making common Legado
+        // rules such as `$..bookList[*]` impossible to evaluate.
+        var parts: [String] = []
+        var buffer = ""
+        var index = path.startIndex
+        func flush() {
+            let value = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { parts.append(value) }
+            buffer.removeAll(keepingCapacity: true)
+        }
+        while index < path.endIndex {
+            let ch = path[index]
+            if ch == "[" {
+                flush()
+                var depth = 1
+                var quote: Character?
+                var escaped = false
+                var cursor = path.index(after: index)
+                var token = ""
+                while cursor < path.endIndex, depth > 0 {
+                    let c = path[cursor]
+                    if let q = quote {
+                        token.append(c)
+                        if escaped { escaped = false }
+                        else if c == "\\" { escaped = true }
+                        else if c == q { quote = nil }
+                    } else if c == "\"" || c == "'" {
+                        quote = c; token.append(c)
+                    } else if c == "[" {
+                        depth += 1; token.append(c)
+                    } else if c == "]" {
+                        depth -= 1
+                        if depth > 0 { token.append(c) }
+                    } else {
+                        token.append(c)
+                    }
+                    cursor = path.index(after: cursor)
+                }
+                let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    let unquoted = unquote(trimmed)
+                    parts.append(unquoted == "*" ? "*" : (unquoted.hasPrefix("?") ? unquoted : unquoted))
+                }
+                index = cursor
+                continue
             }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            if ch == "." || ch == "/" {
+                flush()
+                if ch == "." {
+                    let next = path.index(after: index)
+                    if next < path.endIndex, path[next] == "." {
+                        parts.append("**")
+                        index = path.index(after: next)
+                        continue
+                    }
+                }
+                index = path.index(after: index)
+                continue
+            }
+            buffer.append(ch)
+            index = path.index(after: index)
+        }
+        flush()
+        return parts
+    }
+
+    private func walk(_ current: Any, parts: [String], index: Int) -> Any? {
+        guard index < parts.count else { return current }
+        let part = parts[index]
+
+        if part == "**" {
+            // Recursive descent: try the remainder at this node and then at
+            // every child. This mirrors the subset used by Legado sources.
+            var matches: [Any] = []
+            if let direct = walk(current, parts: parts, index: index + 1) {
+                appendFlattened(direct, to: &matches)
+            }
+            for child in children(of: current) {
+                if let nested = walk(child, parts: parts, index: index) {
+                    appendFlattened(nested, to: &matches)
+                }
+            }
+            return matches.isEmpty ? nil : matches
+        }
+
+        if let filter = filterPredicate(part), let array = current as? [Any] {
+            let filtered = array.filter { matchesPredicate($0, filter: filter) }
+            return walk(filtered, parts: parts, index: index + 1)
+        }
+
+        if let dict = current as? [String: Any] {
+            if part == "*" {
+                let values = Array(dict.values)
+                return walk(values, parts: parts, index: index + 1)
+            }
+            guard let value = lookup(dict, key: part) else { return nil }
+            return walk(value, parts: parts, index: index + 1)
+        }
+
+        if let array = current as? [Any] {
+            if part == "*" {
+                return walk(array, parts: parts, index: index + 1)
+            }
+            if let number = Int(part) {
+                let resolved = number < 0 ? array.count + number : number
+                guard array.indices.contains(resolved) else { return nil }
+                return walk(array[resolved], parts: parts, index: index + 1)
+            }
+            let mapped = array.compactMap { element -> Any? in
+                guard let result = walk(element, parts: parts, index: index) else { return nil }
+                return result
+            }
+            if mapped.isEmpty { return nil }
+            var flattened: [Any] = []
+            mapped.forEach { appendFlattened($0, to: &flattened) }
+            return flattened
+        }
+        return nil
+    }
+
+    private func lookup(_ dict: [String: Any], key: String) -> Any? {
+        dict[key] ?? dict[key.lowercased()] ?? dict[key.uppercased()]
+    }
+
+    private func children(of value: Any) -> [Any] {
+        if let dict = value as? [String: Any] { return Array(dict.values) }
+        if let array = value as? [Any] { return array }
+        return []
+    }
+
+    private func appendFlattened(_ value: Any, to output: inout [Any]) {
+        if let array = value as? [Any] { array.forEach { appendFlattened($0, to: &output) } }
+        else { output.append(value) }
+    }
+
+    private func filterPredicate(_ part: String) -> (path: String, op: String?, expected: String?)? {
+        guard part.hasPrefix("?(") && part.hasSuffix(")") else { return nil }
+        let expression = String(part.dropFirst(2).dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        for op in ["!=", "==", "=", ">=", "<=", ">", "<"] {
+            if let range = expression.range(of: op) {
+                return (String(expression[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines), op, String(expression[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        return (expression, nil, nil)
+    }
+
+    private func matchesPredicate(_ value: Any, filter: (path: String, op: String?, expected: String?)) -> Bool {
+        let key = filter.path.replacingOccurrences(of: "@.", with: "")
+        let actual: Any?
+        if key.isEmpty || key == "@" { actual = value }
+        else { actual = valueForSinglePath(from: value, path: key) }
+        guard let actual else { return false }
+        guard let op = filter.op, let expected = filter.expected else { return truthy(actual) }
+        let lhs = stringify(actual)
+        let rhs = unquote(expected)
+        if let l = Double(lhs), let r = Double(rhs) {
+            switch op { case "==", "=": return l == r; case "!=": return l != r; case ">": return l > r; case "<": return l < r; case ">=": return l >= r; case "<=": return l <= r; default: return false }
+        }
+        switch op { case "==", "=": return lhs == rhs; case "!=": return lhs != rhs; default: return false }
+    }
+
+    private func truthy(_ value: Any) -> Bool {
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.doubleValue != 0 }
+        if let text = value as? String { return !text.isEmpty && text.lowercased() != "false" }
+        return true
     }
 
     private func normalize(_ rule: String) -> String {
@@ -253,7 +383,9 @@ struct JSONRuleExtractor {
         output = output
             .replacingOccurrences(of: #"(?i)@put:\{[^}]*\}"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"(?i)@get:\{([^}]*)\}"#, with: "$1", options: .regularExpression)
-        if output.hasPrefix("$.") {
+        if output.hasPrefix("$..") {
+            output.removeFirst()
+        } else if output.hasPrefix("$.") {
             output.removeFirst(2)
         }
         if output.hasPrefix("$") {

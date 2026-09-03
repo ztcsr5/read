@@ -229,4 +229,42 @@ final class JSONRuleExtractorTests: XCTestCase {
 
         XCTAssertEqual(value, "Primary")
     }
+
+    func testFilterPredicatesSelectTruthyEqualAndNotEqualNodes() throws {
+        let extractor = JSONRuleExtractor()
+        let object: [String: Any] = [
+            "data": [
+                "list": [
+                    ["title": "A", "hasContent": 1, "source": "free"],
+                    ["title": "B", "hasContent": 0, "source": "vip"],
+                    ["title": "C", "hasContent": true, "source": "free"]
+                ]
+            ]
+        ]
+
+        let truthy = extractor.list(from: object, rule: "$.data.list[?(@.hasContent)]")
+        let equals = extractor.list(from: object, rule: "$.data.list[?(@.hasContent==1)]")
+        let notEquals = extractor.list(from: object, rule: #"$.data.list[?(@.source!="vip")]"#)
+
+        XCTAssertEqual(truthy.compactMap { $0["title"] as? String }, ["A", "C"])
+        XCTAssertEqual(equals.compactMap { $0["title"] as? String }, ["A"])
+        XCTAssertEqual(notEquals.compactMap { $0["title"] as? String }, ["A", "C"])
+    }
+
+    func testRecursiveDescentFindsNestedBookLists() throws {
+        let object: [String: Any] = [
+            "payload": [
+                "nested": [
+                    "bookList": [
+                        ["name": "A"],
+                        ["name": "B"]
+                    ]
+                ]
+            ]
+        ]
+
+        let list = JSONRuleExtractor().list(from: object, rule: "$..bookList[*]")
+
+        XCTAssertEqual(list.compactMap { $0["name"] as? String }, ["A", "B"])
+    }
 }
