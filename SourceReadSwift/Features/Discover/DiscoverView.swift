@@ -4,7 +4,6 @@ import UIKit
 struct DiscoverView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = DiscoverViewModel()
-    @State private var selectedTab: DiscoverTab = .books
     @State private var pendingShelfAddBook: SearchBook?
 
     var body: some View {
@@ -17,20 +16,24 @@ struct DiscoverView: View {
                         .accessibilityAddTraits(.isHeader)
                         .padding(.top, 18)
 
-                    Picker("发现分类", selection: $selectedTab) {
-                        ForEach(DiscoverTab.allCases) { tab in
-                            Text(tab.title).tag(tab)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    bookSearchTab
 
-                    switch selectedTab {
-                    case .books:
-                        bookSearchTab
-                    case .subscriptions:
-                        subscriptionTab
-                    case .sourceWriting:
-                        sourceWritingTab
+                    HStack(spacing: 12) {
+                        NavigationLink {
+                            SourceManagerView()
+                        } label: {
+                            Label("订阅与书源", systemImage: "square.stack.3d.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        NavigationLink {
+                            SourceWritingView(server: appState.sourceWritingServer)
+                        } label: {
+                            Label("Web 写源", systemImage: "network")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
 
                     Color.clear.frame(height: 100)
@@ -77,8 +80,6 @@ struct DiscoverView: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 14) {
                 searchField
-                webModeButton
-                sourceManagerCard
                 matchModePicker
                 resultFilterPicker
             }
@@ -427,7 +428,7 @@ private enum DiscoverTab: String, CaseIterable, Identifiable {
 @MainActor
 final class DiscoverViewModel: ObservableObject {
     @Published var keyword = ""
-    @Published var matchMode: SearchMatchMode = .fuzzy
+    @Published var matchMode: SearchMatchMode = .exact
     @Published var resultFilterScope: SearchResultFilterScope = .all
     @Published var resultFilter = ""
     @Published var results: [SearchBook] = []
@@ -552,12 +553,13 @@ final class DiscoverViewModel: ObservableObject {
             return hasName && seenIDs.insert(book.id).inserted
         }
         guard matchMode == .exact else { return uniqueBooks }
-        return uniqueBooks.filter { book in
-            book.name.localizedCaseInsensitiveContains(keyword)
-                || (book.author?.localizedCaseInsensitiveContains(keyword) ?? false)
-                || book.sourceName.localizedCaseInsensitiveContains(keyword)
-                || book.bookUrl.localizedCaseInsensitiveContains(keyword)
+        let exactMatches = uniqueBooks.filter { book in
+            book.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .localizedCaseInsensitiveCompare(keyword) == .orderedSame
+                || (book.author?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(keyword) == .orderedSame)
         }
+        return exactMatches
     }
 }
 

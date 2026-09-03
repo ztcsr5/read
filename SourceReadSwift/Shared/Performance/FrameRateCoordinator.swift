@@ -1,4 +1,5 @@
 import UIKit
+import QuartzCore
 
 /// Coordinates high-refresh capability for active iOS windows.
 /// `CADisableMinimumFrameDurationOnPhone` lets SwiftUI use ProMotion. This type
@@ -27,6 +28,16 @@ enum FrameRateCoordinator {
         // removes the app-imposed 60 Hz floor; UIKit/SwiftUI then selects the
         // highest supported cadence. Avoid SDK-specific frame-rate range APIs
         // here because the CI toolchain does not expose them consistently.
+        if maximum >= 80 {
+            let ceiling = Float(min(maximum, 120))
+            windowScene.windows.forEach { window in
+                window.preferredFrameRateRange = CAFrameRateRange(
+                    minimum: 80,
+                    maximum: ceiling,
+                    preferred: ceiling
+                )
+            }
+        }
         PerformanceSignpost.event(
             "frame.rate",
             "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"

@@ -32,6 +32,7 @@ struct ReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var showOverlay = false
+    @State private var tabChromeOwner = UUID()
     @State private var showSettings = false
     @State private var showChapterList = false
     @State private var showBookmarks = false
@@ -246,7 +247,7 @@ struct ReaderView: View {
             bookmarkSheet
         }
         .onAppear {
-            appState.isTabChromeHidden = true
+            appState.acquireTabChromeHidden(owner: tabChromeOwner)
             sessionStartedAt = Date()
             rebuildPagedBlocksCache()
             autoScrollTarget = initialAutoScrollTarget()
@@ -271,7 +272,7 @@ struct ReaderView: View {
             speechController.stop()
             playbackCoordinator.stop()
             restoreIdleTimerPreference()
-            appState.isTabChromeHidden = false
+            appState.releaseTabChromeHidden(owner: tabChromeOwner)
             appState.bookshelfStore.recordReadingSession(
                 bookID: bookID,
                 duration: Date().timeIntervalSince(sessionStartedAt)
@@ -804,16 +805,6 @@ struct ReaderView: View {
             .pickerStyle(.segmented)
             .padding(.bottom, 8)
 
-            Text("字号大小")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $fontSize, in: 14...32, step: 1)
-
-            Text("行距")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Slider(value: $lineSpacing, in: 2...18, step: 1)
-
             Text("背景颜色")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -885,19 +876,14 @@ struct ReaderView: View {
 
     private var layoutSettings: some View {
         VStack(alignment: .leading, spacing: 14) {
-            settingStepper(title: "字号", value: String(format: "%.0f", fontSize)) {
-                fontSize = max(14, fontSize - 1)
-            } increase: {
-                fontSize = min(32, fontSize + 1)
-            }
-
-            readerValueSlider("行高", value: $lineSpacing, range: 2...18, step: 1, unit: "pt")
-            readerValueSlider("字距", value: $letterSpacing, range: 0...4, step: 0.2, unit: "pt")
-            readerValueSlider("段距", value: $paragraphSpacing, range: 8...32, step: 1, unit: "pt")
-            readerValueSlider("段首缩进", value: $paragraphIndent, range: 0...40, step: 2, unit: "pt")
-            readerValueSlider("标题间距", value: $titleSpacing, range: 0...36, step: 2, unit: "pt")
-            readerValueSlider("左右间距", value: $pagePadding, range: 14...40, step: 1, unit: "pt")
-            readerValueSlider("底部留白", value: $footerHeight, range: 48...180, step: 8, unit: "pt")
+            readerValueSlider("字号", value: $fontSize, range: 14...32, step: 1, unit: "pt", help: "正文文字大小，输入数值或拖动滑块")
+            readerValueSlider("行高", value: $lineSpacing, range: 2...18, step: 1, unit: "pt", help: "每行文字之间的垂直间距")
+            readerValueSlider("字距", value: $letterSpacing, range: 0...4, step: 0.2, unit: "pt", help: "字符之间的水平间距")
+            readerValueSlider("段距", value: $paragraphSpacing, range: 8...32, step: 1, unit: "pt", help: "相邻段落之间的留白")
+            readerValueSlider("段首缩进", value: $paragraphIndent, range: 0...40, step: 2, unit: "pt", help: "每段第一行向右缩进")
+            readerValueSlider("标题间距", value: $titleSpacing, range: 0...36, step: 2, unit: "pt", help: "章节标题与正文之间的留白")
+            readerValueSlider("左右间距", value: $pagePadding, range: 14...40, step: 1, unit: "pt", help: "正文距离屏幕左右边缘的距离")
+            readerValueSlider("底部留白", value: $footerHeight, range: 48...180, step: 8, unit: "pt", help: "为底部阅读操作预留的安全空间")
         }
     }
 
@@ -907,7 +893,7 @@ struct ReaderView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            readerValueSlider("朗读速度", value: $ttsRate, range: 0.35...0.65, step: 0.01, unit: "倍速")
+            readerValueSlider("朗读速度", value: $ttsRate, range: 0.35...0.65, step: 0.01, unit: "倍速", help: "从当前可见段落开始朗读，不会跳回章节开头")
 
             Text("睡眠定时")
                 .font(.subheadline.weight(.semibold))
@@ -941,7 +927,8 @@ struct ReaderView: View {
         value: Binding<Double>,
         range: ClosedRange<Double>,
         step: Double,
-        unit: String
+        unit: String,
+        help: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
@@ -972,6 +959,9 @@ struct ReaderView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: step)
+            Text(help)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1401,6 +1391,7 @@ struct ReaderView: View {
             title: content.title,
             paragraphs: content.paragraphs,
             startParagraphIndex: currentParagraphIndexForPersistence(),
+            includeTitle: false,
             rate: Float(ttsRate)
         )
     }
@@ -1708,9 +1699,20 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         synthesizer.delegate = self
     }
 
-    func speak(title: String, paragraphs: [String], startParagraphIndex: Int = 0, rate: Float) {
+    func speak(
+        title: String,
+        paragraphs: [String],
+        startParagraphIndex: Int = 0,
+        includeTitle: Bool = true,
+        rate: Float
+    ) {
         stop(clearCompletion: false)
-        queue.reset(title: title, paragraphs: paragraphs, startParagraphIndex: startParagraphIndex)
+        queue.reset(
+            title: title,
+            paragraphs: paragraphs,
+            startParagraphIndex: startParagraphIndex,
+            includeTitle: includeTitle
+        )
         self.rate = rate
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true, options: [])
