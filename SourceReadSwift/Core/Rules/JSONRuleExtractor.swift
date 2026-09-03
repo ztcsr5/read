@@ -420,7 +420,12 @@ struct JSONRuleExtractor {
            let atIndex = output.lastIndex(of: "@"), atIndex != output.startIndex {
             output.replaceSubrange(atIndex...atIndex, with: ".")
         }
-        output = output.replacingOccurrences(of: #"\[['"]?([^'"\]]+)['"]?\]"#, with: ".$1", options: .regularExpression)
+        // Do not treat JSONPath predicates as ordinary bracket notation. The
+        // generic bracket regex would consume `[?(@.field)]` and turn it into
+        // `.?(@.field)`, so the tokenizer could never reach the filter branch.
+        // A negative look-ahead keeps predicate brackets intact while still
+        // normalizing quoted keys such as `['book-list']`.
+        output = output.replacingOccurrences(of: #"\[(?!\?)['"]?([^'"\]]+)['"]?\]"#, with: ".$1", options: .regularExpression)
         output = output.replacingOccurrences(of: #"\[(-?\d+)\]"#, with: ".$1", options: .regularExpression)
         output = output.replacingOccurrences(of: #"\[\*\]"#, with: ".*", options: .regularExpression)
         return output.trimmingCharacters(in: CharacterSet(charactersIn: ". "))

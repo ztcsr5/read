@@ -15,6 +15,10 @@ final class AppDataBackupTests: XCTestCase {
     }
 
     func testFullSnapshotRoundTrip() throws {
+        // ISO-8601 without fractional seconds is used by the portable
+        // document encoder. Keep fixture dates at second precision so the
+        // round-trip assertion tests the schema rather than formatter loss.
+        let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
         let book = BookshelfBook(
             id: "book-1",
             title: "测试书",
@@ -23,11 +27,13 @@ final class AppDataBackupTests: XCTestCase {
             sourceName: "测试源",
             sourceURL: "https://source.example",
             bookURL: "https://source.example/book/1",
-            intro: nil
+            intro: nil,
+            addedAt: fixedDate
         )
         let bookshelf = BookshelfBackupSnapshot(
             books: [book],
-            groups: [BookshelfGroup(id: "g1", name: "默认", sortOrder: 0)]
+            groups: [BookshelfGroup(id: "g1", name: "默认", sortOrder: 0, createdAt: fixedDate)],
+            exportedAt: fixedDate
         )
         let source = BookSource(bookSourceName: "测试源", bookSourceUrl: "https://source.example")
         let snapshot = AppDataBackupSnapshot(
@@ -35,7 +41,8 @@ final class AppDataBackupTests: XCTestCase {
             sources: SourceLibrarySnapshot(sources: [source]),
             purifyRules: [PurifyRule(id: "rule-1", pattern: "广告")],
             rssState: RSSArticleStateSnapshot(readIDs: ["r1"], favoriteIDs: ["r2"]),
-            readerPreferences: ["reader.fontSize": .double(20), "reader.mode": .string("paged")]
+            readerPreferences: ["reader.fontSize": .double(20), "reader.mode": .string("paged")],
+            exportedAt: fixedDate
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
