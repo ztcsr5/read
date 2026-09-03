@@ -179,7 +179,7 @@ struct ReaderView: View {
         // bounds so rotation, split-view and Stage Manager resize invalidate
         // the model instead of showing pages calculated for the old width.
         let viewport = UIScreen.main.bounds
-        [
+        return [
             readerLayoutKey,
             String(Int(viewport.width.rounded())),
             String(Int(viewport.height.rounded())),
