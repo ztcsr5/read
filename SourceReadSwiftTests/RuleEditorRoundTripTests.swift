@@ -69,7 +69,7 @@ final class RuleEditorRoundTripTests: XCTestCase {
         XCTAssertEqual(
             evaluator.evaluate(
                 sample: "<div id='content'>第一段<br>第二段</div>",
-                ruleText: #"{"content":"#content@text"}"#,
+                ruleText: ##"{"content":"#content@text"}"##,
                 stage: .content
             ),
             "第一段 第二段"
