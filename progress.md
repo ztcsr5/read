@@ -1032,3 +1032,22 @@
 ### Rollback
 
 - Revert the Stage 2B phase commit to remove the new fixture pipeline, rule-editor test coverage, validator syntax checks and JSON-stringified JS list compatibility while preserving the green Stage 2A bridge.
+
+## 2026-09-03 - Stage 2B closure and Stage 2C kickoff
+
+### Stage 2B CI closure
+
+- Commit `687761a` is synchronized to `origin/codex/swift-v2-lifetime-reader`.
+- iOS/XCTest run `33702800984`: success.
+- Unsigned IPA run `33702801020`: success; artifact `SourceReadSwift-unsigned-ipa` produced.
+- Stage 2B is closed: deterministic source pipeline fixtures and rule-editor round-trip/syntax validation now have a dual CI gate.
+
+### Stage 2C kickoff
+
+- Next major phase targets broader Legado/开源阅读 source compatibility rather than isolated fixtures.
+- Work will expand JSONPath/template semantics, HTML selector operators and JS bridge parity while keeping all verification on local fixtures.
+- Real-world source URLs remain outside automated tests; compatibility is proven with sanitized/local fixtures and GitHub Actions.
+
+### Rollback
+
+- Revert `99684f6..687761a` to remove Stage 2B fixture/editor additions while preserving Stage 2A JavaScriptCore bridge closure.
