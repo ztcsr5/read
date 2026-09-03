@@ -1051,3 +1051,26 @@
 ### Rollback
 
 - Revert `99684f6..687761a` to remove Stage 2B fixture/editor additions while preserving Stage 2A JavaScriptCore bridge closure.
+
+## 2026-09-03 - Stage 2C reader polish and portable data backup
+
+### Implemented
+
+- Added a versioned `AppDataBackupSnapshot` covering bookshelf/groups, book/RSS/catalog sources, purification rules, RSS read/favorite state and typed reader preferences.
+- Added backward-compatible import for legacy bookshelf-only JSON and XCTest coverage for typed preference encoding, full snapshot round-trip, source-library restore and RSS state restore.
+- Removed duplicate local JSON button from the source status card; local file import remains in the unified import sheet.
+- Added explicit Web 写源 health URLs (`/health`), copy action and LAN troubleshooting text; enabled local endpoint reuse and peer-to-peer networking on the listener.
+- Added a visible “批量管理” entry beside the bookshelf section header and unified Discover's top shell with the large-title treatment from the reference UI.
+- Fixed JSONPath normalization regression for `$.data.book@name` while retaining recursive descent/filter predicates.
+
+### CI
+
+- Commit `377dc5f` exposed a compile gate because `SourceLibrarySnapshot` was not hashable; fixed in `8f050ca`.
+- iOS and unsigned-IPA workflows for `8f050ca` are running. Do not mark this phase green until both complete.
+
+### Remaining Stage 2C work
+
+- Productize smart web-novel mode or remove it from the primary search flow.
+- Finish source visual test/detail UX and batch operations for RSS/catalogs.
+- Continue reader rendering profiling and validate actual 120 Hz on a ProMotion device; CI cannot prove sustained frame cadence.
+- Add UI-test coverage for settings dismissal, chapter navigation chrome, LAN web import and bottom safe-area behavior.
