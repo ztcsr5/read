@@ -68,7 +68,7 @@ final class AppState: ObservableObject {
         self.sourceHealthStore = sourceHealthStore ?? SourceHealthStore()
         self.sourceDiagnosticHistoryStore = sourceDiagnosticHistoryStore ?? SourceDiagnosticHistoryStore()
         self.sourceCookieStore = sourceCookieStore ?? SourceCookieStore()
-        self.sourceWritingServer = LightweightHTTPServer()
+        self.sourceWritingServer = LightweightHTTPServer(sourceStore: self.sourceStore)
         self.injectedEngine = engine
         bindChildStores()
     }

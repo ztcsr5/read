@@ -195,6 +195,8 @@ struct SourceWritingView: View {
                     return .failure(error)
                 }
             }
+            // Keep the web API backed by the same in-memory source store.
+            server.sourceStore = appState.sourceStore
             // Auto start server
             server.start()
         }
@@ -214,13 +216,17 @@ final class LightweightHTTPServer: ObservableObject {
     }
     @Published var lastError: String?
     @Published var logMessages: [String] = []
-    
+
+    /// Main-actor store reference used by the LAN editor API.
+    var sourceStore: SourceStore?
+
     private var listener: NWListener?
     private var connections: [NWConnection] = []
     private let lockQueue = DispatchQueue(label: "com.sourceread.server.lock")
     var onJSONReceived: ((String) -> Result<String, Error>)?
     
-    init() {
+    init(sourceStore: SourceStore? = nil) {
+        self.sourceStore = sourceStore
         self.localIP = getLocalIPAddresses().first ?? "127.0.0.1"
     }
     
@@ -380,36 +386,86 @@ final class LightweightHTTPServer: ObservableObject {
             let html = getWebPageHtml()
             sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/html; charset=utf-8", body: html)
         } else if method == "GET" && path == "/health" {
-            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: "SOURCE_READ_SWIFT_WEB_OK")
+            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: "SOURCE_READ_SWIFT_WEB_OK\nREAD_SOURCE_WEB_OK port=\(port)")
         } else if method == "GET" && path == "/api/status" {
-            let body = #"{"ok":true,"service":"source-writing","port":\#(port)}"#
-            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "application/json; charset=utf-8", body: body)
+            respondWithSourceStore(connection: connection) { store in
+                let body = #"{"ok":true,"service":"source-writing","port":\#(self.port),"sourceCount":\#(store?.sources.count ?? 0),"enabledSourceCount":\#(store?.sources.filter(\.enabled).count ?? 0)}"#
+                self.sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "application/json; charset=utf-8", body: body)
+            }
+        } else if method == "GET" && path == "/api/sources" {
+            respondWithSourceStore(connection: connection) { store in
+                let sources = store?.sources ?? []
+                self.sendJSON(connection: connection, value: WebSourceListResponse(
+                    ok: true,
+                    total: sources.count,
+                    enabledCount: sources.filter(\.enabled).count,
+                    data: sources
+                ))
+            }
+        } else if method == "GET" && path == "/api/sources/export" {
+            respondWithSourceStore(connection: connection) { store in
+                let snapshot = store?.backupSnapshot() ?? SourceLibrarySnapshot()
+                self.sendJSON(connection: connection, value: snapshot)
+            }
+        } else if method == "POST" && path == "/api/sources/import" {
+            let parts = requestString.components(separatedBy: "\r\n\r\n")
+            let body = parts.dropFirst().joined(separator: "\r\n\r\n")
+            importSourceJSON(body.trimmingCharacters(in: .whitespacesAndNewlines), connection: connection)
         } else if method == "POST" && path == "/import" {
             let parts = requestString.components(separatedBy: "\r\n\r\n")
             let body = parts.dropFirst().joined(separator: "\r\n\r\n")
             let cleanBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
             
-            if let onJSONReceived = onJSONReceived {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    let result = onJSONReceived(cleanBody)
-                    switch result {
-                    case .success(let msg):
-                        self.log("导入成功：\(msg)")
-                        self.sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: msg)
-                    case .failure(let err):
-                        self.log("导入失败：\(err.localizedDescription)")
-                        self.sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "text/plain; charset=utf-8", body: err.localizedDescription)
-                    }
-                }
-            } else {
-                sendResponse(connection: connection, statusCode: 500, statusText: "Internal Error", contentType: "text/plain; charset=utf-8", body: "No import handler registered")
-            }
+            importSourceJSON(cleanBody, connection: connection)
         } else {
             sendResponse(connection: connection, statusCode: 404, statusText: "Not Found", contentType: "text/plain; charset=utf-8", body: "Not Found")
         }
     }
     
+    private func importSourceJSON(_ text: String, connection: NWConnection? = nil) {
+        guard let onJSONReceived else {
+            if let connection { sendResponse(connection: connection, statusCode: 500, statusText: "Internal Error", contentType: "text/plain; charset=utf-8", body: "No import handler registered") }
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let result = onJSONReceived(text)
+            guard let connection else { return }
+            switch result {
+            case .success(let message):
+                self.log("导入成功：\(message)")
+                self.sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "application/json; charset=utf-8", body: #"{"ok":true,"message":"\#(self.jsonEscape(message))"}"#)
+            case .failure(let error):
+                self.log("导入失败：\(error.localizedDescription)")
+                self.sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "application/json; charset=utf-8", body: #"{"ok":false,"error":"\#(self.jsonEscape(error.localizedDescription))"}"#)
+            }
+        }
+    }
+
+    private func respondWithSourceStore(connection: NWConnection, _ body: @escaping @MainActor (SourceStore?) -> Void) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            body(self.sourceStore)
+        }
+    }
+
+    private func sendJSON<T: Encodable>(connection: NWConnection, value: T) {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(value)
+            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "application/json; charset=utf-8", body: String(decoding: data, as: UTF8.self))
+        } catch {
+            sendResponse(connection: connection, statusCode: 500, statusText: "Internal Error", contentType: "application/json; charset=utf-8", body: #"{"ok":false,"error":"encoding failed"}"#)
+        }
+    }
+
+    private func jsonEscape(_ text: String) -> String {
+        guard let data = try? JSONEncoder().encode(text),
+              let encoded = String(data: data, encoding: .utf8) else { return "" }
+        return String(encoded.dropFirst().dropLast())
+    }
+
     private func sendResponse(connection: NWConnection, statusCode: Int, statusText: String, contentType: String, body: String) {
         let responseBodyData = body.data(using: .utf8) ?? Data()
         let responseHeader = """
@@ -662,6 +718,13 @@ final class LightweightHTTPServer: ObservableObject {
 }
 
 // MARK: - IP Address Helper
+
+private struct WebSourceListResponse: Encodable {
+    let ok: Bool
+    let total: Int
+    let enabledCount: Int
+    let data: [BookSource]
+}
 
 private func getLocalIPAddresses() -> [String] {
     var wifi: [String] = []
