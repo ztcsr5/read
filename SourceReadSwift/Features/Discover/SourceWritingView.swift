@@ -378,15 +378,20 @@ final class LightweightHTTPServer: ObservableObject {
         }
         
         let method = requestLineParts[0]
-        let path = requestLineParts[1]
+        // Browsers append cache-busting query items and routinely probe for
+        // `/favicon.ico`. Route on the URL path only so `/api/status?ts=...`
+        // remains compatible with the same lightweight server.
+        let rawPath = requestLineParts[1]
+        let path = rawPath.split(separator: "?", maxSplits: 1).first.map(String.init) ?? rawPath
         
         if method == "OPTIONS" {
             sendResponse(connection: connection, statusCode: 204, statusText: "No Content", contentType: "text/plain; charset=utf-8", body: "")
         } else if method == "GET" && (path == "/" || path == "/index.html") {
             let html = getWebPageHtml()
             sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/html; charset=utf-8", body: html)
-        } else if method == "GET" && path == "/health" {
-            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: "SOURCE_READ_SWIFT_WEB_OK\nREAD_SOURCE_WEB_OK port=\(port)")
+        } else if (method == "GET" || method == "HEAD") && path == "/health" {
+            let healthBody = "SOURCE_READ_SWIFT_WEB_OK\nREAD_SOURCE_WEB_OK port=\(port)"
+            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: method == "HEAD" ? "" : healthBody)
         } else if method == "GET" && path == "/api/status" {
             respondWithSourceStore(connection: connection) { store in
                 let body = #"{"ok":true,"service":"source-writing","port":\#(self.port),"sourceCount":\#(store?.sources.count ?? 0),"enabledSourceCount":\#(store?.sources.filter(\.enabled).count ?? 0)}"#
@@ -599,6 +604,30 @@ final class LightweightHTTPServer: ObservableObject {
                     font-size: 12px;
                     font-weight: 700;
                 }
+                .actions {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 10px;
+                    margin-top: 12px;
+                }
+                .actions button {
+                    margin-top: 0;
+                    padding: 12px 14px;
+                    font-size: 13px;
+                    background: rgba(92,80,236,.10);
+                    color: var(--primary);
+                    box-shadow: none;
+                }
+                .status {
+                    margin: 14px 0 0;
+                    padding: 11px 13px;
+                    border-radius: 14px;
+                    background: rgba(92,80,236,.07);
+                    color: var(--muted);
+                    font-size: 12px;
+                    line-height: 1.5;
+                    white-space: pre-wrap;
+                }
                 textarea {
                     width: 100%;
                     min-height: 330px;
@@ -669,7 +698,12 @@ final class LightweightHTTPServer: ObservableObject {
           }
         ]'></textarea>
                 <button id="import-btn" onclick="performImport()">Import to iPhone</button>
-                <div class="footer">Keep this page and the iPhone on the same Wi-Fi.</div>
+                <div class="actions">
+                    <button onclick="refreshStatus()">Refresh status</button>
+                    <button onclick="exportSources()">Export sources</button>
+                </div>
+                <div id="status" class="status">Status not loaded yet.</div>
+                <div class="footer">Keep this page and the iPhone on the same Wi-Fi. API: <code>/api/status</code> · <code>/api/sources</code> · <code>/api/sources/export</code></div>
             </div>
             <div id="toast" class="toast"></div>
             <script>
@@ -678,6 +712,38 @@ final class LightweightHTTPServer: ObservableObject {
                     toast.textContent = message;
                     toast.className = 'toast ' + (isSuccess ? 'success' : 'error') + ' show';
                     setTimeout(() => toast.classList.remove('show'), 4000);
+                }
+
+                function setStatus(message) {
+                    document.getElementById('status').textContent = message;
+                }
+
+                async function refreshStatus() {
+                    setStatus('Loading source status...');
+                    try {
+                        const response = await fetch('/api/status', { cache: 'no-store' });
+                        const payload = await response.json();
+                        if (!response.ok || !payload.ok) throw new Error(payload.error || ('HTTP ' + response.status));
+                        setStatus('Online · port ' + payload.port + '\\nSources: ' + payload.sourceCount + ' total · ' + payload.enabledSourceCount + ' enabled');
+                    } catch (error) {
+                        setStatus('Status unavailable: ' + error);
+                    }
+                }
+
+                async function exportSources() {
+                    try {
+                        const response = await fetch('/api/sources/export', { cache: 'no-store' });
+                        if (!response.ok) throw new Error('HTTP ' + response.status);
+                        const blob = await response.blob();
+                        const anchor = document.createElement('a');
+                        anchor.href = URL.createObjectURL(blob);
+                        anchor.download = 'sourceread-sources-' + new Date().toISOString().slice(0, 10) + '.json';
+                        anchor.click();
+                        URL.revokeObjectURL(anchor.href);
+                        showToast('Sources exported.', true);
+                    } catch (error) {
+                        showToast('Export failed: ' + error, false);
+                    }
                 }
 
                 function performImport() {
@@ -689,26 +755,31 @@ final class LightweightHTTPServer: ObservableObject {
                     const btn = document.getElementById('import-btn');
                     btn.disabled = true;
                     btn.textContent = 'Importing...';
-                    fetch('/import', {
+                    fetch('/api/sources/import', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: text
                     })
                     .then(async res => {
                         const responseText = await res.text();
-                        if (res.ok) {
-                            showToast(responseText, true);
+                        let payload;
+                        try { payload = JSON.parse(responseText); } catch (_) { payload = null; }
+                        if (res.ok && (!payload || payload.ok !== false)) {
+                            showToast(payload && payload.message ? payload.message : responseText, true);
                             document.getElementById('json-input').value = '';
                         } else {
-                            showToast('Import failed: ' + responseText, false);
+                            showToast('Import failed: ' + (payload && payload.error ? payload.error : responseText), false);
                         }
                     })
                     .catch(err => showToast('Network error: ' + err, false))
                     .finally(() => {
                         btn.disabled = false;
                         btn.textContent = 'Import to iPhone';
+                        refreshStatus();
                     });
                 }
+
+                refreshStatus();
             </script>
         </body>
         </html>

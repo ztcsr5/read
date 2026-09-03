@@ -1132,3 +1132,30 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - GitHub Actions must compile/test the consolidated pass; Windows cannot run Xcode.
 - Sustained 120 Hz still requires a ProMotion device + Instruments; `CADisableMinimumFrameDurationOnPhone` and the display-link ceiling request are already enabled.
 - LAN Web 写源 needs a real phone/PC same-network check; the app exposes `/health` for that verification.
+
+## 2026-09-03 - Stage 2D performance and LAN writer acceleration
+
+### Implemented
+
+- Web 写源页面 now uses the JSON API (`/api/sources/import`) and exposes live status refresh plus one-click source export for PC workflows.
+- Added LAN API guidance directly in the page: `/api/status`, `/api/sources`, and `/api/sources/export`.
+- HTTP routing now ignores query strings and supports `HEAD /health`, so browser cache probes and health monitors do not produce false failures.
+- Reader pagination cache now includes viewport dimensions, preventing stale page breaks after rotation, split-view or Stage Manager resize.
+- RSS article visible-paragraph bookkeeping is throttled with the same 80 ms policy as the native reader, reducing PreferenceKey/state churn during high-refresh scrolling.
+- High-refresh display-link request is adaptive (`minimum = 1`) instead of forcing an 80 Hz floor on idle screens; ProMotion devices can still use the requested 120 Hz ceiling while iOS adapts for power/thermal state.
+
+### Testing
+
+- `git diff --check` passed locally (Windows reports only existing LF-to-CRLF normalization warnings).
+- Web page JavaScript extracted and passed Node syntax validation; endpoint strings and status/export flows are present in the generated HTML.
+- Unsigned IPA run `33746250790` for the preceding Web API commit `6828d18` passed; iOS build/XCTest run `33746250746` also passed.
+- This performance/LAN follow-up is pending its own iOS build/XCTest and unsigned IPA runs.
+
+### Unverified
+
+- Windows cannot run Xcode or exercise a real phone/PC LAN session.
+- Sustained 120 Hz remains a ProMotion device/Instruments measurement, not a CI claim.
+
+### Rollback
+
+- Revert the performance/LAN follow-up commit and this entry to restore the previous display-link floor, reader cache key, RSS bookkeeping cadence and web writer page/API routing.

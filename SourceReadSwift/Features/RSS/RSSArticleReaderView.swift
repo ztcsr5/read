@@ -15,6 +15,7 @@ struct RSSArticleReaderView: View {
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var reloadToken = UUID()
+    @State private var lastVisibleParagraphUpdateAt = Date.distantPast
     @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 19
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
@@ -153,7 +154,7 @@ struct RSSArticleReaderView: View {
     }
 
     private func resetReaderSession() {
-        stopAutoScroll(); speechController.stop(); paragraphs = []; errorMessage = nil; showingCachedContent = false; visibleParagraphIndex = 0; autoScrollTarget = 0
+        stopAutoScroll(); speechController.stop(); paragraphs = []; errorMessage = nil; showingCachedContent = false; visibleParagraphIndex = 0; autoScrollTarget = 0; lastVisibleParagraphUpdateAt = .distantPast
     }
 
     private func toggleSpeech() {
@@ -184,9 +185,18 @@ struct RSSArticleReaderView: View {
 
     private func updateVisibleParagraph(from positions: [RSSParagraphPosition]) {
         guard !autoScrollEnabled, !positions.isEmpty else { return }
+        // PreferenceKey updates can arrive several times per display frame on
+        // long HTML articles. Resume/highlight state does not need 120 Hz
+        // precision, so keep this bookkeeping off the rendering hot path.
+        let now = Date()
+        guard now.timeIntervalSince(lastVisibleParagraphUpdateAt) >= ReaderPerformancePolicy.visibleParagraphUpdateInterval else { return }
+        lastVisibleParagraphUpdateAt = now
         let topInset = CGFloat(pagePadding)
         let visible = positions.filter { $0.minY >= topInset }.min { $0.minY < $1.minY } ?? positions.filter { $0.minY < topInset }.max { $0.minY < $1.minY }
-        if let index = visible?.index, paragraphs.indices.contains(index) { visibleParagraphIndex = index; autoScrollTarget = index }
+        if let index = visible?.index, paragraphs.indices.contains(index), index != visibleParagraphIndex {
+            visibleParagraphIndex = index
+            autoScrollTarget = index
+        }
     }
 
     @MainActor private func load(_ article: RSSArticlePreview) async {

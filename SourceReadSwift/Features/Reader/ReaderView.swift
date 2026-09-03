@@ -175,8 +175,14 @@ struct ReaderView: View {
     }
 
     private var readerPageCacheKey: String {
+        // Pagination depends on the viewport. Include the current screen
+        // bounds so rotation, split-view and Stage Manager resize invalidate
+        // the model instead of showing pages calculated for the old width.
+        let viewport = UIScreen.main.bounds
         [
             readerLayoutKey,
+            String(Int(viewport.width.rounded())),
+            String(Int(viewport.height.rounded())),
             content.title,
             String(content.paragraphs.count),
             String(content.paragraphs.first?.hashValue ?? 0),

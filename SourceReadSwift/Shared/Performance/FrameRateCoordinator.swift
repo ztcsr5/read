@@ -54,7 +54,12 @@ private final class HighRefreshDisplayLinkDriver: NSObject {
     func start(maximumFramesPerSecond: Float) {
         if let displayLink {
             displayLink.preferredFrameRateRange = CAFrameRateRange(
-                minimum: min(80, maximumFramesPerSecond),
+                // Keep the link adaptive. A hard 80 Hz minimum makes the
+                // otherwise idle app render continuously on devices that
+                // support ProMotion, wasting power and competing with the
+                // reader's own layout work. The maximum/preferred values are
+                // still allowed to reach the native 120 Hz ceiling.
+                minimum: 1,
                 maximum: maximumFramesPerSecond,
                 preferred: maximumFramesPerSecond
             )
@@ -62,7 +67,7 @@ private final class HighRefreshDisplayLinkDriver: NSObject {
         }
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.preferredFrameRateRange = CAFrameRateRange(
-            minimum: min(80, maximumFramesPerSecond),
+            minimum: 1,
             maximum: maximumFramesPerSecond,
             preferred: maximumFramesPerSecond
         )
