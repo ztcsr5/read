@@ -8,6 +8,8 @@ final class BookshelfStore: ObservableObject {
 
     private let persistence: BookshelfPersistence
     private let groupPersistence: BookshelfGroupPersistence
+    private var persistenceBatchDepth = 0
+    private var persistenceBatchDirty = false
 
     init(persistence: BookshelfPersistence = BookshelfPersistence(), groupPersistence: BookshelfGroupPersistence = BookshelfGroupPersistence()) {
         self.persistence = persistence
@@ -230,6 +232,21 @@ final class BookshelfStore: ObservableObject {
         BookshelfBackupSnapshot(books: books, groups: groups)
     }
 
+    /// Coalesce a burst of background refresh mutations into one disk write.
+    /// Published array updates still reach SwiftUI immediately, but JSON
+    /// encoding and file I/O happen once when the batch closes.
+    func beginBatchUpdates() {
+        persistenceBatchDepth += 1
+    }
+
+    func endBatchUpdates() {
+        guard persistenceBatchDepth > 0 else { return }
+        persistenceBatchDepth -= 1
+        guard persistenceBatchDepth == 0, persistenceBatchDirty else { return }
+        persistenceBatchDirty = false
+        persistNow()
+    }
+
     /// Restores a snapshot atomically. Existing records are replaced so a
     /// restore behaves predictably on a new device; malformed/empty backups are
     /// rejected by the caller before this method is reached.
@@ -277,6 +294,14 @@ final class BookshelfStore: ObservableObject {
     }
 
     private func persist() {
+        if persistenceBatchDepth > 0 {
+            persistenceBatchDirty = true
+            return
+        }
+        persistNow()
+    }
+
+    private func persistNow() {
         do {
             try persistence.save(books)
             lastError = nil

@@ -1180,3 +1180,18 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert `f2a8991`, `e46c79a`, `6004aad`, `11f30a5` and `4547111` together to restore serial diagnostics and the previous CI workflow behavior.
+## 2026-09-03 - Task: Native TextKit reader performance and 120 Hz interaction pass
+
+### What was done
+- Replaced the scroll-mode `LazyVStack + GeometryReader + PreferenceKey` hot path with `NativeReaderTextView`, a UIKit/TextKit surface that lays out the chapter once and keeps paragraph ranges for O(1) speech highlighting and jumps.
+- Added native range scrolling with interruptible linear animation for automatic scroll, current-paragraph speech follow, restore-position, and chapter jumps.
+- Added throttled visible-paragraph callbacks from `UITextView` so reading progress persistence is debounced without rebuilding the SwiftUI reader tree on every display callback.
+- Kept system fonts, line spacing, paragraph spacing/indent, letter spacing, text selection, footer safe inset, and existing reader tap/chrome behavior.
+- Added regression coverage for native layout paragraph ranges, empty paragraphs, and system font attributes.
+
+### Testing
+- Ran `git diff --check` locally; only the existing Windows LF-to-CRLF warnings remain.
+- Windows has no Xcode/UIKit runtime, so Swift compilation, XCTest, and ProMotion Instruments verification are delegated to GitHub Actions and a real iPhone. Do not interpret the display-link configuration alone as proof of sustained 120 FPS.
+
+### Rollback
+- Revert this entry and the native reader commit; the previous SwiftUI scroll implementation remains intact in `ReaderView.swift` history.

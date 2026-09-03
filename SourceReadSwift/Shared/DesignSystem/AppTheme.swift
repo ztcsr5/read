@@ -10,6 +10,7 @@ enum AppTheme {
     static let card = Color(.systemBackground)
     static let elevatedCard = Color(.secondarySystemGroupedBackground)
     static let accent = Color(red: 0.35, green: 0.31, blue: 0.86)
+    static let accentUIColor = UIColor(red: 0.35, green: 0.31, blue: 0.86, alpha: 1)
     static let softBlue = Color(red: 0.86, green: 0.92, blue: 1.0)
     static let secondaryText = Color.secondary
 

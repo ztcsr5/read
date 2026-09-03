@@ -331,7 +331,14 @@ struct BookshelfView: View {
             return BookshelfRefreshCandidate(bookID: book.id, source: source, book: searchBook)
         }
 
+        // Refresh results arrive in bounded parallel batches. Keep the UI
+        // reactive, but commit the bookshelf JSON once for the whole refresh
+        // instead of encoding it after every completed book.
+        appState.bookshelfStore.beginBatchUpdates()
+        defer { appState.bookshelfStore.endBatchUpdates() }
+
         for batch in candidates.chunked(into: 4) {
+            guard !Task.isCancelled else { break }
             await withTaskGroup(of: BookshelfRefreshResult.self) { group in
                 for candidate in batch {
                     group.addTask {
@@ -361,6 +368,10 @@ struct BookshelfView: View {
                 }
 
                 for await result in group {
+                    guard !Task.isCancelled else {
+                        group.cancelAll()
+                        break
+                    }
                     switch result {
                     case .success(let bookID, let latestChapterTitle, let intro, let totalChapters):
                         appState.bookshelfStore.updateDetails(

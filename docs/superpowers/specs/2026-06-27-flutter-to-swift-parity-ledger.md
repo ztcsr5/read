@@ -105,7 +105,9 @@ Current status:
 - Native reader shell, settings, TOC, bookmarks, TTS, auto scroll, tap zones, and modes exist.
 - Cover mode has a distinct drag/transition path instead of behaving exactly like horizontal page mode.
 - Reader system color scheme follows the selected reading background for better toolbar/status contrast.
-- Needs strict parity pass for actual mode behavior, immediate layout changes, restore position, gesture conflict, toolbar color contrast, and long-scroll ProMotion feel.
+- Scroll mode now uses a UIKit/TextKit-backed `NativeReaderTextView` for long chapters, with range-based TTS highlighting, native jumps, throttled visible-paragraph callbacks, and reserved footer safe inset.
+- RSS article reading reuses the same native text surface after content load, preserving offline cache, article navigation, TTS, and auto-scroll while avoiding a second SwiftUI paragraph tree.
+- Remaining device gate: verify actual mode behavior, immediate layout changes, restore position, gesture conflict, toolbar color contrast, and sustained ProMotion feel with Xcode/Instruments on a 120 Hz iPhone.
 
 ## Settings
 
@@ -158,6 +160,7 @@ Current status:
 - Added JSON-string rule object decoding, so `ruleSearch: "{\"bookList\":\"...\"}"` becomes structured fields.
 - Added `httpUserAgent` as a request User-Agent alias.
 - Added tests for legacy field normalization and JSON-string rule decoding.
+- Added native reader layout regression coverage for paragraph ranges, empty paragraphs, and system font attributes.
 
 Deferred:
 

@@ -46,39 +46,29 @@ struct RSSArticleReaderView: View {
 
     private var readerTextColor: Color { backgroundRawValue == "dark" ? .white.opacity(0.92) : .primary }
 
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
-                    Text(currentArticle.title)
-                        .font(.system(size: fontSize + 5, weight: .bold, design: .default))
-                        .foregroundStyle(readerTextColor)
-                        .textSelection(.enabled)
-                        .id(-1)
-                    if let pubDate = currentArticle.pubDate {
-                        Text(pubDate).font(.caption).foregroundStyle(readerTextColor.opacity(0.62))
-                    }
-                    articleBody
-                }
-                .padding(CGFloat(pagePadding))
-                .padding(.bottom, 110)
-            }
-            .coordinateSpace(name: "rssReaderScroll")
-            .onPreferenceChange(RSSParagraphPositionPreferenceKey.self) { updateVisibleParagraph(from: $0) }
-            .onChange(of: autoScrollTarget) { target in
-                guard paragraphs.indices.contains(target) else { return }
-                withAnimation(.linear(duration: max(autoScrollDelay * 0.9, 0.25))) { proxy.scrollTo(target, anchor: .top) }
-            }
-            .onChange(of: speechController.currentParagraphIndex) { target in
-                guard target >= 0, paragraphs.indices.contains(target) else { return }
-                visibleParagraphIndex = target
-                withAnimation(.easeInOut(duration: 0.28)) { proxy.scrollTo(target, anchor: .center) }
-            }
-            .onChange(of: currentArticle.id) { _ in
-                resetReaderSession()
-                proxy.scrollTo(-1, anchor: .top)
-            }
+    private var readerTextUIColor: UIColor {
+        backgroundRawValue == "dark" ? UIColor.white.withAlphaComponent(0.92) : UIColor.label
+    }
+
+    private var nativeScrollTarget: Int? {
+        if paragraphs.indices.contains(speechController.currentParagraphIndex) {
+            return speechController.currentParagraphIndex
         }
+        return paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil
+    }
+
+    private var nativeScrollRequestKey: String {
+        [
+            currentArticle.id,
+            reloadToken.uuidString,
+            String(autoScrollTarget),
+            String(speechController.currentParagraphIndex),
+            autoScrollEnabled ? "auto" : "manual"
+        ].joined(separator: "|")
+    }
+
+    var body: some View {
+        articleReaderSurface
         .background(readerBackground.ignoresSafeArea())
         .navigationTitle("文章阅读")
         .navigationBarTitleDisplayMode(.inline)
@@ -87,6 +77,53 @@ struct RSSArticleReaderView: View {
         .onAppear { appState.rssArticleStateStore.markRead(currentArticle) }
         .onDisappear { stopAutoScroll(); speechController.stop() }
         .toolbar { readerToolbar }
+    }
+
+    @ViewBuilder
+    private var articleReaderSurface: some View {
+        if paragraphs.isEmpty {
+            ScrollView { articleBody.frame(maxWidth: .infinity).padding(CGFloat(pagePadding)).padding(.bottom, 110) }
+        } else {
+            ZStack(alignment: .top) {
+                NativeReaderTextView(
+                    title: currentArticle.title,
+                    subtitle: currentArticle.pubDate,
+                    paragraphs: paragraphs,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing,
+                    pagePadding: pagePadding,
+                    letterSpacing: 0,
+                    paragraphSpacing: paragraphSpacing,
+                    paragraphIndent: 0,
+                    titleSpacing: 12,
+                    footerHeight: 110,
+                    textColor: readerTextUIColor,
+                    highlightColor: AppTheme.accentUIColor.withAlphaComponent(backgroundRawValue == "dark" ? 0.24 : 0.12),
+                    currentParagraphIndex: speechController.currentParagraphIndex,
+                    scrollTarget: nativeScrollTarget,
+                    scrollRequestKey: nativeScrollRequestKey,
+                    animatedScrollDuration: autoScrollEnabled ? max(autoScrollDelay * 0.9, 0.25) : 0.28,
+                    textSelectionEnabled: true,
+                    onVisibleParagraph: { index in
+                        guard !autoScrollEnabled, paragraphs.indices.contains(index), index != visibleParagraphIndex else { return }
+                        visibleParagraphIndex = index
+                        autoScrollTarget = index
+                    }
+                )
+                .ignoresSafeArea(.container, edges: .bottom)
+
+                if showingCachedContent {
+                    Label("离线缓存正文", systemImage: "externaldrive")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(readerTextColor.opacity(0.72))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
     }
 
     @ViewBuilder private var articleBody: some View {
@@ -100,24 +137,6 @@ struct RSSArticleReaderView: View {
         } else if paragraphs.isEmpty {
             EmptyStateCard(systemImage: "doc.text", title: "暂无正文", message: "该文章没有可显示的正文内容。")
         } else {
-            ForEach(paragraphs.indices, id: \.self) { index in
-                Text(paragraphs[index])
-                    .font(.system(size: fontSize, weight: .regular, design: .default))
-                    .foregroundStyle(readerTextColor)
-                    .lineSpacing(lineSpacing)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .padding(.vertical, speechController.currentParagraphIndex == index ? 5 : 0)
-                    .background { if speechController.currentParagraphIndex == index { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(AppTheme.accent.opacity(backgroundRawValue == "dark" ? 0.24 : 0.12)) } }
-                    .id(index)
-                    .background {
-                        if shouldTrackParagraph(index) {
-                            GeometryReader { geometry in
-                                Color.clear.preference(key: RSSParagraphPositionPreferenceKey.self, value: [RSSParagraphPosition(index: index, minY: geometry.frame(in: .named("rssReaderScroll")).minY)])
-                            }
-                        }
-                    }
-            }
             if showingCachedContent {
                 Label("离线缓存正文", systemImage: "externaldrive").font(.caption).foregroundStyle(readerTextColor.opacity(0.62)).frame(maxWidth: .infinity, alignment: .center).padding(.top, 10)
             }
@@ -178,26 +197,6 @@ struct RSSArticleReaderView: View {
 
     private func stopAutoScroll() { autoScrollTask?.cancel(); autoScrollTask = nil; autoScrollEnabled = false }
 
-    private func shouldTrackParagraph(_ index: Int) -> Bool {
-        let stride = ReaderPerformancePolicy.paragraphTrackingStride(paragraphCount: paragraphs.count)
-        return index == 0 || index == visibleParagraphIndex || index % stride == 0
-    }
-
-    private func updateVisibleParagraph(from positions: [RSSParagraphPosition]) {
-        guard !autoScrollEnabled, !positions.isEmpty else { return }
-        // PreferenceKey updates can arrive several times per display frame on
-        // long HTML articles. Resume/highlight state does not need 120 Hz
-        // precision, so keep this bookkeeping off the rendering hot path.
-        let now = Date()
-        guard now.timeIntervalSince(lastVisibleParagraphUpdateAt) >= ReaderPerformancePolicy.visibleParagraphUpdateInterval else { return }
-        lastVisibleParagraphUpdateAt = now
-        let topInset = CGFloat(pagePadding)
-        let visible = positions.filter { $0.minY >= topInset }.min { $0.minY < $1.minY } ?? positions.filter { $0.minY < topInset }.max { $0.minY < $1.minY }
-        if let index = visible?.index, paragraphs.indices.contains(index), index != visibleParagraphIndex {
-            visibleParagraphIndex = index
-            autoScrollTarget = index
-        }
-    }
 
     @MainActor private func load(_ article: RSSArticlePreview) async {
         isLoading = true; errorMessage = nil; showingCachedContent = false; defer { isLoading = false }
@@ -222,10 +221,4 @@ struct RSSArticleReaderView: View {
     private func fallbackParagraphs(for article: RSSArticlePreview) -> [String] {
         article.contentHTML.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? article.description.map { RSSArticleContentParser().parseParagraphs(from: $0) } ?? []
     }
-}
-
-private struct RSSParagraphPosition: Equatable { let index: Int; let minY: CGFloat }
-private struct RSSParagraphPositionPreferenceKey: PreferenceKey {
-    static var defaultValue: [RSSParagraphPosition] = []
-    static func reduce(value: inout [RSSParagraphPosition], nextValue: () -> [RSSParagraphPosition]) { value.append(contentsOf: nextValue()) }
 }

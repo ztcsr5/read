@@ -210,7 +210,10 @@ struct ReaderView: View {
             readerBackdrop
 
             readerContent
-            .id(readerLayoutKey)
+            // UIKit owns the long-form scroll layout. Avoid invalidating the
+            // whole reader tree for each appearance/highlight update; paged
+            // modes still reset when their layout model changes.
+            .id(readerMode == .scroll ? "native-scroll-reader" : readerLayoutKey)
             .contentShape(Rectangle())
             .simultaneousGesture(
                 SpatialTapGesture()
@@ -391,65 +394,51 @@ struct ReaderView: View {
     }
 
     private var scrollReaderContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: CGFloat(paragraphSpacing)) {
-                    Text(content.title)
-                        .font(.system(size: fontSize + 8, weight: .bold, design: .default))
-                        .foregroundStyle(background.textColor)
-                        .padding(.bottom, CGFloat(titleSpacing))
-                        .id(-1)
-
-                    ForEach(content.paragraphs.indices, id: \.self) { index in
-                        paragraphText(content.paragraphs[index], index: index)
-                            .id(index)
-                            .background {
-                                if shouldTrackParagraphPosition(index) {
-                                    paragraphPositionReader(index: index)
-                                }
-                            }
-                    }
-                }
-                .padding(CGFloat(pagePadding))
-                .padding(.bottom, CGFloat(footerHeight))
+        NativeReaderTextView(
+            title: content.title,
+            paragraphs: content.paragraphs,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            pagePadding: pagePadding,
+            letterSpacing: letterSpacing,
+            paragraphSpacing: paragraphSpacing,
+            paragraphIndent: paragraphIndent,
+            titleSpacing: titleSpacing,
+            footerHeight: footerHeight,
+            textColor: background == .dark ? UIColor.white.withAlphaComponent(0.9) : UIColor.label,
+            highlightColor: AppTheme.accentUIColor.withAlphaComponent(background == .dark ? 0.22 : 0.12),
+            currentParagraphIndex: speechController.currentParagraphIndex,
+            scrollTarget: content.paragraphs.indices.contains(speechController.currentParagraphIndex)
+                ? speechController.currentParagraphIndex
+                : (content.paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil),
+            scrollRequestKey: nativeScrollRequestKey,
+            animatedScrollDuration: autoScrollEnabled ? max(autoScrollDelay * 0.9, 0.25) : 0.35,
+            textSelectionEnabled: textSelectionEnabled,
+            onVisibleParagraph: { index in
+                updateVisibleParagraph(index)
             }
-            .coordinateSpace(name: "readerScroll")
-            .onChange(of: autoScrollTarget) { target in
-                guard content.paragraphs.indices.contains(target) else { return }
-                // Advance on the same cadence as the timer. A short fixed
-                // animation made auto-scroll appear to do nothing between
-                // jumps; matching the configured interval produces a
-                // continuous, readable movement on 60/90/120 Hz displays.
-                withAnimation(.linear(duration: max(autoScrollDelay * 0.9, 0.25))) {
-                    proxy.scrollTo(target, anchor: .top)
-                }
-            }
-            .onChange(of: paragraphJumpRequest) { target in
-                guard let target, content.paragraphs.indices.contains(target.index) else { return }
-                withAnimation(.easeInOut(duration: 0.35)) {
-                    proxy.scrollTo(target.index, anchor: .top)
-                }
-            }
-            .onChange(of: speechController.currentParagraphIndex) { target in
-                guard target >= 0 else { return }
-                // Speech can advance once per paragraph. Do not serialize the
-                // whole bookshelf synchronously on the display frame path.
-                scheduleReadingPositionPersistence(paragraphIndex: target)
-                withAnimation(.easeInOut(duration: 0.35)) {
-                    proxy.scrollTo(target, anchor: .center)
-                }
-            }
-            .onAppear {
-                let target = autoScrollTarget
-                guard target > 0, content.paragraphs.indices.contains(target) else { return }
+        )
+        .ignoresSafeArea(.container, edges: .bottom)
+        .onAppear {
+            if autoScrollTarget > 0 {
                 DispatchQueue.main.async {
-                    proxy.scrollTo(target, anchor: .top)
+                    paragraphJumpRequest = ParagraphJumpRequest(index: autoScrollTarget)
                 }
-            }
-            .onPreferenceChange(ParagraphPositionPreferenceKey.self) { positions in
-                updateVisibleParagraph(from: positions)
             }
         }
+        .onChange(of: speechController.currentParagraphIndex) { target in
+            guard target >= 0 else { return }
+            scheduleReadingPositionPersistence(paragraphIndex: target)
+        }
+    }
+
+    private var nativeScrollRequestKey: String {
+        [
+            String(autoScrollTarget),
+            paragraphJumpRequest?.id.uuidString ?? "none",
+            String(speechController.currentParagraphIndex),
+            autoScrollEnabled ? "auto" : "manual"
+        ].joined(separator: "|")
     }
 
     @ViewBuilder
@@ -1532,6 +1521,18 @@ struct ReaderView: View {
         guard let index = visible?.index,
               index != visibleParagraphIndex,
               content.paragraphs.indices.contains(index) else { return }
+        visibleParagraphIndex = index
+        scheduleReadingPositionPersistence(paragraphIndex: index)
+    }
+
+    /// Receives throttled visibility updates from the TextKit reader surface.
+    /// Keep this state write narrow so scrolling does not invalidate the full
+    /// SwiftUI reader hierarchy on every display callback.
+    private func updateVisibleParagraph(_ index: Int) {
+        guard readerMode == .scroll,
+              !autoScrollEnabled,
+              content.paragraphs.indices.contains(index),
+              index != visibleParagraphIndex else { return }
         visibleParagraphIndex = index
         scheduleReadingPositionPersistence(paragraphIndex: index)
     }
