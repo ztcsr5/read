@@ -73,12 +73,23 @@ struct LocalTextBook: Equatable {
     let author: String
     let chapters: [LocalTextChapter]
     let coverURL: URL?
+    let language: String?
+    let publisher: String?
 
-    init(title: String, author: String, chapters: [LocalTextChapter], coverURL: URL? = nil) {
+    init(
+        title: String,
+        author: String,
+        chapters: [LocalTextChapter],
+        coverURL: URL? = nil,
+        language: String? = nil,
+        publisher: String? = nil
+    ) {
         self.title = title
         self.author = author
         self.chapters = chapters
         self.coverURL = coverURL
+        self.language = language
+        self.publisher = publisher
     }
 
     var paragraphs: [String] {
@@ -91,4 +102,35 @@ struct LocalTextChapter: Identifiable, Codable, Hashable, Sendable, Equatable {
     let title: String
     let paragraphs: [String]
     let index: Int
+    /// EPUB package-relative document path. Nil for imported plain text.
+    let sourcePath: String?
+    /// First navigation anchor targeting this document, when present.
+    let navigationFragment: String?
+
+    init(
+        title: String,
+        paragraphs: [String],
+        index: Int,
+        sourcePath: String? = nil,
+        navigationFragment: String? = nil
+    ) {
+        self.title = title
+        self.paragraphs = paragraphs
+        self.index = index
+        self.sourcePath = sourcePath
+        self.navigationFragment = navigationFragment
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case title, paragraphs, index, sourcePath, navigationFragment
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        paragraphs = try container.decode([String].self, forKey: .paragraphs)
+        index = try container.decode(Int.self, forKey: .index)
+        sourcePath = try container.decodeIfPresent(String.self, forKey: .sourcePath)
+        navigationFragment = try container.decodeIfPresent(String.self, forKey: .navigationFragment)
+    }
 }

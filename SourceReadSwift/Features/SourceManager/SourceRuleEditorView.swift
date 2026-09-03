@@ -39,6 +39,13 @@ struct SourceRuleEditorView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                Section("当前阶段说明") {
+                    Label(stageHelp.title, systemImage: stageHelp.systemImage)
+                        .font(.subheadline.weight(.semibold))
+                    Text(stageHelp.message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Section("输入") {
                     if selectedSection == 0 {
                         TextEditor(text: $searchURL)
@@ -124,6 +131,15 @@ struct SourceRuleEditorView: View {
         case 1: return $detailRule
         case 2: return $tocRule
         default: return $contentRule
+        }
+    }
+
+    private var stageHelp: (title: String, message: String, systemImage: String) {
+        switch selectedSection {
+        case 0: return ("搜索规则", "从搜索响应中提取书名、作者、封面和详情链接；JSON 书源通常填写 JSONPath，网页书源填写 CSS/XPath。", "magnifyingglass")
+        case 1: return ("详情规则", "提取书籍简介、作者、封面、目录地址和最新章节。没有目录地址时会尝试使用详情页中的目录链接。", "book.closed")
+        case 2: return ("目录规则", "把章节标题和章节链接解析成目录列表；分页目录可在规则中保留 nextUrl/分页字段。", "list.number")
+        default: return ("正文规则", "从章节响应中提取正文文本；建议同时处理广告净化和 HTML 实体，预览结果应接近阅读页正文。", "doc.text")
         }
     }
 

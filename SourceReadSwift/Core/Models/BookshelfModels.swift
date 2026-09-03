@@ -100,6 +100,9 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
 
     init(localTextBook: LocalTextBook) {
         let id = "local|\(UUID().uuidString)"
+        let metadata = [localTextBook.publisher, localTextBook.language]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+            .joined(separator: " · ")
         self.init(
             id: id,
             title: localTextBook.title,
@@ -108,7 +111,7 @@ struct BookshelfBook: Identifiable, Codable, Hashable, Sendable {
             sourceName: "Local",
             sourceURL: "local://text",
             bookURL: id,
-            intro: nil,
+            intro: metadata.nilIfEmpty,
             localContent: nil,
             localChapters: localTextBook.chapters,
             latestChapterTitle: localTextBook.chapters.last?.title ?? "全文",

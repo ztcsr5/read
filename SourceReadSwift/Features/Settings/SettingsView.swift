@@ -24,7 +24,9 @@ struct SettingsView: View {
                     ForEach(ThemeMode.allCases) { mode in
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            themeModeRawValue = mode.rawValue
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                themeModeRawValue = mode.rawValue
+                            }
                         } label: {
                             HStack {
                                 Text(mode.title)
@@ -162,6 +164,7 @@ struct SettingsView: View {
             .pageBackground()
             .listStyle(.insetGrouped)
             .navigationTitle("设置")
+            .animation(.easeInOut(duration: 0.22), value: themeModeRawValue)
             .onAppear {
                 updateCacheSummary()
                 appState.chapterContentCacheStore.removeExpired()

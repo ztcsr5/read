@@ -56,7 +56,7 @@ struct RSSArticlesView: View {
                 Section("文章") {
                     ForEach(articles) { article in
                         NavigationLink {
-                            RSSArticleReaderView(article: article)
+                            RSSArticleReaderView(article: article, articles: articles)
                         } label: {
                             RSSArticleRow(
                                 article: article,

@@ -18,8 +18,8 @@ struct LocalEPUBBookParser {
         let basePath = URL(fileURLWithPath: opfPath).deletingLastPathComponent().relativePath
         let metadata = metadata(from: opfXML, fallbackTitle: fileURL.deletingPathExtension().lastPathComponent)
         let manifest = manifestItems(from: opfXML)
-        let spine = spineIDs(from: opfXML)
-        let tocTitles = tableOfContentsTitles(from: opfXML, manifest: manifest, spine: spine, basePath: basePath, archive: archive)
+        let spine = spineItems(from: opfXML)
+        let tocEntries = tableOfContentsEntries(from: opfXML, manifest: manifest, basePath: basePath, archive: archive)
         let coverURL = extractCoverURL(
             from: opfXML,
             manifest: manifest,
@@ -27,9 +27,10 @@ struct LocalEPUBBookParser {
             archive: archive,
             bookURL: fileURL
         )
+        let linearSpine = spine.filter(\.isLinear).map(\.id)
         let orderedIDs = spine.isEmpty
             ? manifest.filter { $0.mediaType.contains("xhtml") || $0.mediaType.contains("html") }.map(\.id)
-            : spine
+            : (linearSpine.isEmpty ? spine.map(\.id) : linearSpine)
         let chapters = try orderedIDs.enumerated().compactMap { index, id -> LocalTextChapter? in
             guard let item = manifest.first(where: { $0.id == id }) else { return nil }
             let href = item.href
@@ -37,17 +38,26 @@ struct LocalEPUBBookParser {
             guard let html = try? stringEntry(path, in: archive) else { return nil }
             let paragraphs = paragraphs(from: html)
             guard !paragraphs.isEmpty else { return nil }
-            let tocTitle = tocTitles[path]
+            let tocEntry = tocEntries[path]
             return LocalTextChapter(
-                title: tocTitle ?? chapterTitle(from: html) ?? "Chapter \(index + 1)",
+                title: tocEntry?.title ?? chapterTitle(from: html) ?? "Chapter \(index + 1)",
                 paragraphs: paragraphs,
-                index: index
+                index: index,
+                sourcePath: path,
+                navigationFragment: tocEntry?.fragment
             )
         }
         guard !chapters.isEmpty else {
             throw LocalEPUBImportError.emptyContent
         }
-        return LocalTextBook(title: metadata.title, author: metadata.author, chapters: chapters, coverURL: coverURL)
+        return LocalTextBook(
+            title: metadata.title,
+            author: metadata.author,
+            chapters: chapters,
+            coverURL: coverURL,
+            language: metadata.language,
+            publisher: metadata.publisher
+        )
     }
 
     private func stringEntry(_ path: String, in archive: Archive) throws -> String {
@@ -61,10 +71,12 @@ struct LocalEPUBBookParser {
         return ResponseTextDecoder().decode(data: data, headers: [:])
     }
 
-    private func metadata(from opf: String, fallbackTitle: String) -> (title: String, author: String) {
+    private func metadata(from opf: String, fallbackTitle: String) -> (title: String, author: String, language: String?, publisher: String?) {
         let title = firstTagText(in: opf, names: ["dc:title", "title"]) ?? fallbackTitle
         let author = firstTagText(in: opf, names: ["dc:creator", "creator"]) ?? "Local"
-        return (title, author)
+        let language = firstTagText(in: opf, names: ["dc:language", "language"])
+        let publisher = firstTagText(in: opf, names: ["dc:publisher", "publisher"])
+        return (title, author, language, publisher)
     }
 
     private func manifestItems(from opf: String) -> [ManifestItem] {
@@ -86,25 +98,28 @@ struct LocalEPUBBookParser {
         }
     }
 
-    private func spineIDs(from opf: String) -> [String] {
+    private func spineItems(from opf: String) -> [SpineItem] {
         do {
             let document = try SwiftSoup.parse(opf)
             return try document.select("spine itemref").array().compactMap {
                 let id = try $0.attr("idref")
-                return id.isEmpty ? nil : id
+                guard !id.isEmpty else { return nil }
+                return SpineItem(
+                    id: id,
+                    isLinear: try $0.attr("linear").lowercased() != "no"
+                )
             }
         } catch {
             return []
         }
     }
 
-    private func tableOfContentsTitles(
+    private func tableOfContentsEntries(
         from opf: String,
         manifest: [ManifestItem],
-        spine: [String],
         basePath: String,
         archive: Archive
-    ) -> [String: String] {
+    ) -> [String: NavigationEntry] {
         let tocID: String? = {
             do {
                 let document = try SwiftSoup.parse(opf)
@@ -118,38 +133,42 @@ struct LocalEPUBBookParser {
                 || item.id == tocID
                 || item.mediaType == "application/x-dtbncx+xml"
         }
-        var result: [String: String] = [:]
+        var result: [String: NavigationEntry] = [:]
         for item in candidates {
             let path = normalizeEPUBPath(basePath: basePath, href: item.href)
+            let navigationBasePath = URL(fileURLWithPath: path).deletingLastPathComponent().relativePath
             guard let raw = try? stringEntry(path, in: archive) else { continue }
             if item.mediaType == "application/x-dtbncx+xml" || raw.range(of: "<navMap", options: .caseInsensitive) != nil {
-                result.merge(ncxTitles(from: raw, basePath: basePath), uniquingKeysWith: { current, _ in current })
+                result.merge(ncxEntries(from: raw, basePath: navigationBasePath), uniquingKeysWith: { current, _ in current })
             } else {
-                result.merge(navTitles(from: raw, basePath: basePath), uniquingKeysWith: { current, _ in current })
+                result.merge(navEntries(from: raw, basePath: navigationBasePath), uniquingKeysWith: { current, _ in current })
             }
         }
         return result
     }
 
-    private func navTitles(from html: String, basePath: String) -> [String: String] {
+    private func navEntries(from html: String, basePath: String) -> [String: NavigationEntry] {
         guard let document = try? SwiftSoup.parse(html),
               let links = try? document.select("nav a").array() else { return [:] }
-        var result: [String: String] = [:]
+        var result: [String: NavigationEntry] = [:]
         for link in links {
             do {
                 let href = try link.attr("href")
                 let label = try link.text().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !href.isEmpty, !label.isEmpty else { continue }
-                result[normalizeEPUBPath(basePath: basePath, href: href)] = label
+                let path = normalizeEPUBPath(basePath: basePath, href: href)
+                if result[path] == nil {
+                    result[path] = NavigationEntry(title: label, fragment: fragment(from: href))
+                }
             } catch { continue }
         }
         return result
     }
 
-    private func ncxTitles(from xml: String, basePath: String) -> [String: String] {
+    private func ncxEntries(from xml: String, basePath: String) -> [String: NavigationEntry] {
         guard let document = try? SwiftSoup.parse(xml),
               let points = try? document.select("navPoint").array() else { return [:] }
-        var result: [String: String] = [:]
+        var result: [String: NavigationEntry] = [:]
         for point in points {
             do {
                 guard let content = try point.select("content").first(),
@@ -157,7 +176,10 @@ struct LocalEPUBBookParser {
                 let src = try content.attr("src")
                 let label = try text.text().trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !src.isEmpty, !label.isEmpty else { continue }
-                result[normalizeEPUBPath(basePath: basePath, href: src)] = label
+                let path = normalizeEPUBPath(basePath: basePath, href: src)
+                if result[path] == nil {
+                    result[path] = NavigationEntry(title: label, fragment: fragment(from: src))
+                }
             } catch { continue }
         }
         return result
@@ -258,6 +280,14 @@ struct LocalEPUBBookParser {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
+    private func fragment(from href: String) -> String? {
+        guard let hashIndex = href.firstIndex(of: "#") else { return nil }
+        let value = String(href[href.index(after: hashIndex)...])
+            .removingPercentEncoding?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.nilIfEmpty
+    }
+
     private func firstMatch(in text: String, pattern: String) throws -> String? {
         let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
@@ -291,6 +321,16 @@ private struct ManifestItem {
     let href: String
     let mediaType: String
     let properties: String
+}
+
+private struct SpineItem {
+    let id: String
+    let isLinear: Bool
+}
+
+private struct NavigationEntry {
+    let title: String
+    let fragment: String?
 }
 
 enum LocalEPUBImportError: LocalizedError {

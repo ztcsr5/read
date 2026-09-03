@@ -1115,3 +1115,20 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Deepen EPUB/RSS reader navigation and article caching interactions.
 - Expand rule editor with field-level help and stage preview diagnostics.
 - Keep CI green before each large-phase handoff.
+
+## 2026-09-03 - Stage 2D reader depth and UX consolidation (in progress)
+
+### Implemented in this large pass
+
+- EPUB parser now retains `dc:language`/`dc:publisher`, skips `linear="no"` spine entries, and preserves navigation fragments/source paths for chapter handoff.
+- Added EPUB regression coverage for non-linear spine, package metadata and fragment-aware EPUB3 navigation.
+- RSS article reader now shares reader font/background/spacing preferences, starts speech from the visible paragraph, supports automatic scrolling, offline cache fallback, refresh/favorite/open-in-Safari actions, and previous/next article navigation.
+- RSS article content uses the system font instead of a forced serif design and reserves bottom safe-area space for controls.
+- Removed the obsolete Discover “智能网页小说模式”、订阅、写源 and duplicate source-management cards; source management remains centralized under Settings/Source Manager.
+- Settings appearance changes now use a short native transition rather than an abrupt theme swap.
+
+### Still requiring CI/device evidence
+
+- GitHub Actions must compile/test the consolidated pass; Windows cannot run Xcode.
+- Sustained 120 Hz still requires a ProMotion device + Instruments; `CADisableMinimumFrameDurationOnPhone` and the display-link ceiling request are already enabled.
+- LAN Web 写源 needs a real phone/PC same-network check; the app exposes `/health` for that verification.
