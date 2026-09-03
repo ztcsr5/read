@@ -7,7 +7,7 @@ struct SettingsView: View {
     @AppStorage("settings.themeMode") private var themeModeRawValue = ThemeMode.system.rawValue
     @State private var cacheSize = "无缓存"
     @State private var rssCacheSize = "无缓存"
-    @State private var backupDocument: BookshelfBackupDocument?
+    @State private var backupDocument: AppDataBackupDocument?
     @State private var showBackupExporter = false
     @State private var showBackupImporter = false
     @State private var backupMessage: String?
@@ -40,18 +40,6 @@ struct SettingsView: View {
                 }
 
                 Section("内容设置") {
-                    NavigationLink {
-                        SourceManagerView()
-                    } label: {
-                        Label("书源管理", systemImage: "square.stack.3d.up")
-                    }
-
-                    NavigationLink {
-                        SourceWritingView(server: appState.sourceWritingServer)
-                    } label: {
-                        Label("Web 写源", systemImage: "network")
-                    }
-
                     NavigationLink {
                         RuleHealthView()
                     } label: {
@@ -125,16 +113,16 @@ struct SettingsView: View {
 
                 Section("数据") {
                     Button {
-                        backupDocument = BookshelfBackupDocument(snapshot: appState.bookshelfStore.backupSnapshot())
+                        backupDocument = AppDataBackupDocument(snapshot: appDataBackupSnapshot())
                         showBackupExporter = true
                     } label: {
-                        Label("导出书架备份", systemImage: "square.and.arrow.up")
+                        Label("导出完整数据", systemImage: "externaldrive.badge.icloud")
                     }
 
                     Button {
                         showBackupImporter = true
                     } label: {
-                        Label("恢复书架备份", systemImage: "square.and.arrow.down")
+                        Label("恢复完整数据", systemImage: "arrow.clockwise.icloud")
                     }
                 }
 
@@ -188,7 +176,7 @@ struct SettingsView: View {
             ) { result in
                 switch result {
                 case .success:
-                    backupMessage = "书架备份已导出"
+                    backupMessage = "完整数据已导出"
                 case .failure(let error):
                     backupMessage = "导出失败：\(error.localizedDescription)"
                 }
@@ -218,13 +206,35 @@ struct SettingsView: View {
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let snapshot = try decoder.decode(BookshelfBackupSnapshot.self, from: Data(contentsOf: url))
-            guard appState.bookshelfStore.restore(snapshot) else {
+            let data = try Data(contentsOf: url)
+            let snapshot: AppDataBackupSnapshot
+            if let full = try? decoder.decode(AppDataBackupSnapshot.self, from: data) {
+                snapshot = full
+            } else {
+                // Keep backups exported by schema v1 readable while new exports use the full envelope.
+                let legacy = try decoder.decode(BookshelfBackupSnapshot.self, from: data)
+                snapshot = AppDataBackupSnapshot(
+                    schemaVersion: 1,
+                    exportedAt: legacy.exportedAt,
+                    bookshelf: legacy,
+                    sources: appState.sourceStore.backupSnapshot(),
+                    purifyRules: appState.purifyRuleStore.backupSnapshot(),
+                    rssState: appState.rssArticleStateStore.backupSnapshot(),
+                    readerPreferences: [:]
+                )
+            }
+            guard snapshot.schemaVersion >= 1 && snapshot.schemaVersion <= 3,
+                  appState.bookshelfStore.restore(snapshot.bookshelf),
+                  appState.sourceStore.restore(snapshot.sources),
+                  appState.purifyRuleStore.restore(snapshot.purifyRules) else {
                 backupMessage = "备份版本不受支持"
                 return
             }
+            appState.rssArticleStateStore.restore(snapshot.rssState)
+            restoreReaderPreferences(snapshot.readerPreferences)
             updateCacheSummary()
-            backupMessage = "已恢复 \(snapshot.books.count) 本书和 \(snapshot.groups.count) 个分组"
+            updateRSSCacheSummary()
+            backupMessage = "已恢复 \(snapshot.bookshelf.books.count) 本书、\(snapshot.sources.sources.count) 个书源和 \(snapshot.purifyRules.count) 条规则"
         } catch {
             backupMessage = "恢复失败：\(error.localizedDescription)"
         }
@@ -235,6 +245,57 @@ struct SettingsView: View {
         cacheSize = chapters == 0
             ? "无缓存"
             : "\(chapters) 章 / \(byteCountText(appState.chapterContentCacheStore.estimatedByteCount))"
+    }
+
+    private func appDataBackupSnapshot() -> AppDataBackupSnapshot {
+        let keys = [
+            "reader.fontSize", "reader.lineSpacing", "reader.pagePadding", "reader.letterSpacing",
+            "reader.paragraphSpacing", "reader.paragraphIndent", "reader.titleSpacing", "reader.footerHeight",
+            "reader.ttsRate", "reader.autoScrollDelay", "reader.sleepTimerMinutes", "reader.background",
+            "reader.mode", "reader.tapZones", "reader.keepScreenAwake", "reader.preloadChapterCount",
+            "reader.textSelectionEnabled", "settings.themeMode"
+        ]
+        let defaults = UserDefaults.standard
+        let doubleKeys: Set<String> = [
+            "reader.fontSize", "reader.lineSpacing", "reader.pagePadding", "reader.letterSpacing",
+            "reader.paragraphSpacing", "reader.paragraphIndent", "reader.titleSpacing", "reader.footerHeight",
+            "reader.ttsRate", "reader.autoScrollDelay"
+        ]
+        let integerKeys: Set<String> = ["reader.sleepTimerMinutes", "reader.preloadChapterCount"]
+        let boolKeys: Set<String> = ["reader.keepScreenAwake", "reader.textSelectionEnabled"]
+        let preferences = Dictionary(uniqueKeysWithValues: keys.compactMap { key -> (String, BackupPreferenceValue)? in
+            guard let value = defaults.object(forKey: key) else { return nil }
+            if doubleKeys.contains(key) {
+                return (key, .double((value as? NSNumber)?.doubleValue ?? (value as? Double) ?? 0))
+            }
+            if integerKeys.contains(key) {
+                return (key, .integer((value as? NSNumber)?.intValue ?? (value as? Int) ?? 0))
+            }
+            if boolKeys.contains(key) {
+                return (key, .bool((value as? NSNumber)?.boolValue ?? (value as? Bool) ?? false))
+            }
+            if let string = value as? String { return (key, .string(string)) }
+            return nil
+        })
+        return AppDataBackupSnapshot(
+            bookshelf: appState.bookshelfStore.backupSnapshot(),
+            sources: appState.sourceStore.backupSnapshot(),
+            purifyRules: appState.purifyRuleStore.backupSnapshot(),
+            rssState: appState.rssArticleStateStore.backupSnapshot(),
+            readerPreferences: preferences
+        )
+    }
+
+    private func restoreReaderPreferences(_ preferences: [String: BackupPreferenceValue]) {
+        let defaults = UserDefaults.standard
+        for (key, value) in preferences {
+            switch value {
+            case .string(let value): defaults.set(value, forKey: key)
+            case .double(let value): defaults.set(value, forKey: key)
+            case .integer(let value): defaults.set(value, forKey: key)
+            case .bool(let value): defaults.set(value, forKey: key)
+            }
+        }
     }
 
     private func updateRSSCacheSummary() {

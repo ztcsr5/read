@@ -45,8 +45,23 @@ final class RSSArticleStateStore: ObservableObject {
         persist()
     }
 
+    func backupSnapshot() -> RSSArticleStateSnapshot {
+        RSSArticleStateSnapshot(readIDs: Array(readIDs), favoriteIDs: Array(favoriteIDs))
+    }
+
+    func restore(_ snapshot: RSSArticleStateSnapshot) {
+        readIDs = Set(snapshot.readIDs)
+        favoriteIDs = Set(snapshot.favoriteIDs)
+        persist()
+    }
+
     private func persist() {
         defaults.set(Array(readIDs), forKey: readKey)
         defaults.set(Array(favoriteIDs), forKey: favoriteKey)
     }
+}
+
+struct RSSArticleStateSnapshot: Codable, Hashable, Sendable {
+    let readIDs: [String]
+    let favoriteIDs: [String]
 }

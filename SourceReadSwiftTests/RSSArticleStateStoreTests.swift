@@ -3,6 +3,19 @@ import XCTest
 
 @MainActor
 final class RSSArticleStateStoreTests: XCTestCase {
+    func testRestoresReadAndFavoriteSnapshot() {
+        let suite = "RSSArticleStateStoreTests.restore.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let store = RSSArticleStateStore(defaults: defaults)
+        store.restore(RSSArticleStateSnapshot(readIDs: ["read"], favoriteIDs: ["favorite"]))
+        XCTAssertEqual(store.readIDs, Set(["read"]))
+        XCTAssertEqual(store.favoriteIDs, Set(["favorite"]))
+        let reloaded = RSSArticleStateStore(defaults: defaults)
+        XCTAssertEqual(reloaded.readIDs, Set(["read"]))
+        XCTAssertEqual(reloaded.favoriteIDs, Set(["favorite"]))
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     func testReadAndFavoriteStatePersists() {
         let suite = "RSSArticleStateStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

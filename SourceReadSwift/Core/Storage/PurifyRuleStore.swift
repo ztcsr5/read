@@ -132,6 +132,15 @@ final class PurifyRuleStore: ObservableObject {
         PurifyRuleEvaluator.apply(rules: enabledPatterns, to: text)
     }
 
+    func backupSnapshot() -> [PurifyRule] { rules }
+
+    @discardableResult
+    func restore(_ snapshot: [PurifyRule]) -> Bool {
+        rules = snapshot.filter { !$0.pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        persist()
+        return lastError == nil
+    }
+
     func remove(ruleID: String) {
         rules.removeAll { $0.id == ruleID }
         persist()

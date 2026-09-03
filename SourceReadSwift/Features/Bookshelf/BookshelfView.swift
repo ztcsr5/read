@@ -184,21 +184,32 @@ struct BookshelfView: View {
     }
 
     private var shelfHeader: some View {
-        NavigationLink {
-            BookshelfCollectionView(title: "书架", books: allBooks)
-        } label: {
-            HStack(spacing: 7) {
+        HStack(spacing: 12) {
+            NavigationLink {
+                BookshelfCollectionView(title: "书架", books: allBooks)
+            } label: {
+                HStack(spacing: 7) {
                 Text("书架")
                     .font(.system(size: 22, weight: .bold))
                 Image(systemName: "chevron.right")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.secondary)
-                Spacer()
+                }
+                .foregroundStyle(.primary)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(.primary)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            Spacer()
+            if !allBooks.isEmpty {
+                NavigationLink {
+                    BookshelfCollectionView(title: "书架", books: allBooks, startsManaging: true)
+                } label: {
+                    Label("批量管理", systemImage: "checkmark.circle")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
         }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -551,6 +562,12 @@ private struct BookshelfCollectionView: View {
     @State private var isManaging = false
     @State private var selectedBookIDs: Set<String> = []
     @State private var confirmBatchDelete = false
+
+    init(title: String, books: [BookshelfBook], startsManaging: Bool = false) {
+        self.title = title
+        self.books = books
+        _isManaging = State(initialValue: startsManaging)
+    }
 
     private var displayBooks: [BookshelfBook] {
         guard let selectedGroupName else { return books }

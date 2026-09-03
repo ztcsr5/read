@@ -64,6 +64,18 @@ struct SourceWritingView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+
+                        Button {
+                            UIPasteboard.general.string = server.healthURLs.joined(separator: "\n")
+                        } label: {
+                            Label("复制健康检查地址", systemImage: "stethoscope")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Text("PC 无法打开时，先访问任一 /health 地址；返回 SOURCE_READ_SWIFT_WEB_OK 即表示局域网连通。请确认手机允许‘本地网络’权限，且路由器未开启 AP 隔离。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     if let lastError = server.lastError {
@@ -197,6 +209,9 @@ final class LightweightHTTPServer: ObservableObject {
     @Published var port: UInt16 = 8080
     @Published var localIP: String = "127.0.0.1"
     @Published var localURLs: [String] = []
+    var healthURLs: [String] {
+        localURLs.map { $0 + "/health" }
+    }
     @Published var lastError: String?
     @Published var logMessages: [String] = []
     
@@ -215,6 +230,8 @@ final class LightweightHTTPServer: ObservableObject {
         lastError = nil
         localIP = getLocalIPAddresses().first ?? "127.0.0.1"
         let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
+        parameters.includePeerToPeer = true
         let candidates = [port] + (1122...1132).map(UInt16.init).filter { $0 != port }
         var lastStartError: Error?
         for candidate in candidates {

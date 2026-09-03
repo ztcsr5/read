@@ -232,17 +232,8 @@ struct SourceManagerView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showFileImporter = true
-                } label: {
-                    Label("本地 JSON", systemImage: "doc.badge.plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
             }
-            Text("支持本地 JSON、URL、阅读分享链接、仓库导入、RSS 预览和书源搜索/详情/目录/正文链路测试。")
+            Text("支持本地 JSON、URL、阅读分享链接、仓库导入、RSS 预览和书源搜索/详情/目录/正文链路测试。点击“导入”后可选择本地 JSON 文件。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

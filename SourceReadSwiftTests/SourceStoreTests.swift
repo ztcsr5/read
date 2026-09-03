@@ -3,6 +3,20 @@ import XCTest
 
 @MainActor
 final class SourceStoreTests: XCTestCase {
+    func testRestoresCompleteSourceLibrarySnapshot() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+        let source = BookSource(bookSourceName: "恢复源", bookSourceUrl: "https://restore.example")
+        let rss = RSSSource(sourceName: "恢复 RSS", sourceUrl: "https://restore.example/rss")
+        let catalog = SourceCatalog(name: "恢复仓库", url: "https://restore.example/catalog.json")
+        XCTAssertTrue(store.restore(SourceLibrarySnapshot(sources: [source], rssSources: [rss], catalogs: [catalog])))
+        let reloaded = SourceStore(persistence: SourcePersistence(fileManager: .default, rootURL: root))
+        XCTAssertEqual(reloaded.sources.map(\.bookSourceUrl), [source.bookSourceUrl])
+        XCTAssertEqual(reloaded.rssSources.map(\.sourceUrl), [rss.sourceUrl])
+        XCTAssertEqual(reloaded.catalogs.map(\.url), [catalog.url])
+        try? FileManager.default.removeItem(at: root)
+    }
+
     func testImportSingleSource() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

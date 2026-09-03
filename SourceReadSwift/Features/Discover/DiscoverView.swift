@@ -10,31 +10,10 @@ struct DiscoverView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
-                    Text("发现")
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .accessibilityAddTraits(.isHeader)
+                    PodcastLargeTitleBar(title: "发现") { EmptyView() }
                         .padding(.top, 18)
 
                     bookSearchTab
-
-                    HStack(spacing: 12) {
-                        NavigationLink {
-                            SourceManagerView()
-                        } label: {
-                            Label("订阅与书源", systemImage: "square.stack.3d.up")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-
-                        NavigationLink {
-                            SourceWritingView(server: appState.sourceWritingServer)
-                        } label: {
-                            Label("Web 写源", systemImage: "network")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                    }
 
                     Color.clear.frame(height: 100)
                 }

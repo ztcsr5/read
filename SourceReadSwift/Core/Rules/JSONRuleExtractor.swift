@@ -380,12 +380,12 @@ struct JSONRuleExtractor {
 
     private func normalize(_ rule: String) -> String {
         var output = rule.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Preserve JSONPath recursive descent and filter/wildcard segments.
-        // The tokenizer understands these brackets directly; converting them
-        // to the legacy `.*` form would silently discard predicates such as
-        // `[?(@.hasContent)]` and make `$..bookList[*]` over-select nodes.
-        if output.hasPrefix("$..") || output.hasPrefix("$.") {
-            output.removeFirst() // keep the leading dots for `..` descent
+        // Keep filters intact while still normalizing Legado's `@field`
+        // suffix. Returning early for JSONPath broke rules such as
+        // `$.data.book@name`; the bracket transforms below do not consume
+        // `[?()]` predicates, so both syntaxes can share this path.
+        if output.hasPrefix("$..") {
+            output.removeFirst() // `$..name` -> `..name`, tokenizer emits `**`.
             return output
         }
         output = output
