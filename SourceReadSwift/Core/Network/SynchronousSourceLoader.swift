@@ -89,7 +89,9 @@ struct SynchronousSourceLoader {
         if let persistentState {
             let previous = effectivePersistentValues["cookieHeader"]
                 ?? cookieHeader
-                ?? HTTPCookieStorage.shared.cookies(for: responseURL).map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+                ?? (HTTPCookieStorage.shared.cookies(for: responseURL) ?? [])
+                    .map { "\($0.name)=\($0.value)" }
+                    .joined(separator: "; ")
             let setCookie = CookieHeaderParser.setCookieValues(from: result.headers)
                 .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
                 .map { "\($0.name)=\($0.value)" }

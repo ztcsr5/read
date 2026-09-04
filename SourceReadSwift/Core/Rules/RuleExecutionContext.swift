@@ -103,13 +103,10 @@ final class RuleExecutionContext: @unchecked Sendable {
     /// only cookie names/values in diagnostics; response bodies and secrets are
     /// never logged here.
     func ingestResponse(_ response: SourceResponse) {
-        let values = CookieHeaderParser.setCookieValues(from: response.headers)
-            .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
-            .map { "\($0.name)=\($0.value)" }
-        guard !values.isEmpty else { return }
-        let merged = CookieHeaderParser.merge(values.joined(separator: "; "), into: string(for: "cookieHeader").nilIfEmpty)
-        setValue(merged, for: "cookieHeader")
-        log("response cookies persisted: \(values.map { $0.split(separator: "=").first.map(String.init) ?? "" }.joined(separator: ","))")
+        let names = persistentState.ingestResponse(response)
+        guard !names.isEmpty else { return }
+        setValue(persistentState.get("cookieHeader"), for: "cookieHeader")
+        log("response cookies persisted: \(names.joined(separator: ","))")
     }
 
     func log(_ message: String) {
@@ -169,5 +166,21 @@ final class RulePersistentState: @unchecked Sendable {
     func snapshot() -> [String: String] {
         lock.lock(); defer { lock.unlock() }
         return values
+    }
+
+    /// Merge response Set-Cookie values into the source-scoped state and return
+    /// only cookie names for diagnostics. Values are intentionally not exposed
+    /// in logs.
+    @discardableResult
+    func ingestResponse(_ response: SourceResponse) -> [String] {
+        let values = CookieHeaderParser.setCookieValues(from: response.headers)
+            .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
+        guard !values.isEmpty else { return [] }
+        let incoming = values.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        lock.lock()
+        let merged = CookieHeaderParser.merge(incoming, into: self.values["cookieHeader"].nilIfEmpty)
+        if !merged.isEmpty { self.values["cookieHeader"] = merged }
+        lock.unlock()
+        return values.map(\.name)
     }
 }
