@@ -222,6 +222,12 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
             return services.utf8ToGbk(RuleExecutionContext.bridgeString(arguments.first))
         case "inflateBytes":
             return services.inflate(arguments.first)
+        case "inflateHex":
+            return Self.hexString(from: services.inflate(arguments.first))
+        case "gunzipBytes":
+            return services.gunzip(arguments.first)
+        case "gunzipHex":
+            return Self.hexString(from: services.gunzip(arguments.first))
         case "encodeURI":
             return services.encodeURI(
                 RuleExecutionContext.bridgeString(arguments.first),
@@ -287,7 +293,16 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
         if value.isBoolean { return value.toBool() }
         if value.isNull || value.isUndefined { return NSNull() }
         if value.isArray {
-            let length = max(0, Int(value.forProperty("length")?.toInt32() ?? 0))
+            let length = max(
+                0,
+                max(
+                    Int(value.forProperty("length")?.toInt32() ?? 0),
+                    Int(value.forProperty("count")?.toInt32() ?? 0)
+                )
+            )
+            if length == 0, let object = value.toObject() as? NSArray, !object.isEmpty {
+                return object
+            }
             return (0..<length).map { nativeValue(value.atIndex($0)) } as NSArray
         }
         if let dictionary = value.toDictionary() {
@@ -296,6 +311,20 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
             } as NSDictionary
         }
         return value.toObject() ?? value
+    }
+
+    /// Return binary command results as a scalar string.  JavaScriptCore on
+    /// older iOS releases can expose an NSArray returned by JSExport as a
+    /// host-backed object with no writable indexed properties; converting the
+    /// bytes to hex at the bridge boundary lets the JS prelude rebuild a real
+    /// JavaScript Array without losing elements.
+    private static func hexString(from value: NSArray) -> String {
+        value.compactMap { item in
+            if let number = item as? NSNumber { return number.uint8Value }
+            if let scalar = item as? UInt8 { return scalar }
+            if let scalar = item as? Int { return UInt8(clamping: scalar) }
+            return nil
+        }.map { String(format: "%02x", $0) }.joined()
     }
 }
 

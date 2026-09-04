@@ -46,6 +46,32 @@ final class LegadoStage9CompatibilityTests: XCTestCase {
         XCTAssertEqual(value, "hello legado")
     }
 
+    func testGzipInputStreamAndCollectionsFixtures() throws {
+        // gzip.compress(b"hello legado", mtime=0)
+        let gzip = [31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 203, 72, 205, 201, 201, 87, 200, 73, 77, 79, 76, 201, 7, 0, 253, 112, 110, 222, 12, 0, 0, 0]
+        let result = JSCoreRuntime().evaluate("""
+        var stream = new Packages.java.util.zip.GZIPInputStream(gzip);
+        var bytes = [];
+        var value;
+        while ((value = stream.read()) >= 0) bytes.push(value);
+        var list = new Packages.java.util.ArrayList();
+        list.add('z'); list.add('a'); list.add('m');
+        Packages.java.util.Collections.sort(list);
+        var sorted = list.toArray().join('');
+        Packages.java.util.Collections.reverse(list);
+        var reversed = list.toArray().join('');
+        var set = new Packages.java.util.HashSet(['a', 'a', 'b']);
+        JSON.stringify({text: bytesToStr(bytes), sorted: sorted, reversed: reversed, setSize: set.size(), setHasB: set.contains('b')})
+        """, variables: ["gzip": gzip])
+
+        let object = try jsonObject(from: result)
+        XCTAssertEqual(object["text"] as? String, "hello legado")
+        XCTAssertEqual(object["sorted"] as? String, "amz")
+        XCTAssertEqual(object["reversed"] as? String, "zma")
+        XCTAssertEqual(object["setSize"] as? Int, 2)
+        XCTAssertEqual(object["setHasB"] as? Bool, true)
+    }
+
     func testIntegerLongImporterAndDigestApis() throws {
         let result = JSCoreRuntime().evaluate("""
         var imported = JavaImporter();

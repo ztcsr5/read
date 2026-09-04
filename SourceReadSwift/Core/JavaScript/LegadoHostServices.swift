@@ -243,6 +243,83 @@ final class LegadoHostServices {
         return []
     }
 
+
+    /// Decode an RFC 1952 gzip stream for Android sources that explicitly use
+    /// `GZIPInputStream` instead of relying on URLSession content decoding.
+    /// The gzip envelope is parsed here and the raw DEFLATE payload is handed
+    /// to the same bounded system decoder used by `InflaterInputStream`.
+    func gunzip(_ value: Any?) -> NSArray {
+        let input = bytes(from: value)
+        guard let payload = gzipPayload(input) else {
+            executionContext.log("GZIPInputStream rejected an invalid gzip envelope")
+            return []
+        }
+        if let output = inflateCandidate(payload) {
+            return output.map { NSNumber(value: $0) } as NSArray
+        }
+        var capacity = max(1024, payload.count * 4)
+        for _ in 0..<10 {
+            var output = Array(repeating: UInt8(0), count: capacity)
+            let decoded = payload.withUnsafeBytes { source in
+                output.withUnsafeMutableBytes { destination in
+                    compression_decode_buffer(
+                        destination.bindMemory(to: UInt8.self).baseAddress!,
+                        capacity,
+                        source.bindMemory(to: UInt8.self).baseAddress!,
+                        payload.count,
+                        nil,
+                        COMPRESSION_ZLIB
+                    )
+                }
+            }
+            if decoded > 0 {
+                output.removeLast(output.count - decoded)
+                return output.map { NSNumber(value: $0) } as NSArray
+            }
+            capacity *= 2
+        }
+        executionContext.log("GZIPInputStream failed to decode payload")
+        return []
+    }
+
+
+    private func gzipPayload(_ input: [UInt8]) -> [UInt8]? {
+        guard input.count >= 18, input[0] == 0x1f, input[1] == 0x8b, input[2] == 8 else { return nil }
+        let flags = input[3]
+        // Reserved bits must be clear per RFC 1952.
+        guard flags & 0xe0 == 0 else { return nil }
+        var index = 10
+        let trailerStart = input.count - 8
+
+        if flags & 0x04 != 0 {
+            guard index + 2 <= trailerStart else { return nil }
+            let length = Int(input[index]) | (Int(input[index + 1]) << 8)
+            index += 2
+            guard index + length <= trailerStart else { return nil }
+            index += length
+        }
+        if flags & 0x08 != 0 {
+            guard skipZeroTerminatedField(input, index: &index, limit: trailerStart) else { return nil }
+        }
+        if flags & 0x10 != 0 {
+            guard skipZeroTerminatedField(input, index: &index, limit: trailerStart) else { return nil }
+        }
+        if flags & 0x02 != 0 {
+            guard index + 2 <= trailerStart else { return nil }
+            index += 2
+        }
+        guard index < trailerStart else { return nil }
+        return Array(input[index..<trailerStart])
+    }
+
+    private func skipZeroTerminatedField(_ input: [UInt8], index: inout Int, limit: Int) -> Bool {
+        while index < limit {
+            defer { index += 1 }
+            if input[index] == 0 { return true }
+        }
+        return false
+    }
+
     private func inflateCandidate(_ candidate: [UInt8]) -> [UInt8]? {
         guard !candidate.isEmpty else { return nil }
 
@@ -421,7 +498,16 @@ final class LegadoHostServices {
                 // JavaScriptCore versions it may deep-bridge an injected
                 // NSArray as an empty Swift array.  Indexed access keeps the
                 // original JS values intact and also handles nested arrays.
-                let length = max(0, Int(jsValue.forProperty("length")?.toInt32() ?? 0))
+                let length = max(
+                    0,
+                    max(
+                        Int(jsValue.forProperty("length")?.toInt32() ?? 0),
+                        Int(jsValue.forProperty("count")?.toInt32() ?? 0)
+                    )
+                )
+                if length == 0, let object = jsValue.toObject() as? NSArray, !object.isEmpty {
+                    return bytes(from: object)
+                }
                 var output: [UInt8] = []
                 output.reserveCapacity(length)
                 for index in 0..<length {
@@ -548,4 +634,5 @@ final class LegadoHostServices {
     private static let gbkEncoding = String.Encoding(
         rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
     )
+
 }

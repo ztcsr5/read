@@ -541,10 +541,13 @@ final class JSCoreRuntime {
         java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
         java.inflate = function(value) {
-          // Keep the original bridged array intact.  JavaScriptCore can expose
-          // host NSArray values through a JSValue wrapper; eagerly copying via
-          // __javaBytes() may lose indexed elements on older iOS runtimes.
-          return __asJavaList(__nativeLegado.invoke({ method: 'inflateBytes', args: [value] }));
+          // Return a scalar across JSExport. Older JavaScriptCore releases can
+          // expose an NSArray result as a host object with no indexed members;
+          // hex lets us rebuild a real JavaScript Array without that loss.
+          return __hexToJavaBytes(__nativeLegado.invoke({ method: 'inflateHex', args: [value] }));
+        };
+        java.gunzip = function(value) {
+          return __hexToJavaBytes(__nativeLegado.invoke({ method: 'gunzipHex', args: [value] }));
         };
         java.copyOfRange = function(value, start, end) {
           var source = __javaBytes(value);
@@ -557,11 +560,33 @@ final class JSCoreRuntime {
           if (arguments.length === 1 && arguments[0] && typeof arguments[0] !== 'string') return __asJavaList(__javaArray(arguments[0]));
           return __asJavaList(Array.prototype.slice.call(arguments));
         };
-        java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
-        java.bytesToStr = function(value) {
-          var list = value && value.length != null ? value : [];
-          return String(__native_bytesToString(list) || '');
-        };
+java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
+java.bytesToStr = function(value) {
+  var list = __javaArray(value), out = '', i = 0;
+  while (i < list.length) {
+    var first = Number(list[i++] == null ? 0 : list[i - 1]) & 255;
+    if (first < 0x80) { out += String.fromCharCode(first); continue; }
+    var code = 0, needed = 0;
+    if ((first & 0xe0) === 0xc0) { code = first & 0x1f; needed = 1; }
+    else if ((first & 0xf0) === 0xe0) { code = first & 0x0f; needed = 2; }
+    else if ((first & 0xf8) === 0xf0) { code = first & 0x07; needed = 3; }
+    else { out += '\ufffd'; continue; }
+    var valid = true;
+    for (var j = 0; j < needed; j++) {
+      if (i >= list.length) { valid = false; break; }
+      var continuation = Number(list[i++] == null ? 0 : list[i - 1]) & 255;
+      if ((continuation & 0xc0) !== 0x80) { valid = false; break; }
+      code = (code << 6) | (continuation & 0x3f);
+    }
+    if (!valid || (needed === 1 && code < 0x80) || (needed === 2 && code < 0x800) || (needed === 3 && code < 0x10000) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+      out += '\ufffd';
+      continue;
+    }
+    if (code <= 0xffff) out += String.fromCharCode(code);
+    else { code -= 0x10000; out += String.fromCharCode(0xd800 + (code >> 10), 0xdc00 + (code & 0x3ff)); }
+  }
+  return out;
+};
         java.hexEncodeToString = function(value) {
           var list = value && value.length != null ? value : __native_stringToBytes(String(value || ''));
           var out = '';
@@ -715,6 +740,17 @@ final class JSCoreRuntime {
         }
         function __javaBytes(value) {
           return __javaArray(value).map(function(item) { return Number(item == null ? 0 : item) & 255; });
+        }
+        function __hexToJavaBytes(value) {
+          var text = String(value == null ? '' : value).replace(/\s+/g, '').toLowerCase();
+          if ((text.length & 1) !== 0) return __asJavaList([]);
+          var out = [];
+          for (var i = 0; i < text.length; i += 2) {
+            var byte = parseInt(text.substring(i, i + 2), 16);
+            if (isNaN(byte)) return __asJavaList([]);
+            out.push(byte & 255);
+          }
+          return __asJavaList(out);
         }
         function __jsonPathTokens(path) {
           var text = String(path || '');
@@ -1869,6 +1905,36 @@ final class JSCoreRuntime {
             return true;
           }
         };
+        Packages.java.util.Collections = Packages.java.util.Collections || {
+          sort: function(list, comparator) {
+            var values = list && typeof list.toArray === 'function' ? list.toArray() : Array.prototype.slice.call(list || []);
+            values.sort(function(left, right) {
+              if (comparator && typeof comparator.compare === 'function') return Number(comparator.compare(left, right)) || 0;
+              if (typeof comparator === 'function') return Number(comparator(left, right)) || 0;
+              return String(left).localeCompare(String(right));
+            });
+            if (list && typeof list.clear === 'function' && typeof list.addAll === 'function') { list.clear(); list.addAll(values); return list; }
+            for (var i = 0; list && i < values.length; i++) list[i] = values[i];
+            return list;
+          },
+          reverse: function(list) {
+            var values = list && typeof list.toArray === 'function' ? list.toArray().reverse() : Array.prototype.reverse.call(list || []);
+            if (list && typeof list.clear === 'function' && typeof list.addAll === 'function') { list.clear(); list.addAll(values); }
+            return list;
+          },
+          singletonList: function(value) { return __asJavaList([value]); },
+          emptyList: function() { return __asJavaList([]); },
+          frequency: function(list, value) {
+            var values = list && typeof list.toArray === 'function' ? list.toArray() : Array.prototype.slice.call(list || []);
+            var count = 0; for (var i = 0; i < values.length; i++) if (values[i] === value || String(values[i]) === String(value)) count++;
+            return count;
+          }
+        };
+        Packages.java.util.Objects = Packages.java.util.Objects || {
+          equals: function(left, right) { return left === right || (left != null && right != null && String(left) === String(right)); },
+          toString: function(value, fallback) { return value == null ? String(arguments.length > 1 ? fallback : 'null') : String(value); },
+          requireNonNull: function(value) { if (value == null) throw new Error('NullPointerException'); return value; }
+        };
         Packages.java.net = Packages.java.net || {};
         Packages.java.net.URL = Packages.java.net.URL || function(value, baseValue) {
           var raw = String(value == null ? '' : value);
@@ -2070,30 +2136,84 @@ final class JSCoreRuntime {
           this.entrySet = function() { var out = []; for (var k in this.__map) { (function(key, value) { out.push({ getKey: function() { return key; }, getValue: function() { return value; } }); })(k, this.__map[k]); } return __asJavaList(out); };
           this.toString = function() { return JSON.stringify(this.__map); };
         };
+        Packages.java.util.LinkedHashMap = Packages.java.util.LinkedHashMap || Packages.java.util.HashMap;
+        Packages.java.util.TreeMap = Packages.java.util.TreeMap || Packages.java.util.HashMap;
+        Packages.java.util.HashSet = Packages.java.util.HashSet || function(initial) {
+          var values = [];
+          function indexOf(value) {
+            for (var i = 0; i < values.length; i++) if (values[i] === value || String(values[i]) === String(value)) return i;
+            return -1;
+          }
+          var seed = initial && typeof initial.toArray === 'function' ? initial.toArray() : (initial && initial.length != null ? initial : []);
+          for (var i = 0; i < seed.length; i++) if (indexOf(seed[i]) < 0) values.push(seed[i]);
+          this.add = function(value) { if (indexOf(value) >= 0) return false; values.push(value); return true; };
+          this.addAll = function(other) { var changed = false; var list = other && other.toArray ? other.toArray() : (other || []); for (var i = 0; i < list.length; i++) changed = this.add(list[i]) || changed; return changed; };
+          this.remove = function(value) { var index = indexOf(value); if (index < 0) return false; values.splice(index, 1); return true; };
+          this.contains = function(value) { return indexOf(value) >= 0; };
+          this.size = function() { return values.length; };
+          this.isEmpty = function() { return values.length === 0; };
+          this.clear = function() { values = []; };
+          this.toArray = function() { return __asJavaList(values.slice()); };
+          this.iterator = function() { var index = 0; return { hasNext: function() { return index < values.length; }, next: function() { return values[index++]; } }; };
+          this.toString = function() { return '[' + values.join(', ') + ']'; };
+        };
+        Packages.java.util.LinkedHashSet = Packages.java.util.LinkedHashSet || Packages.java.util.HashSet;
         Packages.java.util.ArrayList = Packages.java.util.ArrayList || function() {
           var values = [];
           if (arguments.length && arguments[0]) {
             if (arguments[0].length != null) values = Array.prototype.slice.call(arguments[0]);
             else if (typeof arguments[0].toArray === 'function') values = arguments[0].toArray();
           }
-          this.add = function(value) { values.push(value); return true; };
+          this.add = function(index, value) {
+            if (arguments.length > 1) { values.splice(Math.max(0, Number(index) || 0), 0, value); return true; }
+            values.push(index); return true;
+          };
           this.addAll = function(other) { if (other && other.length != null) for (var i = 0; i < other.length; i++) values.push(other[i]); else if (other && other.toArray) values = values.concat(other.toArray()); return true; };
           this.get = function(index) { return values[Number(index)]; };
           this.set = function(index, value) { var old = values[Number(index)]; values[Number(index)] = value; return old; };
-          this.remove = function(index) { return values.splice(Number(index), 1)[0]; };
+          this.remove = function(index) {
+            if (typeof index === 'number' || /^-?\d+$/.test(String(index))) return values.splice(Number(index), 1)[0];
+            var match = values.indexOf(index); return match >= 0 ? values.splice(match, 1)[0] : null;
+          };
           this.contains = function(value) { return values.indexOf(value) >= 0; };
+          this.indexOf = function(value) { return values.indexOf(value); };
+          this.lastIndexOf = function(value) { return values.lastIndexOf(value); };
+          this.containsAll = function(other) { var list = other && other.toArray ? other.toArray() : (other || []); for (var i = 0; i < list.length; i++) if (values.indexOf(list[i]) < 0) return false; return true; };
+          this.subList = function(start, end) { return __asJavaList(values.slice(Number(start) || 0, end == null ? values.length : Number(end))); };
           this.clear = function() { values = []; };
           this.first = function() { return values.length ? values[0] : null; };
           this.last = function() { return values.length ? values[values.length - 1] : null; };
           this.size = function() { return values.length; };
           this.isEmpty = function() { return values.length === 0; };
           this.toArray = function() { return values.slice(); };
+          this.iterator = function() { var index = 0; return { hasNext: function() { return index < values.length; }, next: function() { return values[index++]; } }; };
           this.toString = function() { return values.join(','); };
         };
         Packages.java.util.zip = Packages.java.util.zip || {};
         Packages.java.util.zip.InflaterInputStream = Packages.java.util.zip.InflaterInputStream || function(input) {
           var raw = input && input.__bytes ? input.__bytes : (input && input.__javaBytes ? input.__javaBytes : input);
-          var inflated = java.inflate(raw && raw.length != null ? raw : []);
+          // A Swift-injected NSArray can expose `count` but no JavaScript
+          // `length`.  Do not discard that host-backed value before it reaches
+          // the native bridge; the bridge reads JSValue arrays by index and
+          // also understands NSArray/count-backed objects.
+          var inflated = java.inflate(raw == null ? [] : raw);
+          var index = 0;
+          this.read = function(buffer, offset, length) {
+            if (buffer && buffer.length != null) {
+              var start = Number(offset || 0);
+              var requested = length == null ? buffer.length - start : Number(length);
+              var count = Math.min(Math.max(0, requested), inflated.length - index);
+              for (var i = 0; i < count; i++) buffer[start + i] = inflated[index++];
+              return count > 0 ? count : -1;
+            }
+            return index < inflated.length ? Number(inflated[index++]) : -1;
+          };
+          this.available = function() { return Math.max(0, inflated.length - index); };
+          this.close = function() {};
+        };
+        Packages.java.util.zip.GZIPInputStream = Packages.java.util.zip.GZIPInputStream || function(input) {
+          var raw = input && input.__bytes ? input.__bytes : (input && input.__javaBytes ? input.__javaBytes : input);
+          var inflated = java.gunzip(raw == null ? [] : raw);
           var index = 0;
           this.read = function(buffer, offset, length) {
             if (buffer && buffer.length != null) {
@@ -2259,6 +2379,7 @@ final class JSCoreRuntime {
         Packages.java.io.ByteArrayInputStream.__javaSimpleName = 'ByteArrayInputStream';
         Packages.java.io.ByteArrayOutputStream.__javaSimpleName = 'ByteArrayOutputStream';
         Packages.java.util.zip.InflaterInputStream.__javaSimpleName = 'InflaterInputStream';
+        Packages.java.util.zip.GZIPInputStream.__javaSimpleName = 'GZIPInputStream';
         Packages.java.security.MessageDigest.__javaSimpleName = 'MessageDigest';
         Packages.javax.crypto.Mac.__javaSimpleName = 'Mac';
         Packages.javax.crypto.spec.SecretKeySpec.__javaSimpleName = 'SecretKeySpec';
@@ -2292,6 +2413,7 @@ final class JSCoreRuntime {
             IvParameterSpec: Packages.javax.crypto.spec.IvParameterSpec,
             ByteArrayOutputStream: Packages.java.io.ByteArrayOutputStream,
             InflaterInputStream: Packages.java.util.zip.InflaterInputStream,
+            GZIPInputStream: Packages.java.util.zip.GZIPInputStream,
             Jsoup: Packages.org.jsoup.Jsoup,
             Base64: Packages.java.util.Base64
           };
@@ -2666,7 +2788,16 @@ final class JSCoreRuntime {
     /// empty NSArray on iOS.
     private static func byteValues(from value: JSValue) -> [UInt8] {
         if value.isArray {
-            let length = max(0, Int(value.forProperty("length")?.toInt32() ?? 0))
+            let length = max(
+                0,
+                max(
+                    Int(value.forProperty("length")?.toInt32() ?? 0),
+                    Int(value.forProperty("count")?.toInt32() ?? 0)
+                )
+            )
+            if length == 0, let object = value.toObject() as? NSArray, !object.isEmpty {
+                return object.compactMap(Self.byteValue)
+            }
             return (0..<length).compactMap { byteValue(value.atIndex($0)) }
         }
         if value.isString { return Array((value.toString() ?? "").utf8) }
