@@ -2652,7 +2652,8 @@ final class JSCoreRuntime {
         if let value = value as? JSValue {
             if value.isNumber { return UInt8(clamping: value.toInt32()) }
             if let object = value.toObject(), !(object is JSValue) { return byteValue(object) }
-            if let text = value.toString(), let number = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            let text = value.toString() ?? ""
+            if let number = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 return UInt8(clamping: number)
             }
         }
