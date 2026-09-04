@@ -628,27 +628,175 @@ final class JSCoreRuntime {
           list.isEmpty = function() { return list.length === 0; };
           return list;
         }
+        function __jsonPathTokens(path) {
+          var text = String(path || '');
+          if (text.indexOf('$..') === 0) text = '**.' + text.substring(3);
+          else if (text.indexOf('$.') === 0) text = text.substring(2);
+          else if (text.charAt(0) === '$') text = text.substring(1);
+          var tokens = [];
+          var buffer = '';
+          function flush() {
+            var value = buffer.trim();
+            if (value) tokens.push(value);
+            buffer = '';
+          }
+          for (var i = 0; i < text.length;) {
+            var ch = text.charAt(i);
+            if (ch === '[') {
+              flush();
+              var depth = 1;
+              var quote = '';
+              var escaped = false;
+              var cursor = i + 1;
+              var token = '';
+              for (; cursor < text.length && depth > 0; cursor++) {
+                var c = text.charAt(cursor);
+                if (quote) {
+                  token += c;
+                  if (escaped) escaped = false;
+                  else if (c === '\\\\') escaped = true;
+                  else if (c === quote) quote = '';
+                } else if (c === '"' || c === "'") { quote = c; token += c; }
+                else if (c === '[') { depth++; token += c; }
+                else if (c === ']') { depth--; if (depth > 0) token += c; }
+                else token += c;
+              }
+              token = token.trim().replace(/^['"]|['"]$/g, '');
+              if (token) tokens.push(token);
+              i = cursor;
+              continue;
+            }
+            if (ch === '.') {
+              flush();
+              if (text.charAt(i + 1) === '.') { tokens.push('**'); i += 2; }
+              else i++;
+              continue;
+            }
+            if (ch === '/') { flush(); i++; continue; }
+            buffer += ch;
+            i++;
+          }
+          flush();
+          return tokens;
+        }
+        function __jsonChildren(value) {
+          var children = [];
+          if (value && typeof value === 'object' && typeof value !== 'string') {
+            if (typeof value.length === 'number') for (var i = 0; i < value.length; i++) children.push(value[i]);
+            else for (var key in value) children.push(value[key]);
+          }
+          return children;
+        }
+        function __jsonArray(value) {
+          if (value && typeof value !== 'string' && typeof value.length === 'number') {
+            var array = [];
+            for (var i = 0; i < value.length; i++) array.push(value[i]);
+            return array;
+          }
+          return null;
+        }
+        function __jsonFlatten(value, output) {
+          if (value && typeof value.length === 'number' && typeof value !== 'string') {
+            for (var i = 0; i < value.length; i++) __jsonFlatten(value[i], output);
+          } else output.push(value);
+        }
+        function __jsonTruthy(value) {
+          if (value === null || value === undefined || value === false) return false;
+          if (typeof value === 'number') return value !== 0;
+          if (typeof value === 'string') return value !== '' && value.toLowerCase() !== 'false';
+          return true;
+        }
+        function __jsonLookup(value, path) {
+          var key = String(path || '').replace(/^@\.?/, '');
+          if (!key || key === '@') return value;
+          var current = value;
+          var parts = key.split('.').filter(function(part) { return part !== ''; });
+          for (var i = 0; i < parts.length; i++) {
+            if (current == null || current[parts[i]] === undefined) return undefined;
+            current = current[parts[i]];
+          }
+          return current;
+        }
+        function __jsonFilterMatch(value, expression) {
+          var text = String(expression || '').trim();
+          var operators = ['!=', '==', '>=', '<=', '>', '<', '='];
+          var op = null;
+          var position = -1;
+          for (var i = 0; i < operators.length; i++) {
+            position = text.indexOf(operators[i]);
+            if (position >= 0) { op = operators[i]; break; }
+          }
+          var actual;
+          if (op) {
+            actual = __jsonLookup(value, text.substring(0, position).trim());
+            var expected = text.substring(position + op.length).trim().replace(/^['"]|['"]$/g, '');
+            if (actual === undefined || actual === null) return false;
+            var lhs = String(typeof actual === 'object' ? JSON.stringify(actual) : actual);
+            var leftNumber = Number(lhs), rightNumber = Number(expected);
+            if (lhs !== '' && isFinite(leftNumber) && isFinite(rightNumber)) {
+              if (op === '==' || op === '=') return leftNumber === rightNumber;
+              if (op === '!=') return leftNumber !== rightNumber;
+              if (op === '>') return leftNumber > rightNumber;
+              if (op === '<') return leftNumber < rightNumber;
+              if (op === '>=') return leftNumber >= rightNumber;
+              if (op === '<=') return leftNumber <= rightNumber;
+            }
+            if (op === '==' || op === '=') return lhs === expected;
+            if (op === '!=') return lhs !== expected;
+            return false;
+          }
+          return __jsonTruthy(__jsonLookup(value, text));
+        }
+        function __jsonWalk(current, tokens, index) {
+          if (index >= tokens.length) return current;
+          var token = tokens[index];
+          if (token === '**') {
+            var recursive = [];
+            var direct = __jsonWalk(current, tokens, index + 1);
+            if (direct !== undefined && direct !== null) __jsonFlatten(direct, recursive);
+            var children = __jsonChildren(current);
+            for (var i = 0; i < children.length; i++) {
+              var nested = __jsonWalk(children[i], tokens, index);
+              if (nested !== undefined && nested !== null) __jsonFlatten(nested, recursive);
+            }
+            return recursive;
+          }
+          var array = __jsonArray(current);
+          if (token.indexOf('?(') === 0 && token.charAt(token.length - 1) === ')' && array) {
+            var expression = token.substring(2, token.length - 1);
+            var filtered = array.filter(function(item) { return __jsonFilterMatch(item, expression); });
+            return __jsonWalk(filtered, tokens, index + 1);
+          }
+          if (array) {
+            if (token === '*') return __jsonWalk(array, tokens, index + 1);
+            if (/^-?\d+$/.test(token)) {
+              var numeric = Number(token); if (numeric < 0) numeric = array.length + numeric;
+              return numeric >= 0 && numeric < array.length ? __jsonWalk(array[numeric], tokens, index + 1) : undefined;
+            }
+            var mapped = [];
+            for (var j = 0; j < array.length; j++) {
+              var itemResult = __jsonWalk(array[j], tokens, index);
+              if (itemResult !== undefined && itemResult !== null) __jsonFlatten(itemResult, mapped);
+            }
+            return mapped;
+          }
+          if (current && typeof current === 'object') {
+            if (token === '*') {
+              var values = __jsonChildren(current);
+              return __jsonWalk(values, tokens, index + 1);
+            }
+            if (current[token] !== undefined) return __jsonWalk(current[token], tokens, index + 1);
+          }
+          return undefined;
+        }
         function __jsonRuleValues(documentText, rule) {
           var root;
           try { root = typeof documentText === 'object' ? documentText : JSON.parse(String(documentText || '')); } catch (_) { return []; }
-          var path = String(rule || '');
-          if (path.indexOf('$.') === 0) path = path.substring(2);
-          else if (path.charAt(0) === '$') path = path.substring(1);
-          if (!path) return [root];
-          var tokens = path.split('[').join('.').split(']').join('').split('.').filter(function(token) { return token !== ''; });
-          var values = [root];
-          for (var t = 0; t < tokens.length; t++) {
-            var token = tokens[t].replace(/^['"]|['"]$/g, '');
-            var next = [];
-            for (var v = 0; v < values.length; v++) {
-              var current = values[v];
-              if (token === '*') {
-                if (current && typeof current.length === 'number') for (var i = 0; i < current.length; i++) next.push(current[i]);
-                else if (current && typeof current === 'object') for (var key in current) next.push(current[key]);
-              } else if (current != null && current[token] !== undefined) next.push(current[token]);
-            }
-            values = next;
-          }
+          var tokens = __jsonPathTokens(rule);
+          if (!tokens.length) return [root];
+          var result = __jsonWalk(root, tokens, 0);
+          var values = [];
+          if (result !== undefined && result !== null) __jsonFlatten(result, values);
           return values;
         }
         function __jsonRuleString(documentText, rule) {
@@ -768,23 +916,69 @@ final class JSCoreRuntime {
         function __bridgeStored(name) {
           return __native_getStore(String(name));
         }
+        // Response/body compatibility: Android Legado sources use both the
+        // legacy `response.statusCode` property and the newer callable
+        // `response.statusCode()`/`response.code` forms.  A callable Number
+        // object keeps both spellings coercible in concatenation/JSON while
+        // still allowing invocation.
+        function __bridgeBody(value) {
+          var body = new String(value == null ? '' : String(value));
+          body.string = function() { return String(body); };
+          body.text = body.string;
+          body.json = function() {
+            try { return JSON.parse(String(body)); } catch (_) { return {}; }
+          };
+          return body;
+        }
+        function __bridgeStatusCode(value) {
+          var number = Number(value == null || value === '' ? 200 : value);
+          if (!isFinite(number)) number = 200;
+          var callable = function() { return number; };
+          callable.valueOf = function() { return number; };
+          callable.toString = function() { return String(number); };
+          return callable;
+        }
         function __bridgeResponse(text, responseUrl, responseMeta) {
           var meta = responseMeta || {};
           var value = meta.body !== undefined ? String(meta.body || '') : String(text || '');
           var finalUrl = meta.url !== undefined ? String(meta.url || responseUrl || '') : String(responseUrl || '');
           var code = meta.statusCode !== undefined ? Number(meta.statusCode) : 200;
           var responseHeaders = meta.headers || {};
+          var bodyValue = __bridgeBody(value);
+          var statusValue = __bridgeStatusCode(code);
           return {
-            statusCode: code,
-            body: function() { return value; },
-            text: function() { return value; },
+            statusCode: statusValue,
+            // `code` and `status` are numeric aliases in Fetch-like sources;
+            // `statusCode` remains the callable/legacy-compatible member.
+            code: code,
+            status: code,
+            ok: code >= 200 && code < 300,
+            body: function() { return bodyValue; },
+            text: function() { return bodyValue; },
+            json: function() { return bodyValue.json(); },
             url: function() { return finalUrl; },
+            finalUrl: function() { return finalUrl; },
             header: function(name) {
               var key = String(name || '').toLowerCase();
               for (var headerKey in responseHeaders) if (String(headerKey).toLowerCase() === key) return String(responseHeaders[headerKey] || '');
               return '';
             },
             headers: function() { return responseHeaders; },
+            cookie: function() { return this.header('set-cookie') || this.header('cookie'); },
+            // A number of Android/Flutter sources call `fetch(...).match(...)`
+            // directly. Delegate common String operations to the response
+            // body while retaining the modern response API (`json`, `text`).
+            match: function(pattern, flags) { return String(value).match(pattern, flags); },
+            replace: function(search, replacement) { return String(value).replace(search, replacement); },
+            replaceAll: function(search, replacement) { return String(value).split(String(search)).join(String(replacement)); },
+            split: function(separator, limit) { return String(value).split(separator, limit); },
+            trim: function() { return String(value).trim(); },
+            indexOf: function(search, position) { return String(value).indexOf(String(search), position); },
+            includes: function(search, position) { return String(value).indexOf(String(search), position) >= 0; },
+            substring: function(start, end) { return String(value).substring(start, end); },
+            substr: function(start, length) { return String(value).substr(start, length); },
+            charAt: function(index) { return String(value).charAt(index); },
+            length: value.length,
             toString: function() { return value; },
             valueOf: function() { return value; }
           };
@@ -984,7 +1178,25 @@ final class JSCoreRuntime {
         };
         java.setCookie = cookie.setCookie;
         java.utf8ToGbk = function(value) { return __nativeLegado.invoke({ method: 'utf8ToGbk', args: [String(value || '')] }); };
-        java.htmlFormat = function(value) { return String(__nativeLegado.invoke({ method: 'htmlFormat', args: [String(value || '')] }) || ''); };
+        java.htmlFormat = function(value) {
+          var input = String(value == null ? '' : value);
+          // Legado's clean/htmlFormat keeps readable line breaks while
+          // dropping script/style and markup noise.
+          return input
+            .replace(/<script[\\s\\S]*?<\\/script>/gi, '')
+            .replace(/<style[\\s\\S]*?<\\/style>/gi, '')
+            .replace(/<\\/?(?:br|p|div|section|article|li|tr|h[1-6])[^>]*>/gi, '\\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, "'")
+            .replace(/\\r/g, '')
+            .replace(/\\n{3,}/g, '\\n\\n')
+            .split('\\n').map(function(line) { return line.trim(); }).filter(Boolean).join('\\n');
+        };
         java.readFile = function(path) { return __nativeLegado.invoke({ method: 'readFile', args: [String(path || '')] }); };
         java.readTxtFile = function(path, charset) { return String(__nativeLegado.invoke({ method: 'readTxtFile', args: [String(path || ''), String(charset || 'utf-8')] }) || ''); };
         java.downloadFile = function(url, path) { return String(__nativeLegado.invoke({ method: 'downloadFile', args: [String(url || ''), String(path || '')] }) || ''); };
@@ -1376,13 +1588,67 @@ final class JSCoreRuntime {
           this.toString = function() { return values.join(','); };
         };
         Packages.java.util.regex = Packages.java.util.regex || {};
-         Packages.java.util.regex.Pattern = Packages.java.util.regex.Pattern || {
-           compile: function(pattern) {
-             return {
-               matcher: function(input) {
-                var re; try { re = new RegExp(String(pattern)); } catch (_) { re = /$a/; }
-                var text = String(input || '');
-                return { find: function() { return re.test(text); }, matches: function() { return re.test(text); }, group: function(_) { var m = re.exec(text); return m ? (m[1] || m[0]) : ''; } };
+        function __javaRegexFlags(flags) {
+          if (flags === undefined || flags === null) return '';
+          if (typeof flags === 'number' || /^\d+$/.test(String(flags))) {
+            var bits = Number(flags);
+            var numericFlags = '';
+            if ((bits & 2) !== 0) numericFlags += 'i';   // CASE_INSENSITIVE
+            if ((bits & 8) !== 0) numericFlags += 'm';   // MULTILINE
+            if ((bits & 32) !== 0) numericFlags += 's';  // DOTALL
+            if ((bits & 64) !== 0) numericFlags += 'u';  // UNICODE_CASE
+            return numericFlags;
+          }
+          var textFlags = String(flags);
+          var mapped = '';
+          if (/[iI]/.test(textFlags) || /CASE_INSENSITIVE/i.test(textFlags)) mapped += 'i';
+          if (/[mM]/.test(textFlags) || /MULTILINE/i.test(textFlags)) mapped += 'm';
+          if (/[sS]/.test(textFlags) || /DOTALL/i.test(textFlags)) mapped += 's';
+          if (/[uU]/.test(textFlags) || /UNICODE/i.test(textFlags)) mapped += 'u';
+          return mapped;
+        }
+        Packages.java.util.regex.Pattern = Packages.java.util.regex.Pattern || {
+          compile: function(pattern, flags) {
+            var source = String(pattern == null ? '' : pattern);
+            var patternFlags = __javaRegexFlags(flags);
+            return {
+              matcher: function(input) {
+                var text = String(input == null ? '' : input);
+                var re;
+                try { re = new RegExp(source, patternFlags); } catch (_) { re = /$a/; }
+                var cursor = 0;
+                var lastMatch = null;
+                return {
+                  find: function() {
+                    // Java Matcher.find() advances across repeated calls.
+                    var flagsWithGlobal = patternFlags.indexOf('g') >= 0 ? patternFlags : patternFlags + 'g';
+                    try { re = new RegExp(source, flagsWithGlobal); } catch (_) { return false; }
+                    re.lastIndex = cursor;
+                    lastMatch = re.exec(text);
+                    if (!lastMatch) return false;
+                    cursor = re.lastIndex;
+                    if (lastMatch[0] === '') cursor++;
+                    return true;
+                  },
+                  matches: function() {
+                    try {
+                      var match = new RegExp('^(?:' + source + ')$', patternFlags).exec(text);
+                      lastMatch = match;
+                      return !!match;
+                    } catch (_) { lastMatch = null; return false; }
+                  },
+                  group: function(index) {
+                    if (!lastMatch) {
+                      try { lastMatch = new RegExp(source, patternFlags).exec(text); } catch (_) { lastMatch = null; }
+                    }
+                    if (!lastMatch) return '';
+                    var position = index == null ? 0 : Number(index);
+                    return lastMatch[position] == null ? '' : String(lastMatch[position]);
+                  },
+                  start: function() { return lastMatch ? lastMatch.index : -1; },
+                  end: function() { return lastMatch ? lastMatch.index + String(lastMatch[0]).length : -1; },
+                  groupCount: function() { return lastMatch ? Math.max(0, lastMatch.length - 1) : 0; }
+                };
               }
             };
           }
@@ -1483,9 +1749,111 @@ final class JSCoreRuntime {
         java.jsoup = java.jsoup || {
           parse: function(html, baseUrlValue) { return Packages.org.jsoup.Jsoup.parse(String(html || ''), baseUrlValue); },
           select: function(html, selector) { return Packages.org.jsoup.Jsoup.parse(String(html || '')).select(String(selector || '')); },
-          selectFirst: function(html, selector) { return java.jsoup.select(html, selector).first(); },
-          getAttr: function(html, selector, attr) { return java.jsoup.selectFirst(html, selector).attr(String(attr || '')); },
-          clean: function(html) { return __native_getString(String(html || ''), 'body@text', __defaultBaseUrl()); }
+          selectFirst: function(html, selector) {
+            var selection = java.jsoup.select(html, selector);
+            if (!selection || typeof selection.first !== 'function' || selection.isEmpty()) return '';
+            var node = selection.first();
+            return node && typeof node.text === 'function' ? String(node.text()) : String(node || '');
+          },
+          getAttr: function(html, selector, attr) {
+            var selection = java.jsoup.select(html, selector);
+            if (!selection || typeof selection.first !== 'function' || selection.isEmpty()) return '';
+            var node = selection.first();
+            return node && typeof node.attr === 'function' ? String(node.attr(String(attr || '')) || '') : '';
+          },
+          clean: function(html) { return java.htmlFormat(String(html || '')); }
+        };
+        // Global aliases used by Android Legado/MR sources.  Keep the return
+        // shape deliberately small and predictable: `select` is an array of
+        // outerHTML strings, `selectFirst`/`getAttr` are scalar strings.
+        function select(html, selector) {
+          var selection = java.jsoup.select(String(html || ''), String(selector || ''));
+          var out = [];
+          var count = selection && typeof selection.size === 'function' ? selection.size() : 0;
+          for (var i = 0; i < count; i++) {
+            var node = selection.get(i);
+            out.push(node && typeof node.outerHtml === 'function' ? String(node.outerHtml()) : String(node || ''));
+          }
+          return __asJavaList(out);
+        }
+        function selectFirst(html, selector) {
+          var selection = java.jsoup.select(String(html || ''), String(selector || ''));
+          if (!selection || typeof selection.first !== 'function' || selection.isEmpty()) return '';
+          var node = selection.first();
+          return node && typeof node.text === 'function' ? String(node.text()) : String(node || '');
+        }
+        function getAttr(html, selector, attr) {
+          var name = String(attr || '').trim();
+          if (!name) return '';
+          var selection = java.jsoup.select(String(html || ''), String(selector || 'body'));
+          if (!selection || typeof selection.first !== 'function' || selection.isEmpty()) return '';
+          var node = selection.first();
+          return node && typeof node.attr === 'function' ? String(node.attr(name) || '') : '';
+        }
+        function clean(html) { return java.htmlFormat(String(html == null ? '' : html)); }
+        function htmlFormat(value) { return java.htmlFormat(value); }
+        function getString() { return java.getString.apply(java, arguments); }
+        function getStringList() { return java.getStringList.apply(java, arguments); }
+        function getStr(key, fallback) { return java.getStr(key, fallback); }
+        function put() { return java.put.apply(java, arguments); }
+        function ajax() { return java.ajax.apply(java, arguments); }
+        function request() { return java.fetch.apply(java, arguments); }
+        function fetch() { return java.fetch.apply(java, arguments); }
+        function importScript() { return java.importScript.apply(java, arguments); }
+        function getWebViewUA() { return java.getWebViewUA(); }
+        function md5Encode() { return java.md5Encode.apply(java, arguments); }
+        function sha1Encode() { return java.sha1Encode.apply(java, arguments); }
+        function sha256Encode() { return java.sha256Encode.apply(java, arguments); }
+        function sha512Encode() { return java.sha512Encode.apply(java, arguments); }
+        // Keep aliases available as properties as well as top-level function
+        // declarations; some scripts explicitly access globalThis/window.
+        if (typeof globalThis !== 'undefined') {
+          globalThis.select = select;
+          globalThis.selectFirst = selectFirst;
+          globalThis.getAttr = getAttr;
+          globalThis.clean = clean;
+          globalThis.htmlFormat = htmlFormat;
+          globalThis.getString = getString;
+          globalThis.getStringList = getStringList;
+          globalThis.getStr = getStr;
+          globalThis.put = put;
+          globalThis.ajax = ajax;
+          globalThis.request = request;
+          globalThis.fetch = fetch;
+          globalThis.importScript = importScript;
+          globalThis.getWebViewUA = getWebViewUA;
+          globalThis.base64Encode = function() { return java.base64Encode.apply(java, arguments); };
+          globalThis.base64Decode = function() { return java.base64Decode.apply(java, arguments); };
+          globalThis.md5Encode = md5Encode;
+          globalThis.sha1Encode = sha1Encode;
+          globalThis.sha256Encode = sha256Encode;
+          globalThis.sha512Encode = sha512Encode;
+        }
+        java.regex = java.regex || {};
+        java.regex.replace = function(value, pattern, replacement) {
+          var text = String(value == null ? '' : value);
+          var source = String(pattern == null ? '' : pattern);
+          try { return text.replace(new RegExp(source, 'g'), String(replacement == null ? '' : replacement)); }
+          catch (_) { return text; }
+        };
+        java.regex.matchAll = function(value, pattern) {
+          var text = String(value == null ? '' : value);
+          var source = String(pattern == null ? '' : pattern);
+          var out = [];
+          try {
+            var re = new RegExp(source, 'g');
+            var match;
+            while ((match = re.exec(text)) !== null) {
+              out.push(String(match[0]));
+              // Avoid an infinite loop for zero-width expressions.
+              if (match[0] === '') re.lastIndex++;
+            }
+          } catch (_) {}
+          return __asJavaList(out);
+        };
+        java.regex.test = function(value, pattern) {
+          try { return new RegExp(String(pattern == null ? '' : pattern)).test(String(value == null ? '' : value)); }
+          catch (_) { return false; }
         };
         var ruleResolver = {
           chapter: (typeof chapter === 'undefined' ? null : chapter),

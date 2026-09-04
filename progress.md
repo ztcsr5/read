@@ -1309,3 +1309,28 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Unsigned IPA: [run 33859400414](https://github.com/ztcsr5/read/actions/runs/33859400414) — success.
 - Artifact: `SourceReadSwift-unsigned-ipa`, 5.84 MB, SHA-256 `89ed9f19284eb3b2cb8a87355de55e629b5ace9122f28db712ad69b762fae120`.
 - Device-only items remain open: sustained ProMotion frame pacing, reader gesture feel, keyboard/layer behavior and same-network Web 写源 access.
+## 2026-09-04 - Stage 5: Legado JS source compatibility expansion (in progress)
+
+### Implemented
+
+- Expanded the JavaScriptCore Legado bridge with response/body compatibility (body().string/json, response.json, code/status/ok, final URL, headers/cookies and common string methods).
+- Added global Legado/MR aliases for DOM extraction, storage, network, script import, user-agent and digest helpers.
+- Reworked java.htmlFormat/clean to remove script/style noise, preserve readable block breaks and decode common HTML entities.
+- Added java.regex helpers and a Java-style Packages.java.util.regex.Pattern matcher with find, matches, groups, offsets and Java flag mapping.
+- Replaced the limited JSON rule resolver with JSONPath support for nested paths, wildcards, array indexes, recursive descent and filter/comparison predicates.
+- Added deterministic XCTest coverage for helper aliases, regex, Pattern, JSONPath, response metadata, POST/connect/cookie/importScript and content mutation.
+
+### Verification
+
+- Extracted the Swift multiline prelude with Swift escape decoding and passed node --check.
+- Ran deterministic Node harnesses for JSONPath, HTML formatting, response aliases and Pattern matching.
+- git diff --check passes with only the repository's existing Windows LF-to-CRLF warnings.
+- Windows cannot run Swift/Xcode/UIKit/XCTest; GitHub Actions remains the compile/test and unsigned-IPA gate.
+
+### Next
+
+- Commit and push this Stage 5 pass once, wait for iOS build/XCTest and unsigned IPA workflows, inspect annotations/artifact, then record CI closure and IPA hash.
+
+### Rollback
+
+- Revert the single Stage 5 bridge/test commit and this entry to restore the prior JSON resolver and JS compatibility surface.
