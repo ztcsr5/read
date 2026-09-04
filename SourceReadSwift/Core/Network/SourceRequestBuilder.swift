@@ -39,9 +39,13 @@ struct SourceRequestBuilder {
         page: Int? = nil,
         persistentValues: [String: String] = [:]
     ) -> SourceRequest {
-        let interpolatedText = interpolatePersistentValues(resolvedText, values: persistentValues)
-        let directive = directiveParser.parse(interpolatedText)
-        let url = resolveURL(directive.urlText, base: source.bookSourceUrl)
+        // Keep placeholders intact while parsing directives.  Interpolating the
+        // complete URL first would replace body tokens before `interpolateData`
+        // can URL-encode them (for example `p 2` became a literal space).  Each
+        // component is expanded at its own boundary below instead.
+        let directive = directiveParser.parse(resolvedText)
+        let resolvedURLText = interpolatePersistentValues(directive.urlText, values: persistentValues)
+        let url = resolveURL(resolvedURLText, base: source.bookSourceUrl)
         let sourceOptions = requestOptions(
             source,
             keyword: keyword,
