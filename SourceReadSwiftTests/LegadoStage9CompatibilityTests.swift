@@ -38,7 +38,9 @@ final class LegadoStage9CompatibilityTests: XCTestCase {
         var bytes = [];
         var value;
         while ((value = stream.read()) >= 0) bytes.push(value);
-        JSON.stringify({text: bytesToStr(bytes), inputLength: compressed.length, firstByte: compressed[0], outputLength: bytes.length, output: bytes})
+        var outputBytes = [];
+        for (var i = 0; i < bytes.length; i++) outputBytes.push(Number(bytes[i]));
+        JSON.stringify({text: bytesToStr(bytes), inputLength: compressed.length, firstByte: compressed[0], outputLength: bytes.length, output: outputBytes.join(',')})
         """, variables: ["compressed": compressed])
         guard case .success(let value) = result,
               let data = value.data(using: .utf8),
