@@ -1565,3 +1565,31 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the Stage 12 implementation commit and this entry together to restore the previous compact deep-check behavior.
+
+## 2026-09-05 - Stage 13: request/response evidence in source diagnostics (complete)
+
+### Implemented
+
+- Added `SourceDiagnosticEvidence` and an optional `SourceDiagnosticEvidenceProvider` capability so engines can expose structured request/response evidence without coupling the diagnostic model to networking internals.
+- `LegadoSourceEngine` now records per-stage HTTP method, request body/headers, response status/headers, Cookie/Set-Cookie summary and final URL for Search, Detail, TOC and Content, including WebView fallback responses.
+- Batch diagnostics enrich every retained stage with this evidence while preserving the existing redaction boundary in `SourceDiagnosticStep`; legacy reports remain decodable.
+- Added regression coverage for four-stage evidence capture and verification that exported JSON never contains the fixture secret cookie value.
+
+### Verification
+
+- iOS build/XCTest: [run 33930495421](https://github.com/ztcsr5/read/actions/runs/33930495421) — success.
+- Unsigned IPA: [run 33930495381](https://github.com/ztcsr5/read/actions/runs/33930495381) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9958420577`, 6,333,230 bytes. GitHub API rate limiting prevented retrieving the artifact digest; it is intentionally not guessed.
+- `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js` and `git diff --check` pass locally. Windows has no Xcode/UIKit runtime, so Actions remains the authoritative Swift compile/XCTest/IPA gate.
+
+### Open device/source checks
+
+- Real public-source diversity, same-network Web 写源 behavior and sustained ProMotion frame pacing still require a ProMotion iPhone/device run. Captured evidence is deterministic fixture/engine coverage, not proof of every public source.
+
+### Rollback
+
+- Revert commit `a25323b` and this closure entry together to restore the prior batch diagnostics without structured request/response evidence.
+
+### Next
+
+- Expand the offline Android Legado corpus and failure taxonomy, then add compatibility probes for less-common response transforms before the next CI-gated handoff.
