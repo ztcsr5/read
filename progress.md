@@ -1543,3 +1543,25 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the Stage 11 implementation commits and this closure entry together to restore the prior diagnostic model, Source Manager export surface and fixture test set.
+
+## 2026-09-05 - Stage 12: full batch pipeline diagnostics (complete)
+
+### Implemented
+
+- Replaced the Source Manager deep-check path that previously compressed Detail → TOC → Content into one free-form row with `SourceBatchDiagnosticRunner`.
+- Deep batch checks now execute the production `SourcePipeline` once per source and retain every structured Search, Detail, TOC and Content step, including the successful prefix when a later stage fails.
+- Shallow checks still run Search only for fast health scans; both modes export through the same redacted `SourceDiagnosticBatchReport` JSON/text model.
+- Added bounded concurrent source execution with progress callbacks and source-scoped report retention in the UI state.
+- Added regression coverage for full four-stage export, failed-content prefix retention and bounded multi-source progress accounting.
+
+### Verification
+
+- `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js` and `git diff --check` pass locally.
+- iOS build/XCTest: [run 33929236140](https://github.com/ztcsr5/read/actions/runs/33929236140) — success.
+- Unsigned IPA: [run 33929236280](https://github.com/ztcsr5/read/actions/runs/33929236280) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9958015274`, 6,324,630 bytes; package digest `sha256:2e95adf3cae14eb1a1e91d9333dd5a48ccbeb52047d024b0f2891528c36c3958`.
+- Windows has no Xcode/UIKit runtime; real public-source diversity, LAN Web 写源 and sustained ProMotion frame pacing remain device/source checks.
+
+### Rollback
+
+- Revert the Stage 12 implementation commit and this entry together to restore the previous compact deep-check behavior.
