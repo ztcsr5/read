@@ -195,6 +195,9 @@ final class LegadoHostServices {
     func inflate(_ value: Any?) -> NSArray {
         let input = bytes(from: value)
         guard !input.isEmpty else { return [] }
+        if let output = zlibInflate(input, rawDeflate: false) {
+            return output.map { NSNumber(value: $0) } as NSArray
+        }
         // Compression.framework accepts the zlib-wrapped payload used by
         // Legado.  A few sources incorrectly strip or retain the wrapper, so
         // try both representations before reporting a decode miss.
@@ -253,6 +256,9 @@ final class LegadoHostServices {
         guard let payload = gzipPayload(input) else {
             executionContext.log("GZIPInputStream rejected an invalid gzip envelope")
             return []
+        }
+        if let output = zlibInflate(payload, rawDeflate: true) {
+            return output.map { NSNumber(value: $0) } as NSArray
         }
         if let output = inflateCandidate(payload) {
             return output.map { NSNumber(value: $0) } as NSArray
@@ -318,6 +324,28 @@ final class LegadoHostServices {
             if input[index] == 0 { return true }
         }
         return false
+    }
+
+    private func zlibInflate(_ input: [UInt8], rawDeflate: Bool) -> [UInt8]? {
+        guard !input.isEmpty else { return nil }
+        var outputPointer: UnsafeMutablePointer<UInt8>?
+        var outputLength = 0
+        let status = input.withUnsafeBytes { buffer -> Int32 in
+            guard let base = buffer.bindMemory(to: UInt8.self).baseAddress else { return -1 }
+            return sourceread_zlib_inflate(
+                base,
+                input.count,
+                &outputPointer,
+                &outputLength,
+                rawDeflate ? 1 : 0
+            )
+        }
+        guard status == 0, let outputPointer, outputLength > 0 else {
+            if let outputPointer { sourceread_zlib_free(outputPointer) }
+            return nil
+        }
+        defer { sourceread_zlib_free(outputPointer) }
+        return Array(UnsafeBufferPointer(start: outputPointer, count: outputLength))
     }
 
     private func inflateCandidate(_ candidate: [UInt8]) -> [UInt8]? {
