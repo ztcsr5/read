@@ -2633,8 +2633,29 @@ final class JSCoreRuntime {
     private static func byteValue(_ value: Any) -> UInt8? {
         if let value = value as? NSNumber { return value.uint8Value }
         if let value = value as? UInt8 { return value }
+        if let value = value as? UInt16 { return UInt8(clamping: value) }
+        if let value = value as? UInt32 { return UInt8(clamping: value) }
+        if let value = value as? UInt64 { return UInt8(clamping: value) }
         if let value = value as? Int { return UInt8(clamping: value) }
-        if let value = value as? JSValue, value.isNumber { return value.toNumber().uint8Value }
+        if let value = value as? Int8 { return UInt8(clamping: value) }
+        if let value = value as? Int16 { return UInt8(clamping: value) }
+        if let value = value as? Int32 { return UInt8(clamping: value) }
+        if let value = value as? Int64 { return UInt8(clamping: value) }
+        if let value = value as? Double { return UInt8(clamping: Int(value)) }
+        if let value = value as? Float { return UInt8(clamping: Int(value)) }
+        if let value = value as? String, let number = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return UInt8(clamping: number)
+        }
+        if let value = value as? NSString, let number = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return UInt8(clamping: number)
+        }
+        if let value = value as? JSValue {
+            if value.isNumber { return UInt8(clamping: value.toInt32()) }
+            if let object = value.toObject(), !(object is JSValue) { return byteValue(object) }
+            if let text = value.toString(), let number = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return UInt8(clamping: number)
+            }
+        }
         return nil
     }
 
