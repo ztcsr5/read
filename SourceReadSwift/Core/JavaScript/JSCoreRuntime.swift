@@ -1741,6 +1741,16 @@ final class JSCoreRuntime {
           if (padding.toLowerCase().indexOf('no') >= 0) return 'NoPadding';
           return 'PKCS7Padding';
         }
+        function __cryptoOpenSSLKeyAndIV(passphrase, salt, keyLength, ivLength) {
+          var password = __cryptoBytes(passphrase, 'utf8');
+          var material = [], previous = [];
+          while (material.length < keyLength + ivLength) {
+            var input = previous.concat(password).concat(salt || []);
+            previous = __cryptoBytes(__native_digestBytes(input, 'MD5'), 'bytes');
+            material = material.concat(previous);
+          }
+          return {key: material.slice(0, keyLength), iv: material.slice(keyLength, keyLength + ivLength)};
+        }
         function __cryptoCipher(algorithm) {
           return {
             encrypt: function(value, key, options) {
@@ -1768,14 +1778,29 @@ final class JSCoreRuntime {
               options = options || {};
               var ciphertext = value && value.ciphertext != null ? value.ciphertext : value;
               if (!options.iv && value && value.iv) options.iv = value.iv;
-              var bytes = ciphertext && ciphertext.__bytes ? ciphertext.__bytes :
+              var bytes = ciphertext && ciphertext.__bytes ? ciphertext.__bytes.slice() :
                 (typeof ciphertext === 'string' ? __cryptoBytes(__native_base64DecodeBytes(ciphertext), 'bytes') : __cryptoBytes(ciphertext, ciphertext && ciphertext.__encoding));
+              var keyBytes = __cryptoBytes(key, key && key.__encoding);
+              var ivBytes = __cryptoBytes(options.iv, options.iv && options.iv.__encoding);
+              // CryptoJS's passphrase overload accepts an OpenSSL `Salted__`
+              // envelope and derives an AES-256 key/IV with EVP_BytesToKey.
+              // Preserve the raw WordArray path above for explicit keys.
+              if (typeof key === 'string' && !options.iv) {
+                var salt = [];
+                if (bytes.length >= 16 && String.fromCharCode.apply(null, bytes.slice(0, 8)) === 'Salted__') {
+                  salt = bytes.slice(8, 16);
+                  bytes = bytes.slice(16);
+                }
+                var derived = __cryptoOpenSSLKeyAndIV(key, salt, 32, 16);
+                keyBytes = derived.key;
+                ivBytes = derived.iv;
+              }
               var transformation = algorithm + '/' + __cryptoModeName(options) + '/' + __cryptoPaddingName(options);
               var output = __nativeLegado.invoke({ method: 'cipherDecryptBytes', args: [
                 bytes,
-                __cryptoBytes(key, key && key.__encoding),
+                keyBytes,
                 transformation,
-                __cryptoBytes(options.iv, options.iv && options.iv.__encoding)
+                ivBytes
               ]});
               return __cryptoWordArray(output, 'bytes');
             }

@@ -196,6 +196,46 @@ final class LegadoHostServices {
         }
     }
 
+    /// CryptoJS's string-key overload uses the OpenSSL-compatible
+    /// EVP_BytesToKey derivation rather than treating the passphrase as a
+    /// fixed UTF-8 AES key.  Legado sources frequently return `Salted__`
+    /// Base64 payloads, so keep this path separate from the raw WordArray
+    /// cipher bridge.
+    func cipherDecryptPassphrase(input: Any?, passphrase: Any?) -> NSArray {
+        let encoded = RuleExecutionContext.bridgeString(input)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        guard let decoded = Data(base64Encoded: Self.paddedBase64(encoded)) else { return [] }
+        let bytes = Array(decoded)
+        let salted = bytes.count >= 16 && Array(bytes.prefix(8)) == Array("Salted__".utf8)
+        let salt = salted ? Array(bytes[8..<16]) : []
+        let ciphertext = salted ? Array(bytes.dropFirst(16)) : bytes
+        let password = bytes(from: passphrase)
+        guard !ciphertext.isEmpty else { return [] }
+
+        var derived: [UInt8] = []
+        var previous: [UInt8] = []
+        while derived.count < 48 {
+            var material = previous
+            material.append(contentsOf: password)
+            material.append(contentsOf: salt)
+            previous = Array(Insecure.MD5.hash(data: Data(material)))
+            derived.append(contentsOf: previous)
+        }
+        let key = Array(derived.prefix(32))
+        let iv = Array(derived[32..<48])
+        do {
+            let aes = try AES(key: key, blockMode: CBC(iv: iv), padding: .pkcs7)
+            let plain = try aes.decrypt(ciphertext)
+            return plain.map { NSNumber(value: $0) } as NSArray
+        } catch {
+            executionContext.log("AES passphrase decrypt failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// Inflate a zlib-wrapped byte stream for java.util.zip.InflaterInputStream.
     /// Compression is available on every supported iOS release and avoids
     /// pulling a second native zlib package into the app.
@@ -664,6 +704,11 @@ final class LegadoHostServices {
         let remainder = text.count % 4
         if remainder != 0 { text += String(repeating: "=", count: 4 - remainder) }
         return text
+    }
+
+    private static func paddedBase64(_ value: String) -> String {
+        let remainder = value.count % 4
+        return remainder == 0 ? value : value + String(repeating: "=", count: 4 - remainder)
     }
 
     private static let gbkEncoding = String.Encoding(

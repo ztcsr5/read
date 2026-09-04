@@ -6,6 +6,14 @@ import XCTest
 /// an Android Legado source is moved to iOS: encrypted response bodies and a
 /// bodyJs stage that performs another request before returning readable HTML.
 final class SourceEngineCryptoFixtureTests: XCTestCase {
+    func testCryptoJSPassphraseDecryptsOpenSSLSaltedEnvelope() throws {
+        let result = JSCoreRuntime().evaluate("CryptoJS.AES.decrypt('U2FsdGVkX18xMjM0NTY3OKWM0JxM5A2ppliuYJJMeHs=', 'password').toString(CryptoJS.enc.Utf8)")
+        guard case .success(let text) = result else {
+            return XCTFail("expected OpenSSL passphrase decrypt: \(result)")
+        }
+        XCTAssertEqual(text, "hello legado")
+    }
+
     func testContentBodyJsDecryptsCryptoJSAESBase64HTML() async throws {
         let source = BookSource(
             bookSourceName: "CryptoJS body fixture",
@@ -65,6 +73,41 @@ final class SourceEngineCryptoFixtureTests: XCTestCase {
             "https://fixture.local/chapter/2",
             "https://fixture.local/bootstrap",
             "https://fixture.local/content?token=nonce-bodyjs"
+        ])
+        XCTAssertEqual(network.invalidRequests, 0)
+    }
+
+    func testPaginatedContentCarriesBodyJsTokenIntoNextPage() async throws {
+        let source = BookSource(
+            bookSourceName: "paged bodyJs fixture",
+            bookSourceUrl: "https://fixture.local/",
+            ruleContent: SourceRule(fields: [
+                "content": "#content@text",
+                "nextContentUrl": "a.next@href"
+            ]),
+            raw: [
+                "bodyJs": "if (result.indexOf('PAGE_ONE') >= 0) { var boot = java.ajax('https://fixture.local/bootstrap'); java.put('cursor', boot.header('X-Cursor')); } return result.replace('CURSOR_PLACEHOLDER', java.get('cursor'));"
+            ]
+        )
+        let chapter = BookChapter(
+            title: "分页章节",
+            url: "https://fixture.local/chapter/paged",
+            bookUrl: "https://fixture.local/book/paged",
+            index: 0,
+            isVip: false
+        )
+        let network = PaginatedBodyJSSourceNetworkClient()
+
+        let result = await LegadoSourceEngine(network: network).getContent(source: source, chapter: chapter)
+
+        guard case .success(let content) = result else {
+            return XCTFail("expected paginated bodyJs content: \(result)")
+        }
+        XCTAssertEqual(content.paragraphs, ["分页第一页", "分页第二页"])
+        XCTAssertEqual(network.requestedURLs, [
+            "https://fixture.local/chapter/paged",
+            "https://fixture.local/bootstrap",
+            "https://fixture.local/chapter/paged-next?cursor=cursor-bodyjs"
         ])
         XCTAssertEqual(network.invalidRequests, 0)
     }
@@ -133,6 +176,51 @@ private final class BodyJSAjaxSourceNetworkClient: SourceNetworkClient, @uncheck
         default:
             lock.lock(); failures += 1; lock.unlock()
             return .failure(.network("unexpected fixture URL"))
+        }
+    }
+}
+
+private final class PaginatedBodyJSSourceNetworkClient: SourceNetworkClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: [String] = []
+    private var failures = 0
+
+    var requestedURLs: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return urls
+    }
+
+    var invalidRequests: Int {
+        lock.lock(); defer { lock.unlock() }
+        return failures
+    }
+
+    func load(_ request: SourceRequest) async -> Result<SourceResponse, SourceEngineError> {
+        let url = request.url.absoluteString
+        lock.lock(); urls.append(url); lock.unlock()
+        switch url {
+        case "https://fixture.local/chapter/paged":
+            let body = "<html><body><div id='content'>分页第一页 PAGE_ONE</div><a class='next' href='/chapter/paged-next?cursor=CURSOR_PLACEHOLDER'>next</a></body></html>"
+            return .success(SourceResponse(url: request.url, statusCode: 200, headers: [:], body: body, data: Data(body.utf8)))
+        case "https://fixture.local/bootstrap":
+            return .success(SourceResponse(
+                url: request.url,
+                statusCode: 200,
+                headers: ["X-Cursor": "cursor-bodyjs", "Set-Cookie": "sid=paged; Path=/"],
+                body: "boot",
+                data: Data("boot".utf8)
+            ))
+        case "https://fixture.local/chapter/paged-next?cursor=cursor-bodyjs":
+            let cookie = request.headers.first { $0.key.caseInsensitiveCompare("Cookie") == .orderedSame }?.value
+            guard cookie == "sid=paged" else {
+                lock.lock(); failures += 1; lock.unlock()
+                return .failure(.network("pagination cookie missing"))
+            }
+            let body = "<html><body><div id='content'>分页第二页</div></body></html>"
+            return .success(SourceResponse(url: request.url, statusCode: 200, headers: [:], body: body, data: Data(body.utf8)))
+        default:
+            lock.lock(); failures += 1; lock.unlock()
+            return .failure(.network("unexpected pagination fixture URL"))
         }
     }
 }

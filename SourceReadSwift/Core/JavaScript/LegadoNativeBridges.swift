@@ -255,6 +255,11 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
                     : "AES/CBC/PKCS7Padding",
                 iv: arguments.count > 3 ? arguments[3] : nil
             )
+        case "cipherDecryptPassphrase":
+            return services.cipherDecryptPassphrase(
+                input: arguments.first,
+                passphrase: arguments.count > 1 ? arguments[1] : nil
+            )
         case "sandboxPath":
             return services.sandboxURL.path
             default:
