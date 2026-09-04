@@ -544,6 +544,13 @@ final class JSCoreRuntime {
         java.base64 = java.base64Encode;
         java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
+        java.base64UrlEncode = function(value, withoutPadding) {
+          var encoded = java.base64Encode(value).replace(/\\+/g, '-').replace(/\\//g, '_');
+          return withoutPadding === false ? encoded : encoded.replace(/=+$/g, '');
+        };
+        java.base64UrlDecode = function(value) {
+          return java.base64Decode(String(value == null ? '' : value).replace(/-/g, '+').replace(/_/g, '/'));
+        };
         java.inflate = function(value) {
           // Return a scalar across JSExport. Older JavaScriptCore releases can
           // expose an NSArray result as a host object with no indexed members;
@@ -2049,7 +2056,13 @@ final class JSCoreRuntime {
               // java.util.Base64.Encoder.encode(byte[]) returns the ASCII
               // bytes of the encoded payload (not the original input bytes).
               return __asJavaList(__native_stringToBytes(__native_base64EncodeBytes(__javaBytes(bytes))));
+            }, withoutPadding: function() {
+              var encoder = this;
+              return { encodeToString: function(value) { return encoder.encodeToString(value).replace(/=+$/g, ''); }, encode: function(value) { return __asJavaList(__native_stringToBytes(encoder.encodeToString(value).replace(/=+$/g, ''))); } };
             } };
+          },
+          getUrlEncoder: function() {
+            return { encodeToString: function(value) { return java.base64UrlEncode(value, true); }, encode: function(value) { return __asJavaList(__native_stringToBytes(java.base64UrlEncode(value, true))); }, withoutPadding: function() { return this; } };
           },
           getDecoder: function() {
             return { decode: function(value) {
@@ -2069,6 +2082,9 @@ final class JSCoreRuntime {
               ? String(__native_bytesToString(__javaBytes(value)) || '')
               : String(value == null ? '' : value);
             return java.base64DecodeToByteArray(encoded);
+          },
+          getUrlDecoder: function() {
+            return { decode: function(value) { return java.base64DecodeToByteArray(String(value == null ? '' : value).replace(/-/g, '+').replace(/_/g, '/')); } };
           }
         };
         Packages.java.security = Packages.java.security || {};

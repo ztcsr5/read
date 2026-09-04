@@ -48,6 +48,21 @@ final class LegadoStage10CompatibilityTests: XCTestCase {
         XCTAssertEqual((object["cipher"] as? String)?.isEmpty, false)
     }
 
+    func testJavaURLSafeBase64AndPaddingVariants() throws {
+        let result = JSCoreRuntime().evaluate("""
+        var standard = Packages.java.util.Base64.getEncoder().encodeToString('ûï'.getBytes());
+        var url = Packages.java.util.Base64.getUrlEncoder().encodeToString('ûï'.getBytes());
+        var noPad = Packages.java.util.Base64.getEncoder().withoutPadding().encodeToString('hello'.getBytes());
+        var decoded = Packages.java.util.Base64.getUrlDecoder().decode(url);
+        JSON.stringify({standard: standard, url: url, noPad: noPad, decoded: bytesToStr(decoded)})
+        """)
+        let object = try jsonObject(from: result)
+        XCTAssertEqual(object["standard"] as? String, "w7vDrw==")
+        XCTAssertEqual(object["url"] as? String, "w7vDrw")
+        XCTAssertEqual(object["noPad"] as? String, "aGVsbG8")
+        XCTAssertEqual(object["decoded"] as? String, "ûï")
+    }
+
     private func jsonObject(from result: Result<String, SourceEngineError>, file: StaticString = #filePath, line: UInt = #line) throws -> [String: Any] {
         guard case .success(let value) = result,
               let data = value.data(using: .utf8),
