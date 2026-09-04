@@ -296,10 +296,11 @@ struct SourceManagerView: View {
                     Label("检测启用书源", systemImage: "checkmark.seal")
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
+                .controlSize(.small)
+                .font(.subheadline.weight(.semibold))
                 .disabled(appState.sourceStore.sources.filter(\.enabled).isEmpty)
                 Spacer()
-                Text("导入请使用右上角 +")
+                Text("导入：右上角 +")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

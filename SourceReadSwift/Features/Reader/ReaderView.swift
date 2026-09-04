@@ -63,6 +63,10 @@ struct ReaderView: View {
     @State private var paragraphJumpRequest: ParagraphJumpRequest?
     @State private var pagedBlocksCache: [ReaderPageBlock] = []
     @State private var pagedBlocksCacheKey = ""
+    /// The reader may live in a split view or Stage Manager window. Keep the
+    /// actual container size instead of using UIScreen.main, which describes
+    /// the physical display and can be stale for the current scene.
+    @State private var viewportSize: CGSize = .zero
     @State private var sessionStartedAt = Date()
     @State private var previousIdleTimerDisabled = false
     @State private var visibleParagraphIndex = 0
@@ -198,15 +202,21 @@ struct ReaderView: View {
         return [ReaderPageBlock(id: 0, includesTitle: true, paragraphs: [])]
     }
 
+    private var effectiveViewportSize: CGSize {
+        guard viewportSize.width > 1, viewportSize.height > 1 else {
+            return ReaderPerformancePolicy.defaultViewportSize
+        }
+        return viewportSize
+    }
+
     private var readerPageCacheKey: String {
-        // Pagination depends on the viewport. Include the current screen
+        // Pagination depends on the viewport. Include the actual container
         // bounds so rotation, split-view and Stage Manager resize invalidate
         // the model instead of showing pages calculated for the old width.
-        let viewport = UIScreen.main.bounds
+        let viewport = effectiveViewportSize
         return [
             readerLayoutKey,
-            String(Int(viewport.width.rounded())),
-            String(Int(viewport.height.rounded())),
+            ReaderPerformancePolicy.viewportCacheKey(viewport),
             content.title,
             String(content.paragraphs.count),
             String(content.paragraphs.first?.hashValue ?? 0),
@@ -287,6 +297,12 @@ struct ReaderView: View {
                 settingsPanel
                     .zIndex(2)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: ReaderViewportSizePreferenceKey.self, value: proxy.size)
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -399,6 +415,10 @@ struct ReaderView: View {
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showOverlay)
         .animation(.spring(response: 0.3, dampingFraction: 0.88), value: showSettings)
         .animation(.easeOut(duration: 0.18), value: statusMessage)
+        .onPreferenceChange(ReaderViewportSizePreferenceKey.self) { size in
+            guard size.width > 1, size.height > 1, size != viewportSize else { return }
+            viewportSize = size
+        }
     }
 
     private var readerBackdrop: some View {
@@ -1427,7 +1447,7 @@ struct ReaderView: View {
 
     private func handleReaderTap(at location: CGPoint) {
         guard !showSettings else { return }
-        let size = UIScreen.main.bounds.size
+        let size = effectiveViewportSize
         let column = min(max(Int(location.x / max(size.width / 3, 1)), 0), 2)
         let row = min(max(Int(location.y / max(size.height / 3, 1)), 0), 2)
         let index = row * 3 + column
@@ -1788,18 +1808,18 @@ struct ReaderView: View {
             return [ReaderPageBlock(id: 0, includesTitle: true, paragraphs: [])]
         }
 
-        let screen = UIScreen.main.bounds.size
-        let screenWidth = Double(screen.width)
-        let screenHeight = Double(screen.height)
-        let availableWidth = max(screenWidth - pagePadding * 2, 260)
-        let availableHeight = max(screenHeight - pagePadding * 2 - footerHeight - 70, 360)
-        let charWidth = max(fontSize * 0.56 + letterSpacing, 7)
-        let lineHeight = max(fontSize + lineSpacing, 18)
-        let charsPerLine = max(Int(availableWidth / charWidth), 10)
-        let linesPerPage = max(Int(availableHeight / lineHeight), 8)
-        let pageBudget = max(charsPerLine * linesPerPage, 220)
-        let paragraphBreakCost = max(charsPerLine / 2, 10)
-        let titleCost = max(charsPerLine * 3, 90)
+        let metrics = ReaderPerformancePolicy.pageMetrics(
+            viewportSize: effectiveViewportSize,
+            pagePadding: pagePadding,
+            footerHeight: footerHeight,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing,
+            letterSpacing: letterSpacing
+        )
+        let charsPerLine = metrics.charsPerLine
+        let pageBudget = metrics.pageBudget
+        let paragraphBreakCost = metrics.paragraphBreakCost
+        let titleCost = metrics.titleCost
 
         var pages: [ReaderPageBlock] = []
         var currentEntries: [ReaderPageEntry] = []
@@ -1844,6 +1864,17 @@ struct ReaderView: View {
 private struct ParagraphPosition: Equatable {
     let index: Int
     let minY: CGFloat
+}
+
+private struct ReaderViewportSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let candidate = nextValue()
+        if candidate.width > 1, candidate.height > 1 {
+            value = candidate
+        }
+    }
 }
 
 private struct ParagraphPositionPreferenceKey: PreferenceKey {

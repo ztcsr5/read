@@ -18,6 +18,7 @@ This file tracks release gates for the native Swift rewrite. Passing CI or produ
   - [ ] Reader settings, bookmarks, TTS, auto-scroll, source switching.
   - [ ] Offline/weak-network errors and recovery actions.
   - [ ] Light/dark mode and Dynamic Type.
+  - [ ] ProMotion reader scroll/paging profiling on a 120 Hz iPhone; CI cannot prove sustained frame cadence.
 - [ ] No visible mojibake in runtime UI.
 - [ ] No debug-only seeded source data in release builds.
 - [ ] No placeholder controls that appear enabled but do nothing.
@@ -63,3 +64,16 @@ Windows cannot verify iOS builds locally. Use GitHub Actions only after a cohere
 2. Run the iOS build/test workflow.
 3. Fix the first compiler/test failure.
 4. Run unsigned IPA workflow only when CI is green and the build is worth device testing.
+
+## Current native-performance checkpoint (2026-09-04)
+
+- The app allows the system's highest supported interactive refresh rate via
+  `CADisableMinimumFrameDurationOnPhone` and avoids a persistent no-op display
+  link. This is an adaptive ceiling, not a claim that every device renders at
+  120 Hz continuously.
+- Reader pagination and tap zones use the measured scene container; TextKit
+  visible-paragraph lookup is logarithmic; list covers use a bounded decoded
+  image cache.
+- Remaining evidence gate: run Instruments (Core Animation/Time Profiler) on a
+  ProMotion iPhone and attach frame-time evidence before changing the checklist
+  to “120 Hz verified”.

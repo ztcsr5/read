@@ -236,12 +236,40 @@ struct NativeReaderTextView: UIViewRepresentable {
             let glyphRange = textView.layoutManager.glyphRange(forBoundingRect: visibleRect, in: textView.textContainer)
             guard glyphRange.length > 0 else { return }
             let visibleCharacterRange = textView.layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-            let index = paragraphRanges.firstIndex { NSIntersectionRange($0, visibleCharacterRange).length > 0 }
-                ?? paragraphRanges.firstIndex { $0.location >= visibleCharacterRange.location }
+            let index = ReaderParagraphIndexResolver.firstVisibleIndex(
+                in: paragraphRanges,
+                visibleRange: visibleCharacterRange
+            )
             guard let index, index != lastVisibleParagraph else { return }
             lastVisibleParagraph = index
             visibleParagraphCallback(index)
         }
+    }
+}
+
+/// Resolves the first paragraph intersecting the visible character range in
+/// O(log n). Long chapters can contain thousands of paragraph ranges; a full
+/// linear scan on every scroll callback needlessly steals main-thread time.
+enum ReaderParagraphIndexResolver {
+    static func firstVisibleIndex(in ranges: [NSRange], visibleRange: NSRange) -> Int? {
+        guard !ranges.isEmpty, visibleRange.length > 0 else { return nil }
+        let visibleStart = visibleRange.location
+        var lower = 0
+        var upper = ranges.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if NSMaxRange(ranges[middle]) <= visibleStart {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+
+        guard ranges.indices.contains(lower) else { return nil }
+        if NSIntersectionRange(ranges[lower], visibleRange).length > 0 {
+            return lower
+        }
+        return ranges[lower...].firstIndex { $0.location >= visibleStart }
     }
 }
 

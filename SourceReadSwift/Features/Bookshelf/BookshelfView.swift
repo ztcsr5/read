@@ -801,14 +801,7 @@ private struct AsyncBookCover: View {
     var body: some View {
         Group {
             if let urlString, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        placeholder
-                    }
-                }
+                CachedRemoteImage(url: url) { placeholder }
             } else {
                 placeholder
             }

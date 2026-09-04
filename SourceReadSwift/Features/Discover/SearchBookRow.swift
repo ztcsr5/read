@@ -60,16 +60,7 @@ struct SearchBookRow: View {
     @ViewBuilder
     private var cover: some View {
         if let coverUrl = book.coverUrl, let url = URL(string: coverUrl) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                default:
-                    placeholder
-                }
-            }
+            CachedRemoteImage(url: url) { placeholder }
             .frame(width: 74, height: 98)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {

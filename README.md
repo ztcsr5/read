@@ -58,3 +58,12 @@ See `docs/BUILD.md` for Windows + CI details.
 3. Search -> detail -> TOC -> content MVP.
 4. JSCore / SwiftSoup / Cookie / WebView compatibility loop.
 5. Native reading UI polish.
+
+## Stage 3 hardening checkpoint
+
+- ProMotion is opt-in safe: `CADisableMinimumFrameDurationOnPhone` remains enabled and no idle `CADisplayLink` is kept alive. UIKit can adapt interactive work up to the device's supported ceiling (120 Hz on ProMotion models).
+- Reader pagination and tap zones use the measured SwiftUI container size, not `UIScreen.main`, so rotation, Split View and Stage Manager resize correctly.
+- TextKit visible-paragraph lookup is O(log n); bookshelf, Discover and RSS cover rows share a bounded decoded-image memory cache.
+- Settings exposes the canonical `书源管理` and `Web 写源` routes; Discover remains focused on search.
+
+CI proves compilation and XCTest only. Sustained 120 Hz, touch feel, LAN Web 写源 and self-sign installation still require a ProMotion iPhone and the unsigned IPA artifact.

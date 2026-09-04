@@ -43,6 +43,20 @@ struct SettingsView: View {
 
                 Section("内容设置") {
                     NavigationLink {
+                        SourceManagerView()
+                            .environmentObject(appState)
+                    } label: {
+                        Label("书源管理", systemImage: "books.vertical")
+                    }
+
+                    NavigationLink {
+                        SourceWritingView(server: appState.sourceWritingServer)
+                            .environmentObject(appState)
+                    } label: {
+                        Label("Web 写源", systemImage: "network")
+                    }
+
+                    NavigationLink {
                         RuleHealthView()
                     } label: {
                         Label("规则体检", systemImage: "shield")

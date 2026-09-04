@@ -148,12 +148,8 @@ private struct RSSArticleRow: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 8) {
                 if let imageURL = article.imageURL, let url = URL(string: imageURL) {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Image(systemName: "photo").foregroundStyle(.tertiary)
-                        }
+                    CachedRemoteImage(url: url) {
+                        Image(systemName: "photo").foregroundStyle(.tertiary)
                     }
                     .frame(width: 56, height: 56)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

@@ -1261,3 +1261,20 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Next
 
 - Push the consolidated Stage 2E pass once, wait for both Actions workflows, inspect compiler/test diagnostics and record the new IPA artifact hash before starting the next large feature phase.
+## 2026-09-04 - Stage 3: reader performance and product parity hardening
+
+### What was done
+- Removed the persistent no-op `CADisplayLink` from `FrameRateCoordinator`. The app keeps `CADisableMinimumFrameDurationOnPhone = true` and records the adaptive 120-ceiling policy without scheduling idle main-run-loop callbacks.
+- Replaced `UIScreen.main` pagination and nine-zone tap geometry with the reader's measured container viewport, so rotation, split view and Stage Manager use the actual layout size.
+- Extracted deterministic viewport/page metrics into `ReaderPerformancePolicy` and added regression tests for adaptive frame-rate plans, cache keys, orientation-sensitive pagination metrics and visible-range resolution.
+- Changed long-chapter visible paragraph lookup from a linear range scan to an O(log n) binary-search resolver in the TextKit reader.
+- Added a shared `CachedRemoteImage` memory cache and migrated bookshelf, Discover search and RSS article rows away from repeated `AsyncImage` decoding.
+- Restored the single Settings entry points for `书源管理` and `Web 写源`, keeping Discover focused on search and avoiding duplicate source routes.
+
+### Testing
+- `git diff --check` passed locally (Windows reports the repository's existing LF-to-CRLF warnings only).
+- Windows cannot run Swift/Xcode/UIKit tests. GitHub Actions remains the authoritative iOS compile/XCTest/unsigned-IPA gate for this stage.
+- Sustained 120 Hz and LAN Web 写源 behavior remain real-device checks; no device evidence is claimed here.
+
+### Rollback
+- Revert the Stage 3 commit and this progress entry together. The previous reader path remains available in the parent commit.
