@@ -2109,11 +2109,11 @@ final class JSCoreRuntime {
           var raw = first, base = second;
           if (second && hasScheme(first) && !hasScheme(second)) { raw = second; base = first; }
           function originOf(text) {
-            var match = String(text || '').match(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*)/);
+            var match = String(text || '').match(/^([A-Za-z][A-Za-z0-9+.-]*:\\/\\/[^/?#]*)/);
             return match ? match[1] : '';
           }
           function normalizePath(path) {
-            var leading = path.charAt(0) === '/', trailing = /\/$/.test(path);
+            var leading = path.charAt(0) === '/', trailing = /\\/$/.test(path);
             var parts = path.split('/'), out = [];
             for (var i = 0; i < parts.length; i++) {
               var part = parts[i];
@@ -2150,20 +2150,20 @@ final class JSCoreRuntime {
             return origin + normalizePath(path) + query + hash;
           }
           if (base && !hasScheme(raw)) raw = resolve(raw, base);
-          var schemeMatch = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/);
+          var schemeMatch = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\\/\\/([^/?#]*)([^?#]*)(?:\\?([^#]*))?(?:#(.*))?$/);
           var scheme = '', authority = '', pathOnly = '', queryOnly = '', refOnly = '';
           if (schemeMatch) {
             scheme = schemeMatch[1]; authority = schemeMatch[2]; pathOnly = schemeMatch[3] || '/';
             queryOnly = schemeMatch[4] || ''; refOnly = schemeMatch[5] || '';
           } else {
-            var generic = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*:)([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/);
+            var generic = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*:)([^?#]*)(?:\\?([^#]*))?(?:#(.*))?$/);
             if (generic) { scheme = generic[1].replace(/:$/, ''); pathOnly = generic[2] || ''; queryOnly = generic[3] || ''; refOnly = generic[4] || ''; }
             else { pathOnly = raw || ''; }
           }
           var userInfo = '', host = authority, port = -1;
           var at = authority.lastIndexOf('@');
           if (at >= 0) { userInfo = authority.substring(0, at); host = authority.substring(at + 1); }
-          var portMatch = host.match(/^(.*):(\d+)$/);
+          var portMatch = host.match(/^(.*):(\\d+)$/);
           if (portMatch && portMatch[1].indexOf(']') < 0) { host = portMatch[1]; port = Number(portMatch[2]); }
           var protocol = scheme.toLowerCase();
           function defaultPort() { return protocol === 'http' ? 80 : (protocol === 'https' ? 443 : -1); }
