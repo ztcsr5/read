@@ -117,7 +117,7 @@ final class LegadoJavaCompatibilityTests: XCTestCase {
             )
         }))
         let result = runtime.evaluate("""
-            var doc = org.jsoup.Jsoup.parse('<html><head><title>Fixture</title></head><body><img src='/cover.png'></body></html>', 'https://fixture.local/book/');
+            var doc = org.jsoup.Jsoup.parse('<html><head><title>Fixture</title></head><body><img src="/cover.png"></body></html>', 'https://fixture.local/book/');
             var response = java.ajax('https://fixture.local/page');
             JSON.stringify({
               location: doc.location(), title: doc.title(), head: doc.head().tagName(), body: doc.body().tagName(),
