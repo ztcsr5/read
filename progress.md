@@ -1309,7 +1309,17 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Unsigned IPA: [run 33859400414](https://github.com/ztcsr5/read/actions/runs/33859400414) — success.
 - Artifact: `SourceReadSwift-unsigned-ipa`, 5.84 MB, SHA-256 `89ed9f19284eb3b2cb8a87355de55e629b5ace9122f28db712ad69b762fae120`.
 - Device-only items remain open: sustained ProMotion frame pacing, reader gesture feel, keyboard/layer behavior and same-network Web 写源 access.
-## 2026-09-04 - Stage 5: Legado JS source compatibility expansion (in progress)
+## 2026-09-04 - Stage 5: Legado JS source compatibility expansion (complete)
+### CI closure
+
+- Initial bridge commit: `5e532bd`.
+- Corrected Swift regex escaping: `fecb16c`.
+- Corrected raw attribute semantics and Fetch request metadata: `cf5a41e`.
+- Corrected Fetch body fixture envelope: `f7ffafc`.
+- iOS build/XCTest: [run 33866066483](https://github.com/ztcsr5/read/actions/runs/33866066483) — success.
+- Unsigned IPA: [run 33866066490](https://github.com/ztcsr5/read/actions/runs/33866066490) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, 6,174,111 bytes, SHA-256 `06963cb903fd92096c6209d5568788e06215d63eb5dd6cfdd1dff1e308be091b`.
+- CI now proves the bridge compiles and deterministic compatibility tests pass. Real-world source coverage, network quirks and sustained 120 Hz remain device/source fixture checks.
 
 ### Implemented
 
