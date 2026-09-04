@@ -93,6 +93,39 @@ final class SourceEngineLegadoCorpusTests: XCTestCase {
         XCTAssertEqual(content.paragraphs, ["Crypto 正文"])
     }
 
+    func testPipelineBatchReportIncludesRedactedRequestResponseEvidence() async throws {
+        let source = try loadFixture(named: "legado-mixed-response-source")
+        let searchURL = "https://fixture.example/mixed/search?q=%E6%B7%B7%E5%90%88"
+        let bookURL = "https://fixture.example/mixed/book/1"
+        let tocURL = "https://fixture.example/mixed/toc/1"
+        let chapterURL = "https://fixture.example/mixed/chapter/1"
+        let network = CorpusNetworkClient(responses: [
+            searchURL: .init(body: "\u{FEFF})]}',<pre>prefix {\"data\":{\"items\":[{\"title\":\"混合书\",\"author\":\"Fixture\",\"url\":\"/mixed/book/1\"}]}}</pre>", contentType: "text/html", setCookie: "sid=secret; Path=/"),
+            bookURL: .init(body: "\u{FEFF}<pre>prefix {\"title\":\"混合书\",\"toc\":\"/mixed/toc/1\"}</pre>", contentType: "text/html"),
+            tocURL: .init(body: "\u{FEFF}<pre>prefix {\"chapters\":[{\"title\":\"第一章\",\"url\":\"/mixed/chapter/1\"}]}</pre>", contentType: "text/html"),
+            chapterURL: .init(body: "\u{FEFF}<pre>prefix {\"content\":\"混合正文\"}</pre>", contentType: "text/html")
+        ])
+        let engine = LegadoSourceEngine(network: network)
+
+        let report = await SourceBatchDiagnosticRunner(engine: engine).run(
+            source: source, keyword: "混合", deepCheck: true, timeout: 1
+        )
+
+        XCTAssertEqual(report.steps.map(\.stage), [.search, .detail, .toc, .content])
+        XCTAssertEqual(report.steps.first?.requestMethod, "GET")
+        XCTAssertEqual(report.steps.first?.responseStatusCode, 200)
+        XCTAssertEqual(report.steps.first?.responseHeaders?["Content-Type"], "text/html")
+        XCTAssertTrue(report.steps.first?.cookieSummary?.contains("sid=<redacted>") == true)
+        XCTAssertEqual(report.steps.first?.finalURL, searchURL)
+        let batch = SourceDiagnosticBatchReport(
+            startedAt: report.startedAt,
+            keyword: report.keyword,
+            reports: [report]
+        )
+        let json = String(data: try batch.exportJSON(), encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("sid=secret"))
+    }
+
     private func loadFixture(named name: String) throws -> BookSource {
         let bundle = Bundle(for: Self.self)
         let url = try XCTUnwrap(

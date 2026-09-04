@@ -54,13 +54,15 @@ extension SourceEngine {
     }
 }
 
-final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
+final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, @unchecked Sendable {
     private let network: SourceNetworkClient
     private let diagnostics: DiagnosticSink
     private let cookieStore: SourceCookieStore
     private let purifyRules: () async -> [String]
     private let stateLock = NSLock()
     private var states: [String: RulePersistentState] = [:]
+    private let evidenceLock = NSLock()
+    private var evidence: [String: [SourceDiagnosticStage: SourceDiagnosticEvidence]] = [:]
     private let requestBuilder = SourceRequestBuilder()
     private let searchURLResolver = SearchURLResolver()
 
@@ -368,6 +370,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let primary = await network.load(request)
         if case .success(let response) = primary {
             persistentState(for: source).ingestResponse(response)
+            recordEvidence(source: source, stage: stage, request: request, response: response)
             await emitResponseObservation(response, request: request, source: source, stage: stage)
             if !shouldUseWebViewFallback(source: source, response: response) {
                 return .success(response)
@@ -389,16 +392,57 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let htmlResult = await WebViewFallback(cookieStore: cookieStore).load(url: request.url, delay: delay)
         switch htmlResult {
         case .success(let html):
-            return .success(SourceResponse(
+            let response = SourceResponse(
                 url: request.url,
                 statusCode: 200,
                 headers: [:],
                 body: html,
                 data: Data(html.utf8)
-            ))
+            )
+            recordEvidence(source: source, stage: stage, request: request, response: response)
+            return .success(response)
         case .failure(let error):
             return .failure(error)
         }
+    }
+
+    func resetDiagnosticEvidence(sourceURL: String) {
+        let key = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        evidenceLock.lock()
+        evidence.removeValue(forKey: key)
+        evidenceLock.unlock()
+    }
+
+    func diagnosticEvidence(sourceURL: String, stage: SourceDiagnosticStage) -> SourceDiagnosticEvidence? {
+        let key = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        evidenceLock.lock()
+        defer { evidenceLock.unlock() }
+        return evidence[key]?[stage]
+    }
+
+    private func recordEvidence(
+        source: BookSource,
+        stage: String,
+        request: SourceRequest,
+        response: SourceResponse
+    ) {
+        let normalizedStage: SourceDiagnosticStage?
+        if stage.lowercased().hasPrefix("search") {
+            normalizedStage = .search
+        } else if stage.lowercased().hasPrefix("detail") {
+            normalizedStage = .detail
+        } else if stage.lowercased().hasPrefix("toc") {
+            normalizedStage = .toc
+        } else if stage.lowercased().hasPrefix("content") {
+            normalizedStage = .content
+        } else {
+            normalizedStage = nil
+        }
+        guard let normalizedStage else { return }
+        let key = source.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        evidenceLock.lock()
+        evidence[key, default: [:]][normalizedStage] = SourceDiagnosticEvidence(request: request, response: response)
+        evidenceLock.unlock()
     }
 
     private func shouldUseWebView(source: BookSource) -> Bool {

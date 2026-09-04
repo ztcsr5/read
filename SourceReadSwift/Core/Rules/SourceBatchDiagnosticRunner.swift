@@ -25,6 +25,7 @@ struct SourceBatchDiagnosticRunner: Sendable {
     ) async -> SourceDiagnosticReport {
         let startedAt = Date()
         let cleanKeyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        (engine as? SourceDiagnosticEvidenceProvider)?.resetDiagnosticEvidence(sourceURL: source.bookSourceUrl)
         guard !cleanKeyword.isEmpty else {
             return SourceDiagnosticReport(
                 sourceName: source.bookSourceName,
@@ -55,21 +56,21 @@ struct SourceBatchDiagnosticRunner: Sendable {
                     timeout: timeout
                 )
             }) {
-                return execution.result.report
+                return enrichedReport(execution.result.report)
             }
 
             return timeoutReport(
                 source: source,
                 keyword: cleanKeyword,
                 startedAt: startedAt,
-                message: "完整链路超时（超过 (Int(outerTimeout)) 秒）"
+                message: "完整链路超时（超过 " + String(Int(outerTimeout)) + " 秒）"
             )
         }
 
         let searchStarted = Date()
         let result = await AsyncTimeout.run(seconds: max(timeout, 0), operation: {
             await self.engine.searchBooks(source: source, keyword: cleanKeyword, page: page)
-        }) ?? .failure(.network("搜索超时（超过 (Int(timeout)) 秒）"))
+        }) ?? .failure(.network("搜索超时（超过 " + String(Int(timeout)) + " 秒）"))
         let elapsed = max(0, Int(Date().timeIntervalSince(searchStarted) * 1_000))
 
         let step: SourceDiagnosticStep
@@ -79,8 +80,8 @@ struct SourceBatchDiagnosticRunner: Sendable {
             step = SourceDiagnosticStep(
                 stage: .search,
                 status: isEmpty ? .warning : .passed,
-                requestSummary: "keyword=(cleanKeyword)&page=(page)",
-                responseSummary: isEmpty ? "搜索结果为空" : "搜索结果 (books.count) 条",
+                requestSummary: "keyword=" + cleanKeyword + "&page=" + String(page),
+                responseSummary: isEmpty ? "搜索结果为空" : "搜索结果 " + String(books.count) + " 条",
                 matchCount: books.count,
                 elapsedMilliseconds: elapsed,
                 failureClassification: isEmpty ? "empty-result" : nil
@@ -89,19 +90,54 @@ struct SourceBatchDiagnosticRunner: Sendable {
             step = SourceDiagnosticStep(
                 stage: .search,
                 status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search"),
-                requestSummary: "keyword=(cleanKeyword)&page=(page)",
+                requestSummary: "keyword=" + cleanKeyword + "&page=" + String(page),
                 responseSummary: error.displayMessage,
                 elapsedMilliseconds: elapsed,
                 failureClassification: String(describing: error)
             )
         }
 
-        return SourceDiagnosticReport(
+        return enrichedReport(SourceDiagnosticReport(
             sourceName: source.bookSourceName,
             sourceURL: source.bookSourceUrl,
             keyword: cleanKeyword,
             startedAt: startedAt,
             steps: [step]
+        ))
+    }
+
+    private func enrichedReport(_ report: SourceDiagnosticReport) -> SourceDiagnosticReport {
+        guard let provider = engine as? SourceDiagnosticEvidenceProvider else { return report }
+        let steps = report.steps.map { step in
+            guard let evidence = provider.diagnosticEvidence(sourceURL: report.sourceURL, stage: step.stage) else {
+                return step
+            }
+            return SourceDiagnosticStep(
+                id: step.id,
+                stage: step.stage,
+                status: step.status,
+                requestSummary: step.requestSummary,
+                responseSummary: step.responseSummary,
+                matchCount: step.matchCount,
+                elapsedMilliseconds: step.elapsedMilliseconds,
+                failureClassification: step.failureClassification,
+                requestMethod: evidence.requestMethod,
+                requestBody: evidence.requestBody,
+                requestHeaders: evidence.requestHeaders,
+                responseStatusCode: evidence.responseStatusCode,
+                responseHeaders: evidence.responseHeaders,
+                cookieSummary: evidence.cookieSummary,
+                finalURL: evidence.finalURL,
+                retryCount: 0
+            )
+        }
+        return SourceDiagnosticReport(
+            id: report.id,
+            sourceName: report.sourceName,
+            sourceURL: report.sourceURL,
+            keyword: report.keyword,
+            startedAt: report.startedAt,
+            steps: steps
         )
     }
 
@@ -180,7 +216,7 @@ struct SourceBatchDiagnosticRunner: Sendable {
             steps: [SourceDiagnosticStep(
                 stage: .search,
                 status: .warning,
-                requestSummary: "keyword=(keyword)",
+            requestSummary: "keyword=" + keyword,
                 responseSummary: message,
                 failureClassification: "timeout"
             )]
