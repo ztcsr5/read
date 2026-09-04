@@ -376,6 +376,7 @@ final class JSCoreRuntime {
             guard let runtime = weakSelf else { return [:] }
             let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
             if let response = runtime.executionContext.responseHandler?(requestText) {
+                runtime.executionContext.ingestResponse(response)
                 return [
                     "body": response.body,
                     "url": response.url.absoluteString,
@@ -390,6 +391,7 @@ final class JSCoreRuntime {
             guard let runtime = weakSelf else { return [] }
             let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
             if let response = runtime.executionContext.responseHandler?(requestText) {
+                runtime.executionContext.ingestResponse(response)
                 return response.data.map { NSNumber(value: $0) } as NSArray
             }
             let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
@@ -402,6 +404,7 @@ final class JSCoreRuntime {
         let post: @convention(block) (String, String, String) -> String = { url, body, headers in
             let requestText = weakSelf?.requestText(url: url, body: body, headers: headers, includeStoredBody: true) ?? "\(url)@Body:\(body)"
             if let response = weakSelf?.executionContext.responseHandler?(requestText) {
+                weakSelf?.executionContext.ingestResponse(response)
                 return response.body
             }
             return weakSelf?.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
@@ -410,6 +413,7 @@ final class JSCoreRuntime {
             guard let runtime = weakSelf else { return [:] }
             let requestText = runtime.requestText(url: url, body: body, headers: headers, includeStoredBody: true)
             if let response = runtime.executionContext.responseHandler?(requestText) {
+                runtime.executionContext.ingestResponse(response)
                 return [
                     "body": response.body,
                     "url": response.url.absoluteString,

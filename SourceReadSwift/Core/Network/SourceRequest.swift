@@ -56,10 +56,10 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
                 result[String(describing: item.key)] = String(describing: item.value)
             }
             let text = ResponseTextDecoder().decode(data: data, headers: headers, preferredCharset: request.expectedCharset)
-            let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: http.url ?? request.url)
-            if !responseCookies.isEmpty {
-                await cookieStore.store(responseCookies, for: http.url ?? request.url)
-            }
+            // Foundation does not reliably parse a combined Set-Cookie field
+            // when Expires contains a comma. Parse each cookie value first,
+            // then persist the complete response set for the next stage.
+            await cookieStore.storeSetCookieHeaders(headers, for: http.url ?? request.url)
             if (400...599).contains(http.statusCode) {
                 return .failure(.network("HTTP \(http.statusCode)"))
             }

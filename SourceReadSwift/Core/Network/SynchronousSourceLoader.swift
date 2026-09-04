@@ -8,14 +8,16 @@ struct SynchronousSourceLoader {
         source: BookSource,
         timeout: TimeInterval? = nil,
         cookieHeader: String? = nil,
-        persistentValues: [String: String] = [:]
+        persistentValues: [String: String] = [:],
+        persistentState: RulePersistentState? = nil
     ) -> String {
         loadResponse(
             urlText: urlText,
             source: source,
             timeout: timeout,
             cookieHeader: cookieHeader,
-            persistentValues: persistentValues
+            persistentValues: persistentValues,
+            persistentState: persistentState
         )?.body ?? ""
     }
 
@@ -24,7 +26,8 @@ struct SynchronousSourceLoader {
         source: BookSource,
         timeout: TimeInterval? = nil,
         cookieHeader: String? = nil,
-        persistentValues: [String: String] = [:]
+        persistentValues: [String: String] = [:],
+        persistentState: RulePersistentState? = nil
     ) -> SourceResponse? {
         // Keep the explicit callback cookie in lockstep with the persistent
         // state snapshot.  This matters for JS stages that receive a cookie
@@ -76,8 +79,24 @@ struct SynchronousSourceLoader {
         // JS callbacks use this synchronous loader. Mirror URLSessionSourceNetworkClient
         // by persisting response cookies so subsequent source requests (including
         // java.ajax chains) see the same session state.
-        let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: result.headers, for: responseURL)
+        let responseCookies = CookieHeaderParser.setCookieValues(from: result.headers).flatMap { value in
+            HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": value], for: responseURL)
+        }
         for cookie in responseCookies { HTTPCookieStorage.shared.setCookie(cookie) }
+        // Keep the JS-visible state and Foundation's cookie jar in sync.  A
+        // source may receive `sid=...` in one ajax call and interpolate the
+        // merged Cookie header into the very next request.
+        if let persistentState {
+            let previous = effectivePersistentValues["cookieHeader"]
+                ?? cookieHeader
+                ?? HTTPCookieStorage.shared.cookies(for: responseURL).map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+            let setCookie = CookieHeaderParser.setCookieValues(from: result.headers)
+                .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
+                .map { "\($0.name)=\($0.value)" }
+                .joined(separator: "; ")
+            let merged = CookieHeaderParser.merge(setCookie, into: previous)
+            if !merged.isEmpty { persistentState.put(merged, for: "cookieHeader") }
+        }
         let body = ResponseTextDecoder().decode(data: result.data, headers: result.headers, preferredCharset: request.expectedCharset)
         return SourceResponse(url: responseURL, statusCode: result.statusCode, headers: result.headers, body: body, data: result.data)
     }

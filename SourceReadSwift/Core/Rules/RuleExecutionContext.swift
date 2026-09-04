@@ -98,6 +98,20 @@ final class RuleExecutionContext: @unchecked Sendable {
 
     func persistentSnapshot() -> [String: String] { persistentState.snapshot() }
 
+    /// Import response cookies into the same state used by `java.put/get`.
+    /// This mirrors Android's source-scoped cookie jar and deliberately keeps
+    /// only cookie names/values in diagnostics; response bodies and secrets are
+    /// never logged here.
+    func ingestResponse(_ response: SourceResponse) {
+        let values = CookieHeaderParser.setCookieValues(from: response.headers)
+            .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
+            .map { "\($0.name)=\($0.value)" }
+        guard !values.isEmpty else { return }
+        let merged = CookieHeaderParser.merge(values.joined(separator: "; "), into: string(for: "cookieHeader").nilIfEmpty)
+        setValue(merged, for: "cookieHeader")
+        log("response cookies persisted: \(values.map { $0.split(separator: "=").first.map(String.init) ?? "" }.joined(separator: ","))")
+    }
+
     func log(_ message: String) {
         lock.lock()
         recordedLogs.append(message)

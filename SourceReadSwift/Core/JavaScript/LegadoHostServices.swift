@@ -37,12 +37,19 @@ final class LegadoHostServices {
 
     @discardableResult
     func setCookie(url rawURL: String, value: String) -> String {
-        executionContext.setValue(value, for: "cookieHeader")
-        guard let url = URL(string: rawURL), !value.isEmpty else { return value }
-        let headerFields = ["Set-Cookie": value]
-        HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
-            .forEach(HTTPCookieStorage.shared.setCookie)
-        return value
+        let existing = executionContext.string(for: "cookieHeader").nilIfEmpty
+        let pairs = CookieHeaderParser.setCookieValues(from: ["Set-Cookie": value])
+            .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+        let merged = CookieHeaderParser.merge(pairs.isEmpty ? value : pairs, into: existing)
+        executionContext.setValue(merged, for: "cookieHeader")
+        guard let url = URL(string: rawURL), !value.isEmpty else { return merged }
+        for item in CookieHeaderParser.setCookieValues(from: ["Set-Cookie": value]) {
+            HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": item], for: url)
+                .forEach(HTTPCookieStorage.shared.setCookie)
+        }
+        return merged
     }
 
     // MARK: - Text/encoding

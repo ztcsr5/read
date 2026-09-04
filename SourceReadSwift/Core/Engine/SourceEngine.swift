@@ -87,15 +87,18 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 source: source,
                 network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: executionState.snapshot()
+                persistentValues: executionState.snapshot(),
+                persistentState: executionState
             )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(
+            SynchronousSourceNetworkBridge.loadResponse(
                 urlText: encoded,
                 source: source,
+                network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: executionState.snapshot()
+                persistentValues: executionState.snapshot(),
+                persistentState: executionState
             )
         }
         await diagnostics.emit(.init(
@@ -107,7 +110,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         ))
 
         let searchUrl: String
-        switch searchURLResolver.resolve(source: source, keyword: keyword, page: page, persistentState: executionState) {
+        switch searchURLResolver.resolve(source: source, keyword: keyword, page: page, persistentState: executionState, network: network) {
         case .success(let value):
             searchUrl = value
         case .failure(let error):
@@ -124,7 +127,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "search.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleSearch])
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleSearch], network: network, stateOverride: executionState)
             guard !transformedResponse.body.isEmpty else {
                 let error = SourceEngineError.empty("\u{641c}\u{7d22}\u{54cd}\u{5e94}\u{4e3a}\u{7a7a}")
                 await emitFailure(error, stage: "search.empty", source: source, details: ["url": transformedResponse.url.absoluteString])
@@ -151,15 +154,18 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 source: source,
                 network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: persistentState(for: source).snapshot()
+                persistentValues: persistentState(for: source).snapshot(),
+                persistentState: persistentState(for: source)
             )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(
+            SynchronousSourceNetworkBridge.loadResponse(
                 urlText: encoded,
                 source: source,
+                network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: persistentState(for: source).snapshot()
+                persistentValues: persistentState(for: source).snapshot(),
+                persistentState: persistentState(for: source)
             )
         }
         let request = requestBuilder.buildPageRequest(
@@ -169,7 +175,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleBookInfo])
+            let state = persistentState(for: source)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleBookInfo], network: network, stateOverride: state)
             let parsed = BookDetailParser(executionContext: executionContext).parse(source: source, book: book, response: transformedResponse)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "detail.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
@@ -191,15 +198,18 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 source: source,
                 network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: persistentState(for: source).snapshot()
+                persistentValues: persistentState(for: source).snapshot(),
+                persistentState: persistentState(for: source)
             )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(
+            SynchronousSourceNetworkBridge.loadResponse(
                 urlText: encoded,
                 source: source,
+                network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: persistentState(for: source).snapshot()
+                persistentValues: persistentState(for: source).snapshot(),
+                persistentState: persistentState(for: source)
             )
         }
         let tocURL = book.tocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? book.bookUrl
@@ -210,7 +220,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc])
+            let state = persistentState(for: source)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: state)
             let parsed = parseChapterListPage(source: source, book: book, response: transformedResponse, executionContext: executionContext)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
@@ -241,15 +252,18 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
                 source: source,
                 network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: persistentState(for: source).snapshot()
+                persistentValues: persistentState(for: source).snapshot(),
+                persistentState: persistentState(for: source)
             )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(
+            SynchronousSourceNetworkBridge.loadResponse(
                 urlText: encoded,
                 source: source,
+                network: network,
                 cookieHeader: executionContext.string(for: "cookieHeader"),
-                persistentValues: persistentState(for: source).snapshot()
+                persistentValues: persistentState(for: source).snapshot(),
+                persistentState: persistentState(for: source)
             )
         }
         let request = requestBuilder.buildPageRequest(
@@ -260,7 +274,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let globalPurifyRules = await purifyRules()
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent])
+            let state = persistentState(for: source)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: state)
             let parsed = parseContentPage(
                 source: source,
                 chapter: chapter,
@@ -352,6 +367,7 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
     ) async -> Result<SourceResponse, SourceEngineError> {
         let primary = await network.load(request)
         if case .success(let response) = primary {
+            persistentState(for: source).ingestResponse(response)
             await emitResponseObservation(response, request: request, source: source, stage: stage)
             if !shouldUseWebViewFallback(source: source, response: response) {
                 return .success(response)
@@ -410,32 +426,60 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         return 3
     }
 
-    private func transformBodyIfNeeded(_ response: SourceResponse, source: BookSource, rules: [SourceRule?] = []) -> SourceResponse {
+    private func transformBodyIfNeeded(
+        _ response: SourceResponse,
+        source: BookSource,
+        rules: [SourceRule?] = [],
+        network: SourceNetworkClient? = nil,
+        stateOverride: RulePersistentState? = nil
+    ) -> SourceResponse {
         var scripts: [String] = []
         if let sourceScript = bodyJSScript(source) { scripts.append(sourceScript) }
         for rule in rules {
             if let script = bodyJSScript(rule) { scripts.append(script) }
         }
         guard !scripts.isEmpty else { return response }
-        let state = persistentState(for: source)
+        let state = stateOverride ?? persistentState(for: source)
         let context = RuleExecutionContext(
             initialValues: ["baseUrl": response.url.absoluteString, "source": source],
             persistentState: state,
             networkHandler: { encoded in
-                SynchronousSourceLoader().load(
+                if let network {
+                    return SynchronousSourceNetworkBridge.loadBody(
+                        urlText: encoded,
+                        source: source,
+                        network: network,
+                        cookieHeader: state.get("cookieHeader").nilIfEmpty,
+                        persistentValues: state.snapshot(),
+                        persistentState: state
+                    )
+                }
+                return SynchronousSourceLoader().load(
                     urlText: encoded,
                     source: source,
                     cookieHeader: state.get("cookieHeader").nilIfEmpty,
-                    persistentValues: state.snapshot()
+                    persistentValues: state.snapshot(),
+                    persistentState: state
                 )
             }
         )
         context.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(
+            if let network {
+                return SynchronousSourceNetworkBridge.loadResponse(
+                    urlText: encoded,
+                    source: source,
+                    network: network,
+                    cookieHeader: context.string(for: "cookieHeader"),
+                    persistentValues: state.snapshot(),
+                    persistentState: state
+                )
+            }
+            return SynchronousSourceLoader().loadResponse(
                 urlText: encoded,
                 source: source,
                 cookieHeader: context.string(for: "cookieHeader"),
-                persistentValues: state.snapshot()
+                persistentValues: state.snapshot(),
+                persistentState: state
             )
         }
         var output = response.body
@@ -492,17 +536,19 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         source: BookSource,
         network: SourceNetworkClient,
         cookieHeader: String? = nil,
-        persistentValues: [String: String] = [:]
+        persistentValues: [String: String] = [:],
+        persistentState: RulePersistentState? = nil
     ) -> String {
         // JavaScriptCore callbacks are synchronous. Calling async `network.load` and
         // waiting on a semaphore can deadlock when the callback is already running on
         // the cooperative executor, so use the dedicated synchronous loader here.
-        _ = network // kept in the signature for source-engine injection compatibility
-        return SynchronousSourceLoader().load(
+        return SynchronousSourceNetworkBridge.loadBody(
             urlText: encoded,
             source: source,
+            network: network,
             cookieHeader: cookieHeader,
-            persistentValues: persistentValues
+            persistentValues: persistentValues,
+            persistentState: persistentState
         )
     }
 
@@ -531,7 +577,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.next.load") {
             case .success(let response):
-                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc])
+                let state = persistentState(for: source)
+                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: state)
                 switch parseChapterListPage(source: source, book: book, response: transformedResponse, executionContext: executionContext) {
                 case .success(let page):
                     let offset = chapters.count
@@ -589,7 +636,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.next.load") {
             case .success(let response):
-                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent])
+                let state = persistentState(for: source)
+                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: state)
                 switch parseContentPage(
                     source: source,
                     chapter: chapter,

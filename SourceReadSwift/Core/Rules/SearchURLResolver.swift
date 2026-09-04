@@ -3,7 +3,13 @@ import Foundation
 struct SearchURLResolver {
     private let ruleResolver = LegadoRuleResolver()
 
-    func resolve(source: BookSource, keyword: String, page: Int, persistentState: RulePersistentState = RulePersistentState()) -> Result<String, SourceEngineError> {
+    func resolve(
+        source: BookSource,
+        keyword: String,
+        page: Int,
+        persistentState: RulePersistentState = RulePersistentState(),
+        network: SourceNetworkClient? = nil
+    ) -> Result<String, SourceEngineError> {
         guard let searchUrl = source.searchUrl, !searchUrl.isEmpty else {
             return .failure(.invalidSource("searchUrl \u{4e3a}\u{7a7a}"))
         }
@@ -20,14 +26,14 @@ struct SearchURLResolver {
         let trimmed = interpolated.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("@js:") {
             let script = String(trimmed.dropFirst(4))
-            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState)
+            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState, network: network)
         }
 
         if trimmed.hasPrefix("<js>"), trimmed.hasSuffix("</js>") {
             let start = trimmed.index(trimmed.startIndex, offsetBy: 4)
             let end = trimmed.index(trimmed.endIndex, offsetBy: -5)
             let script = String(trimmed[start..<end])
-            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState)
+            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState, network: network)
         }
 
         if trimmed.contains("<js>"), trimmed.contains("</js>") {
@@ -35,7 +41,8 @@ struct SearchURLResolver {
                 trimmed,
                 source: source,
                 variables: scriptVariables,
-                persistentState: persistentState
+                persistentState: persistentState,
+                network: network
             )
         }
 
@@ -46,13 +53,14 @@ struct SearchURLResolver {
         _ text: String,
         source: BookSource,
         variables: [String: Any],
-        persistentState: RulePersistentState
+        persistentState: RulePersistentState,
+        network: SourceNetworkClient?
     ) -> Result<String, SourceEngineError> {
         var output = text
         while let startRange = output.range(of: "<js>"),
               let endRange = output.range(of: "</js>", range: startRange.upperBound..<output.endIndex) {
             let script = String(output[startRange.upperBound..<endRange.lowerBound])
-            switch evaluateScript(script, source: source, variables: variables, persistentState: persistentState) {
+            switch evaluateScript(script, source: source, variables: variables, persistentState: persistentState, network: network) {
             case .success(let value):
                 output.replaceSubrange(startRange.lowerBound..<endRange.upperBound, with: value)
             case .failure(let error):
@@ -66,42 +74,76 @@ struct SearchURLResolver {
         _ script: String,
         source: BookSource,
         variables: [String: Any],
-        persistentState: RulePersistentState
+        persistentState: RulePersistentState,
+        network: SourceNetworkClient?
     ) -> Result<String, SourceEngineError> {
-        let direct = makeRuntime(source: source, persistentState: persistentState).evaluate(script, variables: variables)
+        let direct = makeRuntime(source: source, persistentState: persistentState, network: network).evaluate(script, variables: variables)
         if case .failure(.javascript) = direct, script.contains("return") {
-            return makeRuntime(source: source, persistentState: persistentState).evaluate("(function(){\(script)})()", variables: variables)
+            return makeRuntime(source: source, persistentState: persistentState, network: network).evaluate("(function(){\(script)})()", variables: variables)
         }
         return direct
     }
 
-    private func makeRuntime(source: BookSource, persistentState: RulePersistentState) -> JSCoreRuntime {
+    private func makeRuntime(source: BookSource, persistentState: RulePersistentState, network: SourceNetworkClient?) -> JSCoreRuntime {
         let context = RuleExecutionContext(
             initialValues: ["source": source, "baseUrl": source.bookSourceUrl],
             persistentState: persistentState,
             networkHandler: { urlText in
-                SynchronousSourceLoader().load(
+                if let network {
+                    return SynchronousSourceNetworkBridge.loadBody(
+                        urlText: urlText,
+                        source: source,
+                        network: network,
+                        cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
+                        persistentValues: persistentState.snapshot(),
+                        persistentState: persistentState
+                    )
+                }
+                return SynchronousSourceLoader().load(
                     urlText: urlText,
                     source: source,
                     cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
-                    persistentValues: persistentState.snapshot()
+                    persistentValues: persistentState.snapshot(),
+                    persistentState: persistentState
                 )
             },
             responseHandler: { urlText in
-                SynchronousSourceLoader().loadResponse(
+                if let network {
+                    return SynchronousSourceNetworkBridge.loadResponse(
+                        urlText: urlText,
+                        source: source,
+                        network: network,
+                        cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
+                        persistentValues: persistentState.snapshot(),
+                        persistentState: persistentState
+                    )
+                }
+                return SynchronousSourceLoader().loadResponse(
                     urlText: urlText,
                     source: source,
                     cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
-                    persistentValues: persistentState.snapshot()
+                    persistentValues: persistentState.snapshot(),
+                    persistentState: persistentState
                 )
             }
         )
         return JSCoreRuntime(ajaxHandler: { urlText in
-            SynchronousSourceLoader().load(
+            if let network {
+                return SynchronousSourceNetworkBridge.loadBody(
+                    urlText: urlText,
+                    source: source,
+                    network: network,
+                    cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
+                    persistentValues: persistentState.snapshot(),
+                    persistentState: persistentState
+                )
+            }
+            return SynchronousSourceLoader().load(
                 urlText: urlText,
                 source: source,
                 cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
-                persistentValues: persistentState.snapshot()
+                persistentValues: persistentState.snapshot(),
+                persistentState: persistentState
             )
         }, executionContext: context)
     }
