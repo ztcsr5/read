@@ -269,7 +269,7 @@ final class LegadoHostServices {
                 let status = destination.withUnsafeMutableBytes { destinationBuffer -> compression_status in
                     stream.dst_ptr = destinationBuffer.bindMemory(to: UInt8.self).baseAddress!
                     stream.dst_size = destinationBuffer.count
-                    return compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE))
+                    return compression_stream_process(&stream, 1)
                 }
                 let produced = destination.count - stream.dst_size
                 if produced > 0 {
