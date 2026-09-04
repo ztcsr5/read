@@ -108,7 +108,9 @@ final class AppDataBackupTests: XCTestCase {
             rssState: RSSArticleStateSnapshot(readIDs: [], favoriteIDs: []),
             readerPreferences: [:]
         )
-        let data = try JSONEncoder().encode(snapshot)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
         XCTAssertThrowsError(try AppDataBackupCodec.decode(
             data: data,
             fallbackSources: SourceLibrarySnapshot(sources: []),
