@@ -194,26 +194,35 @@ final class LegadoHostServices {
     func inflate(_ value: Any?) -> NSArray {
         let input = bytes(from: value)
         guard !input.isEmpty else { return [] }
-        var capacity = max(1024, input.count * 4)
-        for _ in 0..<8 {
-            var output = Array(repeating: UInt8(0), count: capacity)
-            let decoded = input.withUnsafeBytes { source in
-                output.withUnsafeMutableBytes { destination in
-                    compression_decode_buffer(
-                        destination.bindMemory(to: UInt8.self).baseAddress!,
-                        capacity,
-                        source.bindMemory(to: UInt8.self).baseAddress!,
-                        input.count,
-                        nil,
-                        COMPRESSION_ZLIB
-                    )
+        // Compression.framework accepts the zlib-wrapped payload used by
+        // Legado.  A few sources incorrectly strip or retain the wrapper, so
+        // try both representations before reporting a decode miss.
+        var candidates = [input]
+        if input.count > 6, input[0] == 0x78 {
+            candidates.append(Array(input.dropFirst(2).dropLast(4)))
+        }
+        for candidate in candidates where !candidate.isEmpty {
+            var capacity = max(1024, candidate.count * 4)
+            for _ in 0..<8 {
+                var output = Array(repeating: UInt8(0), count: capacity)
+                let decoded = candidate.withUnsafeBytes { source in
+                    output.withUnsafeMutableBytes { destination in
+                        compression_decode_buffer(
+                            destination.bindMemory(to: UInt8.self).baseAddress!,
+                            capacity,
+                            source.bindMemory(to: UInt8.self).baseAddress!,
+                            candidate.count,
+                            nil,
+                            COMPRESSION_ZLIB
+                        )
+                    }
                 }
+                if decoded > 0 {
+                    output.removeLast(output.count - decoded)
+                    return output.map { NSNumber(value: $0) } as NSArray
+                }
+                capacity *= 2
             }
-            if decoded > 0 {
-                output.removeLast(output.count - decoded)
-                return output.map { NSNumber(value: $0) } as NSArray
-            }
-            capacity *= 2
         }
         executionContext.log("InflaterInputStream failed to decode payload")
         return []

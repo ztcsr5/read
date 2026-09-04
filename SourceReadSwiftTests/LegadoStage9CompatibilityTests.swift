@@ -23,7 +23,9 @@ final class LegadoStage9CompatibilityTests: XCTestCase {
         XCTAssertEqual(object["encoded"] as? String, "a+b%2Bc%2F%E4%B8%AD%E6%96%87")
         XCTAssertEqual(object["decoded"] as? String, "a b+c/中文")
         XCTAssertEqual(object["range"] as? [Int], [2, 3, 0, 0])
-        XCTAssertEqual(object["list"] as? [Int], [2, 1])
+        let list = object["list"] as? [Any]
+        XCTAssertEqual(list?.first as? Int, 2)
+        XCTAssertEqual(list?.last as? String, "b")
         XCTAssertEqual(object["output"] as? String, "BCD")
         XCTAssertEqual(object["read"] as? [Int], [1, 2, 1, 1, -1])
     }

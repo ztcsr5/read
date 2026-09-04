@@ -1908,6 +1908,9 @@ final class JSCoreRuntime {
             return { encodeToString: function(value) {
               var bytes = value && value.length != null && typeof value !== 'string' ? value : __native_stringToBytes(String(value == null ? '' : value));
               return __native_base64EncodeBytes(bytes);
+            }, encode: function(value) {
+              var bytes = value && value.length != null && typeof value !== 'string' ? value : __native_stringToBytes(String(value == null ? '' : value));
+              return __asJavaList(Array.prototype.slice.call(bytes));
             } };
           },
           getDecoder: function() {
