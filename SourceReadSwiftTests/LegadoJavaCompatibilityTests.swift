@@ -132,7 +132,7 @@ final class LegadoJavaCompatibilityTests: XCTestCase {
         guard case .success(let value) = result,
               let data = value.data(using: .utf8),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return XCTFail("expected document/response result")
+            return XCTFail("expected document/response result: \(String(describing: result))")
         }
         XCTAssertEqual(object["location"] as? String, "https://fixture.local/book/")
         XCTAssertEqual(object["title"] as? String, "Fixture")
