@@ -178,7 +178,8 @@ final class RulePersistentState: @unchecked Sendable {
         guard !values.isEmpty else { return [] }
         let incoming = values.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
         lock.lock()
-        let merged = CookieHeaderParser.merge(incoming, into: self.values["cookieHeader"].nilIfEmpty)
+        let existing = self.values["cookieHeader"] ?? ""
+        let merged = CookieHeaderParser.merge(incoming, into: existing.isEmpty ? nil : existing)
         if !merged.isEmpty { self.values["cookieHeader"] = merged }
         lock.unlock()
         return values.map(\.name)
