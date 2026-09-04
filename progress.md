@@ -1525,3 +1525,21 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the Stage 11 commit to restore the prior diagnostic model, Source Manager export surface and fixture test set.
+
+## 2026-09-05 - Stage 11: Legado fixture corpus and diagnostic export (complete)
+
+### CI closure
+
+- iOS build/XCTest: [run 33927521894](https://github.com/ztcsr5/read/actions/runs/33927521894) — success (Run 256).
+- Unsigned IPA: [run 33927521929](https://github.com/ztcsr5/read/actions/runs/33927521929) — success (Run 253).
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9957418426`, displayed size 6.02 MB.
+- GitHub artifact package digest: `d0d3d45b0cc7d486105900aee1d0c4696e60989e73a8b506f2ad3054d7f30496` (this is the artifact package digest, not an internal IPA SHA-256).
+
+### Closure
+
+- Stage 11 is complete. The offline fixture corpus, Search → Detail → TOC → Content regression chain, structured diagnostic metadata, redacted JSON/text batch export and Source Manager export actions are now covered by the green CI build/test/package gates.
+- Real public-source diversity, same-network Web 写源 behavior and sustained ProMotion frame pacing remain device/source checks and are not overstated as CI-proven.
+
+### Rollback
+
+- Revert the Stage 11 implementation commits and this closure entry together to restore the prior diagnostic model, Source Manager export surface and fixture test set.
