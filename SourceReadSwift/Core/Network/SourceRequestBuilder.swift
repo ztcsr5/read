@@ -372,7 +372,9 @@ struct SourceRequestBuilder {
         persistentValues: [String: String] = [:]
     ) -> Data? {
         if let text = value as? String {
-            let interpolated = interpolate(interpolatePersistentValues(text, values: persistentValues), keyword: keyword, page: page)
+            // Preserve persistent placeholders until the body boundary so
+            // form values are encoded exactly once (JSON stays untouched).
+            let interpolated = interpolate(text, keyword: keyword, page: page)
             return Data(interpolateBodyText(interpolated, values: persistentValues, headers: headers).utf8)
         }
         if let object = value as? [String: Any] {

@@ -47,6 +47,24 @@ final class SourceRequestBuilderDynamicStateTests: XCTestCase {
         )
     }
 
+    func testPersistentValuesEncodeTextSourceOptionBody() throws {
+        let source = BookSource(
+            bookSourceName: "Form dynamic fixture",
+            bookSourceUrl: "https://fixture.example/",
+            customConfig: #"{"method":"POST","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"q={{cursor}}&token={{token}}"}"#
+        )
+        let request = SourceRequestBuilder().buildPageRequest(
+            source: source,
+            urlText: "https://fixture.example/api",
+            persistentValues: ["cursor": "p 2&x", "token": "abc"]
+        )
+
+        XCTAssertEqual(
+            String(data: request.body ?? Data(), encoding: .utf8),
+            "q=p%202%26x&token=abc"
+        )
+    }
+
     func testDynamicCookieOverridesSourceCookieButDirectiveCookieWins() throws {
         let source = BookSource(
             bookSourceName: "Cookie precedence fixture",
