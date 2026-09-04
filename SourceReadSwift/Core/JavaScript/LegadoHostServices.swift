@@ -505,7 +505,7 @@ final class LegadoHostServices {
                         Int(jsValue.forProperty("count")?.toInt32() ?? 0)
                     )
                 )
-                if length == 0, let object = jsValue.toObject() as? NSArray, !object.isEmpty {
+                if length == 0, let object = jsValue.toObject() as? NSArray, object.count > 0 {
                     return bytes(from: object)
                 }
                 var output: [UInt8] = []

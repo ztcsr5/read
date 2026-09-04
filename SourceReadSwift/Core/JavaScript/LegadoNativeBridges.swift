@@ -300,7 +300,7 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
                     Int(value.forProperty("count")?.toInt32() ?? 0)
                 )
             )
-            if length == 0, let object = value.toObject() as? NSArray, !object.isEmpty {
+            if length == 0, let object = value.toObject() as? NSArray, object.count > 0 {
                 return object
             }
             return (0..<length).map { nativeValue(value.atIndex($0)) } as NSArray
