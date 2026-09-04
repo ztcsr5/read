@@ -15,11 +15,18 @@ struct ContentParser {
         response: SourceResponse,
         globalPurifyRules: [String] = []
     ) -> Result<ChapterContent, SourceEngineError> {
-        let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if body.first == "{" || body.first == "[" {
-            return parseJSON(source: source, chapter: chapter, response: response, globalPurifyRules: globalPurifyRules)
+        let body = ResponseFormatDetector.normalizedBody(response.body)
+        let normalizedResponse = SourceResponse(
+            url: response.url,
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: body,
+            data: response.data
+        )
+        if ResponseFormatDetector.prefersJSON(body: body, headers: response.headers) {
+            return parseJSON(source: source, chapter: chapter, response: normalizedResponse, globalPurifyRules: globalPurifyRules)
         }
-        return parseHTML(source: source, chapter: chapter, response: response, globalPurifyRules: globalPurifyRules)
+        return parseHTML(source: source, chapter: chapter, response: normalizedResponse, globalPurifyRules: globalPurifyRules)
     }
 
     private func parseHTML(
@@ -70,8 +77,7 @@ struct ContentParser {
         response: SourceResponse,
         globalPurifyRules: [String]
     ) -> Result<ChapterContent, SourceEngineError> {
-        guard let data = response.body.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) else {
+        guard let object = ResponseFormatDetector.jsonObject(from: response.body) else {
             return .failure(.rule("JSON 解析失败"))
         }
         let rule = source.ruleContent

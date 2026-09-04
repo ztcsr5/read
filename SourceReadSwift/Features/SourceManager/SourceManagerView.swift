@@ -1264,6 +1264,9 @@ struct SourceManagerView: View {
         }
     }
 
+    /// Runs the same Search → Detail → TOC → Content pipeline used by the
+    /// visual diagnostic sheet. Keeping one execution path prevents the test
+    /// button from reporting a different result than source-detail history.
     @MainActor
     private func runSourceTest() async {
         guard var state = sourceTest else { return }
@@ -1277,114 +1280,33 @@ struct SourceManagerView: View {
         state.output = sourceTestHeader(source: state.source, keyword: keyword)
         sourceTest = state
 
-        let engine = appState.engine
-        var loginNote = ""
-        if state.source.loginCheckJs?.nilIfEmpty != nil {
-            let loginResult = await AsyncTimeout.run(seconds: 10) {
-                await engine.verifyLogin(source: state.source)
-            } ?? .failure(.network("Login check timed out"))
-            switch loginResult {
-            case .success(let verification):
-                let health = verification.status.healthStatus
-                loginNote = "\n[\(verification.status.displayTitle)] 登录检查：\(verification.message)（Cookie：\(verification.cookiePresent ? "present" : "absent")）"
-                appState.sourceDiagnosticHistoryStore.record(
-                    source: state.source,
-                    stage: "login",
-                    status: health,
-                    message: verification.message,
-                    resultCount: 0
-                )
-            case .failure(let error):
-                loginNote = "\n[WARN] 登录检查失败：\(error.displayMessage)"
-                appState.sourceDiagnosticHistoryStore.record(
-                    source: state.source,
-                    stage: "login",
-                    status: .warning,
-                    message: error.displayMessage,
-                    resultCount: 0
-                )
-            }
-        }
-        let searchStartedAt = Date()
-        let result = await AsyncTimeout.run(seconds: 10) {
-            await engine.searchBooks(source: state.source, keyword: keyword, page: 1)
-        } ?? .failure(.network("Search timed out"))
-        guard var latest = sourceTest else { return }
+        let execution = await appState.engine.runPipelineReport(source: state.source, keyword: keyword, page: 1, timeout: 10)
+        guard var latest = sourceTest, latest.source.bookSourceUrl == state.source.bookSourceUrl else { return }
         latest.isRunning = false
-        switch result {
-        case .success(let books):
-            let preview = books.prefix(10).enumerated().map { index, book in
-                "\(index + 1). \(book.name) | \(book.author ?? "未知作者")\n   \(book.bookUrl)"
-            }.joined(separator: "\n")
-            var output = sourceTestHeader(source: state.source, keyword: keyword) + loginNote
-            output += "\n\n[PASS] 搜索：\(books.count) 条结果（\(elapsedMilliseconds(since: searchStartedAt))）"
+        var output = sourceTestHeader(source: state.source, keyword: keyword)
+        for step in execution.result.steps {
+            let status = step.status == .passed ? "PASS" : (step.status == .warning ? "WARN" : "FAIL")
+            let summary = step.responseSummary?.nilIfEmpty ?? step.failureClassification?.nilIfEmpty ?? "无摘要"
+            let elapsed = step.elapsedMilliseconds.map { "（耗时 \($0) ms）" } ?? ""
+            output += "\n[\(status)] \(step.stage.title)：\(summary)\(elapsed)"
             appState.sourceDiagnosticHistoryStore.record(
                 source: state.source,
-                stage: "search",
-                status: books.isEmpty ? .warning : .passed,
-                message: books.isEmpty ? "搜索请求成功但列表为空" : "搜索通过：\(books.count) 条结果",
-                elapsedMilliseconds: Int(Date().timeIntervalSince(searchStartedAt) * 1_000),
-                resultCount: books.count
+                stage: step.stage.rawValue,
+                status: step.status,
+                message: summary,
+                elapsedMilliseconds: step.elapsedMilliseconds,
+                resultCount: step.matchCount
             )
-            if preview.isEmpty {
-                output += "\n[WARN] 搜索请求成功但列表为空。建议检查 keyword/page 占位符、搜索规则列表选择器或接口返回结构。"
-            } else {
-                output += "\n\n\(preview)"
-            }
-            if let first = books.first {
-                output += "\n\n正在验证首条结果详情..."
-                latest.output = output
-                sourceTest = latest
-                let detailStartedAt = Date()
-                let detailResult = await AsyncTimeout.run(seconds: 10) {
-                    await engine.getBookDetail(source: state.source, book: first)
-                } ?? .failure(.network("Detail test timed out"))
-                switch detailResult {
-                case .success(let detail):
-                    output += "\n[PASS] 详情：\(detail.name)（\(elapsedMilliseconds(since: detailStartedAt))）"
-                    let chapterStartedAt = Date()
-                    let chapterResult = await AsyncTimeout.run(seconds: 10) {
-                        await engine.getChapterList(source: state.source, book: detail)
-                    } ?? .failure(.network("Chapter test timed out"))
-                    switch chapterResult {
-                    case .success(let chapters):
-                        output += "\n[PASS] 目录：\(chapters.count) 章（\(elapsedMilliseconds(since: chapterStartedAt))）"
-                        if let chapter = chapters.first {
-                            let contentStartedAt = Date()
-                            let contentResult = await AsyncTimeout.run(seconds: 10) {
-                                await engine.getContent(source: state.source, chapter: chapter)
-                            } ?? .failure(.network("Content test timed out"))
-                            switch contentResult {
-                            case .success(let content):
-                                output += "\n[PASS] 正文：\(content.paragraphs.count) 段（\(elapsedMilliseconds(since: contentStartedAt))）"
-                                appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "content", status: content.paragraphs.isEmpty ? .warning : .passed, message: "正文：\(content.paragraphs.count) 段", elapsedMilliseconds: Int(Date().timeIntervalSince(contentStartedAt) * 1_000), resultCount: content.paragraphs.count)
-                                if content.paragraphs.isEmpty {
-                                    output += "\n[WARN] 正文解析为空。建议检查 ruleContent.content / content 正则清洗是否过度。"
-                                } else {
-                                    output += "\n\n首段预览：\(content.paragraphs.first?.prefix(120) ?? "")"
-                                }
-                            case .failure(let error):
-                                output += sourceTestFailure(stage: "正文", error: error)
-                                appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "content", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(contentStartedAt) * 1_000))
-                            }
-                        } else {
-                            output += "\n[WARN] 目录为空，无法验证正文。建议检查 ruleToc.chapterList / chapterName / chapterUrl。"
-                        }
-                    case .failure(let error):
-                        output += sourceTestFailure(stage: "目录", error: error)
-                        appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "toc", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(chapterStartedAt) * 1_000))
-                    }
-                case .failure(let error):
-                    output += sourceTestFailure(stage: "详情", error: error)
-                    appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "detail", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(detailStartedAt) * 1_000))
-                }
-            }
-            latest.output = output
-        case .failure(let error):
-            latest.output = sourceTestHeader(source: state.source, keyword: keyword) + loginNote
-                + sourceTestFailure(stage: "搜索", error: error)
-            appState.sourceDiagnosticHistoryStore.record(source: state.source, stage: "search", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search"), message: error.displayMessage, elapsedMilliseconds: Int(Date().timeIntervalSince(searchStartedAt) * 1_000))
         }
+        if execution.isSuccess {
+            output += "\n\n[PASS] 完整链路通过：搜索 → 详情 → 目录 → 正文"
+            if let first = execution.result.content?.paragraphs.first {
+                output += "\n首段预览：\(first.prefix(120))"
+            }
+        } else if let error = execution.error {
+            output += sourceTestFailure(stage: execution.result.report.firstFailure?.stage.title ?? "书源", error: error)
+        }
+        latest.output = output
         sourceTest = latest
     }
 

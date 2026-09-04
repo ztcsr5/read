@@ -20,11 +20,12 @@ struct ChapterListParser {
     }
 
     func parsePage(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<ChapterListPage, SourceEngineError> {
-        let body = response.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if body.first == "{" || body.first == "[" {
-            return parseJSON(source: source, book: book, response: response)
+        let normalized = ResponseFormatDetector.normalizedBody(response.body)
+        let normalizedResponse = SourceResponse(url: response.url, statusCode: response.statusCode, headers: response.headers, body: normalized, data: response.data)
+        if ResponseFormatDetector.prefersJSON(body: normalized, headers: response.headers) {
+            return parseJSON(source: source, book: book, response: normalizedResponse)
         }
-        return parseHTML(source: source, book: book, response: response)
+        return parseHTML(source: source, book: book, response: normalizedResponse)
     }
 
     private func parseHTML(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<ChapterListPage, SourceEngineError> {
@@ -78,8 +79,7 @@ struct ChapterListParser {
     }
 
     private func parseJSON(source: BookSource, book: BookDetail, response: SourceResponse) -> Result<ChapterListPage, SourceEngineError> {
-        guard let data = response.body.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) else {
+        guard let object = ResponseFormatDetector.jsonObject(from: response.body) else {
             return .failure(.rule("JSON parse failed"))
         }
         let bookMap: [String: Any] = [

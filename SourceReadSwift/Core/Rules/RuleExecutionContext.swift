@@ -12,7 +12,7 @@ final class RuleExecutionContext: @unchecked Sendable {
 
     private let lock = NSRecursiveLock()
     private var values: [String: Any] = [:]
-    private var persistentValues: [String: String] = [:]
+    private let persistentState: RulePersistentState
     private var recordedLogs: [String] = []
 
     var networkHandler: NetworkHandler?
@@ -21,6 +21,7 @@ final class RuleExecutionContext: @unchecked Sendable {
 
     init(
         initialValues: [String: Any] = [:],
+        persistentState: RulePersistentState = RulePersistentState(),
         networkHandler: NetworkHandler? = nil,
         responseHandler: ResponseHandler? = nil,
         logHandler: LogHandler? = nil
@@ -28,6 +29,7 @@ final class RuleExecutionContext: @unchecked Sendable {
         self.networkHandler = networkHandler
         self.responseHandler = responseHandler
         self.logHandler = logHandler
+        self.persistentState = persistentState
         bind(initialValues)
     }
 
@@ -67,23 +69,19 @@ final class RuleExecutionContext: @unchecked Sendable {
     @discardableResult
     func put(_ value: Any?, for key: String) -> String {
         let text = Self.bridgeString(value)
-        lock.lock()
-        persistentValues[key] = text
-        lock.unlock()
+        persistentState.put(text, for: key)
         return text
     }
 
     func get(_ key: String) -> String {
-        lock.lock()
-        defer { lock.unlock() }
-        return persistentValues[key] ?? ""
+        persistentState.get(key)
     }
 
     func remove(_ key: String) {
-        lock.lock()
-        persistentValues.removeValue(forKey: key)
-        lock.unlock()
+        persistentState.remove(key)
     }
+
+    func persistentSnapshot() -> [String: String] { persistentState.snapshot() }
 
     func log(_ message: String) {
         lock.lock()
@@ -115,5 +113,32 @@ final class RuleExecutionContext: @unchecked Sendable {
             return text
         }
         return String(describing: value)
+    }
+}
+
+/// Synchronous, lock-protected storage shared by all JS contexts used for one
+/// source.  Legado sources commonly `java.put` a nonce/cookie in search and
+/// read it again from detail or content; creating a fresh JS context per stage
+/// must not erase those values.
+final class RulePersistentState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String] = [:]
+
+    func put(_ value: String, for key: String) {
+        lock.lock(); values[key] = value; lock.unlock()
+    }
+
+    func get(_ key: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        return values[key] ?? ""
+    }
+
+    func remove(_ key: String) {
+        lock.lock(); values.removeValue(forKey: key); lock.unlock()
+    }
+
+    func snapshot() -> [String: String] {
+        lock.lock(); defer { lock.unlock() }
+        return values
     }
 }

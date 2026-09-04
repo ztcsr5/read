@@ -1400,3 +1400,32 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert `408a8c4..d39507c` together to restore the pre-pipeline source execution path and request-directive behavior.
+## 2026-09-04 - Stage 8: Legado mixed-response and cross-stage JS state hardening
+
+### Implemented
+
+- Added a shared `ResponseFormatDetector` for UTF-8 BOM, XSSI guards, `<pre>` JSON, embedded balanced JSON and incorrect content-type responses; Search, Detail, TOC and Content parsers now use the same decision path.
+- Added a balanced JSON scanner that respects nested objects/arrays, quoted strings and escaped quotes instead of truncating on the last closing bracket.
+- Added source-scoped `RulePersistentState` shared across Search -> Detail -> TOC -> Content and login JS contexts, so `java.put/get`, source variables and dynamic nonce values survive stage boundaries.
+- Extended `bodyJs` execution to source-level and rule-level transforms, including Search/Detail/TOC/Content and paginated follow-up pages; removed the duplicate legacy source-test path in Source Manager.
+- Added response-aware JS callbacks to search URL evaluation and propagated the current cookie header into synchronous JS requests.
+- Hardened WebView fallback cancellation, navigation-delay handling, cookie sync and the bounded 30-second timeout so cancelled diagnostics cannot leave a continuation hanging.
+
+### Tests added
+
+- `ResponseFormatDetectorTests`: BOM, wrong content type, XSSI, `<pre>`, embedded balanced JSON and malformed/ordinary HTML behavior.
+- `SourceEngineBodyJSTests`: source/rule `bodyJs` ordering and `java.put/get` state surviving Search into Detail.
+
+### Verification
+
+- Node bridge harnesses still pass (`advanced-bridge-harness.js`, `response-harness.js`, `prelude-check.js`).
+- `git diff --check` passes with only the repository's existing Windows LF-to-CRLF normalization warnings.
+- Windows has no Swift/Xcode/UIKit runtime; GitHub Actions remains the authoritative compile/XCTest and unsigned-IPA gate.
+
+### Next
+
+- Commit and push this Stage 8 pass once, wait for both Actions workflows, inspect compiler/test annotations and record the unsigned IPA size/hash before moving to the next large source-compatibility phase.
+
+### Rollback
+
+- Revert the single Stage 8 commit to restore the prior parser format detection, per-stage JS state, body transforms, WebView fallback lifecycle and Source Manager test path.

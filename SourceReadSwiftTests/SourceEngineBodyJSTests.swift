@@ -107,6 +107,70 @@ final class SourceEngineBodyJSTests: XCTestCase {
         XCTAssertEqual(content.paragraphs, ["BodyJSWithSource"])
     }
 
+    func testSourceAndRuleBodyJsRunInOrder() async throws {
+        let source = BookSource(
+            bookSourceName: "BodyJSOrder",
+            bookSourceUrl: "https://source.example.com",
+            ruleContent: SourceRule(fields: [
+                "content": "#content@text",
+                "bodyJs": "return result.replace('[source]', '[source] [rule]')"
+            ]),
+            raw: ["bodyJs": "return result.replace('正文', '正文 [source]')"]
+        )
+        let chapter = BookChapter(
+            title: "第一章",
+            url: "https://source.example.com/chapter/1",
+            bookUrl: "https://source.example.com/book",
+            index: 0,
+            isVip: false
+        )
+        let network = StaticSourceNetworkClient(body: "<html><body><div id='content'>正文</div></body></html>")
+        let engine = LegadoSourceEngine(network: network)
+
+        let result = await engine.getContent(source: source, chapter: chapter)
+
+        guard case .success(let content) = result else {
+            return XCTFail("expected content")
+        }
+        XCTAssertEqual(content.paragraphs, ["正文 [source] [rule]"])
+    }
+
+    func testJavaPutStateSurvivesSearchIntoDetailBodyJs() async throws {
+        let source = BookSource(
+            bookSourceName: "PersistentState",
+            bookSourceUrl: "https://source.example.com",
+            searchUrl: "@js:java.put('token', 'abc'); return 'https://source.example.com/search'",
+            ruleSearch: SourceRule(fields: [
+                "bookList": ".book",
+                "name": "h2@text",
+                "bookUrl": "a@href"
+            ]),
+            ruleBookInfo: SourceRule(fields: [
+                "name": "h1@text",
+                "bodyJs": "return result.replace('PLACEHOLDER', java.get('token'))"
+            ])
+        )
+        let network = RecordingSourceNetworkClient(responses: [
+            "https://source.example.com/search": "<html><body><div class='book'><h2>Book</h2><a href='/book/1'>open</a></div></body></html>",
+            "https://source.example.com/book/1": "<html><body><h1>PLACEHOLDER</h1></body></html>"
+        ])
+        let engine = LegadoSourceEngine(network: network)
+
+        let booksResult = await engine.searchBooks(source: source, keyword: "book", page: 1)
+        guard case .success(let books) = booksResult, let first = books.first else {
+            return XCTFail("expected search result")
+        }
+        let detailResult = await engine.getBookDetail(source: source, book: first)
+        guard case .success(let detail) = detailResult else {
+            return XCTFail("expected detail result")
+        }
+        XCTAssertEqual(detail.name, "abc")
+        XCTAssertEqual(network.requestedURLs, [
+            "https://source.example.com/search",
+            "https://source.example.com/book/1"
+        ])
+    }
+
     func testChapterListUsesBookDetailTocUrlWhenPresent() async throws {
         let source = BookSource(
             bookSourceName: "TOC URL",
