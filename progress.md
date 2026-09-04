@@ -1485,14 +1485,17 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 - `node ci-log/extract-prelude.js` and `node --check ci-log/js-prelude-check.js`
   pass on Windows after decoding Swift's escaped JavaScript layer.
-- `git diff --check` passes; Swift/XCTest/IPA remain pending GitHub Actions
-  because this Windows host has no Xcode/UIKit toolchain.
+- `git diff --check` passes; Windows has no Xcode/UIKit toolchain.
+- iOS build/XCTest: [run 33924320643](https://github.com/ztcsr5/read/actions/runs/33924320643) — success.
+- Unsigned IPA: [run 33924320745](https://github.com/ztcsr5/read/actions/runs/33924320745) — success.
+- Both workflows passed on the Stage 10 head; the unsigned IPA artifact was
+  produced successfully (artifact hash/size were not retained in the CI
+  summary and are intentionally not guessed).
 
 ### Next
 
-- Commit this complete Stage 10 pass once, push
-  `codex/swift-v2-lifetime-reader`, then inspect iOS XCTest and unsigned IPA
-  Actions for compiler annotations, test failures and artifact evidence.
+- Stage 10 is closed. Continue with the Stage 11 offline Legado fixture corpus,
+  parity probes and batch diagnostic export on the same branch.
 
 ### Rollback
 
