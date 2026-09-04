@@ -239,7 +239,17 @@ final class LegadoHostServices {
 
     private func inflateCandidate(_ candidate: [UInt8]) -> [UInt8]? {
         guard !candidate.isEmpty else { return nil }
-        var stream = compression_stream()
+        // `compression_stream` is imported as a value type with an explicit
+        // memberwise initializer on the macOS/iOS SDK used by CI.  Keep all
+        // pointers and sizes zeroed until `compression_stream_init` fills the
+        // codec state.
+        var stream = compression_stream(
+            dst_ptr: nil,
+            dst_size: 0,
+            src_ptr: nil,
+            src_size: 0,
+            state: nil
+        )
         guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
             return nil
         }
@@ -248,7 +258,7 @@ final class LegadoHostServices {
         var output: [UInt8] = []
         var destination = Array(repeating: UInt8(0), count: max(4096, candidate.count * 4))
         var source = candidate
-        return source.withUnsafeMutableBytes { sourceBuffer in
+        return source.withUnsafeMutableBytes { (sourceBuffer: UnsafeMutableRawBufferPointer) -> [UInt8]? in
             guard let sourcePointer = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else { return nil }
             stream.src_ptr = sourcePointer
             stream.src_size = source.count
