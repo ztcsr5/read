@@ -1741,16 +1741,6 @@ final class JSCoreRuntime {
           if (padding.toLowerCase().indexOf('no') >= 0) return 'NoPadding';
           return 'PKCS7Padding';
         }
-        function __cryptoOpenSSLKeyAndIV(passphrase, salt, keyLength, ivLength) {
-          var password = __cryptoBytes(passphrase, 'utf8');
-          var material = [], previous = [];
-          while (material.length < keyLength + ivLength) {
-            var input = previous.concat(password).concat(salt || []);
-            previous = __cryptoBytes(__native_digestBytes(input, 'MD5'), 'bytes');
-            material = material.concat(previous);
-          }
-          return {key: material.slice(0, keyLength), iv: material.slice(keyLength, keyLength + ivLength)};
-        }
         function __cryptoCipher(algorithm) {
           return {
             encrypt: function(value, key, options) {
@@ -1785,15 +1775,9 @@ final class JSCoreRuntime {
               // CryptoJS's passphrase overload accepts an OpenSSL `Salted__`
               // envelope and derives an AES-256 key/IV with EVP_BytesToKey.
               // Preserve the raw WordArray path above for explicit keys.
-              if (typeof key === 'string' && !options.iv) {
-                var salt = [];
-                if (bytes.length >= 16 && String.fromCharCode.apply(null, bytes.slice(0, 8)) === 'Salted__') {
-                  salt = bytes.slice(8, 16);
-                  bytes = bytes.slice(16);
-                }
-                var derived = __cryptoOpenSSLKeyAndIV(key, salt, 32, 16);
-                keyBytes = derived.key;
-                ivBytes = derived.iv;
+              if (algorithm === 'AES' && typeof ciphertext === 'string' && typeof key === 'string' && !options.iv) {
+                var passphraseOutput = __nativeLegado.invoke({ method: 'cipherDecryptPassphrase', args: [ciphertext, key] });
+                return __cryptoWordArray(passphraseOutput, 'bytes');
               }
               var transformation = algorithm + '/' + __cryptoModeName(options) + '/' + __cryptoPaddingName(options);
               var output = __nativeLegado.invoke({ method: 'cipherDecryptBytes', args: [
