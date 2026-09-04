@@ -1301,3 +1301,11 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the single Stage 4 commit and this entry to restore the prior scene frame-rate policy, reader lifecycle, source-card layout, Discover search controls, root keyboard behavior and Settings title mode.
+
+### CI evidence
+
+- Corrected Stage 4 commit: `5592aac`.
+- iOS build/XCTest: [run 33859400392](https://github.com/ztcsr5/read/actions/runs/33859400392) — success.
+- Unsigned IPA: [run 33859400414](https://github.com/ztcsr5/read/actions/runs/33859400414) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, 5.84 MB, SHA-256 `89ed9f19284eb3b2cb8a87355de55e629b5ace9122f28db712ad69b762fae120`.
+- Device-only items remain open: sustained ProMotion frame pacing, reader gesture feel, keyboard/layer behavior and same-network Web 写源 access.
