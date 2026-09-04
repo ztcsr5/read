@@ -1,0 +1,25 @@
+{
+  "bookSourceName": "Fixture Dynamic Token",
+  "bookSourceUrl": "https://fixture.example/dynamic",
+  "searchUrl": "@js: java.put('token', 'fixture-token'); java.put('cursor', 'cursor-1'); java.put('cookieHeader', 'session=dynamic'); return 'https://fixture.example/dynamic/search';",
+  "header": "{\"X-Token\":\"{{token}}\",\"X-Cursor\":\"{cursor}\"}",
+  "ruleSearch": {
+    "bookList": "$.books",
+    "name": "$.name",
+    "author": "$.author",
+    "bookUrl": "$.url"
+  },
+  "ruleBookInfo": {
+    "name": "$.name",
+    "author": "$.author",
+    "tocUrl": "$.toc"
+  },
+  "ruleToc": {
+    "chapterList": "$.chapters",
+    "chapterName": "$.title",
+    "chapterUrl": "$.url"
+  },
+  "ruleContent": {
+    "content": "$.content"
+  }
+}

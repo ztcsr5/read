@@ -7,13 +7,37 @@ struct SynchronousSourceLoader {
         urlText: String,
         source: BookSource,
         timeout: TimeInterval? = nil,
-        cookieHeader: String? = nil
+        cookieHeader: String? = nil,
+        persistentValues: [String: String] = [:]
     ) -> String {
-        loadResponse(urlText: urlText, source: source, timeout: timeout, cookieHeader: cookieHeader)?.body ?? ""
+        loadResponse(
+            urlText: urlText,
+            source: source,
+            timeout: timeout,
+            cookieHeader: cookieHeader,
+            persistentValues: persistentValues
+        )?.body ?? ""
     }
 
-    func loadResponse(urlText: String, source: BookSource, timeout: TimeInterval? = nil, cookieHeader: String? = nil) -> SourceResponse? {
-        let request = requestBuilder.buildPageRequest(source: source, urlText: urlText)
+    func loadResponse(
+        urlText: String,
+        source: BookSource,
+        timeout: TimeInterval? = nil,
+        cookieHeader: String? = nil,
+        persistentValues: [String: String] = [:]
+    ) -> SourceResponse? {
+        // Keep the explicit callback cookie in lockstep with the persistent
+        // state snapshot.  This matters for JS stages that receive a cookie
+        // from a response and immediately call java.ajax/fetch again.
+        var effectivePersistentValues = persistentValues
+        if let cookieHeader, !cookieHeader.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            effectivePersistentValues["cookieHeader"] = cookieHeader
+        }
+        let request = requestBuilder.buildPageRequest(
+            source: source,
+            urlText: urlText,
+            persistentValues: effectivePersistentValues
+        )
         let effectiveTimeout = timeout ?? request.timeout
         var urlRequest = URLRequest(url: request.url, timeoutInterval: effectiveTimeout)
         urlRequest.httpMethod = request.method.rawValue

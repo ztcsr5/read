@@ -82,10 +82,21 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             Task { await diagnostics.emit(.init(level: .info, stage: "search.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.networkHandler = { [network] encoded in
-            self.syncLoad(encoded: encoded, source: source, network: network, cookieHeader: executionContext.string(for: "cookieHeader"))
+            self.syncLoad(
+                encoded: encoded,
+                source: source,
+                network: network,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: executionState.snapshot()
+            )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
+            SynchronousSourceLoader().loadResponse(
+                urlText: encoded,
+                source: source,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: executionState.snapshot()
+            )
         }
         await diagnostics.emit(.init(
             level: .info,
@@ -104,7 +115,13 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             return .failure(error)
         }
 
-        let request = requestBuilder.buildSearchRequest(source: source, searchUrl: searchUrl, keyword: keyword, page: page)
+        let request = requestBuilder.buildSearchRequest(
+            source: source,
+            searchUrl: searchUrl,
+            keyword: keyword,
+            page: page,
+            persistentValues: executionState.snapshot()
+        )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "search.load") {
         case .success(let response):
             let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleSearch])
@@ -129,12 +146,27 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             Task { await diagnostics.emit(.init(level: .info, stage: "detail.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.networkHandler = { [network] encoded in
-            self.syncLoad(encoded: encoded, source: source, network: network, cookieHeader: executionContext.string(for: "cookieHeader"))
+            self.syncLoad(
+                encoded: encoded,
+                source: source,
+                network: network,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: persistentState(for: source).snapshot()
+            )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
+            SynchronousSourceLoader().loadResponse(
+                urlText: encoded,
+                source: source,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: persistentState(for: source).snapshot()
+            )
         }
-        let request = requestBuilder.buildPageRequest(source: source, urlText: book.bookUrl)
+        let request = requestBuilder.buildPageRequest(
+            source: source,
+            urlText: book.bookUrl,
+            persistentValues: persistentState(for: source).snapshot()
+        )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
             let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleBookInfo])
@@ -154,13 +186,28 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             Task { await diagnostics.emit(.init(level: .info, stage: "toc.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.networkHandler = { [network] encoded in
-            self.syncLoad(encoded: encoded, source: source, network: network, cookieHeader: executionContext.string(for: "cookieHeader"))
+            self.syncLoad(
+                encoded: encoded,
+                source: source,
+                network: network,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: persistentState(for: source).snapshot()
+            )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
+            SynchronousSourceLoader().loadResponse(
+                urlText: encoded,
+                source: source,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: persistentState(for: source).snapshot()
+            )
         }
         let tocURL = book.tocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? book.bookUrl
-        let request = requestBuilder.buildPageRequest(source: source, urlText: tocURL)
+        let request = requestBuilder.buildPageRequest(
+            source: source,
+            urlText: tocURL,
+            persistentValues: persistentState(for: source).snapshot()
+        )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
             let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc])
@@ -189,12 +236,27 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
             Task { await diagnostics.emit(.init(level: .info, stage: "content.js", sourceName: source.bookSourceName, message: message)) }
         })
         executionContext.networkHandler = { [network] encoded in
-            self.syncLoad(encoded: encoded, source: source, network: network, cookieHeader: executionContext.string(for: "cookieHeader"))
+            self.syncLoad(
+                encoded: encoded,
+                source: source,
+                network: network,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: persistentState(for: source).snapshot()
+            )
         }
         executionContext.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: executionContext.string(for: "cookieHeader"))
+            SynchronousSourceLoader().loadResponse(
+                urlText: encoded,
+                source: source,
+                cookieHeader: executionContext.string(for: "cookieHeader"),
+                persistentValues: persistentState(for: source).snapshot()
+            )
         }
-        let request = requestBuilder.buildPageRequest(source: source, urlText: chapter.url)
+        let request = requestBuilder.buildPageRequest(
+            source: source,
+            urlText: chapter.url,
+            persistentValues: persistentState(for: source).snapshot()
+        )
         let globalPurifyRules = await purifyRules()
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
@@ -359,10 +421,22 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let context = RuleExecutionContext(
             initialValues: ["baseUrl": response.url.absoluteString, "source": source],
             persistentState: state,
-            networkHandler: { encoded in SynchronousSourceLoader().load(urlText: encoded, source: source) }
+            networkHandler: { encoded in
+                SynchronousSourceLoader().load(
+                    urlText: encoded,
+                    source: source,
+                    cookieHeader: state.get("cookieHeader").nilIfEmpty,
+                    persistentValues: state.snapshot()
+                )
+            }
         )
         context.responseHandler = { encoded in
-            SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: context.string(for: "cookieHeader"))
+            SynchronousSourceLoader().loadResponse(
+                urlText: encoded,
+                source: source,
+                cookieHeader: context.string(for: "cookieHeader"),
+                persistentValues: state.snapshot()
+            )
         }
         var output = response.body
         for script in scripts {
@@ -413,12 +487,23 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         return ChapterListParser(executionContext: executionContext).parsePage(source: source, book: book, response: response)
     }
 
-    private func syncLoad(encoded: String, source: BookSource, network: SourceNetworkClient, cookieHeader: String? = nil) -> String {
+    private func syncLoad(
+        encoded: String,
+        source: BookSource,
+        network: SourceNetworkClient,
+        cookieHeader: String? = nil,
+        persistentValues: [String: String] = [:]
+    ) -> String {
         // JavaScriptCore callbacks are synchronous. Calling async `network.load` and
         // waiting on a semaphore can deadlock when the callback is already running on
         // the cooperative executor, so use the dedicated synchronous loader here.
         _ = network // kept in the signature for source-engine injection compatibility
-        return SynchronousSourceLoader().load(urlText: encoded, source: source, cookieHeader: cookieHeader)
+        return SynchronousSourceLoader().load(
+            urlText: encoded,
+            source: source,
+            cookieHeader: cookieHeader,
+            persistentValues: persistentValues
+        )
     }
 
     private func appendNextChapterListPages(
@@ -435,7 +520,11 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let maxPages = 30
 
         while let currentNext = nextURLText, pagesLoaded < maxPages {
-            let request = requestBuilder.buildPageRequest(source: source, urlText: currentNext)
+            let request = requestBuilder.buildPageRequest(
+                source: source,
+                urlText: currentNext,
+                persistentValues: persistentState(for: source).snapshot()
+            )
             let absolute = request.url.absoluteString
             guard !seenURLs.contains(absolute) else { break }
             seenURLs.insert(absolute)
@@ -486,7 +575,11 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         let maxPages = 8
 
         while let currentNext = nextURLText, pagesLoaded < maxPages {
-            let request = requestBuilder.buildPageRequest(source: source, urlText: currentNext)
+            let request = requestBuilder.buildPageRequest(
+                source: source,
+                urlText: currentNext,
+                persistentValues: persistentState(for: source).snapshot()
+            )
             let absolute = request.url.absoluteString
             guard !seenURLs.contains(absolute) else {
                 finalNextURL = nil

@@ -83,19 +83,26 @@ struct SearchURLResolver {
                 SynchronousSourceLoader().load(
                     urlText: urlText,
                     source: source,
-                    cookieHeader: persistentState.get("cookieHeader").nilIfEmpty
+                    cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
+                    persistentValues: persistentState.snapshot()
                 )
             },
             responseHandler: { urlText in
                 SynchronousSourceLoader().loadResponse(
                     urlText: urlText,
                     source: source,
-                    cookieHeader: persistentState.get("cookieHeader").nilIfEmpty
+                    cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
+                    persistentValues: persistentState.snapshot()
                 )
             }
         )
         return JSCoreRuntime(ajaxHandler: { urlText in
-            SynchronousSourceLoader().load(urlText: urlText, source: source)
+            SynchronousSourceLoader().load(
+                urlText: urlText,
+                source: source,
+                cookieHeader: persistentState.get("cookieHeader").nilIfEmpty,
+                persistentValues: persistentState.snapshot()
+            )
         }, executionContext: context)
     }
 

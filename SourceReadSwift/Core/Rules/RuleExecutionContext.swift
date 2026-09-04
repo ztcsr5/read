@@ -49,8 +49,14 @@ final class RuleExecutionContext: @unchecked Sendable {
         defer { lock.unlock() }
         if let value {
             values[key] = value
+            if key == "cookieHeader" {
+                persistentState.put(Self.bridgeString(value), for: key)
+            }
         } else {
             values.removeValue(forKey: key)
+            if key == "cookieHeader" {
+                persistentState.remove(key)
+            }
         }
     }
 
@@ -63,12 +69,18 @@ final class RuleExecutionContext: @unchecked Sendable {
     func string(for key: String) -> String {
         lock.lock()
         defer { lock.unlock() }
-        return Self.bridgeString(values[key])
+        if let value = values[key] {
+            return Self.bridgeString(value)
+        }
+        return persistentState.get(key)
     }
 
     @discardableResult
     func put(_ value: Any?, for key: String) -> String {
         let text = Self.bridgeString(value)
+        lock.lock()
+        values[key] = value ?? ""
+        lock.unlock()
         persistentState.put(text, for: key)
         return text
     }
@@ -78,6 +90,9 @@ final class RuleExecutionContext: @unchecked Sendable {
     }
 
     func remove(_ key: String) {
+        lock.lock()
+        values.removeValue(forKey: key)
+        lock.unlock()
         persistentState.remove(key)
     }
 

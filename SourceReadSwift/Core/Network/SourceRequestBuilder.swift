@@ -3,33 +3,69 @@ import Foundation
 struct SourceRequestBuilder {
     private let directiveParser = SourceURLDirectiveParser()
 
-    func buildPageRequest(source: BookSource, urlText: String) -> SourceRequest {
-        buildRequest(source: source, resolvedText: urlText)
+    func buildPageRequest(
+        source: BookSource,
+        urlText: String,
+        persistentValues: [String: String] = [:]
+    ) -> SourceRequest {
+        buildRequest(source: source, resolvedText: urlText, persistentValues: persistentValues)
     }
 
-    func buildSearchRequest(source: BookSource, searchUrl: String, keyword: String, page: Int) -> SourceRequest {
+    func buildSearchRequest(
+        source: BookSource,
+        searchUrl: String,
+        keyword: String,
+        page: Int,
+        persistentValues: [String: String] = [:]
+    ) -> SourceRequest {
         let resolved = searchUrl
             .replacingOccurrences(of: "{{key}}", with: keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)
             .replacingOccurrences(of: "{{keyword}}", with: keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)
             .replacingOccurrences(of: "{{page}}", with: String(page))
 
-        return buildRequest(source: source, resolvedText: resolved, keyword: keyword, page: page)
+        return buildRequest(
+            source: source,
+            resolvedText: resolved,
+            keyword: keyword,
+            page: page,
+            persistentValues: persistentValues
+        )
     }
 
-    private func buildRequest(source: BookSource, resolvedText: String, keyword: String? = nil, page: Int? = nil) -> SourceRequest {
-        let directive = directiveParser.parse(resolvedText)
+    private func buildRequest(
+        source: BookSource,
+        resolvedText: String,
+        keyword: String? = nil,
+        page: Int? = nil,
+        persistentValues: [String: String] = [:]
+    ) -> SourceRequest {
+        let interpolatedText = interpolatePersistentValues(resolvedText, values: persistentValues)
+        let directive = directiveParser.parse(interpolatedText)
         let url = resolveURL(directive.urlText, base: source.bookSourceUrl)
-        let sourceOptions = requestOptions(source, keyword: keyword, page: page)
+        let sourceOptions = requestOptions(
+            source,
+            keyword: keyword,
+            page: page,
+            persistentValues: persistentValues
+        )
         let charset = directive.expectedCharset ?? sourceCharset(source)
 
-        var headers = sourceHeaders(source)
-        headers.merge(sourceOptions.headers, uniquingKeysWith: { _, new in new })
-        headers.merge(directive.headers, uniquingKeysWith: { _, new in new })
+        var headers = sourceHeaders(source, persistentValues: persistentValues)
+        mergeHeaders(sourceOptions.headers, into: &headers)
+        // A cookie written by a Legado JS stage is dynamic state, not a source
+        // default.  Apply it after source/custom headers but before the URL
+        // directive so an explicit @Header: Cookie=... still wins.
+        if let dynamicCookie = persistentValues["cookieHeader"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !dynamicCookie.isEmpty {
+            setHeaderCaseInsensitive("Cookie", value: dynamicCookie, in: &headers)
+        }
+        mergeHeaders(directive.headers, into: &headers)
+        headers = headers.mapValues { interpolatePersistentValues($0, values: persistentValues) }
         headers["User-Agent", default: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"]
         headers["Accept", default: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"]
         applyDefaultNavigationHeaders(to: &headers, sourceBase: source.bookSourceUrl)
 
-        let body = directive.body ?? sourceOptions.body
+        let body = directive.body.map { interpolateData($0, values: persistentValues) } ?? sourceOptions.body
         let timeout = resolvedTimeout(
             directive: directive,
             source: source,
@@ -92,35 +128,35 @@ struct SourceRequestBuilder {
         return URL(string: base) ?? URL(string: "https://invalid.local")!
     }
 
-    private func sourceHeaders(_ source: BookSource) -> [String: String] {
+    private func sourceHeaders(_ source: BookSource, persistentValues: [String: String] = [:]) -> [String: String] {
         var headers = parseHeaders(source.header)
         for key in ["headers", "bookSourceHeader"] {
-            headers.merge(parseHeaders(source.raw[key]), uniquingKeysWith: { _, new in new })
+            mergeHeaders(parseHeaders(source.raw[key]), into: &headers)
         }
         if let customConfig = source.customConfig,
            let data = customConfig.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if let nested = object["headers"] as? [String: Any] {
-                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+                mergeHeaders(stringMap(nested), into: &headers)
             }
             if let nested = object["header"] as? [String: Any] {
-                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+                mergeHeaders(stringMap(nested), into: &headers)
             }
             if let text = object["header"] as? String {
-                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+                mergeHeaders(parseHeaders(text), into: &headers)
             }
             if let cookie = object["cookie"] as? String, !cookie.isEmpty {
-                headers["Cookie"] = cookie
+                setHeaderCaseInsensitive("Cookie", value: cookie, in: &headers)
             }
             applyUserAgentAlias(from: object, to: &headers)
         }
         if let cookie = source.raw["cookie"], !cookie.isEmpty {
-            headers["Cookie"] = cookie
+            setHeaderCaseInsensitive("Cookie", value: cookie, in: &headers)
         }
         applyUserAgentAlias(from: source.raw.reduce(into: [String: Any]()) { result, item in
             result[item.key] = item.value
         }, to: &headers)
-        return headers
+        return headers.mapValues { interpolatePersistentValues($0, values: persistentValues) }
     }
 
     private func applyUserAgentAlias(from object: [String: Any], to headers: inout [String: String]) {
@@ -136,7 +172,12 @@ struct SourceRequestBuilder {
         }
     }
 
-    private func requestOptions(_ source: BookSource, keyword: String?, page: Int?) -> (method: SourceHTTPMethod?, body: Data?, headers: [String: String], timeout: TimeInterval?) {
+    private func requestOptions(
+        _ source: BookSource,
+        keyword: String?,
+        page: Int?,
+        persistentValues: [String: String] = [:]
+    ) -> (method: SourceHTTPMethod?, body: Data?, headers: [String: String], timeout: TimeInterval?) {
         var method: SourceHTTPMethod?
         var body: Data?
         var headers: [String: String] = [:]
@@ -152,25 +193,31 @@ struct SourceRequestBuilder {
                 }
             }
             if let nested = object["headers"] as? [String: Any] {
-                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+                mergeHeaders(stringMap(nested), into: &headers)
             }
             if let nested = object["header"] as? [String: Any] {
-                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+                mergeHeaders(stringMap(nested), into: &headers)
             }
             if let nested = object["bookSourceHeader"] as? [String: Any] {
-                headers.merge(stringMap(nested), uniquingKeysWith: { _, new in new })
+                mergeHeaders(stringMap(nested), into: &headers)
             }
             if let text = object["headers"] as? String {
-                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+                mergeHeaders(parseHeaders(text), into: &headers)
             }
             if let text = object["header"] as? String {
-                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+                mergeHeaders(parseHeaders(text), into: &headers)
             }
             if let text = object["bookSourceHeader"] as? String {
-                headers.merge(parseHeaders(text), uniquingKeysWith: { _, new in new })
+                mergeHeaders(parseHeaders(text), into: &headers)
             }
             if let bodyOption = firstValue(in: object, keys: ["body", "requestBody", "postBody", "data"]),
-               let encoded = encodeBodyOption(bodyOption, headers: headers, keyword: keyword, page: page) {
+               let encoded = encodeBodyOption(
+                   bodyOption,
+                   headers: headers,
+                   keyword: keyword,
+                   page: page,
+                   persistentValues: persistentValues
+               ) {
                 body = encoded
                 method = .post
             }
@@ -190,7 +237,7 @@ struct SourceRequestBuilder {
         apply(source.raw.reduce(into: [String: Any]()) { result, item in
             result[item.key] = item.value
         })
-        return (method, body, headers, timeout)
+        return (method, body, headers.mapValues { interpolatePersistentValues($0, values: persistentValues) }, timeout)
     }
 
     private func resolvedTimeout(
@@ -252,6 +299,22 @@ struct SourceRequestBuilder {
         headers.keys.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
     }
 
+    /// HTTP field names are case-insensitive.  Dictionary.merge is not, so a
+    /// source containing `cookie`, `Cookie`, or `COOKIE` could otherwise emit
+    /// duplicate fields and make URLRequest choose the wrong value.
+    private func mergeHeaders(_ newHeaders: [String: String], into headers: inout [String: String]) {
+        for (key, value) in newHeaders {
+            setHeaderCaseInsensitive(key, value: value, in: &headers)
+        }
+    }
+
+    private func setHeaderCaseInsensitive(_ key: String, value: String, in headers: inout [String: String]) {
+        if let existingKey = headers.keys.first(where: { $0.caseInsensitiveCompare(key) == .orderedSame }) {
+            headers.removeValue(forKey: existingKey)
+        }
+        headers[key] = value
+    }
+
     private func sourceCharset(_ source: BookSource) -> String? {
         if let charset = source.raw["charset"]?.trimmingCharacters(in: .whitespacesAndNewlines), !charset.isEmpty {
             return charset
@@ -294,19 +357,31 @@ struct SourceRequestBuilder {
         return nil
     }
 
-    private func encodeBodyOption(_ value: Any, headers: [String: String], keyword: String?, page: Int?) -> Data? {
+    private func encodeBodyOption(
+        _ value: Any,
+        headers: [String: String],
+        keyword: String?,
+        page: Int?,
+        persistentValues: [String: String] = [:]
+    ) -> Data? {
         if let text = value as? String {
-            return Data(interpolate(text, keyword: keyword, page: page).utf8)
+            return Data(interpolatePersistentValues(interpolate(text, keyword: keyword, page: page), values: persistentValues).utf8)
         }
         if let object = value as? [String: Any] {
             let interpolated = object.reduce(into: [String: String]()) { result, item in
-                result[item.key] = interpolate(stringify(item.value), keyword: keyword, page: page)
+                result[item.key] = interpolatePersistentValues(
+                    interpolate(stringify(item.value), keyword: keyword, page: page),
+                    values: persistentValues
+                )
             }
             let contentType = headers.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value ?? ""
             if contentType.localizedCaseInsensitiveContains("application/json") {
                 let jsonObject = object.reduce(into: [String: Any]()) { result, item in
                     if let stringValue = item.value as? String {
-                        result[item.key] = interpolate(stringValue, keyword: keyword, page: page)
+                        result[item.key] = interpolatePersistentValues(
+                            interpolate(stringValue, keyword: keyword, page: page),
+                            values: persistentValues
+                        )
                     } else {
                         result[item.key] = item.value
                     }
@@ -327,7 +402,28 @@ struct SourceRequestBuilder {
            let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
             return data
         }
-        return Data(String(describing: value).utf8)
+        return Data(interpolatePersistentValues(String(describing: value), values: persistentValues).utf8)
+    }
+
+    /// Legado JS sources commonly persist a nonce, token or cursor in one
+    /// stage and reference it from a later URL/header/body as `{{token}}` or
+    /// `{token}`.  Android's runtime expands those values at request time;
+    /// keeping the expansion in the request builder makes all four pipeline
+    /// stages (including synchronous JS ajax calls) behave the same way.
+    private func interpolatePersistentValues(_ text: String, values: [String: String]) -> String {
+        guard !values.isEmpty else { return text }
+        return values.reduce(text) { output, item in
+            guard !item.key.isEmpty else { return output }
+            return output
+                .replacingOccurrences(of: "{{\(item.key)}}", with: item.value)
+                .replacingOccurrences(of: "{\(item.key)}", with: item.value)
+        }
+    }
+
+    private func interpolateData(_ data: Data, values: [String: String]) -> Data {
+        guard !values.isEmpty,
+              let text = String(data: data, encoding: .utf8) else { return data }
+        return Data(interpolatePersistentValues(text, values: values).utf8)
     }
 
     private func stringify(_ value: Any) -> String {
