@@ -1,3 +1,28 @@
+## 2026-09-04 - Stage 7: Legado response and Java regex compatibility hardening
+
+### Implemented
+
+- Extended the JavaScriptCore response bridge with byte-oriented bodies (`bytes`, `byteArray`, `length`), case-insensitive header map operations (`get`, `has`, `keys`, `values`, `entries`, `toJSON`) and parsed cookie access (`cookies().get/containsKey`).
+- Hardened Set-Cookie parsing so commas inside `Expires=...` do not split the cookie pair list.
+- Expanded Java regex `Pattern` compatibility with standard flag constants, `reset`, `region`, `lookingAt`, static group counting and capture offsets backed by `RegExp` indices when available.
+- Scoped matcher `find()` to the active region and added repeated-capture offset regression coverage.
+- Added Jsoup document metadata, absolute resource URL, response header/cookie facade and UTF-8 byte-length fixtures.
+
+### Verification
+
+- Extracted the Swift multiline prelude with Swift escape decoding and passed `node --check`.
+- Ran deterministic Node harnesses for Pattern matching, repeated capture offsets, response headers/cookies and body bytes.
+- `git diff --check` passes with only the repository's existing Windows LF-to-CRLF normalization warnings.
+- Windows cannot run Swift/Xcode/UIKit/XCTest; GitHub Actions remains the authoritative compile/test and unsigned-IPA gate.
+
+### Next
+
+- Commit and push this Stage 7 pass once, wait for both Actions workflows, inspect annotations and the unsigned IPA artifact, then continue with higher-risk Legado fixtures (dynamic cookie/token chains, mixed JSON/HTML responses and paginated source rules).
+
+### Rollback
+
+- Revert the single Stage 7 bridge/test commit and this progress entry to restore the prior response facade and matcher behavior.
+
 ## 2026-09-03 - Task: Legado JS bridge compatibility phase CI correction
 
 ### What was done

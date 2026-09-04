@@ -80,6 +80,72 @@ final class LegadoJavaCompatibilityTests: XCTestCase {
         XCTAssertEqual(object["exactGroup"] as? String, "hello")
     }
 
+    func testPatternMatcherRegionLookingAtResetAndGroupOffsets() throws {
+        let runtime = JSCoreRuntime()
+        let result = runtime.evaluate("""
+            var p = Packages.java.util.regex.Pattern.compile('(ab)(cd)', Packages.java.util.regex.Pattern.CASE_INSENSITIVE);
+            var m = p.matcher('xxABcdYY');
+            var before = [m.find(), m.group(), m.group(1), m.start(1), m.end(1), m.groupCount()];
+            m.region(2, 6);
+            var region = [m.lookingAt(), m.group(), m.start(), m.end()];
+            m.reset('ABCD');
+            var reset = [m.matches(), m.group(), m.groupCount()];
+            var repeated = Packages.java.util.regex.Pattern.compile('(a)(a)').matcher('aa');
+            repeated.find();
+            var repeatedOffsets = [repeated.start(1), repeated.end(1), repeated.start(2), repeated.end(2)];
+            JSON.stringify({before: before, region: region, reset: reset, repeatedOffsets: repeatedOffsets})
+            """)
+        guard case .success(let value) = result,
+              let data = value.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return XCTFail("expected matcher result")
+        }
+        XCTAssertEqual(object["before"] as? [AnyHashable], [true, "ABcd", "AB", 2, 4, 2])
+        XCTAssertEqual(object["region"] as? [AnyHashable], [true, "ABcd", 2, 6])
+        XCTAssertEqual(object["reset"] as? [AnyHashable], [true, "ABCD", 2])
+        XCTAssertEqual(object["repeatedOffsets"] as? [AnyHashable], [0, 1, 1, 2])
+    }
+
+    func testJsoupDocumentMetadataAndResponseHeaderCookieFacades() throws {
+        let runtime = JSCoreRuntime(executionContext: RuleExecutionContext(responseHandler: { _ in
+            SourceResponse(
+                url: URL(string: "https://fixture.local/final")!,
+                statusCode: 200,
+                headers: ["Content-Type": "text/html", "Set-Cookie": "sid=abc; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Path=/, theme=dark; Path=/"],
+                body: "<html><head><title>Fixture</title></head><body><img src='/cover.png'></body></html>",
+                data: Data()
+            )
+        }))
+        let result = runtime.evaluate("""
+            var doc = org.jsoup.Jsoup.parse('<html><head><title>Fixture</title></head><body><img src='/cover.png'></body></html>', 'https://fixture.local/book/');
+            var response = java.ajax('https://fixture.local/page');
+            JSON.stringify({
+              location: doc.location(), title: doc.title(), head: doc.head().tagName(), body: doc.body().tagName(),
+              absolute: doc.body().select('img').first().absUrl('src'),
+              contentType: response.headers().get('content-type'),
+              hasContentType: response.headers().has('CONTENT-TYPE'),
+              cookie: response.cookies().get('sid'),
+              hasTheme: response.cookies().containsKey('theme'),
+              bytes: response.body().bytes().length
+            })
+            """)
+        guard case .success(let value) = result,
+              let data = value.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return XCTFail("expected document/response result")
+        }
+        XCTAssertEqual(object["location"] as? String, "https://fixture.local/book/")
+        XCTAssertEqual(object["title"] as? String, "Fixture")
+        XCTAssertEqual(object["head"] as? String, "head")
+        XCTAssertEqual(object["body"] as? String, "body")
+        XCTAssertEqual(object["absolute"] as? String, "https://fixture.local/cover.png")
+        XCTAssertEqual(object["contentType"] as? String, "text/html")
+        XCTAssertEqual(object["hasContentType"] as? Bool, true)
+        XCTAssertEqual(object["cookie"] as? String, "abc")
+        XCTAssertEqual(object["hasTheme"] as? Bool, true)
+        XCTAssertEqual(object["bytes"] as? Int, 83)
+    }
+
     func testJSONPathFiltersAndRecursiveDescent() throws {
         let runtime = JSCoreRuntime()
         let json = """

@@ -925,10 +925,55 @@ final class JSCoreRuntime {
           var body = new String(value == null ? '' : String(value));
           body.string = function() { return String(body); };
           body.text = body.string;
+          body.bytes = function() { return __asJavaList(__native_stringToBytes(String(body))); };
+          body.byteArray = body.bytes;
+          body.length = String(body).length;
           body.json = function() {
             try { return JSON.parse(String(body)); } catch (_) { return {}; }
           };
           return body;
+        }
+        function __bridgeHeaders(value) {
+          var source = value || {};
+          var map = {};
+          for (var key in source) if (Object.prototype.hasOwnProperty.call(source, key)) map[String(key)] = String(source[key] == null ? '' : source[key]);
+          function find(name) {
+            var wanted = String(name || '').toLowerCase();
+            for (var key in map) if (String(key).toLowerCase() === wanted) return map[key];
+            return '';
+          }
+          function contains(name) {
+            var wanted = String(name || '').toLowerCase();
+            for (var key in map) if (String(key).toLowerCase() === wanted) return true;
+            return false;
+          }
+          map.get = function(name) { return find(name); };
+          map.getIgnoreCase = map.get;
+          map.has = contains;
+          map.containsKey = map.has;
+          map.keys = function() { var out = []; for (var key in map) if (typeof map[key] === 'string') out.push(key); return __asJavaList(out); };
+          map.values = function() { var out = []; for (var key in map) if (typeof map[key] === 'string') out.push(map[key]); return __asJavaList(out); };
+          map.entries = function() { var out = []; for (var key in map) if (typeof map[key] === 'string') out.push([key, map[key]]); return __asJavaList(out); };
+          map.toJSON = function() { var out = {}; for (var key in map) if (typeof map[key] === 'string') out[key] = map[key]; return out; };
+          map.toString = function() { return JSON.stringify(map.toJSON()); };
+          return map;
+        }
+        function __bridgeCookies(headers) {
+          var raw = '';
+          for (var key in (headers || {})) if (String(key).toLowerCase() === 'set-cookie') raw = String(headers[key] || '');
+          // A Set-Cookie header may contain commas in Expires=...; only split
+          // when the comma is followed by a new cookie-pair (not an attribute).
+          var values = raw.split(/,\\s*(?=[^;=,]+=[^;=,]+)/).filter(function(item) { return item.trim() !== ''; });
+          var cookies = {};
+          for (var i = 0; i < values.length; i++) {
+            var pair = values[i].split(';')[0];
+            var pos = pair.indexOf('=');
+            if (pos > 0) cookies[pair.substring(0, pos).trim()] = pair.substring(pos + 1).trim();
+          }
+          cookies.get = function(name) { return cookies[String(name || '')] || ''; };
+          cookies.containsKey = function(name) { return Object.prototype.hasOwnProperty.call(cookies, String(name || '')); };
+          cookies.toJSON = function() { var out = {}; for (var key in cookies) if (typeof cookies[key] === 'string') out[key] = cookies[key]; return out; };
+          return cookies;
         }
         function __bridgeStatusCode(value) {
           var number = Number(value == null || value === '' ? 200 : value);
@@ -946,6 +991,7 @@ final class JSCoreRuntime {
           var responseHeaders = meta.headers || {};
           var bodyValue = __bridgeBody(value);
           var statusValue = __bridgeStatusCode(code);
+          var headerMap = __bridgeHeaders(responseHeaders);
           return {
             statusCode: statusValue,
             // `code` and `status` are numeric aliases in Fetch-like sources;
@@ -958,12 +1004,9 @@ final class JSCoreRuntime {
             json: function() { return bodyValue.json(); },
             url: function() { return finalUrl; },
             finalUrl: function() { return finalUrl; },
-            header: function(name) {
-              var key = String(name || '').toLowerCase();
-              for (var headerKey in responseHeaders) if (String(headerKey).toLowerCase() === key) return String(responseHeaders[headerKey] || '');
-              return '';
-            },
-            headers: function() { return responseHeaders; },
+            header: function(name) { return headerMap.get(name); },
+            headers: function() { return headerMap; },
+            cookies: function() { return __bridgeCookies(responseHeaders); },
             cookie: function() { return this.header('set-cookie') || this.header('cookie'); },
             // A number of Android/Flutter sources call `fetch(...).match(...)`
             // directly. Delegate common String operations to the response
@@ -1613,47 +1656,107 @@ final class JSCoreRuntime {
           if (/[uU]/.test(textFlags) || /UNICODE/i.test(textFlags)) mapped += 'u';
           return mapped;
         }
+        function __javaGroupCount(pattern) {
+          var count = 0, escaped = false, inClass = false;
+          var text = String(pattern || '');
+          for (var i = 0; i < text.length; i++) {
+            var ch = text.charAt(i);
+            if (escaped) { escaped = false; continue; }
+            if (ch === '\\\\') { escaped = true; continue; }
+            if (ch === '[') { inClass = true; continue; }
+            if (ch === ']' && inClass) { inClass = false; continue; }
+            if (inClass || ch !== '(') continue;
+            if (text.charAt(i + 1) !== '?') count++;
+            else if (text.charAt(i + 2) === '<' && text.charAt(i + 3) !== '=' && text.charAt(i + 3) !== '!') count++;
+          }
+          return count;
+        }
+        function __javaRegex(pattern, flags, global) {
+          var effectiveFlags = String(flags || '');
+          if (global && effectiveFlags.indexOf('g') < 0) effectiveFlags += 'g';
+          // RegExp indices (`d`) provide Java-compatible offsets for nested or
+          // repeated capture text.  iOS 16+ JavaScriptCore supports them; keep
+          // a fallback for older runtimes instead of failing the whole rule.
+          try { return new RegExp(pattern, effectiveFlags.indexOf('d') >= 0 ? effectiveFlags : effectiveFlags + 'd'); }
+          catch (_) { return new RegExp(pattern, effectiveFlags.replace(/d/g, '')); }
+        }
         Packages.java.util.regex.Pattern = Packages.java.util.regex.Pattern || {
+          CASE_INSENSITIVE: 2,
+          MULTILINE: 8,
+          DOTALL: 32,
+          UNICODE_CASE: 64,
           compile: function(pattern, flags) {
             var source = String(pattern == null ? '' : pattern);
             var patternFlags = __javaRegexFlags(flags);
+            var compiledGroupCount = __javaGroupCount(source);
             return {
               matcher: function(input) {
                 var text = String(input == null ? '' : input);
                 var re;
-                try { re = new RegExp(source, patternFlags); } catch (_) { re = /$a/; }
+                try { re = __javaRegex(source, patternFlags, false); } catch (_) { re = /$a/; }
                 var cursor = 0;
+                var regionStart = 0;
+                var regionEnd = text.length;
                 var lastMatch = null;
                 return {
+                  reset: function(value) { if (value !== undefined && value !== null) text = String(value); cursor = regionStart = 0; regionEnd = text.length; lastMatch = null; return this; },
+                  region: function(start, end) { regionStart = Math.max(0, Number(start) || 0); regionEnd = Math.max(regionStart, Math.min(text.length, Number(end) || 0)); cursor = regionStart; lastMatch = null; return this; },
                   find: function() {
                     // Java Matcher.find() advances across repeated calls.
-                    var flagsWithGlobal = patternFlags.indexOf('g') >= 0 ? patternFlags : patternFlags + 'g';
-                    try { re = new RegExp(source, flagsWithGlobal); } catch (_) { return false; }
-                    re.lastIndex = cursor;
-                    lastMatch = re.exec(text);
-                    if (!lastMatch) return false;
-                    cursor = re.lastIndex;
+                    try { re = __javaRegex(source, patternFlags, true); } catch (_) { return false; }
+                    var regionText = text.substring(regionStart, regionEnd);
+                    re.lastIndex = Math.max(0, cursor - regionStart);
+                    lastMatch = re.exec(regionText);
+                    if (!lastMatch) { lastMatch = null; return false; }
+                    lastMatch.__regionOffset = regionStart;
+                    lastMatch.index += regionStart;
+                    cursor = regionStart + re.lastIndex;
                     if (lastMatch[0] === '') cursor++;
                     return true;
                   },
                   matches: function() {
                     try {
-                      var match = new RegExp('^(?:' + source + ')$', patternFlags).exec(text);
+                      var regionText = text.substring(regionStart, regionEnd);
+                      var match = __javaRegex('^(?:' + source + ')$', patternFlags, false).exec(regionText);
                       lastMatch = match;
+                      if (match) { match.__regionOffset = regionStart; match.index += regionStart; }
+                      return !!match;
+                    } catch (_) { lastMatch = null; return false; }
+                  },
+                  lookingAt: function() {
+                    try {
+                      var regionText = text.substring(regionStart, regionEnd);
+                      var match = __javaRegex('^(?:' + source + ')', patternFlags, false).exec(regionText);
+                      lastMatch = match;
+                      if (match) { match.__regionOffset = regionStart; match.index += regionStart; }
                       return !!match;
                     } catch (_) { lastMatch = null; return false; }
                   },
                   group: function(index) {
                     if (!lastMatch) {
-                      try { lastMatch = new RegExp(source, patternFlags).exec(text); } catch (_) { lastMatch = null; }
+                      try { lastMatch = __javaRegex(source, patternFlags, false).exec(text); if (lastMatch) lastMatch.__regionOffset = 0; } catch (_) { lastMatch = null; }
                     }
                     if (!lastMatch) return '';
                     var position = index == null ? 0 : Number(index);
-                    return lastMatch[position] == null ? '' : String(lastMatch[position]);
+                    return lastMatch[position] == null ? null : String(lastMatch[position]);
                   },
-                  start: function() { return lastMatch ? lastMatch.index : -1; },
-                  end: function() { return lastMatch ? lastMatch.index + String(lastMatch[0]).length : -1; },
-                  groupCount: function() { return lastMatch ? Math.max(0, lastMatch.length - 1) : 0; }
+                  start: function(index) {
+                    if (!lastMatch) return -1;
+                    var position = index == null ? 0 : Number(index);
+                    if (position === 0) return lastMatch.index;
+                    var group = lastMatch[position]; if (group == null) return -1;
+                    if (lastMatch.indices && lastMatch.indices[position]) return Number(lastMatch.__regionOffset || 0) + lastMatch.indices[position][0];
+                    return lastMatch.index + String(lastMatch[0]).indexOf(String(group));
+                  },
+                  end: function(index) {
+                    if (!lastMatch) return -1;
+                    var position = index == null ? 0 : Number(index);
+                    if (position === 0) return lastMatch.index + String(lastMatch[0]).length;
+                    var group = lastMatch[position]; if (group == null) return -1;
+                    if (lastMatch.indices && lastMatch.indices[position]) return Number(lastMatch.__regionOffset || 0) + lastMatch.indices[position][1];
+                    return this.start(position) + String(group).length;
+                  },
+                  groupCount: function() { return compiledGroupCount; }
                 };
               }
             };
