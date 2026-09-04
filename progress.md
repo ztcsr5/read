@@ -1273,7 +1273,9 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 ### Testing
 - `git diff --check` passed locally (Windows reports the repository's existing LF-to-CRLF warnings only).
-- Windows cannot run Swift/Xcode/UIKit tests. GitHub Actions remains the authoritative iOS compile/XCTest/unsigned-IPA gate for this stage.
+- GitHub Actions iOS build/XCTest run `33855859960` passed.
+- GitHub Actions unsigned IPA run `33855859886` passed and uploaded artifact `SourceReadSwift-unsigned-ipa` (artifact id `99302539`).
+- Windows cannot run Swift/Xcode/UIKit tests; sustained 120 Hz and LAN Web 写源 behavior remain real-device checks.
 - Sustained 120 Hz and LAN Web 写源 behavior remain real-device checks; no device evidence is claimed here.
 
 ### Rollback
