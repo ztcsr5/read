@@ -135,7 +135,7 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
         // the args array as JSValue preserves indexed elements for binary
         // helpers such as java.inflate and Cipher.doFinal.
         let methodValue = payload.forProperty("method")
-        let method = methodValue.map { $0.toString() } ?? RuleExecutionContext.bridgeString(dictionary["method"])
+        let method = methodValue.flatMap { $0.toString() } ?? RuleExecutionContext.bridgeString(dictionary["method"])
         let argumentsValue = payload.forProperty("args")
         let arguments = Self.arguments(argumentsValue ?? dictionary["args"])
 
