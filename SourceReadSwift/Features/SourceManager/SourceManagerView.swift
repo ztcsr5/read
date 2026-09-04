@@ -1181,8 +1181,18 @@ struct SourceManagerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Copy") {
-                        UIPasteboard.general.string = batchCheckExportText(batchCheck ?? state)
+                    Menu {
+                        Button("复制文本报告") {
+                            UIPasteboard.general.string = batchCheckExportText(batchCheck ?? state)
+                        }
+                        Button("复制 JSON 报告") {
+                            let report = (batchCheck ?? state).diagnosticReport
+                            if let data = try? report.exportJSON() {
+                                UIPasteboard.general.string = String(data: data, encoding: .utf8)
+                            }
+                        }
+                    } label: {
+                        Label("导出", systemImage: "square.and.arrow.up")
                     }
                     .disabled((batchCheck ?? state).results.isEmpty)
                 }
@@ -1330,6 +1340,8 @@ struct SourceManagerView: View {
         state.isRunning = true
         state.checkedCount = 0
         state.results = []
+        state.startedAt = Date()
+        state.finishedAt = nil
         batchCheck = state
 
         let engine = appState.engine
@@ -1368,7 +1380,8 @@ struct SourceManagerView: View {
                             sourceURL: result.sourceURL,
                             status: deep.status,
                             message: "\(result.message) \(deep.message)",
-                            elapsedMilliseconds: result.elapsedMilliseconds
+                            elapsedMilliseconds: result.elapsedMilliseconds,
+                            resultCount: result.resultCount
                         )
                     }
                     latest.checkedCount += 1
@@ -1427,6 +1440,7 @@ struct SourceManagerView: View {
               var finished = batchCheck,
               finished.id == sessionID else { return }
         finished.isRunning = false
+        finished.finishedAt = Date()
         batchCheck = finished
     }
 
@@ -1476,7 +1490,7 @@ struct SourceManagerView: View {
             }
             return BatchCheckOutcome(
                 source: source,
-                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)),
+                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000), resultCount: books.count),
                 resultCount: books.count,
                 login: login,
                 deepCheck: deepOutcome
@@ -1487,7 +1501,7 @@ struct SourceManagerView: View {
             let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
             return BatchCheckOutcome(
                 source: source,
-                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)),
+                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000), resultCount: 0),
                 resultCount: 0,
                 login: login,
                 deepCheck: nil
@@ -2007,6 +2021,8 @@ private struct SourceBatchCheckState: Identifiable, Sendable {
     var isRunning = false
     var checkedCount = 0
     var results: [SourceBatchCheckResult] = []
+    var startedAt = Date()
+    var finishedAt: Date?
 
     var hasResults: Bool { !results.isEmpty }
     var passedCount: Int { results.filter { $0.status == .passed }.count }
@@ -2015,6 +2031,34 @@ private struct SourceBatchCheckState: Identifiable, Sendable {
     var loginRequiredCount: Int { results.filter { $0.status == .requiresLogin }.count }
     var verificationRequiredCount: Int { results.filter { $0.status == .verificationRequired }.count }
     var blockedCount: Int { results.filter { $0.status == .blocked }.count }
+
+    /// Converts the compact UI rows into the portable batch model used by
+    /// copy/export and future support bundles.
+    var diagnosticReport: SourceDiagnosticBatchReport {
+        let reports = results.map { result in
+            SourceDiagnosticReport(
+                sourceName: result.sourceName,
+                sourceURL: result.sourceURL,
+                keyword: keyword,
+                startedAt: startedAt,
+                steps: [SourceDiagnosticStep(
+                    stage: .search,
+                    status: result.status.healthStatus,
+                    requestSummary: "keyword=\(keyword)",
+                    responseSummary: result.message,
+                    matchCount: result.resultCount,
+                    elapsedMilliseconds: result.elapsedMilliseconds,
+                    finalURL: result.sourceURL
+                )]
+            )
+        }
+        return SourceDiagnosticBatchReport(
+            startedAt: startedAt,
+            finishedAt: finishedAt ?? Date(),
+            keyword: keyword,
+            reports: reports
+        )
+    }
 }
 
 private struct SourceBatchCheckResult: Identifiable, Sendable {
@@ -2024,19 +2068,22 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
     let status: SourceBatchCheckStatus
     let message: String
     let elapsedMilliseconds: Int
+    let resultCount: Int
 
     init(
         sourceName: String,
         sourceURL: String,
         status: SourceBatchCheckStatus,
         message: String,
-        elapsedMilliseconds: Int = 0
+        elapsedMilliseconds: Int = 0,
+        resultCount: Int = 0
     ) {
         self.sourceName = sourceName
         self.sourceURL = sourceURL
         self.status = status
         self.message = message
         self.elapsedMilliseconds = max(0, elapsedMilliseconds)
+        self.resultCount = max(0, resultCount)
     }
 }
 

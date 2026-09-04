@@ -1,0 +1,8 @@
+{
+  "bookSourceName": "Fixture Crypto",
+  "bookSourceUrl": "https://fixture.example/crypto",
+  "searchUrl": "https://fixture.example/crypto/search?q={{key}}",
+  "ruleSearch": {"bookList": "$.books", "name": "$.name", "bookUrl": "$.url"},
+  "ruleContent": {"content": "$.content", "bodyJs": "var raw = CryptoJS.enc.Base64.parse(result); return CryptoJS.enc.Utf8.stringify(raw);"},
+  "raw": {"fixtureFeatures": "CryptoJS.AES,CryptoJS.enc.Base64,CryptoJS.enc.Utf8"}
+}

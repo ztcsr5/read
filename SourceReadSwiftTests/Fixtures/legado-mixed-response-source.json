@@ -1,0 +1,10 @@
+{
+  "bookSourceName": "Fixture Mixed Response",
+  "bookSourceUrl": "https://fixture.example/mixed",
+  "searchUrl": "https://fixture.example/mixed/search?q={{key}}",
+  "ruleSearch": {"bookList": "$.data.items", "name": "$.title", "author": "$.author", "bookUrl": "$.url"},
+  "ruleBookInfo": {"name": "$.title", "tocUrl": "$.toc"},
+  "ruleToc": {"chapterList": "$.chapters", "chapterName": "$.title", "chapterUrl": "$.url"},
+  "ruleContent": {"content": "$.content"},
+  "raw": {"fixtureFeatures": "bom,xssi,pre,embedded-json,wrong-content-type"}
+}

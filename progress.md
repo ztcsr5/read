@@ -1500,3 +1500,28 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the Stage 10 commit to restore the Stage 9 dynamic body/cookie bridge.
+
+## 2026-09-05 - Stage 11: Legado fixture corpus and diagnostic export (in progress)
+
+### Implemented
+
+- Added four offline Legado source fixtures covering mixed BOM/XSSI/`<pre>`/embedded JSON responses, cookie + dynamic nonce state, JavaImporter/ArrayList/MessageDigest, and CryptoJS Base64 body transforms.
+- Added end-to-end `SourceEngineLegadoCorpusTests` using an injected `CorpusNetworkClient`; Search → Detail → TOC → Content runs without contacting public source hosts.
+- Extended `SourceDiagnosticStep` with request/response metadata, status code, headers, cookie summary, final URL and retry count while keeping old diagnostic JSON decodable.
+- Added `SourceDiagnosticBatchReport` JSON/text export, failure prioritization and credential-like metadata redaction for Authorization/Cookie/token/password fields.
+- Added Source Manager batch-test export actions and result counts for support/debug reports.
+
+### Verification
+
+- `node ci-log/extract-prelude.js` and `node --check ci-log/js-prelude-check.js` pass locally.
+- `git diff --check` passes; Windows reports only the repository's existing LF-to-CRLF normalization warnings.
+- Windows has no Swift/Xcode/UIKit runtime. GitHub Actions remains the authoritative iOS compile/XCTest and unsigned-IPA gate for this stage.
+- Real public-source compatibility, Web 写源 LAN access and sustained ProMotion frame pacing remain device/source checks; these fixtures are deterministic regression coverage, not proof of every public source.
+
+### Next
+
+- Push this Stage 11 commit, wait for iOS XCTest and unsigned-IPA Actions, inspect compiler/test annotations and record the actual artifact size/hash before closing the stage.
+
+### Rollback
+
+- Revert the Stage 11 commit to restore the prior diagnostic model, Source Manager export surface and fixture test set.

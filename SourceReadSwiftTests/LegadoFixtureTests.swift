@@ -5,7 +5,9 @@ final class LegadoFixtureTests: XCTestCase {
     func testAllBookSourceFixturesDecodeAndExposePipelineCoverage() throws {
         let names = [
             "legado-html-source", "legado-json-source", "legado-js-source",
-            "legado-html-pagination-source", "legado-post-source", "legado-jxnode-source"
+            "legado-html-pagination-source", "legado-post-source", "legado-jxnode-source",
+            "legado-dynamic-token-source", "legado-mixed-response-source",
+            "legado-cookie-token-source", "legado-java-import-source", "legado-crypto-source"
         ]
         for name in names {
             let url = try XCTUnwrap(

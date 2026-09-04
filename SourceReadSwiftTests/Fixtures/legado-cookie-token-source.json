@@ -1,0 +1,11 @@
+{
+  "bookSourceName": "Fixture Cookie Token",
+  "bookSourceUrl": "https://fixture.example/cookie-token",
+  "searchUrl": "@js: java.put('nonce', 'fixture-nonce'); return 'https://fixture.example/cookie-token/search';",
+  "header": "{\"X-Nonce\":\"{{nonce}}\"}",
+  "ruleSearch": {"bookList": "$.books", "name": "$.name", "bookUrl": "$.url"},
+  "ruleBookInfo": {"name": "$.name", "tocUrl": "$.toc"},
+  "ruleToc": {"chapterList": "$.chapters", "chapterName": "$.title", "chapterUrl": "$.url"},
+  "ruleContent": {"content": "$.content"},
+  "raw": {"fixtureFeatures": "cookie,set-cookie,java.put-get,dynamic-header"}
+}

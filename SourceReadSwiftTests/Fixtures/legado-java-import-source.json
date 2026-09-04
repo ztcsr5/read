@@ -1,0 +1,8 @@
+{
+  "bookSourceName": "Fixture Java Import",
+  "bookSourceUrl": "https://fixture.example/java-import",
+  "searchUrl": "https://fixture.example/java-import/search?q={{key}}",
+  "ruleSearch": {"bookList": "@js:var I = JavaImporter(Packages.java.util); var list = new I.ArrayList(); list.add({name:'Imported',url:'https://fixture.example/java-import/book'}); JSON.stringify(list.toArray())", "name": "$.name", "bookUrl": "$.url"},
+  "ruleContent": {"content": "@js:var md = Packages.java.security.MessageDigest.getInstance('SHA-256'); md.digest('fixture'.getBytes()); result"},
+  "raw": {"fixtureFeatures": "JavaImporter,ArrayList,MessageDigest,String.getBytes"}
+}
