@@ -38,19 +38,12 @@ final class LegadoStage9CompatibilityTests: XCTestCase {
         var bytes = [];
         var value;
         while ((value = stream.read()) >= 0) bytes.push(value);
-        var outputBytes = [];
-        for (var i = 0; i < bytes.length; i++) outputBytes.push(Number(bytes[i]));
-        JSON.stringify({text: bytesToStr(bytes), inputLength: compressed.length, firstByte: compressed[0], outputLength: bytes.length, output: outputBytes.join(',')})
+        bytesToStr(bytes)
         """, variables: ["compressed": compressed])
-        guard case .success(let value) = result,
-              let data = value.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard case .success(let value) = result else {
             return XCTFail("expected inflate success: \(result)")
         }
-        XCTAssertEqual(object["text"] as? String, "hello legado", "inflate diagnostic: \(object)")
-        XCTAssertEqual(object["inputLength"] as? Int, compressed.count)
-        XCTAssertEqual(object["firstByte"] as? Int, 120)
-        XCTAssertEqual(object["outputLength"] as? Int, 12)
+        XCTAssertEqual(value, "hello legado")
     }
 
     func testIntegerLongImporterAndDigestApis() throws {
