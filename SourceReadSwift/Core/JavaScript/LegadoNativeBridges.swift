@@ -128,8 +128,16 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
 
     func invoke(_ payload: JSValue) -> AnyObject {
         let dictionary = Self.stringDictionary(payload.toDictionary())
-        let method = RuleExecutionContext.bridgeString(dictionary["method"])
-        let arguments = Self.arguments(dictionary["args"])
+        // Read the command fields directly from JSValue before asking
+        // JavaScriptCore to deep-bridge the object.  Deep conversion can turn
+        // nested JS arrays (especially arrays backed by an NSArray injected
+        // from Swift) into an empty NSArray on older iOS runtimes.  Keeping
+        // the args array as JSValue preserves indexed elements for binary
+        // helpers such as java.inflate and Cipher.doFinal.
+        let methodValue = payload.forProperty("method")
+        let method = methodValue.map { $0.toString() } ?? RuleExecutionContext.bridgeString(dictionary["method"])
+        let argumentsValue = payload.forProperty("args")
+        let arguments = Self.arguments(argumentsValue ?? dictionary["args"])
 
         let result: Any = {
             switch method {
@@ -260,6 +268,10 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
     }
 
     private static func arguments(_ value: Any?) -> [Any] {
+        if let value = value as? JSValue, value.isArray {
+            let length = max(0, Int(value.forProperty("length")?.toInt32() ?? 0))
+            return (0..<length).map { value.atIndex($0) as Any }
+        }
         if let value = value as? [Any] { return value }
         if let value = value as? NSArray { return value.map { $0 } }
         return value.map { [$0] } ?? []

@@ -203,6 +203,14 @@ final class LegadoHostServices {
             candidates.append(Array(input.dropFirst(2).dropLast(4)))
         }
         for candidate in candidates where !candidate.isEmpty {
+            if #available(iOS 13.0, macOS 10.15, *) {
+                // Foundation's NSData decompressor is backed by the system
+                // zlib implementation and is more reliable than the
+                // one-shot Compression API for small streams on simulators.
+                if let data = try? (Data(candidate) as NSData).decompressed(using: .zlib) {
+                    return data.map { NSNumber(value: $0) } as NSArray
+                }
+            }
             if let output = inflateCandidate(candidate) {
                 return output.map { NSNumber(value: $0) } as NSArray
             }
@@ -409,8 +417,26 @@ final class LegadoHostServices {
     private func bytes(from value: Any?) -> [UInt8] {
         if let jsValue = value as? JSValue {
             if jsValue.isArray {
-                return bytes(from: jsValue.toArray())
+                // Avoid JSValue.toArray() for binary inputs.  On older
+                // JavaScriptCore versions it may deep-bridge an injected
+                // NSArray as an empty Swift array.  Indexed access keeps the
+                // original JS values intact and also handles nested arrays.
+                let length = max(0, Int(jsValue.forProperty("length")?.toInt32() ?? 0))
+                var output: [UInt8] = []
+                output.reserveCapacity(length)
+                for index in 0..<length {
+                    let item = jsValue.atIndex(index)
+                    if let item, item.isNumber {
+                        output.append(item.toNumber().uint8Value)
+                    } else if let item, item.isString {
+                        output.append(contentsOf: Array(item.toString().utf8))
+                    } else {
+                        output.append(contentsOf: bytes(from: item))
+                    }
+                }
+                return output
             }
+            if jsValue.isNumber { return [jsValue.toNumber().uint8Value] }
             if jsValue.isString {
                 return Array(jsValue.toString().utf8)
             }
