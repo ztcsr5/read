@@ -1429,3 +1429,38 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the single Stage 8 commit to restore the prior parser format detection, per-stage JS state, body transforms, WebView fallback lifecycle and Source Manager test path.
+
+## 2026-09-05 - Stage 9: dynamic request body and cookie compatibility closure
+
+### Implemented
+
+- Preserved Legado placeholders until the request component boundary so dynamic
+  `@Body` and text `requestBody` values are URL-encoded exactly once. JSON bodies
+  remain type-safe and unescaped, while form values now handle spaces, CJK and
+  ampersands without corrupting separators.
+- Fixed `cookie.setCookie` request-header parsing for multiple pairs such as
+  `sid=ok; theme=dark`, filtering response-only attributes before merging them
+  into source-scoped state and `HTTPCookieStorage`.
+- Updated paginated bodyJs fixtures to keep branch markers out of chapter text
+  and to assert response `Set-Cookie` precedence explicitly.
+
+### Verification
+
+- Commits: `e51b50c`, `e546298`, `ab15846`.
+- iOS build/XCTest: [run 33919054887](https://github.com/ztcsr5/read/actions/runs/33919054887) — success.
+- Unsigned IPA: [run 33919054978](https://github.com/ztcsr5/read/actions/runs/33919054978) — success.
+- Added regression coverage for directive and text-form dynamic bodies,
+  multi-cookie JS state and paginated bodyJs output.
+- `git diff --check` passes locally; Windows has no Xcode/UIKit runtime, so the
+  Actions build/test and package workflows remain the authoritative iOS gate.
+
+### Open device/source checks
+
+- Broad real-world Legado source coverage, Web 写源 same-network behavior,
+  sustained ProMotion frame pacing and reader gesture feel still require a
+  ProMotion iPhone/device run.
+
+### Rollback
+
+- Revert `e51b50c..ab15846` together to restore the previous dynamic request,
+  cookie and fixture behavior.
