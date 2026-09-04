@@ -2,6 +2,7 @@ import Foundation
 import JavaScriptCore
 import SwiftSoup
 import CryptoKit
+import CommonCrypto
 
 final class JSCoreRuntime {
     private let context: JSContext
@@ -206,11 +207,13 @@ final class JSCoreRuntime {
             return Data(bytes).base64EncodedString()
         }
         let base64Decode: @convention(block) (String) -> String = { value in
-            guard let data = Data(base64Encoded: value) else { return "" }
+            let normalized = Self.normalizedBase64(value)
+            guard let data = Data(base64Encoded: normalized) else { return "" }
             return String(data: data, encoding: .utf8) ?? ""
         }
         let base64DecodeBytes: @convention(block) (String) -> NSArray = { value in
-            guard let data = Data(base64Encoded: value) else { return [] }
+            let normalized = Self.normalizedBase64(value)
+            guard let data = Data(base64Encoded: normalized) else { return [] }
             return data.map { NSNumber(value: $0) } as NSArray
         }
         let stringToBytes: @convention(block) (String) -> NSArray = { value in
@@ -235,6 +238,12 @@ final class JSCoreRuntime {
             switch normalized {
             case "md5": digest = Array(Insecure.MD5.hash(data: data))
             case "sha1": digest = Array(Insecure.SHA1.hash(data: data))
+            case "sha224":
+                var output = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
+                data.withUnsafeBytes { buffer in
+                    _ = CC_SHA224(buffer.baseAddress, CC_LONG(data.count), &output)
+                }
+                digest = output
             case "sha384": digest = Array(SHA384.hash(data: data))
             case "sha512": digest = Array(SHA512.hash(data: data))
             default: digest = Array(SHA256.hash(data: data))
@@ -247,7 +256,25 @@ final class JSCoreRuntime {
             let normalized = algorithm.lowercased().replacingOccurrences(of: "hmac", with: "").replacingOccurrences(of: "-", with: "")
             let bytes: [UInt8]
             switch normalized {
+            case "md5":
+                var output = Array(repeating: UInt8(0), count: Int(CC_MD5_DIGEST_LENGTH))
+                message.withUnsafeBytes { messageBuffer in
+                    key.withUnsafeBytes { keyBuffer in
+                        CCHmac(CCHmacAlgorithm(kCCHmacAlgMD5), keyBuffer.baseAddress, key.count,
+                               messageBuffer.baseAddress, message.count, &output)
+                    }
+                }
+                bytes = output
             case "sha1": bytes = Array(HMAC<Insecure.SHA1>.authenticationCode(for: message, using: key))
+            case "sha224":
+                var output = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
+                message.withUnsafeBytes { messageBuffer in
+                    key.withUnsafeBytes { keyBuffer in
+                        CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA224), keyBuffer.baseAddress, key.count,
+                               messageBuffer.baseAddress, message.count, &output)
+                    }
+                }
+                bytes = output
             case "sha384": bytes = Array(HMAC<SHA384>.authenticationCode(for: message, using: key))
             case "sha512": bytes = Array(HMAC<SHA512>.authenticationCode(for: message, using: key))
             default: bytes = Array(HMAC<SHA256>.authenticationCode(for: message, using: key))
@@ -496,12 +523,31 @@ final class JSCoreRuntime {
           return __native_base64Encode(String(value));
         };
         java.base64Decode = function(value) { return __native_base64Decode(String(value)); };
-        java.base64DecodeToByteArray = function(value) { return __asJavaList(__native_base64DecodeBytes(String(value || ''))); };
+        java.base64DecodeToByteArray = function(value) {
+          var encoded = value && value.length != null && typeof value !== 'string'
+            ? String(__native_bytesToString(value) || '')
+            : String(value == null ? '' : value);
+          return __asJavaList(__native_base64DecodeBytes(encoded));
+        };
         java.base64DecodeToString = java.base64Decode;
         java.base64Decoder = java.base64Decode;
         java.base64 = java.base64Encode;
         java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
+        java.inflate = function(value) {
+          return __asJavaList(__nativeLegado.invoke({ method: 'inflateBytes', args: [value && value.length != null ? value : []] }));
+        };
+        java.copyOfRange = function(value, start, end) {
+          var source = value && value.length != null ? Array.prototype.slice.call(value) : [];
+          var from = Math.max(0, Number(start || 0)), to = Math.max(from, Number(end || 0));
+          var out = source.slice(from, to);
+          while (out.length < to - from) out.push(0);
+          return __asJavaList(out);
+        };
+        java.asList = function() {
+          if (arguments.length === 1 && arguments[0] && arguments[0].length != null && typeof arguments[0] !== 'string') return __asJavaList(Array.prototype.slice.call(arguments[0]));
+          return __asJavaList(Array.prototype.slice.call(arguments));
+        };
         java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
         java.bytesToStr = function(value) {
           var list = value && value.length != null ? value : [];
@@ -626,6 +672,8 @@ final class JSCoreRuntime {
           list.last = function() { return list.length ? list[list.length - 1] : null; };
           list.size = function() { return list.length; };
           list.isEmpty = function() { return list.length === 0; };
+          list.toArray = function() { return Array.prototype.slice.call(list); };
+          list.contains = function(value) { return list.indexOf(value) >= 0; };
           return list;
         }
         function __jsonPathTokens(path) {
@@ -1255,8 +1303,17 @@ final class JSCoreRuntime {
         java.getZipByteArrayContent = function(path, entry) { return __nativeLegado.invoke({ method: 'getZipByteArrayContent', args: [String(path || ''), String(entry || '')] }); };
         java.getSandboxPath = function() { return String(__nativeLegado.invoke({ method: 'sandboxPath', args: [] }) || ''); };
         java.fetchCloudTTS = function(_) { return ''; };
-        function __aes(method, input, key, transformation, iv) {
-          return __nativeLegado.invoke({ method: method, args: [input, key, String(transformation || 'AES/CBC/PKCS7Padding'), iv] });
+        function __cipherArgs(third, fourth, fallback) {
+          var thirdText = String(third == null ? '' : third);
+          var looksLikeTransformation = thirdText.indexOf('/') >= 0 || /^(AES|DES|DESEDE|TRIPLEDES)/i.test(thirdText);
+          return {
+            iv: looksLikeTransformation ? fourth : third,
+            transformation: String((looksLikeTransformation ? third : fourth) || fallback)
+          };
+        }
+        function __aes(method, input, key, third, fourth) {
+          var normalized = __cipherArgs(third, fourth, 'AES/CBC/PKCS7Padding');
+          return __nativeLegado.invoke({ method: method, args: [input, key, normalized.transformation, normalized.iv] });
         }
         java.aesDecodeToByteArray = function(a,b,c,d) { return __aes('aesDecodeToByteArray',a,b,c,d); };
         java.aesDecodeToString = function(a,b,c,d) { return __aes('aesDecodeToString',a,b,c,d); };
@@ -1266,6 +1323,34 @@ final class JSCoreRuntime {
         java.aesEncodeToString = function(a,b,c,d) { return __aes('aesEncodeToString',a,b,c,d); };
         java.aesEncodeToBase64ByteArray = function(a,b,c,d) { return __aes('aesEncodeToBase64ByteArray',a,b,c,d); };
         java.aesEncodeToBase64String = function(a,b,c,d) { return __aes('aesEncodeToBase64String',a,b,c,d); };
+        function __cipherBase64Encode(value, key, third, fourth, fallback) {
+          var normalized = __cipherArgs(third, fourth, fallback);
+          var plain = value && value.length != null && typeof value !== 'string' ? value : __native_stringToBytes(String(value == null ? '' : value));
+          var encrypted = __nativeLegado.invoke({ method: 'cipherEncryptBytes', args: [plain, key, normalized.transformation, normalized.iv] });
+          return __native_base64EncodeBytes(encrypted && encrypted.length != null ? encrypted : []);
+        }
+        function __cipherBase64Decode(value, key, third, fourth, fallback) {
+          var normalized = __cipherArgs(third, fourth, fallback);
+          var decoded = __native_base64DecodeBytes(String(value == null ? '' : value));
+          var plain = __nativeLegado.invoke({ method: 'cipherDecryptBytes', args: [decoded, key, normalized.transformation, normalized.iv] });
+          return __native_bytesToString(plain && plain.length != null ? plain : []);
+        }
+        java.desEncodeToBase64String = function(value, key, iv, transformation) {
+          return __cipherBase64Encode(value, key, iv, transformation, 'DES/CBC/PKCS5Padding');
+        };
+        java.tripleDESEncodeBase64Str = function(value, key, mode, padding, iv) {
+          var transformation = 'DESede/' + String(mode || 'CBC') + '/' + String(padding || 'PKCS5Padding');
+          return __cipherBase64Encode(value, key, transformation, iv, transformation);
+        };
+        java.cipherEncodeToBase64String = function(value, key, iv, transformation) {
+          return __cipherBase64Encode(value, key, iv, transformation, 'AES/CBC/PKCS5Padding');
+        };
+        java.desBase64DecodeToString = function(value, key, iv, transformation) {
+          return __cipherBase64Decode(value, key, iv, transformation, 'DES/CBC/PKCS5Padding');
+        };
+        java.cipherBase64DecodeToString = function(value, key, iv, transformation) {
+          return __cipherBase64Decode(value, key, iv, transformation, 'AES/CBC/PKCS5Padding');
+        };
         java.setContent = function(value) {
           result = String(value == null ? '' : value);
           return String(__nativeRule.setContent(result));
@@ -1393,22 +1478,93 @@ final class JSCoreRuntime {
         function put(key, value) { return java.put(key, value); }
         function get(key, fallback) { return java.getStr(key, fallback); }
         if (typeof CryptoJS === 'undefined' || CryptoJS === null) CryptoJS = {};
+        function __cryptoBytes(value, encoding) {
+          if (value == null) return [];
+          if (value.__hex !== undefined) return __cryptoBytes(value.__hex, 'hex');
+          if (value.__bytes && value.__bytes.length != null) return Array.prototype.slice.call(value.__bytes).map(function(v) { return Number(v) & 255; });
+          if (value.words && value.words.length != null && value.sigBytes != null) {
+            var wordBytes = [], wordCount = Math.max(0, Number(value.sigBytes));
+            for (var wi = 0; wi < value.words.length && wordBytes.length < wordCount; wi++) {
+              var word = Number(value.words[wi]) || 0;
+              wordBytes.push((word >>> 24) & 255, (word >>> 16) & 255, (word >>> 8) & 255, word & 255);
+            }
+            return wordBytes.slice(0, wordCount);
+          }
+          if (value.__text !== undefined) return __cryptoBytes(value.__text, encoding || value.__encoding);
+          if (value.__cryptoValue !== undefined) return __cryptoBytes(value.__cryptoValue, encoding || value.__cryptoEncoding);
+          if (value.length != null && typeof value !== 'string') return Array.prototype.slice.call(value).map(function(v) { return Number(v) & 255; });
+          var text = String(value);
+          var enc = String(encoding || 'utf8').toLowerCase();
+          if (enc === 'latin1' || enc === 'iso-8859-1') {
+            var latin = []; for (var i = 0; i < text.length; i++) latin.push(text.charCodeAt(i) & 255); return latin;
+          }
+          if (enc === 'hex') {
+            var hex = text.replace(/\s+/g, ''), bytes = [];
+            for (var h = 0; h + 1 < hex.length; h += 2) { var n = parseInt(hex.substr(h, 2), 16); if (!isNaN(n)) bytes.push(n); }
+            return bytes;
+          }
+          return Array.prototype.slice.call(__native_stringToBytes(text)).map(function(v) { return Number(v) & 255; });
+        }
         function __cryptoText(value) {
+          if (value && value.ciphertext != null) return __cryptoText(value.ciphertext);
           if (value && value.__text !== undefined) return String(value.__text);
+          if (value && value.__bytes && value.__encoding === 'latin1') return String.fromCharCode.apply(null, value.__bytes);
+          if (value && value.__bytes) return String(__native_bytesToString(value.__bytes) || '');
           return String(value);
         }
-        function __cryptoWordArray(text, defaultEncoding) {
-          var value = String(text || '');
-          var defaultEnc = defaultEncoding || 'utf8';
+        function __cryptoBytesHex(value) {
+          var bytes = value && value.length != null ? value : [];
+          var out = '';
+          for (var i = 0; i < bytes.length; i++) {
+            var h = (Number(bytes[i]) & 255).toString(16);
+            out += h.length < 2 ? '0' + h : h;
+          }
+          return out;
+        }
+        function __cryptoDigestBytes(value, algorithm) {
+          var bytes = __cryptoBytes(value, value && value.__encoding);
+          return __cryptoDigest(__cryptoBytesHex(__native_digestBytes(bytes, String(algorithm || 'SHA-256'))));
+        }
+        function __cryptoHmacBytes(value, key, algorithm) {
+          var bytes = __cryptoBytes(value, value && value.__encoding);
+          var keyBytes = __cryptoBytes(key, key && key.__encoding);
+          return __cryptoDigest(__cryptoBytesHex(__native_hmacBytes(bytes, String(algorithm || 'HmacSHA256'), keyBytes)));
+        }
+        function __cryptoWords(bytes) {
+          var words = [];
+          for (var wi = 0; wi < bytes.length; wi += 4) {
+            words.push(((bytes[wi] || 0) << 24) | ((bytes[wi + 1] || 0) << 16) | ((bytes[wi + 2] || 0) << 8) | (bytes[wi + 3] || 0));
+          }
+          return words;
+        }
+        function __cryptoWordArray(value, defaultEncoding) {
+          if (value && value.ciphertext != null) value = value.ciphertext;
+          var enc = String(defaultEncoding || 'utf8').toLowerCase();
+          var bytes = __cryptoBytes(value, enc);
+          var text = enc === 'latin1' ? String.fromCharCode.apply(null, bytes) : String(__native_bytesToString(bytes) || '');
           return {
-            __text: value,
-            toString: function(encoder) {
-              var enc = encoder && encoder.__encoding ? String(encoder.__encoding) : defaultEnc;
-              if (enc === 'hex') return __native_hexEncode(value);
-              if (enc === 'base64') return __native_base64Encode(value);
-              return value;
+            __bytes: bytes,
+            __text: text,
+            __encoding: enc,
+            sigBytes: bytes.length,
+            words: __cryptoWords(bytes),
+            concat: function(other) {
+              var extra = __cryptoBytes(other, other && other.__encoding);
+              for (var ci = 0; ci < extra.length; ci++) bytes.push(extra[ci]);
+              this.sigBytes = bytes.length;
+              this.words = __cryptoWords(bytes);
+              return this;
             },
-            valueOf: function() { return value; }
+            clamp: function() { this.sigBytes = Math.max(0, Math.min(bytes.length, Number(this.sigBytes || 0))); bytes.length = this.sigBytes; this.words = __cryptoWords(bytes); return this; },
+            clone: function() { return __cryptoWordArray(bytes.slice(), 'bytes'); },
+            toString: function(encoder) {
+              var outEnc = encoder && encoder.__encoding ? String(encoder.__encoding).toLowerCase() : enc;
+              if (outEnc === 'hex') return bytes.map(function(v) { var h = Number(v).toString(16); return h.length < 2 ? '0' + h : h; }).join('');
+              if (outEnc === 'base64') return __native_base64EncodeBytes(bytes);
+              if (outEnc === 'latin1') return String.fromCharCode.apply(null, bytes);
+              return String(__native_bytesToString(bytes) || '');
+            },
+            valueOf: function() { return text; }
           };
         }
         function __cryptoDigest(hex) {
@@ -1416,45 +1572,146 @@ final class JSCoreRuntime {
           return {
             __hex: value,
             toString: function(encoder) {
-              var enc = encoder && encoder.__encoding ? String(encoder.__encoding) : 'hex';
-              if (enc === 'utf8') return __native_hexDecode(value);
-              if (enc === 'base64') return __native_base64Encode(__native_hexDecode(value));
+              var enc = encoder && encoder.__encoding ? String(encoder.__encoding).toLowerCase() : 'hex';
+              if (enc === 'utf8') return String(__native_bytesToString(__cryptoBytes(value, 'hex')) || '');
+              if (enc === 'base64') return __native_base64EncodeBytes(__cryptoBytes(value, 'hex'));
               return value;
             },
             valueOf: function() { return value; }
           };
         }
-        CryptoJS.MD5 = function(value) {
-          return __cryptoDigest(__native_md5(__cryptoText(value)));
-        };
-        CryptoJS.SHA1 = function(value) {
-          return __cryptoDigest(__native_sha1(__cryptoText(value)));
-        };
-        CryptoJS.SHA256 = function(value) {
-          return __cryptoDigest(__native_sha256(__cryptoText(value)));
-        };
-        CryptoJS.HmacSHA256 = function(value, key) {
-          return __cryptoDigest(__native_hmacSHA256(__cryptoText(value), __cryptoText(key)));
-        };
+        CryptoJS.MD5 = function(value) { return __cryptoDigestBytes(value, 'MD5'); };
+        CryptoJS.SHA1 = function(value) { return __cryptoDigestBytes(value, 'SHA-1'); };
+        CryptoJS.SHA224 = function(value) { return __cryptoDigestBytes(value, 'SHA-224'); };
+        CryptoJS.SHA256 = function(value) { return __cryptoDigestBytes(value, 'SHA-256'); };
+        CryptoJS.SHA384 = function(value) { return __cryptoDigestBytes(value, 'SHA-384'); };
+        CryptoJS.SHA512 = function(value) { return __cryptoDigestBytes(value, 'SHA-512'); };
+        CryptoJS.HmacMD5 = function(value, key) { return __cryptoHmacBytes(value, key, 'HmacMD5'); };
+        CryptoJS.HmacSHA1 = function(value, key) { return __cryptoHmacBytes(value, key, 'HmacSHA1'); };
+        CryptoJS.HmacSHA224 = function(value, key) { return __cryptoHmacBytes(value, key, 'HmacSHA224'); };
+        CryptoJS.HmacSHA256 = function(value, key) { return __cryptoHmacBytes(value, key, 'HmacSHA256'); };
+        CryptoJS.HmacSHA384 = function(value, key) { return __cryptoHmacBytes(value, key, 'HmacSHA384'); };
+        CryptoJS.HmacSHA512 = function(value, key) { return __cryptoHmacBytes(value, key, 'HmacSHA512'); };
         CryptoJS.enc = CryptoJS.enc || {};
         CryptoJS.enc.Utf8 = {
           __encoding: 'utf8',
-          parse: function(value) { return __cryptoWordArray(String(value), 'utf8'); },
-          stringify: function(value) { return __cryptoText(value); }
+          parse: function(value) { return __cryptoWordArray(String(value == null ? '' : value), 'utf8'); },
+          stringify: function(value) { return __cryptoWordArray(value, 'utf8').toString(this); }
         };
         CryptoJS.enc.Hex = {
           __encoding: 'hex',
-          parse: function(value) { return __cryptoWordArray(__native_hexDecode(String(value)), 'hex'); },
-          stringify: function(value) { return value && value.__hex ? String(value.__hex) : __native_hexEncode(__cryptoText(value)); }
+          parse: function(value) { return __cryptoWordArray(String(value == null ? '' : value), 'hex'); },
+          stringify: function(value) { return __cryptoWordArray(value, 'utf8').toString(this); }
         };
         CryptoJS.enc.Base64 = {
           __encoding: 'base64',
-          parse: function(value) { return __cryptoWordArray(__native_base64Decode(String(value)), 'base64'); },
-          stringify: function(value) { return __native_base64Encode(__cryptoText(value)); }
+          parse: function(value) {
+            var decoded = __native_base64DecodeBytes(String(value == null ? '' : value));
+            return __cryptoWordArray(decoded, 'bytes');
+          },
+          stringify: function(value) { return __cryptoWordArray(value, 'utf8').toString(this); }
         };
+        CryptoJS.enc.Latin1 = {
+          __encoding: 'latin1',
+          parse: function(value) { return __cryptoWordArray(String(value == null ? '' : value), 'latin1'); },
+          stringify: function(value) { return __cryptoWordArray(value, 'latin1').toString(this); }
+        };
+        CryptoJS.lib = CryptoJS.lib || {};
+        CryptoJS.lib.WordArray = CryptoJS.lib.WordArray || {
+          create: function(value, sigBytes) {
+            var wordArray;
+            if (value && value.words && value.sigBytes != null) {
+              wordArray = __cryptoWordArray(value, 'bytes');
+            } else if (value && value.length != null) {
+              var values = Array.prototype.slice.call(value);
+              var looksLikeWords = values.some(function(item) { return Number(item) > 255 || Number(item) < 0; });
+              if (looksLikeWords) {
+                var wordBytes = [];
+                for (var wi = 0; wi < values.length; wi++) {
+                  var word = Number(values[wi]) || 0;
+                  wordBytes.push((word >>> 24) & 255, (word >>> 16) & 255, (word >>> 8) & 255, word & 255);
+                }
+                wordArray = __cryptoWordArray(wordBytes, 'bytes');
+              } else {
+                wordArray = __cryptoWordArray(values, 'bytes');
+              }
+            } else {
+              wordArray = __cryptoWordArray([], 'bytes');
+            }
+            if (sigBytes != null) { wordArray.sigBytes = Number(sigBytes); wordArray.__bytes.length = wordArray.sigBytes; }
+            wordArray.words = __cryptoWords(wordArray.__bytes);
+            return wordArray;
+          }
+        };
+        CryptoJS.mode = CryptoJS.mode || {};
+        CryptoJS.mode.CBC = CryptoJS.mode.CBC || 'CBC';
+        CryptoJS.mode.ECB = CryptoJS.mode.ECB || 'ECB';
+        CryptoJS.pad = CryptoJS.pad || {};
+        CryptoJS.pad.Pkcs7 = CryptoJS.pad.Pkcs7 || 'Pkcs7';
+        CryptoJS.pad.PKCS7 = CryptoJS.pad.PKCS7 || CryptoJS.pad.Pkcs7;
+        CryptoJS.pad.ZeroPadding = CryptoJS.pad.ZeroPadding || 'ZeroPadding';
+        CryptoJS.pad.NoPadding = CryptoJS.pad.NoPadding || 'NoPadding';
+        function __cryptoModeName(options) {
+          var mode = options && options.mode != null ? String(options.mode) : 'CBC';
+          return mode.toLowerCase() === 'ecb' || mode.indexOf('ECB') >= 0 ? 'ECB' : 'CBC';
+        }
+        function __cryptoPaddingName(options) {
+          var padding = options && options.padding != null ? String(options.padding) : 'Pkcs7';
+          if (padding.toLowerCase().indexOf('zero') >= 0) return 'ZeroPadding';
+          if (padding.toLowerCase().indexOf('no') >= 0) return 'NoPadding';
+          return 'PKCS7Padding';
+        }
+        function __cryptoCipher(algorithm) {
+          return {
+            encrypt: function(value, key, options) {
+              options = options || {};
+              var transformation = algorithm + '/' + __cryptoModeName(options) + '/' + __cryptoPaddingName(options);
+              var output = __nativeLegado.invoke({ method: 'cipherEncryptBytes', args: [
+                __cryptoBytes(value, value && value.__encoding),
+                __cryptoBytes(key, key && key.__encoding),
+                transformation,
+                __cryptoBytes(options.iv, options.iv && options.iv.__encoding)
+              ]});
+              var ciphertext = __cryptoWordArray(output, 'bytes');
+              return {
+                ciphertext: ciphertext,
+                key: key,
+                iv: options.iv,
+                algorithm: algorithm,
+                toString: function(formatter) {
+                  if (formatter && typeof formatter.stringify === 'function') return String(formatter.stringify(this));
+                  return CryptoJS.enc.Base64.stringify(ciphertext);
+                }
+              };
+            },
+            decrypt: function(value, key, options) {
+              options = options || {};
+              var ciphertext = value && value.ciphertext != null ? value.ciphertext : value;
+              if (!options.iv && value && value.iv) options.iv = value.iv;
+              var bytes = ciphertext && ciphertext.__bytes ? ciphertext.__bytes :
+                (typeof ciphertext === 'string' ? __cryptoBytes(__native_base64DecodeBytes(ciphertext), 'bytes') : __cryptoBytes(ciphertext, ciphertext && ciphertext.__encoding));
+              var transformation = algorithm + '/' + __cryptoModeName(options) + '/' + __cryptoPaddingName(options);
+              var output = __nativeLegado.invoke({ method: 'cipherDecryptBytes', args: [
+                bytes,
+                __cryptoBytes(key, key && key.__encoding),
+                transformation,
+                __cryptoBytes(options.iv, options.iv && options.iv.__encoding)
+              ]});
+              return __cryptoWordArray(output, 'bytes');
+            }
+          };
+        }
+        CryptoJS.AES = CryptoJS.AES || __cryptoCipher('AES');
+        CryptoJS.DES = CryptoJS.DES || __cryptoCipher('DES');
+        CryptoJS.TripleDES = CryptoJS.TripleDES || __cryptoCipher('DESede');
+        CryptoJS.DESede = CryptoJS.DESede || CryptoJS.TripleDES;
         if (typeof Packages === 'undefined' || Packages === null) Packages = {};
         Packages.org = Packages.org || {};
         Packages.org.jsoup = Packages.org.jsoup || {};
+        // Keep the namespace materialized while the rest of the Java aliases
+        // are being declared.  The concrete Jsoup facade is installed below,
+        // but JavaImporter metadata is assigned before that point.
+        Packages.org.jsoup.Jsoup = Packages.org.jsoup.Jsoup || {};
         Packages.java = Packages.java || {};
         Packages.java.lang = Packages.java.lang || {};
         Packages.java.lang.String = Packages.java.lang.String || function(value, charset) {
@@ -1481,9 +1738,12 @@ final class JSCoreRuntime {
         };
         Packages.java.lang.Integer = Packages.java.lang.Integer || {
           parseInt: function(value, radix) { var n = parseInt(String(value || ''), Number(radix || 10)); return isNaN(n) ? 0 : n; },
-          valueOf: function(value) { return Number(value || 0); }
+          valueOf: function(value) { return Number(value || 0); },
+          toString: function(value, radix) { return Number(value || 0).toString(Number(radix || 10)); }
         };
         Packages.java.lang.Long = Packages.java.lang.Long || Packages.java.lang.Integer;
+        Packages.java.lang.Long.parseLong = function(value, radix) { var n = parseInt(String(value == null ? '0' : value), Number(radix || 10)); return isNaN(n) ? 0 : n; };
+        Packages.java.lang.Long.toString = function(value, radix) { return Number(value || 0).toString(Number(radix || 10)); };
         Packages.java.lang.Double = Packages.java.lang.Double || {
           parseDouble: function(value) { var n = parseFloat(String(value || '')); return isNaN(n) ? 0 : n; },
           valueOf: function(value) { return Number(value || 0); }
@@ -1513,9 +1773,61 @@ final class JSCoreRuntime {
         Packages.java.io = Packages.java.io || {};
         Packages.java.io.ByteArrayInputStream = Packages.java.io.ByteArrayInputStream || function(value) {
           var bytes = value && value.length != null ? Array.prototype.slice.call(value) : [];
-          this.read = function() { return bytes.length ? bytes.shift() : -1; };
-          this.available = function() { return bytes.length; };
+          var index = 0;
+          var markIndex = 0;
+          this.read = function(buffer, offset, length) {
+            if (buffer && buffer.length != null) {
+              var start = Math.max(0, Number(offset || 0));
+              var requested = length == null ? buffer.length - start : Number(length);
+              var count = Math.min(Math.max(0, requested), bytes.length - index);
+              for (var i = 0; i < count; i++) buffer[start + i] = Number(bytes[index++]) & 255;
+              return count > 0 ? count : -1;
+            }
+            return index < bytes.length ? Number(bytes[index++]) & 255 : -1;
+          };
+          this.available = function() { return Math.max(0, bytes.length - index); };
+          this.skip = function(count) { var moved = Math.min(Math.max(0, Number(count || 0)), bytes.length - index); index += moved; return moved; };
+          this.mark = function() { markIndex = index; };
+          this.reset = function() { index = markIndex; };
+          this.close = function() { index = bytes.length; };
+        };
+        Packages.java.io.ByteArrayOutputStream = Packages.java.io.ByteArrayOutputStream || function() {
+          var bytes = [];
+          this.write = function(value, offset, length) {
+            if (value && value.length != null) {
+              var start = Number(offset || 0), count = length == null ? value.length - start : Number(length);
+              for (var i = 0; i < count && start + i < value.length; i++) bytes.push(Number(value[start + i]) & 255);
+            } else bytes.push(Number(value || 0) & 255);
+          };
+          this.size = function() { return bytes.length; };
+          this.reset = function() { bytes = []; };
           this.close = function() {};
+          this.toByteArray = function() { return __asJavaList(bytes.slice()); };
+          this.toString = function(charset) { return String(__native_bytesToStringCharset(bytes, String(charset || 'utf-8')) || ''); };
+        };
+        Packages.java.util = Packages.java.util || {};
+        Packages.java.util.Arrays = Packages.java.util.Arrays || {
+          copyOfRange: function(values, start, end) {
+            var source = values && values.length != null ? Array.prototype.slice.call(values) : [];
+            var from = Math.max(0, Number(start || 0)), to = Math.max(from, Number(end || 0));
+            var out = source.slice(from, to);
+            while (out.length < to - from) out.push(0);
+            return __asJavaList(out);
+          },
+          asList: function() {
+            if (arguments.length === 1 && arguments[0] && arguments[0].length != null && typeof arguments[0] !== 'string') return __asJavaList(Array.prototype.slice.call(arguments[0]));
+            return __asJavaList(Array.prototype.slice.call(arguments));
+          },
+          equals: function(a, b) {
+            if (!a || !b || a.length !== b.length) return false;
+            for (var i = 0; i < a.length; i++) {
+              var left = a[i], right = b[i];
+              if (left && typeof left.valueOf === 'function') left = left.valueOf();
+              if (right && typeof right.valueOf === 'function') right = right.valueOf();
+              if (left !== right && String(left) !== String(right)) return false;
+            }
+            return true;
+          }
         };
         Packages.java.net = Packages.java.net || {};
         Packages.java.net.URL = Packages.java.net.URL || function(value, baseValue) {
@@ -1574,34 +1886,123 @@ final class JSCoreRuntime {
           this.getAuthority = function() { return authority; };
           this.openConnection = function() { return __makeConnect(raw); };
         };
+        Packages.java.net.URLEncoder = Packages.java.net.URLEncoder || {
+          encode: function(value, charset) { return java.urlEncode(String(value == null ? '' : value)).replace(/%20/g, '+'); }
+        };
+        Packages.java.net.URLDecoder = Packages.java.net.URLDecoder || {
+          decode: function(value, charset) { return java.decodeURI(String(value == null ? '' : value).replace(/\+/g, '%20')); }
+        };
         if (typeof URL === 'undefined') URL = Packages.java.net.URL;
         Packages.java.util = Packages.java.util || {};
         Packages.java.util.UUID = Packages.java.util.UUID || { randomUUID: java.randomUUID };
         Packages.java.util.Base64 = Packages.java.util.Base64 || {
+          NO_WRAP: 2,
+          DEFAULT: 0,
+          getEncoder: function() {
+            return { encodeToString: function(value) {
+              var bytes = value && value.length != null && typeof value !== 'string' ? value : __native_stringToBytes(String(value == null ? '' : value));
+              return __native_base64EncodeBytes(bytes);
+            } };
+          },
+          getDecoder: function() {
+            return { decode: function(value) { return java.base64DecodeToByteArray(String(value == null ? '' : value)); } };
+          },
           encodeToString: function(value) { return value && value.length != null ? __native_base64EncodeBytes(value) : java.base64Encode(String(value || '')); },
-          decode: function(value) { return java.base64DecodeToByteArray(value); }
+          encode: function(value) {
+            var encoded = __native_base64EncodeBytes(value && value.length != null ? value : []);
+            return __asJavaList(__native_stringToBytes(encoded));
+          },
+          decode: function(value) {
+            var encoded = value && value.length != null && typeof value !== 'string'
+              ? String(__native_bytesToString(value) || '')
+              : String(value == null ? '' : value);
+            return java.base64DecodeToByteArray(encoded);
+          }
         };
         Packages.java.security = Packages.java.security || {};
         Packages.java.security.MessageDigest = Packages.java.security.MessageDigest || {
           getInstance: function(algorithm) {
             var name = String(algorithm || 'SHA-256');
-            return { digest: function(value) { return __asJavaList(__native_digestBytes(value && value.length != null ? value : [], name)); } };
+            var state = { bytes: [] };
+            return {
+              update: function(value, offset, length) {
+                var source = value && value.length != null ? Array.prototype.slice.call(value) : [];
+                var start = Math.max(0, Number(offset || 0));
+                var count = length == null ? source.length - start : Math.max(0, Number(length));
+                state.bytes = state.bytes.concat(source.slice(start, start + count));
+                return this;
+              },
+              digest: function(value) {
+                if (value !== undefined) this.update(value);
+                var output = __asJavaList(__native_digestBytes(state.bytes, name));
+                state.bytes = [];
+                return output;
+              },
+              reset: function() { state.bytes = []; return this; },
+              getAlgorithm: function() { return name; }
+            };
           }
         };
         Packages.javax = Packages.javax || {};
         Packages.javax.crypto = Packages.javax.crypto || {};
         Packages.javax.crypto.spec = Packages.javax.crypto.spec || {};
         Packages.javax.crypto.spec.SecretKeySpec = Packages.javax.crypto.spec.SecretKeySpec || function(value, algorithm) {
-          this.bytes = value && value.length != null ? Array.prototype.slice.call(value) : [];
-          this.algorithm = String(algorithm || 'HmacSHA1');
+          var start = 0;
+          var length = value && value.length != null ? value.length : 0;
+          var name = algorithm;
+          if (arguments.length >= 4) {
+            start = Math.max(0, Number(arguments[1] || 0));
+            length = Math.max(0, Number(arguments[2] || 0));
+            name = arguments[3];
+          }
+          var source = value && value.length != null ? Array.prototype.slice.call(value) : [];
+          this.bytes = source.slice(start, start + length);
+          this.algorithm = String(name || 'HmacSHA1');
           this.getEncoded = function() { return this.bytes; };
+        };
+        Packages.javax.crypto.spec.IvParameterSpec = Packages.javax.crypto.spec.IvParameterSpec || function(value) {
+          var start = arguments.length >= 3 ? Math.max(0, Number(arguments[1] || 0)) : 0;
+          var length = arguments.length >= 3 ? Math.max(0, Number(arguments[2] || 0)) : (value && value.length != null ? value.length : 0);
+          var source = value && value.length != null ? Array.prototype.slice.call(value) : [];
+          this.bytes = source.slice(start, start + length);
+          this.getIV = function() { return this.bytes.slice(); };
+        };
+        Packages.javax.crypto.Cipher = Packages.javax.crypto.Cipher || {
+          DECRYPT_MODE: 2,
+          ENCRYPT_MODE: 1,
+          getInstance: function(transformation) {
+            var state = { transformation: String(transformation || 'AES/CBC/PKCS5Padding'), mode: 2, key: [], iv: [] };
+            return {
+              init: function(mode, keySpec, ivSpec) {
+                state.mode = Number(mode || 2);
+                state.key = keySpec && keySpec.bytes ? keySpec.bytes : (keySpec && keySpec.getEncoded ? keySpec.getEncoded() : keySpec);
+                state.iv = ivSpec && ivSpec.bytes ? ivSpec.bytes : (ivSpec && ivSpec.getIV ? ivSpec.getIV() : []);
+                return this;
+              },
+              update: function(value) { return this.doFinal(value); },
+              doFinal: function(value) {
+                var method = state.mode === 1 ? 'cipherEncryptBytes' : 'cipherDecryptBytes';
+                var input = value && value.length != null ? value : [];
+                return __asJavaList(__nativeLegado.invoke({ method: method, args: [input, state.key || [], state.transformation, state.iv || []] }));
+              }
+            };
+          }
         };
         Packages.javax.crypto.Mac = Packages.javax.crypto.Mac || {
           getInstance: function(algorithm) {
             var state = { key: [], algorithm: String(algorithm || 'HmacSHA1') };
-            return { init: function(secret) { state.key = secret && secret.bytes ? secret.bytes : secret; }, doFinal: function(value) {
-              return __asJavaList(__native_hmacBytes(value && value.length != null ? value : [], state.algorithm, state.key && state.key.length != null ? state.key : []));
-            }};
+            var pending = [];
+            return {
+              init: function(secret) { state.key = secret && secret.bytes ? secret.bytes : secret; pending = []; return this; },
+              update: function(value) { if (value && value.length != null) pending = pending.concat(Array.prototype.slice.call(value)); return this; },
+              doFinal: function(value) {
+                if (value !== undefined) this.update(value);
+                var output = __asJavaList(__native_hmacBytes(pending, state.algorithm, state.key && state.key.length != null ? state.key : []));
+                pending = [];
+                return output;
+              },
+              reset: function() { pending = []; return this; }
+            };
           }
         };
         var javax = Packages.javax;
@@ -1621,7 +2022,10 @@ final class JSCoreRuntime {
         };
         Packages.java.util.ArrayList = Packages.java.util.ArrayList || function() {
           var values = [];
-          if (arguments.length && arguments[0] && arguments[0].length != null) values = Array.prototype.slice.call(arguments[0]);
+          if (arguments.length && arguments[0]) {
+            if (arguments[0].length != null) values = Array.prototype.slice.call(arguments[0]);
+            else if (typeof arguments[0].toArray === 'function') values = arguments[0].toArray();
+          }
           this.add = function(value) { values.push(value); return true; };
           this.addAll = function(other) { if (other && other.length != null) for (var i = 0; i < other.length; i++) values.push(other[i]); else if (other && other.toArray) values = values.concat(other.toArray()); return true; };
           this.get = function(index) { return values[Number(index)]; };
@@ -1635,6 +2039,24 @@ final class JSCoreRuntime {
           this.isEmpty = function() { return values.length === 0; };
           this.toArray = function() { return values.slice(); };
           this.toString = function() { return values.join(','); };
+        };
+        Packages.java.util.zip = Packages.java.util.zip || {};
+        Packages.java.util.zip.InflaterInputStream = Packages.java.util.zip.InflaterInputStream || function(input) {
+          var raw = input && input.__bytes ? input.__bytes : (input && input.__javaBytes ? input.__javaBytes : input);
+          var inflated = java.inflate(raw && raw.length != null ? raw : []);
+          var index = 0;
+          this.read = function(buffer, offset, length) {
+            if (buffer && buffer.length != null) {
+              var start = Number(offset || 0);
+              var requested = length == null ? buffer.length - start : Number(length);
+              var count = Math.min(Math.max(0, requested), inflated.length - index);
+              for (var i = 0; i < count; i++) buffer[start + i] = inflated[index++];
+              return count > 0 ? count : -1;
+            }
+            return index < inflated.length ? Number(inflated[index++]) : -1;
+          };
+          this.available = function() { return Math.max(0, inflated.length - index); };
+          this.close = function() {};
         };
         Packages.java.util.regex = Packages.java.util.regex || {};
         function __javaRegexFlags(flags) {
@@ -1770,16 +2192,72 @@ final class JSCoreRuntime {
         Packages.util = Packages.java.util;
         java.lang = Packages.java.lang;
         java.util = Packages.java.util;
+        java.net = Packages.java.net;
+        java.io = Packages.java.io;
+        java.security = Packages.java.security;
+        java.util.zip = Packages.java.util.zip;
+        var javax = Packages.javax;
+        Packages.org.jsoup.Jsoup.__javaSimpleName = 'Jsoup';
+        Packages.java.lang.String.__javaSimpleName = 'String';
+        Packages.java.lang.Integer.__javaSimpleName = 'Integer';
+        Packages.java.lang.Long.__javaSimpleName = 'Long';
+        Packages.java.util.Arrays.__javaSimpleName = 'Arrays';
+        Packages.java.util.ArrayList.__javaSimpleName = 'ArrayList';
+        Packages.java.util.HashMap.__javaSimpleName = 'HashMap';
+        Packages.java.net.URLEncoder.__javaSimpleName = 'URLEncoder';
+        Packages.java.net.URLDecoder.__javaSimpleName = 'URLDecoder';
+        Packages.java.io.ByteArrayInputStream.__javaSimpleName = 'ByteArrayInputStream';
+        Packages.java.io.ByteArrayOutputStream.__javaSimpleName = 'ByteArrayOutputStream';
+        Packages.java.util.zip.InflaterInputStream.__javaSimpleName = 'InflaterInputStream';
+        Packages.java.security.MessageDigest.__javaSimpleName = 'MessageDigest';
+        Packages.javax.crypto.Mac.__javaSimpleName = 'Mac';
+        Packages.javax.crypto.spec.SecretKeySpec.__javaSimpleName = 'SecretKeySpec';
+        Packages.javax.crypto.spec.IvParameterSpec.__javaSimpleName = 'IvParameterSpec';
+        Packages.javax.crypto.Cipher.__javaSimpleName = 'Cipher';
         function JavaImporter() {
-          return {
-            importPackage: function(_) {},
-            importClass: function(_) {},
+          var importer = {
+            importPackage: function(packageRef) {
+              if (packageRef && typeof packageRef === 'object') {
+                for (var key in packageRef) if (/^[A-Za-z_$][\\w$]*$/.test(key)) importer[key] = packageRef[key];
+              }
+              return importer;
+            },
+            importClass: function(classRef) {
+              var name = classRef && classRef.__javaSimpleName ? String(classRef.__javaSimpleName) : '';
+              if (name) importer[name] = classRef;
+              return classRef;
+            },
             String: Packages.java.lang.String,
+            Integer: Packages.java.lang.Integer,
+            Long: Packages.java.lang.Long,
+            Arrays: Packages.java.util.Arrays,
+            ArrayList: Packages.java.util.ArrayList,
+            HashMap: Packages.java.util.HashMap,
+            URLEncoder: Packages.java.net.URLEncoder,
+            URLDecoder: Packages.java.net.URLDecoder,
+            MessageDigest: Packages.java.security.MessageDigest,
+            Mac: Packages.javax.crypto.Mac,
+            Cipher: Packages.javax.crypto.Cipher,
+            SecretKeySpec: Packages.javax.crypto.spec.SecretKeySpec,
+            IvParameterSpec: Packages.javax.crypto.spec.IvParameterSpec,
+            ByteArrayOutputStream: Packages.java.io.ByteArrayOutputStream,
+            InflaterInputStream: Packages.java.util.zip.InflaterInputStream,
             Jsoup: Packages.org.jsoup.Jsoup,
             Base64: Packages.java.util.Base64
           };
+          return importer;
         }
-        function importPackage(value) { return value; }
+        function importClass(value) {
+          var name = value && value.__javaSimpleName ? String(value.__javaSimpleName) : '';
+          if (name && typeof globalThis !== 'undefined') globalThis[name] = value;
+          return value;
+        }
+        function importPackage(value) {
+          if (value && typeof value === 'object' && typeof globalThis !== 'undefined') {
+            for (var key in value) if (/^[A-Za-z_$][\\w$]*$/.test(key)) globalThis[key] = value[key];
+          }
+          return value;
+        }
         var org = Packages.org;
         function __selectorWithIndex(selector, index) {
           if (index === undefined || index === null || isNaN(Number(index))) return String(selector || '');
@@ -1994,7 +2472,13 @@ final class JSCoreRuntime {
           getElement: function(rule) { __nativeRule.setContent(__defaultHtml()); return __nativeRule.getElement(String(rule || '')); },
           getElements: function(rule) { __nativeRule.setContent(__defaultHtml()); return __nativeRule.getElements(String(rule || '')); }
         };
-        function importClass(_) { return undefined; }
+        // Keep the global helper available after the rule resolver declaration;
+        // some sources call importClass() late in the script.
+        function importClass(value) {
+          var name = value && value.__javaSimpleName ? String(value.__javaSimpleName) : '';
+          if (name && typeof globalThis !== 'undefined') globalThis[name] = value;
+          return value;
+        }
         """
         context.exception = nil
         context.evaluateScript(prelude)
@@ -2120,12 +2604,29 @@ final class JSCoreRuntime {
         charset.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
     }
 
+    private static func normalizedBase64(_ value: String) -> String {
+        var text = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = text.count % 4
+        if remainder != 0 { text += String(repeating: "=", count: 4 - remainder) }
+        return text
+    }
+
     private static func digestHex(value: String, algorithm: String) -> String {
         let normalized = algorithm.lowercased().replacingOccurrences(of: "-", with: "")
         let data = Data(value.utf8)
         switch normalized {
         case "md5": return Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
         case "sha1": return Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        case "sha224":
+            var digest = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
+            data.withUnsafeBytes { buffer in
+                _ = CC_SHA224(buffer.baseAddress, CC_LONG(data.count), &digest)
+            }
+            return digest.map { String(format: "%02x", $0) }.joined()
         case "sha384": return SHA384.hash(data: data).map { String(format: "%02x", $0) }.joined()
         case "sha512": return SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
         default: return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -2138,7 +2639,25 @@ final class JSCoreRuntime {
         let secret = SymmetricKey(data: Data(key.utf8))
         let bytes: [UInt8]
         switch normalized {
+        case "md5":
+            var digest = Array(repeating: UInt8(0), count: Int(CC_MD5_DIGEST_LENGTH))
+            message.withUnsafeBytes { messageBuffer in
+                secret.withUnsafeBytes { keyBuffer in
+                    CCHmac(CCHmacAlgorithm(kCCHmacAlgMD5), keyBuffer.baseAddress, secret.bitCount / 8,
+                           messageBuffer.baseAddress, message.count, &digest)
+                }
+            }
+            bytes = digest
         case "sha1": bytes = Array(HMAC<Insecure.SHA1>.authenticationCode(for: message, using: secret))
+        case "sha224":
+            var digest = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
+            message.withUnsafeBytes { messageBuffer in
+                secret.withUnsafeBytes { keyBuffer in
+                    CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA224), keyBuffer.baseAddress, secret.bitCount / 8,
+                           messageBuffer.baseAddress, message.count, &digest)
+                }
+            }
+            bytes = digest
         case "sha384": bytes = Array(HMAC<SHA384>.authenticationCode(for: message, using: secret))
         case "sha512": bytes = Array(HMAC<SHA512>.authenticationCode(for: message, using: secret))
         default: bytes = Array(HMAC<SHA256>.authenticationCode(for: message, using: secret))

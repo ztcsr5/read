@@ -212,6 +212,8 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
             return data.map { NSNumber(value: $0) } as NSArray
         case "utf8ToGbk":
             return services.utf8ToGbk(RuleExecutionContext.bridgeString(arguments.first))
+        case "inflateBytes":
+            return services.inflate(arguments.first)
         case "encodeURI":
             return services.encodeURI(
                 RuleExecutionContext.bridgeString(arguments.first),
@@ -227,6 +229,16 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
                 input: arguments.first,
                 key: arguments.count > 1 ? arguments[1] : nil,
                 transformation: arguments.count > 2 ? RuleExecutionContext.bridgeString(arguments[2]) : "AES/CBC/PKCS7Padding",
+                iv: arguments.count > 3 ? arguments[3] : nil
+            )
+        case "cipherEncryptBytes", "cipherDecryptBytes":
+            return services.cipher(
+                operation: method,
+                input: arguments.first,
+                key: arguments.count > 1 ? arguments[1] : nil,
+                transformation: arguments.count > 2
+                    ? RuleExecutionContext.bridgeString(arguments[2])
+                    : "AES/CBC/PKCS7Padding",
                 iv: arguments.count > 3 ? arguments[3] : nil
             )
         case "sandboxPath":

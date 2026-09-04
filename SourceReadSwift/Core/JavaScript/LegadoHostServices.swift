@@ -2,6 +2,8 @@ import Foundation
 import CoreFoundation
 import CryptoSwift
 import ZIPFoundation
+import CommonCrypto
+import Compression
 
 /// Native services required by Legado JavaScript sources.  All filesystem access is
 /// constrained to the app container; relative paths live under Documents/LegadoSandbox.
@@ -114,7 +116,7 @@ final class LegadoHostServices {
             let isDecode = operation.localizedCaseInsensitiveContains("decode")
             var payload = bytes(from: input)
             if operation.localizedCaseInsensitiveContains("base64decode"),
-               let decoded = Data(base64Encoded: RuleExecutionContext.bridgeString(input)) {
+               let decoded = Data(base64Encoded: Self.normalizedBase64(RuleExecutionContext.bridgeString(input))) {
                 payload = Array(decoded)
             }
             let output = try isDecode ? cipher.decrypt(payload) : cipher.encrypt(payload)
@@ -133,6 +135,88 @@ final class LegadoHostServices {
             executionContext.log("AES failed: \(error.localizedDescription)")
             return operation.localizedCaseInsensitiveContains("bytearray") ? ([] as NSArray) : ""
         }
+    }
+
+    /// Generic raw-byte cipher bridge used by CryptoJS WordArray shims and by
+    /// Javax.Cipher-compatible source snippets.  Keeping this separate from
+    /// the legacy string helpers preserves their historical return semantics
+    /// while allowing binary ciphertext to round-trip without UTF-8 loss.
+    func cipher(
+        operation: String,
+        input: Any?,
+        key: Any?,
+        transformation: String,
+        iv: Any?
+    ) -> NSArray {
+        let upper = transformation.uppercased()
+        let isDecrypt = operation.localizedCaseInsensitiveContains("decrypt") ||
+            operation.localizedCaseInsensitiveContains("decode")
+        let kind: String = upper.contains("DESEDE") || upper.contains("TRIPLEDES") ? "3DES" :
+            (upper.contains("DES") ? "DES" : "AES")
+        let mode = upper.contains("/ECB") || upper.contains("ECB/") ? "ECB" : "CBC"
+        let padding: String = upper.contains("NOPADDING") ? "NoPadding" :
+            (upper.contains("ZEROPADDING") ? "ZeroPadding" : "PKCS7")
+        var payload = bytes(from: input)
+        var keyBytes = bytes(from: key)
+        var ivBytes = bytes(from: iv)
+        do {
+            let output: [UInt8]
+            if kind == "AES" {
+                let blockSize = 16
+                keyBytes = normalizedKey(keyBytes)
+                ivBytes = Array((ivBytes + Array(repeating: 0, count: blockSize)).prefix(blockSize))
+                let blockMode: BlockMode = mode == "ECB" ? ECB() : CBC(iv: ivBytes)
+                let paddingMode: Padding = padding == "NoPadding" ? .noPadding :
+                    (padding == "ZeroPadding" ? .zeroPadding : .pkcs7)
+                let aes = try AES(key: keyBytes, blockMode: blockMode, padding: paddingMode)
+                output = try isDecrypt ? aes.decrypt(payload) : aes.encrypt(payload)
+            } else {
+                output = try commonCrypto(
+                    payload: payload,
+                    key: keyBytes,
+                    iv: ivBytes,
+                    algorithm: kind == "3DES" ? CCAlgorithm(kCCAlgorithm3DES) : CCAlgorithm(kCCAlgorithmDES),
+                    mode: mode,
+                    padding: padding,
+                    decrypt: isDecrypt
+                )
+            }
+            return output.map { NSNumber(value: $0) } as NSArray
+        } catch {
+            executionContext.log("\(kind) cipher failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Inflate a zlib-wrapped byte stream for java.util.zip.InflaterInputStream.
+    /// Compression is available on every supported iOS release and avoids
+    /// pulling a second native zlib package into the app.
+    func inflate(_ value: Any?) -> NSArray {
+        let input = bytes(from: value)
+        guard !input.isEmpty else { return [] }
+        var capacity = max(1024, input.count * 4)
+        for _ in 0..<8 {
+            var output = Array(repeating: UInt8(0), count: capacity)
+            let decoded = input.withUnsafeBytes { source in
+                output.withUnsafeMutableBytes { destination in
+                    compression_decode_buffer(
+                        destination.bindMemory(to: UInt8.self).baseAddress!,
+                        capacity,
+                        source.bindMemory(to: UInt8.self).baseAddress!,
+                        input.count,
+                        nil,
+                        COMPRESSION_ZLIB
+                    )
+                }
+            }
+            if decoded > 0 {
+                output.removeLast(output.count - decoded)
+                return output.map { NSNumber(value: $0) } as NSArray
+            }
+            capacity *= 2
+        }
+        executionContext.log("InflaterInputStream failed to decode payload")
+        return []
     }
 
     // MARK: - Files and ZIP
@@ -266,6 +350,63 @@ final class LegadoHostServices {
         return Array(RuleExecutionContext.bridgeString(value).utf8)
     }
 
+    private func commonCrypto(
+        payload: [UInt8],
+        key: [UInt8],
+        iv: [UInt8],
+        algorithm: CCAlgorithm,
+        mode: String,
+        padding: String,
+        decrypt: Bool
+    ) throws -> [UInt8] {
+        let blockSize = algorithm == CCAlgorithm(kCCAlgorithm3DES) ? kCCBlockSize3DES : kCCBlockSizeDES
+        let keyLength = algorithm == CCAlgorithm(kCCAlgorithm3DES) ? kCCKeySize3DES : kCCKeySizeDES
+        var normalizedKeyBytes = Array((key + Array(repeating: 0, count: keyLength)).prefix(keyLength))
+        if algorithm == CCAlgorithm(kCCAlgorithm3DES), key.count == 16 {
+            normalizedKeyBytes = key + Array(key.prefix(8))
+        }
+        var input = payload
+        if !decrypt && padding == "ZeroPadding" {
+            let count = blockSize - (input.count % blockSize)
+            input += Array(repeating: 0, count: count == 0 ? blockSize : count)
+        }
+        var options: CCOptions = 0
+        if mode == "ECB" { options |= CCOptions(kCCOptionECBMode) }
+        if padding == "PKCS7" { options |= CCOptions(kCCOptionPKCS7Padding) }
+        let keyData = Data(normalizedKeyBytes)
+        let inputData = Data(input)
+        let ivData = Data((iv + Array(repeating: 0, count: blockSize)).prefix(blockSize))
+        var output = Array(repeating: UInt8(0), count: input.count + blockSize)
+        var moved = 0
+        let status: CCCryptorStatus = keyData.withUnsafeBytes { keyBuffer in
+            inputData.withUnsafeBytes { inputBuffer in
+                ivData.withUnsafeBytes { ivBuffer in
+                    output.withUnsafeMutableBytes { outputBuffer in
+                        CCCrypt(
+                            decrypt ? CCOperation(kCCDecrypt) : CCOperation(kCCEncrypt),
+                            algorithm,
+                            options,
+                            keyBuffer.baseAddress,
+                            keyData.count,
+                            mode == "ECB" ? nil : ivBuffer.baseAddress,
+                            inputBuffer.baseAddress,
+                            inputData.count,
+                            outputBuffer.baseAddress,
+                            outputBuffer.count,
+                            &moved
+                        )
+                    }
+                }
+            }
+        }
+        guard status == kCCSuccess else { throw NSError(domain: "CommonCrypto", code: Int(status)) }
+        output.removeLast(output.count - moved)
+        if decrypt && padding == "ZeroPadding" {
+            while output.last == 0 { output.removeLast() }
+        }
+        return output
+    }
+
     private func normalizedKey(_ value: [UInt8]) -> [UInt8] {
         let size = value.count <= 16 ? 16 : (value.count <= 24 ? 24 : 32)
         return Array((value + Array(repeating: 0, count: size)).prefix(size))
@@ -273,6 +414,17 @@ final class LegadoHostServices {
 
     private func normalizedIV(_ value: [UInt8]) -> [UInt8] {
         Array((value + Array(repeating: 0, count: 16)).prefix(16))
+    }
+
+    private static func normalizedBase64(_ value: String) -> String {
+        var text = value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = text.count % 4
+        if remainder != 0 { text += String(repeating: "=", count: 4 - remainder) }
+        return text
     }
 
     private static let gbkEncoding = String.Encoding(
