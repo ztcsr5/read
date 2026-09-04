@@ -241,7 +241,9 @@ final class JSCoreRuntime {
             case "sha224":
                 var output = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
                 data.withUnsafeBytes { buffer in
-                    _ = CC_SHA224(buffer.baseAddress, CC_LONG(data.count), &output)
+                    output.withUnsafeMutableBytes { destination in
+                        _ = CC_SHA224(buffer.baseAddress, CC_LONG(data.count), destination.bindMemory(to: UInt8.self).baseAddress)
+                    }
                 }
                 digest = output
             case "sha384": digest = Array(SHA384.hash(data: data))
@@ -260,8 +262,10 @@ final class JSCoreRuntime {
                 var output = Array(repeating: UInt8(0), count: Int(CC_MD5_DIGEST_LENGTH))
                 message.withUnsafeBytes { messageBuffer in
                     key.withUnsafeBytes { keyBuffer in
-                        CCHmac(CCHmacAlgorithm(kCCHmacAlgMD5), keyBuffer.baseAddress, key.count,
-                               messageBuffer.baseAddress, message.count, &output)
+                        output.withUnsafeMutableBytes { destination in
+                            CCHmac(CCHmacAlgorithm(kCCHmacAlgMD5), keyBuffer.baseAddress, key.bitCount / 8,
+                                   messageBuffer.baseAddress, message.count, destination.bindMemory(to: UInt8.self).baseAddress)
+                        }
                     }
                 }
                 bytes = output
@@ -270,8 +274,10 @@ final class JSCoreRuntime {
                 var output = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
                 message.withUnsafeBytes { messageBuffer in
                     key.withUnsafeBytes { keyBuffer in
-                        CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA224), keyBuffer.baseAddress, key.count,
-                               messageBuffer.baseAddress, message.count, &output)
+                        output.withUnsafeMutableBytes { destination in
+                            CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA224), keyBuffer.baseAddress, key.bitCount / 8,
+                                   messageBuffer.baseAddress, message.count, destination.bindMemory(to: UInt8.self).baseAddress)
+                        }
                     }
                 }
                 bytes = output
@@ -1499,7 +1505,7 @@ final class JSCoreRuntime {
             var latin = []; for (var i = 0; i < text.length; i++) latin.push(text.charCodeAt(i) & 255); return latin;
           }
           if (enc === 'hex') {
-            var hex = text.replace(/\s+/g, ''), bytes = [];
+            var hex = text.replace(/\\s+/g, ''), bytes = [];
             for (var h = 0; h + 1 < hex.length; h += 2) { var n = parseInt(hex.substr(h, 2), 16); if (!isNaN(n)) bytes.push(n); }
             return bytes;
           }
@@ -1890,7 +1896,7 @@ final class JSCoreRuntime {
           encode: function(value, charset) { return java.urlEncode(String(value == null ? '' : value)).replace(/%20/g, '+'); }
         };
         Packages.java.net.URLDecoder = Packages.java.net.URLDecoder || {
-          decode: function(value, charset) { return java.decodeURI(String(value == null ? '' : value).replace(/\+/g, '%20')); }
+          decode: function(value, charset) { return java.decodeURI(String(value == null ? '' : value).replace(/\\+/g, '%20')); }
         };
         if (typeof URL === 'undefined') URL = Packages.java.net.URL;
         Packages.java.util = Packages.java.util || {};
@@ -2624,7 +2630,9 @@ final class JSCoreRuntime {
         case "sha224":
             var digest = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
             data.withUnsafeBytes { buffer in
-                _ = CC_SHA224(buffer.baseAddress, CC_LONG(data.count), &digest)
+                digest.withUnsafeMutableBytes { destination in
+                    _ = CC_SHA224(buffer.baseAddress, CC_LONG(data.count), destination.bindMemory(to: UInt8.self).baseAddress)
+                }
             }
             return digest.map { String(format: "%02x", $0) }.joined()
         case "sha384": return SHA384.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -2643,8 +2651,10 @@ final class JSCoreRuntime {
             var digest = Array(repeating: UInt8(0), count: Int(CC_MD5_DIGEST_LENGTH))
             message.withUnsafeBytes { messageBuffer in
                 secret.withUnsafeBytes { keyBuffer in
-                    CCHmac(CCHmacAlgorithm(kCCHmacAlgMD5), keyBuffer.baseAddress, secret.bitCount / 8,
-                           messageBuffer.baseAddress, message.count, &digest)
+                    digest.withUnsafeMutableBytes { destination in
+                        CCHmac(CCHmacAlgorithm(kCCHmacAlgMD5), keyBuffer.baseAddress, secret.bitCount / 8,
+                               messageBuffer.baseAddress, message.count, destination.bindMemory(to: UInt8.self).baseAddress)
+                    }
                 }
             }
             bytes = digest
@@ -2653,8 +2663,10 @@ final class JSCoreRuntime {
             var digest = Array(repeating: UInt8(0), count: Int(CC_SHA224_DIGEST_LENGTH))
             message.withUnsafeBytes { messageBuffer in
                 secret.withUnsafeBytes { keyBuffer in
-                    CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA224), keyBuffer.baseAddress, secret.bitCount / 8,
-                           messageBuffer.baseAddress, message.count, &digest)
+                    digest.withUnsafeMutableBytes { destination in
+                        CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA224), keyBuffer.baseAddress, secret.bitCount / 8,
+                               messageBuffer.baseAddress, message.count, destination.bindMemory(to: UInt8.self).baseAddress)
+                    }
                 }
             }
             bytes = digest

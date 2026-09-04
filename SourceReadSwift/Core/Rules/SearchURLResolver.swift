@@ -77,6 +77,7 @@ struct SearchURLResolver {
 
     private func makeRuntime(source: BookSource, persistentState: RulePersistentState) -> JSCoreRuntime {
         let context = RuleExecutionContext(
+            initialValues: ["source": source, "baseUrl": source.bookSourceUrl],
             persistentState: persistentState,
             networkHandler: { urlText in
                 SynchronousSourceLoader().load(

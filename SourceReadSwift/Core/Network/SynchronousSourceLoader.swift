@@ -3,8 +3,13 @@ import Foundation
 struct SynchronousSourceLoader {
     private let requestBuilder = SourceRequestBuilder()
 
-    func load(urlText: String, source: BookSource, timeout: TimeInterval? = nil) -> String {
-        loadResponse(urlText: urlText, source: source, timeout: timeout)?.body ?? ""
+    func load(
+        urlText: String,
+        source: BookSource,
+        timeout: TimeInterval? = nil,
+        cookieHeader: String? = nil
+    ) -> String {
+        loadResponse(urlText: urlText, source: source, timeout: timeout, cookieHeader: cookieHeader)?.body ?? ""
     }
 
     func loadResponse(urlText: String, source: BookSource, timeout: TimeInterval? = nil, cookieHeader: String? = nil) -> SourceResponse? {

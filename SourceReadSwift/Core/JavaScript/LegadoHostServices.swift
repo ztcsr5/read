@@ -367,8 +367,8 @@ final class LegadoHostServices {
         }
         var input = payload
         if !decrypt && padding == "ZeroPadding" {
-            let count = blockSize - (input.count % blockSize)
-            input += Array(repeating: 0, count: count == 0 ? blockSize : count)
+            let count = (blockSize - (input.count % blockSize)) % blockSize
+            if count > 0 { input += Array(repeating: 0, count: count) }
         }
         var options: CCOptions = 0
         if mode == "ECB" { options |= CCOptions(kCCOptionECBMode) }

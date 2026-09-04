@@ -234,12 +234,12 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         }
         let cookieHeader = await cookieStore.cookieHeader(for: baseURL)
         let context = RuleExecutionContext(
-            persistentState: persistentState(for: source),
             initialValues: [
                 "source": source,
                 "baseUrl": baseURL.absoluteString,
                 "cookieHeader": cookieHeader ?? ""
             ],
+            persistentState: persistentState(for: source),
             networkHandler: { encoded in
                 SynchronousSourceLoader().loadResponse(urlText: encoded, source: source, cookieHeader: cookieHeader)?.body ?? ""
             },
@@ -357,8 +357,8 @@ final class LegadoSourceEngine: SourceEngine, @unchecked Sendable {
         guard !scripts.isEmpty else { return response }
         let state = persistentState(for: source)
         let context = RuleExecutionContext(
-            persistentState: state,
             initialValues: ["baseUrl": response.url.absoluteString, "source": source],
+            persistentState: state,
             networkHandler: { encoded in SynchronousSourceLoader().load(urlText: encoded, source: source) }
         )
         context.responseHandler = { encoded in
