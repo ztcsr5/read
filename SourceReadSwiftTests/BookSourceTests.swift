@@ -258,7 +258,7 @@ final class BookSourceTests: XCTestCase {
 
         let clamped = SourceRequestBuilder().buildPageRequest(
             source: source,
-            urlText: #"https://example.com/page,{"timeout":9999}"#
+            urlText: #"https://example.com/page,{"timeout":999999}"#
         )
         XCTAssertEqual(clamped.timeout, 120, accuracy: 0.001)
     }

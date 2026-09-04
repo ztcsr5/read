@@ -124,12 +124,12 @@ final class SourceURLDirectiveTests: XCTestCase {
         let seconds = SourceURLDirectiveParser().parse(
             #"https://example.com/search,{"timeout":2}"#
         )
-        XCTAssertEqual(seconds.timeout, 2, accuracy: 0.001)
+        XCTAssertEqual(seconds.timeout ?? -1, 2, accuracy: 0.001)
 
         let milliseconds = SourceURLDirectiveParser().parse(
             #"https://example.com/search,{"timeoutMs":1500}"#
         )
-        XCTAssertEqual(milliseconds.timeout, 1.5, accuracy: 0.001)
+        XCTAssertEqual(milliseconds.timeout ?? -1, 1.5, accuracy: 0.001)
     }
 
     func testParsePlainHeaderAndEscapedBody() {
