@@ -203,7 +203,7 @@ final class JSCoreRuntime {
             Data(value.utf8).base64EncodedString()
         }
         let base64EncodeBytes: @convention(block) (NSArray) -> String = { values in
-            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            let bytes = values.compactMap(Self.byteValue)
             return Data(bytes).base64EncodedString()
         }
         let base64Decode: @convention(block) (String) -> String = { value in
@@ -223,15 +223,15 @@ final class JSCoreRuntime {
             Self.data(for: value, charset: charset).map { NSNumber(value: $0) } as NSArray
         }
         let bytesToString: @convention(block) (NSArray) -> String = { values in
-            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            let bytes = values.compactMap(Self.byteValue)
             return String(data: Data(bytes), encoding: .utf8) ?? ""
         }
         let bytesToStringCharset: @convention(block) (NSArray, String) -> String = { values, charset in
-            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            let bytes = values.compactMap(Self.byteValue)
             return Self.string(from: Data(bytes), charset: charset)
         }
         let digestBytes: @convention(block) (NSArray, String) -> NSArray = { values, algorithm in
-            let bytes = values.compactMap { ($0 as? NSNumber)?.uint8Value }
+            let bytes = values.compactMap(Self.byteValue)
             let data = Data(bytes)
             let normalized = algorithm.lowercased().replacingOccurrences(of: "-", with: "")
             let digest: [UInt8]
@@ -253,8 +253,8 @@ final class JSCoreRuntime {
             return digest.map { NSNumber(value: $0) } as NSArray
         }
         let hmacBytes: @convention(block) (NSArray, String, NSArray) -> NSArray = { values, algorithm, keyValues in
-            let message = Data(values.compactMap { ($0 as? NSNumber)?.uint8Value })
-            let key = SymmetricKey(data: Data(keyValues.compactMap { ($0 as? NSNumber)?.uint8Value }))
+            let message = Data(values.compactMap(Self.byteValue))
+            let key = SymmetricKey(data: Data(keyValues.compactMap(Self.byteValue)))
             let normalized = algorithm.lowercased().replacingOccurrences(of: "hmac", with: "").replacingOccurrences(of: "-", with: "")
             let bytes: [UInt8]
             switch normalized {
@@ -2628,6 +2628,14 @@ final class JSCoreRuntime {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._*")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func byteValue(_ value: Any) -> UInt8? {
+        if let value = value as? NSNumber { return value.uint8Value }
+        if let value = value as? UInt8 { return value }
+        if let value = value as? Int { return UInt8(clamping: value) }
+        if let value = value as? JSValue, value.isNumber { return value.toNumber().uint8Value }
+        return nil
     }
 
     private static func data(for value: String, charset: String) -> Data {
