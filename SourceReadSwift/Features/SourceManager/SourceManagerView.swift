@@ -1219,20 +1219,9 @@ struct SourceManagerView: View {
     }
 
     private func batchCheckExportText(_ state: SourceBatchCheckState) -> String {
-        var lines = [
-            "Source batch check",
-            "keyword: \(state.keyword)",
-            "checked: \(state.checkedCount)/\(state.sources.count)",
-            "pass: \(state.passedCount), warn: \(state.warningCount), fail: \(state.failedCount), login: \(state.loginRequiredCount), verify: \(state.verificationRequiredCount), blocked: \(state.blockedCount)"
-        ]
-        for result in state.results {
-            lines.append("")
-            lines.append("[\(result.status.title)] \(result.sourceName)")
-            lines.append("url: \(result.sourceURL)")
-            lines.append("duration: \(result.elapsedMilliseconds) ms")
-            lines.append("message: \(result.message)")
-        }
-        return lines.joined(separator: "\n")
+        var text = state.diagnosticReport.exportText()
+        text += "\nchecked: \(state.checkedCount)/\(state.sources.count)"
+        return text
     }
 
     private func importSources() {
@@ -1340,6 +1329,7 @@ struct SourceManagerView: View {
         state.isRunning = true
         state.checkedCount = 0
         state.results = []
+        state.diagnosticReports = [:]
         state.startedAt = Date()
         state.finishedAt = nil
         batchCheck = state
@@ -1374,18 +1364,29 @@ struct SourceManagerView: View {
                         return
                     }
                     var result = outcome.result
-                    if let deep = outcome.deepCheck {
+                    if let report = outcome.diagnosticReport {
+                        let status = SourceBatchCheckStatus(report.overallStatus)
+                        // `evaluateBatchSource` may append login-check
+                        // evidence to the compact row.  Keep that suffix
+                        // while deriving the stage/status from the full
+                        // report instead of compressing it back to Search.
+                        let message = result.message.nilIfEmpty
+                            ?? Self.batchResultMessage(report: report, fallback: "书源未返回诊断摘要")
                         result = SourceBatchCheckResult(
                             sourceName: result.sourceName,
                             sourceURL: result.sourceURL,
-                            status: deep.status,
-                            message: "\(result.message) \(deep.message)",
+                            status: status,
+                            message: message,
                             elapsedMilliseconds: result.elapsedMilliseconds,
-                            resultCount: result.resultCount
+                            resultCount: report.steps.first(where: { $0.stage == .search })?.matchCount ?? result.resultCount,
+                            diagnosticReport: report
                         )
                     }
                     latest.checkedCount += 1
                     latest.results.append(result)
+                    if let report = outcome.diagnosticReport {
+                        latest.diagnosticReports[outcome.source.bookSourceUrl] = report
+                    }
                     latest.results.sort { lhs, rhs in
                         if lhs.status.priority != rhs.status.priority {
                             return lhs.status.priority < rhs.status.priority
@@ -1424,12 +1425,12 @@ struct SourceManagerView: View {
                         message: outcome.result.message,
                         resultCount: outcome.resultCount
                     )
-                    if let deep = outcome.deepCheck {
+                    if let report = outcome.diagnosticReport {
                         appState.sourceDiagnosticHistoryStore.record(
                             source: outcome.source,
-                            stage: "batch.deep",
-                            status: deep.status.healthStatus,
-                            message: deep.message
+                            stage: "batch.pipeline",
+                            status: report.overallStatus,
+                            message: Self.batchResultMessage(report: report, fallback: result.message)
                         )
                     }
                 }
@@ -1467,46 +1468,58 @@ struct SourceManagerView: View {
             }
         }
 
-        let result = await AsyncTimeout.run(seconds: 10) {
-            await engine.searchBooks(source: source, keyword: keyword, page: 1)
-        } ?? .failure(.network("Search timed out"))
+        let report = await SourceBatchDiagnosticRunner(engine: engine).run(
+            source: source,
+            keyword: keyword,
+            deepCheck: deepCheck,
+            page: 1,
+            timeout: 10
+        )
+        let searchStep = report.steps.first(where: { $0.stage == .search })
+        let resultCount = searchStep?.matchCount ?? 0
+        let resultStatus = SourceBatchCheckStatus(report.overallStatus)
+        let reportMessage = Self.batchResultMessage(report: report, fallback: "书源未返回诊断摘要")
+        let result = SourceBatchCheckResult(
+            sourceName: source.bookSourceName,
+            sourceURL: source.bookSourceUrl,
+            status: resultStatus,
+            message: reportMessage,
+            elapsedMilliseconds: report.steps.compactMap(\.elapsedMilliseconds).reduce(0, +),
+            resultCount: resultCount,
+            diagnosticReport: report
+        )
 
-        switch result {
-        case .success(let books):
-            let status: SourceBatchCheckStatus = books.isEmpty ? .warning : .passed
-            var message = books.isEmpty
-                ? "搜索请求成功但结果为空，优先检查 searchUrl、分页占位符和 ruleSearch.bookList。"
-                : "搜索通过：\(books.count) 条结果。"
-            if !loginMessage.isEmpty { message += " \(loginMessage)" }
-            let deepOutcome: BatchDeepCheckOutcome?
-            if deepCheck, let firstBook = books.first {
-                deepOutcome = await Self.batchDeepCheckFirstResult(
-                    source: source,
-                    book: firstBook,
-                    engine: engine
-                )
-            } else {
-                deepOutcome = nil
-            }
-            return BatchCheckOutcome(
-                source: source,
-                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000), resultCount: books.count),
-                resultCount: books.count,
-                login: login,
-                deepCheck: deepOutcome
-            )
-        case .failure(let error):
-            var message = "\(error.displayMessage)"
-            if !loginMessage.isEmpty { message += " \(loginMessage)" }
-            let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
-            return BatchCheckOutcome(
-                source: source,
-                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000), resultCount: 0),
-                resultCount: 0,
-                login: login,
-                deepCheck: nil
-            )
+        var message = result.message
+        if !loginMessage.isEmpty { message += " \(loginMessage)" }
+        let finalResult = SourceBatchCheckResult(
+            sourceName: result.sourceName,
+            sourceURL: result.sourceURL,
+            status: result.status,
+            message: message,
+            elapsedMilliseconds: max(result.elapsedMilliseconds, Int(Date().timeIntervalSince(startedAt) * 1_000)),
+            resultCount: result.resultCount,
+            diagnosticReport: result.diagnosticReport
+        )
+        return BatchCheckOutcome(
+            source: source,
+            result: finalResult,
+            resultCount: resultCount,
+            login: login,
+            diagnosticReport: report
+        )
+    }
+
+    private static func batchResultMessage(report: SourceDiagnosticReport, fallback: String) -> String {
+        if let failure = report.firstFailure {
+            let summary = failure.responseSummary?.nilIfEmpty
+                ?? failure.failureClassification?.nilIfEmpty
+                ?? fallback
+            return "\(failure.stage.title)：\(summary)"
         }
+        if let search = report.steps.first(where: { $0.stage == .search }) {
+            return search.responseSummary?.nilIfEmpty ?? fallback
+        }
+        return fallback
     }
 
     private func sourceTestHeader(source: BookSource, keyword: String) -> String {
@@ -1569,40 +1582,6 @@ struct SourceManagerView: View {
             return "重点看 ruleContent.content、正文净化 replaceRegex，以及章节 URL 是否需要 Referer。"
         default:
             return "按当前失败阶段检查对应规则和请求配置。"
-        }
-    }
-
-    private static func batchDeepCheckFirstResult(source: BookSource, book: SearchBook, engine: SourceEngine) async -> BatchDeepCheckOutcome {
-        let detailResult = await AsyncTimeout.run(seconds: 10) {
-            await engine.getBookDetail(source: source, book: book)
-        } ?? .failure(.network("Detail deep check timed out"))
-        switch detailResult {
-        case .success(let detail):
-            let chapterResult = await AsyncTimeout.run(seconds: 10) {
-                await engine.getChapterList(source: source, book: detail)
-            } ?? .failure(.network("Chapter deep check timed out"))
-            switch chapterResult {
-            case .success(let chapters):
-                guard let firstChapter = chapters.first else {
-                    return BatchDeepCheckOutcome(status: .warning, message: "深测：详情通过，但目录为空。")
-                }
-                let contentResult = await AsyncTimeout.run(seconds: 10) {
-                    await engine.getContent(source: source, chapter: firstChapter)
-                } ?? .failure(.network("Content deep check timed out"))
-                switch contentResult {
-                case .success(let content):
-                    if content.paragraphs.isEmpty {
-                        return BatchDeepCheckOutcome(status: .warning, message: "深测：详情/目录通过，但正文为空。")
-                    }
-                    return BatchDeepCheckOutcome(status: .passed, message: "深测通过：详情/目录/正文均可用，正文 \(content.paragraphs.count) 段。")
-                case .failure(let error):
-                    return BatchDeepCheckOutcome(status: SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content")), message: "深测正文失败：\(error.displayMessage)")
-                }
-            case .failure(let error):
-                return BatchDeepCheckOutcome(status: SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc")), message: "深测目录失败：\(error.displayMessage)")
-            }
-        case .failure(let error):
-            return BatchDeepCheckOutcome(status: SourceBatchCheckStatus(SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail")), message: "深测详情失败：\(error.displayMessage)")
         }
     }
 
@@ -2021,6 +2000,10 @@ private struct SourceBatchCheckState: Identifiable, Sendable {
     var isRunning = false
     var checkedCount = 0
     var results: [SourceBatchCheckResult] = []
+    /// Full per-source pipeline reports keyed by source URL.  Keeping this
+    /// separate from the compact row model lets old UI state remain cheap
+    /// while exports retain every stage from deep diagnostics.
+    var diagnosticReports: [String: SourceDiagnosticReport] = [:]
     var startedAt = Date()
     var finishedAt: Date?
 
@@ -2036,7 +2019,7 @@ private struct SourceBatchCheckState: Identifiable, Sendable {
     /// copy/export and future support bundles.
     var diagnosticReport: SourceDiagnosticBatchReport {
         let reports = results.map { result in
-            SourceDiagnosticReport(
+            diagnosticReports[result.sourceURL] ?? SourceDiagnosticReport(
                 sourceName: result.sourceName,
                 sourceURL: result.sourceURL,
                 keyword: keyword,
@@ -2069,6 +2052,7 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
     let message: String
     let elapsedMilliseconds: Int
     let resultCount: Int
+    let diagnosticReport: SourceDiagnosticReport?
 
     init(
         sourceName: String,
@@ -2076,7 +2060,8 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
         status: SourceBatchCheckStatus,
         message: String,
         elapsedMilliseconds: Int = 0,
-        resultCount: Int = 0
+        resultCount: Int = 0,
+        diagnosticReport: SourceDiagnosticReport? = nil
     ) {
         self.sourceName = sourceName
         self.sourceURL = sourceURL
@@ -2084,6 +2069,7 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
         self.message = message
         self.elapsedMilliseconds = max(0, elapsedMilliseconds)
         self.resultCount = max(0, resultCount)
+        self.diagnosticReport = diagnosticReport
     }
 }
 
@@ -2097,12 +2083,7 @@ private struct BatchCheckOutcome: Sendable {
     let result: SourceBatchCheckResult
     let resultCount: Int
     let login: BatchLoginOutcome?
-    let deepCheck: BatchDeepCheckOutcome?
-}
-
-private struct BatchDeepCheckOutcome: Sendable {
-    let status: SourceBatchCheckStatus
-    let message: String
+    let diagnosticReport: SourceDiagnosticReport?
 }
 
 private extension SourceHealthStatus {
