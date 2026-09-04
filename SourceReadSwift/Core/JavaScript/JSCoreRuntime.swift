@@ -707,7 +707,7 @@ final class JSCoreRuntime {
           return true;
         }
         function __jsonLookup(value, path) {
-          var key = String(path || '').replace(/^@\.?/, '');
+          var key = String(path || '').replace(/^@\\.?/, '');
           if (!key || key === '@') return value;
           var current = value;
           var parts = key.split('.').filter(function(part) { return part !== ''; });
@@ -769,7 +769,7 @@ final class JSCoreRuntime {
           }
           if (array) {
             if (token === '*') return __jsonWalk(array, tokens, index + 1);
-            if (/^-?\d+$/.test(token)) {
+            if (/^-?\\d+$/.test(token)) {
               var numeric = Number(token); if (numeric < 0) numeric = array.length + numeric;
               return numeric >= 0 && numeric < array.length ? __jsonWalk(array[numeric], tokens, index + 1) : undefined;
             }
@@ -1590,7 +1590,7 @@ final class JSCoreRuntime {
         Packages.java.util.regex = Packages.java.util.regex || {};
         function __javaRegexFlags(flags) {
           if (flags === undefined || flags === null) return '';
-          if (typeof flags === 'number' || /^\d+$/.test(String(flags))) {
+          if (typeof flags === 'number' || /^\\d+$/.test(String(flags))) {
             var bits = Number(flags);
             var numericFlags = '';
             if ((bits & 2) !== 0) numericFlags += 'i';   // CASE_INSENSITIVE
