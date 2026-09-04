@@ -216,15 +216,7 @@ final class LegadoHostServices {
         let password = self.bytes(from: passphrase)
         guard !ciphertext.isEmpty else { return [] }
 
-        var derived: [UInt8] = []
-        var previous: [UInt8] = []
-        while derived.count < 48 {
-            var material = previous
-            material.append(contentsOf: password)
-            material.append(contentsOf: salt)
-            previous = Array(Insecure.MD5.hash(data: Data(material)))
-            derived.append(contentsOf: previous)
-        }
+        let derived = evpBytesToKey(password: password, salt: salt, byteCount: 48)
         let key = Array(derived.prefix(32))
         let iv = Array(derived[32..<48])
         do {
@@ -235,6 +227,42 @@ final class LegadoHostServices {
             executionContext.log("AES passphrase decrypt failed: \(error.localizedDescription)")
             return []
         }
+    }
+
+    /// CryptoJS passphrase encryption uses the OpenSSL-compatible salted
+    /// envelope.  A fresh eight-byte salt is generated for every call; the
+    /// envelope itself carries the salt so the result is portable to Android.
+    func cipherEncryptPassphrase(input: Any?, passphrase: Any?) -> NSArray {
+        let plaintext = bytes(from: input)
+        let password = bytes(from: passphrase)
+        guard !plaintext.isEmpty || !password.isEmpty else { return [] }
+        var generator = SystemRandomNumberGenerator()
+        let salt = (0..<8).map { _ in UInt8.random(in: 0...255, using: &generator) }
+        let derived = evpBytesToKey(password: password, salt: salt, byteCount: 48)
+        let key = Array(derived.prefix(32))
+        let iv = Array(derived[32..<48])
+        do {
+            let aes = try AES(key: key, blockMode: CBC(iv: iv), padding: .pkcs7)
+            let ciphertext = try aes.encrypt(plaintext)
+            return (Array("Salted__".utf8) + salt + ciphertext)
+                .map { NSNumber(value: $0) } as NSArray
+        } catch {
+            executionContext.log("AES passphrase encrypt failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private func evpBytesToKey(password: [UInt8], salt: [UInt8], byteCount: Int) -> [UInt8] {
+        var derived: [UInt8] = []
+        var previous: [UInt8] = []
+        while derived.count < byteCount {
+            var material = previous
+            material.append(contentsOf: password)
+            material.append(contentsOf: salt)
+            previous = Array(Insecure.MD5.hash(data: Data(material)))
+            derived.append(contentsOf: previous)
+        }
+        return Array(derived.prefix(byteCount))
     }
 
     /// Inflate a zlib-wrapped byte stream for java.util.zip.InflaterInputStream.

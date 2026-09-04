@@ -260,6 +260,11 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
                 input: arguments.first,
                 passphrase: arguments.count > 1 ? arguments[1] : nil
             )
+        case "cipherEncryptPassphrase":
+            return services.cipherEncryptPassphrase(
+                input: arguments.first,
+                passphrase: arguments.count > 1 ? arguments[1] : nil
+            )
         case "sandboxPath":
             return services.sandboxURL.path
             default:

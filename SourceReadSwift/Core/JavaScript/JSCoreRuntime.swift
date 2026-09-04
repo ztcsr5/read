@@ -1745,6 +1745,25 @@ final class JSCoreRuntime {
           return {
             encrypt: function(value, key, options) {
               options = options || {};
+              // CryptoJS treats a string key without an explicit IV as a
+              // passphrase and emits an OpenSSL `Salted__` envelope.  Keep
+              // the existing raw-byte path for Legado sources that provide an
+              // IV or a WordArray key.
+              if (algorithm === 'AES' && typeof key === 'string' && !options.iv) {
+                var envelope = __nativeLegado.invoke({ method: 'cipherEncryptPassphrase', args: [value, key] });
+                var envelopeWordArray = __cryptoWordArray(envelope, 'bytes');
+                return {
+                  ciphertext: envelopeWordArray,
+                  __passphraseEnvelope: CryptoJS.enc.Base64.stringify(envelopeWordArray),
+                  key: key,
+                  iv: null,
+                  algorithm: algorithm,
+                  toString: function(formatter) {
+                    if (formatter && typeof formatter.stringify === 'function') return String(formatter.stringify(this));
+                    return CryptoJS.enc.Base64.stringify(envelopeWordArray);
+                  }
+                };
+              }
               var transformation = algorithm + '/' + __cryptoModeName(options) + '/' + __cryptoPaddingName(options);
               var output = __nativeLegado.invoke({ method: 'cipherEncryptBytes', args: [
                 __cryptoBytes(value, value && value.__encoding),
@@ -1766,6 +1785,10 @@ final class JSCoreRuntime {
             },
             decrypt: function(value, key, options) {
               options = options || {};
+              if (algorithm === 'AES' && typeof key === 'string' && !options.iv && value && value.__passphraseEnvelope) {
+                var passphraseObjectOutput = __nativeLegado.invoke({ method: 'cipherDecryptPassphrase', args: [value.__passphraseEnvelope, key] });
+                return __cryptoWordArray(passphraseObjectOutput, 'bytes');
+              }
               var ciphertext = value && value.ciphertext != null ? value.ciphertext : value;
               if (!options.iv && value && value.iv) options.iv = value.iv;
               var bytes = ciphertext && ciphertext.__bytes ? ciphertext.__bytes.slice() :
