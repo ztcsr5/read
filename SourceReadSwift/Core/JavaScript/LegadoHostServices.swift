@@ -1,4 +1,5 @@
 import Foundation
+import JavaScriptCore
 import CoreFoundation
 import CryptoSwift
 import ZIPFoundation
@@ -202,6 +203,9 @@ final class LegadoHostServices {
             candidates.append(Array(input.dropFirst(2).dropLast(4)))
         }
         for candidate in candidates where !candidate.isEmpty {
+            if let output = inflateCandidate(candidate) {
+                return output.map { NSNumber(value: $0) } as NSArray
+            }
             // The one-shot API is available across all supported iOS SDKs.
             // Grow the destination until the stream fits; this avoids relying
             // on SDK-specific `compression_stream` initializers.
@@ -229,6 +233,54 @@ final class LegadoHostServices {
         }
         executionContext.log("InflaterInputStream failed to decode payload")
         return []
+    }
+
+    private func inflateCandidate(_ candidate: [UInt8]) -> [UInt8]? {
+        guard !candidate.isEmpty else { return nil }
+
+        // The SDK imports compression_stream with non-optional source and
+        // destination pointers. Seed them with one-byte allocations, then
+        // replace both pointers with the actual buffers before processing.
+        let seedDestination = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        let seedSource = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        var stream = compression_stream(
+            dst_ptr: seedDestination,
+            dst_size: 0,
+            src_ptr: UnsafePointer(seedSource),
+            src_size: 0,
+            state: nil
+        )
+        seedDestination.deallocate()
+        seedSource.deallocate()
+
+        guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+            return nil
+        }
+        defer { compression_stream_destroy(&stream) }
+
+        var output: [UInt8] = []
+        var destination = Array(repeating: UInt8(0), count: max(4096, candidate.count * 4))
+        return candidate.withUnsafeBytes { sourceBuffer -> [UInt8]? in
+            guard let sourcePointer = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else { return nil }
+            stream.src_ptr = sourcePointer
+            stream.src_size = candidate.count
+
+            for _ in 0..<4096 {
+                let status = destination.withUnsafeMutableBytes { destinationBuffer -> compression_status in
+                    stream.dst_ptr = destinationBuffer.bindMemory(to: UInt8.self).baseAddress!
+                    stream.dst_size = destinationBuffer.count
+                    return compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE))
+                }
+                let produced = destination.count - stream.dst_size
+                if produced > 0 {
+                    output.append(contentsOf: destination[0..<produced])
+                }
+                if status == COMPRESSION_STATUS_END { return output }
+                if status == COMPRESSION_STATUS_ERROR { return nil }
+                if stream.src_size == 0 && produced == 0 { return nil }
+            }
+            return nil
+        }
     }
 
     // MARK: - Files and ZIP
@@ -355,6 +407,17 @@ final class LegadoHostServices {
     }
 
     private func bytes(from value: Any?) -> [UInt8] {
+        if let jsValue = value as? JSValue {
+            if jsValue.isArray {
+                return bytes(from: jsValue.toArray())
+            }
+            if jsValue.isString {
+                return Array(jsValue.toString().utf8)
+            }
+            if let object = jsValue.toObject() {
+                return bytes(from: object)
+            }
+        }
         if let data = value as? Data { return Array(data) }
         if let values = value as? [UInt8] { return values }
         if let values = value as? [Int] { return values.map { UInt8(clamping: $0) } }
@@ -367,7 +430,15 @@ final class LegadoHostServices {
                 return nil
             }
         }
-        if let values = value as? NSArray { return values.compactMap { ($0 as? NSNumber)?.uint8Value } }
+        if let values = value as? NSArray {
+            return values.compactMap {
+                if let number = $0 as? NSNumber { return number.uint8Value }
+                if let number = $0 as? Int { return UInt8(clamping: number) }
+                if let number = $0 as? UInt8 { return number }
+                if let jsValue = $0 as? JSValue, jsValue.isNumber { return jsValue.toNumber().uint8Value }
+                return nil
+            }
+        }
         return Array(RuleExecutionContext.bridgeString(value).utf8)
     }
 
