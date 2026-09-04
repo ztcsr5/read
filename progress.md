@@ -19,6 +19,13 @@
 
 - Commit and push this Stage 7 pass once, wait for both Actions workflows, inspect annotations and the unsigned IPA artifact, then continue with higher-risk Legado fixtures (dynamic cookie/token chains, mixed JSON/HTML responses and paginated source rules).
 
+### CI closure
+
+- Initial Stage 7 run `33873914088` caught a malformed nested-quote Jsoup fixture; the bridge itself built and the unsigned IPA run `33873914093` passed.
+- Fixture correction commit: `db23917`.
+- iOS build/XCTest: [run 33874608533](https://github.com/ztcsr5/read/actions/runs/33874608533) — success.
+- Unsigned IPA: [run 33874608530](https://github.com/ztcsr5/read/actions/runs/33874608530) — success; artifact `SourceReadSwift-unsigned-ipa` (6,190,173 bytes, artifact id `9937425550`). The artifact download endpoint requires GitHub authentication from this Windows session, so no SHA-256 is reported.
+
 ### Rollback
 
 - Revert the single Stage 7 bridge/test commit and this progress entry to restore the prior response facade and matcher behavior.
