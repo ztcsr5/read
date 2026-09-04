@@ -2172,7 +2172,7 @@ java.bytesToStr = function(value) {
           this.get = function(index) { return values[Number(index)]; };
           this.set = function(index, value) { var old = values[Number(index)]; values[Number(index)] = value; return old; };
           this.remove = function(index) {
-            if (typeof index === 'number' || /^-?\d+$/.test(String(index))) return values.splice(Number(index), 1)[0];
+             if (typeof index === 'number' || /^-?\\d+$/.test(String(index))) return values.splice(Number(index), 1)[0];
             var match = values.indexOf(index); return match >= 0 ? values.splice(match, 1)[0] : null;
           };
           this.contains = function(value) { return values.indexOf(value) >= 0; };
