@@ -541,7 +541,10 @@ final class JSCoreRuntime {
         java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
         java.inflate = function(value) {
-          return __asJavaList(__nativeLegado.invoke({ method: 'inflateBytes', args: [__javaBytes(value)] }));
+          // Keep the original bridged array intact.  JavaScriptCore can expose
+          // host NSArray values through a JSValue wrapper; eagerly copying via
+          // __javaBytes() may lose indexed elements on older iOS runtimes.
+          return __asJavaList(__nativeLegado.invoke({ method: 'inflateBytes', args: [value] }));
         };
         java.copyOfRange = function(value, start, end) {
           var source = __javaBytes(value);
