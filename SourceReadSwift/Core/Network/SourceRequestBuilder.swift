@@ -129,7 +129,8 @@ struct SourceRequestBuilder {
     }
 
     private func sourceHeaders(_ source: BookSource, persistentValues: [String: String] = [:]) -> [String: String] {
-        var headers = parseHeaders(source.header)
+        var headers: [String: String] = [:]
+        mergeHeaders(parseHeaders(source.header), into: &headers)
         for key in ["headers", "bookSourceHeader"] {
             mergeHeaders(parseHeaders(source.raw[key]), into: &headers)
         }
