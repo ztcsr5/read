@@ -178,6 +178,7 @@ struct SettingsView: View {
             .pageBackground()
             .listStyle(.insetGrouped)
             .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.large)
             .animation(.easeInOut(duration: 0.22), value: themeModeRawValue)
             .onAppear {
                 updateCacheSummary()

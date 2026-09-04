@@ -23,7 +23,6 @@ struct RootTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
             // Reserve space for the floating tab bar instead of letting the
             // last row disappear underneath it on every root scroll view.
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -38,7 +37,9 @@ struct RootTabView: View {
                     .zIndex(10)
             }
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        // Let SwiftUI lift the tab bar with the keyboard. The previous
+        // keyboard-ignore modifier left the bar underneath the input accessory
+        // and made the bottom controls feel blocked on small screens.
         .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: appState.isTabChromeHidden)
         .animation(.easeOut(duration: 0.16), value: selectedTab)
         .onChange(of: selectedTab) { _ in
@@ -61,7 +62,6 @@ struct RootTabView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func tabButton(index: Int, title: String, systemImage: String) -> some View {

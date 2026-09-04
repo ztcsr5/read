@@ -89,11 +89,30 @@ struct DiscoverView: View {
                         Button("Done") { dismissKeyboard() }
                     }
                 }
+
+            if !viewModel.keyword.isEmpty {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.clearSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清空搜索")
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 50)
         .background(Color(.systemGray5))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onChange(of: viewModel.keyword) { value in
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               viewModel.hasSearchState {
+                viewModel.clearSearch()
+            }
+        }
     }
 
     private var matchModePicker: some View {
@@ -170,8 +189,16 @@ struct DiscoverView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if viewModel.isSearching {
-                    ProgressView()
-                        .controlSize(.small)
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Button("取消") {
+                            viewModel.cancelSearch()
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
                 }
             }
 
@@ -256,6 +283,28 @@ final class DiscoverViewModel: ObservableObject {
 
     func bind(appState: AppState) {
         self.appState = appState
+    }
+
+    var hasSearchState: Bool {
+        isSearching || !results.isEmpty || !unfilteredResults.isEmpty || errorMessage != nil
+    }
+
+    func clearSearch() {
+        cancelSearch()
+        activeKeyword = ""
+        results = []
+        unfilteredResults = []
+        rawResults = []
+        totalResultCount = 0
+        hitSourceCount = 0
+        checkedSourceCount = 0
+        sourceFailures = []
+        errorMessage = nil
+        resultFilter = ""
+        resultFilterScope = .all
+        // Set the text last so the view's empty-keyword observer sees an
+        // already-reset model and cannot recursively trigger another reset.
+        keyword = ""
     }
 
     func cancelSearch() {

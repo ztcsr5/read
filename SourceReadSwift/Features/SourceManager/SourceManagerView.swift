@@ -299,9 +299,9 @@ struct SourceManagerView: View {
                 .controlSize(.small)
                 .font(.subheadline.weight(.semibold))
                 .disabled(appState.sourceStore.sources.filter(\.enabled).isEmpty)
-                Spacer()
-                Text("导入：右上角 +")
-                    .font(.caption)
+                Spacer(minLength: 0)
+                Text("批量诊断")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             Text("支持 JSON、URL、阅读分享链接、仓库、RSS，以及搜索 → 详情 → 目录 → 正文全链路测试。")
@@ -453,6 +453,9 @@ struct SourceManagerView: View {
             enabled: source.enabled,
             badges: source.ruleSearch == nil ? [] : ["可搜索"],
             health: appState.sourceHealthStore.record(for: source),
+            primaryAction: {
+                sourceVisualDetail = source
+            },
             actions: {
                 Button(source.enabled ? "停用" : "启用") {
                     appState.sourceStore.setEnabled(!source.enabled, for: [source.bookSourceUrl])
@@ -762,6 +765,7 @@ struct SourceManagerView: View {
         enabled: Bool,
         badges: [String],
         health: SourceHealthRecord? = nil,
+        primaryAction: (() -> Void)? = nil,
         @ViewBuilder actions: @escaping () -> MenuContent
     ) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -795,6 +799,18 @@ struct SourceManagerView: View {
                 }
             }
             Spacer()
+            if let primaryAction {
+                Button(action: primaryAction) {
+                    Label("详情", systemImage: "info.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 8)
+                        .background(AppTheme.accent.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("打开\(title)详情")
+            }
             Menu {
                 actions()
             } label: {

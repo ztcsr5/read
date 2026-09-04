@@ -288,9 +288,7 @@ struct ReaderView: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            showSettings = false
-                        }
+                        closeSettingsPanel()
                     }
                     .transition(.opacity)
 
@@ -392,6 +390,24 @@ struct ReaderView: View {
             // revision here also handles cache refreshes that replace text in
             // place (including edits to a middle paragraph).
             readerContentFingerprint = makeContentFingerprint(updatedContent)
+            // Never carry a previous chapter's playback, page or sheet state
+            // into freshly loaded content. This also covers source switching
+            // when the owner reuses the same reader identity.
+            stopAutoScroll()
+            stopSpeechPlayback()
+            pagedBlocksCache.removeAll()
+            pagedBlocksCacheKey = ""
+            scrollParagraphTarget = 0
+            pagedPageIndex = 0
+            visibleParagraphIndex = 0
+            paragraphJumpRequest = nil
+            showSettings = false
+            showChapterList = false
+            showBookmarks = false
+            showOverlay = initialOverlayVisible
+            DispatchQueue.main.async {
+                rebuildPagedBlocksCache()
+            }
         }
         .onChange(of: readerModeRawValue) { _ in
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -863,6 +879,15 @@ struct ReaderView: View {
                 }
                 .padding(.top, 10)
                 .padding(.horizontal)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 12)
+                        .onEnded { value in
+                            guard value.translation.height > 70,
+                                  abs(value.translation.height) > abs(value.translation.width) else { return }
+                            closeSettingsPanel()
+                        }
+                )
 
                 Picker("设置", selection: $settingsTab) {
                     Text("外观").tag(0)
@@ -905,8 +930,17 @@ struct ReaderView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 500)
             .glassPanel(cornerRadius: 28, material: .regularMaterial, strokeOpacity: colorScheme == .dark ? 0.08 : 0.12, shadowOpacity: colorScheme == .dark ? 0.35 : 0.18)
+            .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .zIndex(3)
         }
         .ignoresSafeArea(edges: .bottom)
+    }
+
+    private func closeSettingsPanel() {
+        guard showSettings else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            showSettings = false
+        }
     }
 
     private var appearanceSettings: some View {
@@ -1573,10 +1607,15 @@ struct ReaderView: View {
             }
         }
         speechPausedForScene = false
+        // Scroll-mode visibility is updated by the native TextKit surface and
+        // is throttled for performance. This is the latest known visible
+        // paragraph (or the first paragraph on the current page), so speech
+        // never restarts from chapter zero after a user scrolls.
+        let startParagraph = currentParagraphIndexForPersistence()
         speechController.speak(
             title: content.title,
             paragraphs: content.paragraphs,
-            startParagraphIndex: currentParagraphIndexForPersistence(),
+            startParagraphIndex: startParagraph,
             includeTitle: false,
             rate: Float(ttsRate)
         )

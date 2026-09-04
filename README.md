@@ -67,3 +67,12 @@ See `docs/BUILD.md` for Windows + CI details.
 - Settings exposes the canonical `书源管理` and `Web 写源` routes; Discover remains focused on search.
 
 CI proves compilation and XCTest only. Sustained 120 Hz, touch feel, LAN Web 写源 and self-sign installation still require a ProMotion iPhone and the unsigned IPA artifact.
+
+## Stage 4 product parity checkpoint
+
+- Active scenes record the device-capped refresh ceiling and keep `CADisableMinimumFrameDurationOnPhone` enabled; UIKit/SwiftUI can use ProMotion without an SDK-specific frame-range API that is unavailable in the iOS 16 CI toolchain.
+- Reader settings can be dismissed by close button, backdrop tap or downward drag; chapter/content revisions reset stale playback and pagination state.
+- Discover search has explicit clear/cancel controls and a model-level reset path; source cards expose a direct visual-details action.
+- Root tab chrome follows keyboard safe-area changes, while Home, Discover and Settings use the same bounded large-title shell.
+
+CI still proves compilation/tests and unsigned packaging only. Sustained 120 Hz and device/LAN behavior require a ProMotion iPhone check.

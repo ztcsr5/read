@@ -1280,3 +1280,24 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 ### Rollback
 - Revert the Stage 3 commit and this progress entry together. The previous reader path remains available in the parent commit.
+## 2026-09-04 - Stage 4: product regression and parity closure pass
+
+### Implemented
+
+- Kept the SDK-compatible high-refresh path: active scenes record a device-capped 120 Hz ceiling while `CADisableMinimumFrameDurationOnPhone` removes the app-imposed 60 Hz floor. The iOS 16 CI SDK does not expose a compile-safe scene/window/layer frame-range property, so no unsupported `CAFrameRateRange` call is used.
+- Hardened the reader settings panel with an explicit close path, high z-order, and downward drag-to-dismiss. Chapter/content revisions now clear stale playback, pagination, sheet and overlay state before rebuilding the page cache.
+- Kept speech start anchored to the latest visible paragraph so tapping朗读 after scrolling does not replay the chapter from the beginning.
+- Added a visible `详情` action to book-source cards while retaining the full menu for testing, rule editing, JSON editing and history. Removed the redundant import hint from the source status card.
+- Added Discover search clear/cancel actions and a model-level reset path that cancels in-flight work and clears stale results, failures and filters without issuing a second request.
+- Let the root tab bar participate in keyboard safe-area changes so it lifts with the keyboard instead of staying underneath it; Settings now explicitly uses the bounded large-title style like Home and Discover.
+- Added `DiscoverViewModelTests` covering clear/reset behavior and the empty-state transition.
+
+### Verification
+
+- `git diff --check` passed locally (Windows reports only the repository's existing LF-to-CRLF normalization warnings).
+- Windows cannot run Xcode/UIKit/XCTest. The next iOS build/XCTest and unsigned-IPA Actions runs are the authoritative compile/package gate.
+- Sustained 120 Hz, keyboard feel, reader drag dismissal and LAN Web 写源 access still require a ProMotion iPhone / same-network device check.
+
+### Rollback
+
+- Revert the single Stage 4 commit and this entry to restore the prior scene frame-rate policy, reader lifecycle, source-card layout, Discover search controls, root keyboard behavior and Settings title mode.

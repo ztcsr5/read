@@ -21,7 +21,7 @@ enum FrameRateCoordinator {
         let maximum = windowScene.screen.maximumFramesPerSecond
         guard maximum > 0 else { return }
 
-        let plan = ReaderPerformancePolicy.frameRatePlan(maximumFramesPerSecond: maximum)
+        let preferred = ReaderPerformancePolicy.preferredRefreshRate(maximumFramesPerSecond: maximum)
         // Do not keep an empty CADisplayLink alive merely to advertise a
         // ceiling. It schedules main-run-loop work even when no pixels change
         // and can compete with TextKit during real scrolling. The Info.plist
@@ -29,7 +29,7 @@ enum FrameRateCoordinator {
         // active display, interaction and power state.
         PerformanceSignpost.event(
             "frame.rate",
-            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(plan.preferred)"
+            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
         )
     }
 }
