@@ -303,16 +303,17 @@ struct SourceRequestBuilder {
                 result[item.key] = interpolate(stringify(item.value), keyword: keyword, page: page)
             }
             let contentType = headers.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value ?? ""
-            if contentType.localizedCaseInsensitiveContains("application/json"),
-               let jsonObject = object.reduce(into: [String: Any]()) { result, item in
-                   if let stringValue = item.value as? String {
-                       result[item.key] = interpolate(stringValue, keyword: keyword, page: page)
-                   } else {
-                       result[item.key] = item.value
-                   }
-               },
-               let data = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys]) {
-                return data
+            if contentType.localizedCaseInsensitiveContains("application/json") {
+                let jsonObject = object.reduce(into: [String: Any]()) { result, item in
+                    if let stringValue = item.value as? String {
+                        result[item.key] = interpolate(stringValue, keyword: keyword, page: page)
+                    } else {
+                        result[item.key] = item.value
+                    }
+                }
+                if let data = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys]) {
+                    return data
+                }
             }
             let form = interpolated
                 .sorted { $0.key < $1.key }
