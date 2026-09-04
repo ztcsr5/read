@@ -1013,7 +1013,7 @@ final class JSCoreRuntime {
             // Preserve Fetch/Legado request options in the directive text so the
             // native request parser and diagnostics can observe method/body/headers.
             var requestOptions = { method: method, body: options.body == null ? '' : options.body, headers: options.headers || {} };
-            var target = String(url || '') + ',' + JSON.stringify(requestOptions);
+            var target = String(url || '') + ',' + JSON.stringify(requestOptions) + '@Body:' + String(requestOptions.body || '');
             return __bridgeResponse('', String(url || ''), __native_ajaxResponse(target, ''));
           }
           var target = String(url);
