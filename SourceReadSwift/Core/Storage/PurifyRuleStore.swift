@@ -136,9 +136,16 @@ final class PurifyRuleStore: ObservableObject {
 
     @discardableResult
     func restore(_ snapshot: [PurifyRule]) -> Bool {
-        rules = snapshot.filter { !$0.pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        persist()
-        return lastError == nil
+        let normalized = snapshot.filter { !$0.pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        do {
+            try persistence.save(normalized)
+            rules = normalized
+            lastError = nil
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
     }
 
     func remove(ruleID: String) {

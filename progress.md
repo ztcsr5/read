@@ -1242,3 +1242,22 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the single Stage 2E commit to restore the prior EPUB navigation, RSS cache freshness, rule-preview diagnostics, and bookshelf schema behavior; legacy bookshelf JSON remains readable because the new field is optional.
+## 2026-09-04 - Stage 2E restore, lifecycle and diagnostics closure pass
+
+### Implemented
+
+- Made full-data backup import transactional across bookshelf, source library, purification rules, RSS read/favorite state and reader preferences; malformed/empty/unsupported files are rejected before mutation and a failed later write restores the previous snapshot.
+- Added elapsed-time and deterministic severity ordering to batch source diagnostics, with session guards so a dismissed/reopened sheet cannot receive stale async results.
+- Normalized visual source-detail history into the structured Search -> Detail -> TOC -> Content diagnostic model.
+- Hardened Reader and RSS speech/auto-scroll lifecycle handling for scene transitions, chapter/article changes and late completion callbacks; speech completion now persists the last finished paragraph before chapter handoff.
+- Fixed CI shell summary closure and retained iOS XCTest/unsigned IPA evidence summaries.
+
+### Verification
+
+- `git diff --check` passes (only the repository's existing Windows LF-to-CRLF warnings remain).
+- Windows has no Xcode/UIKit runtime; GitHub Actions is the authoritative compile, XCTest and unsigned-IPA gate.
+- Sustained 120 Hz still requires a ProMotion device plus Instruments; this pass only hardens the high-refresh rendering path and lifecycle behavior.
+
+### Next
+
+- Push the consolidated Stage 2E pass once, wait for both Actions workflows, inspect compiler/test diagnostics and record the new IPA artifact hash before starting the next large feature phase.

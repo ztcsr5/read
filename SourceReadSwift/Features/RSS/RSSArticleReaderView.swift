@@ -16,8 +16,13 @@ struct RSSArticleReaderView: View {
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var reloadToken = UUID()
+    @State private var loadGeneration = 0
     @State private var lastVisibleParagraphUpdateAt = Date.distantPast
+    @State private var speechPausedForScene = false
+    @State private var autoScrollPausedForScene = false
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var speechController = ReaderSpeechController()
+    @StateObject private var playbackCoordinator = ReaderPlaybackCoordinator()
     @AppStorage("reader.fontSize") private var fontSize: Double = 19
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
     @AppStorage("reader.pagePadding") private var pagePadding: Double = 24
@@ -80,7 +85,33 @@ struct RSSArticleReaderView: View {
             resetReaderSession()
             appState.rssArticleStateStore.markRead(currentArticle)
         }
-        .onDisappear { stopAutoScroll(); speechController.stop() }
+        .onDisappear {
+            stopAutoScroll()
+            stopSpeechPlayback()
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                if autoScrollEnabled {
+                    autoScrollPausedForScene = true
+                    stopAutoScroll()
+                }
+                if speechController.isSpeaking && !speechController.isPaused {
+                    speechController.pause()
+                    playbackCoordinator.pauseSpeech()
+                    speechPausedForScene = true
+                }
+            } else {
+                if autoScrollPausedForScene {
+                    autoScrollPausedForScene = false
+                    startAutoScroll()
+                }
+                if speechPausedForScene && speechController.isPaused {
+                    speechController.resume()
+                    playbackCoordinator.resumeSpeech()
+                    speechPausedForScene = false
+                }
+            }
+        }
         .toolbar { readerToolbar }
     }
 
@@ -178,33 +209,97 @@ struct RSSArticleReaderView: View {
     }
 
     private func resetReaderSession() {
-        stopAutoScroll(); speechController.stop(); paragraphs = []; contentFingerprint = ""; errorMessage = nil; showingCachedContent = false; visibleParagraphIndex = 0; autoScrollTarget = 0; lastVisibleParagraphUpdateAt = .distantPast
+        loadGeneration &+= 1
+        stopAutoScroll()
+        stopSpeechPlayback()
+        paragraphs = []
+        contentFingerprint = ""
+        errorMessage = nil
+        showingCachedContent = false
+        visibleParagraphIndex = 0
+        autoScrollTarget = 0
+        lastVisibleParagraphUpdateAt = .distantPast
+        speechPausedForScene = false
+        autoScrollPausedForScene = false
     }
 
     private func toggleSpeech() {
-        if speechController.isPaused { speechController.resume() }
-        else if speechController.isSpeaking { speechController.pause() }
-        else { stopAutoScroll(); speechController.speak(title: currentArticle.title, paragraphs: paragraphs, startParagraphIndex: visibleParagraphIndex, includeTitle: false, rate: Float(ttsRate)) }
+        if speechController.isPaused {
+            speechController.resume()
+            playbackCoordinator.resumeSpeech()
+        }
+        else if speechController.isSpeaking {
+            speechController.pause()
+            playbackCoordinator.pauseSpeech()
+        }
+        else {
+            stopAutoScroll()
+            let coordinator = playbackCoordinator
+            let token = coordinator.beginSpeech()
+            speechController.onFinished = { [weak coordinator] in
+                Task { @MainActor in
+                    guard let coordinator, coordinator.accepts(token, for: .speech(generation: token)) else { return }
+                    coordinator.stop()
+                    speechPausedForScene = false
+                }
+            }
+            speechController.speak(title: currentArticle.title, paragraphs: paragraphs, startParagraphIndex: visibleParagraphIndex, includeTitle: false, rate: Float(ttsRate))
+        }
     }
 
     private func startAutoScroll() {
         guard !paragraphs.isEmpty else { return }
-        speechController.stop(); autoScrollEnabled = true; autoScrollTarget = min(max(visibleParagraphIndex, 0), paragraphs.count - 1)
+        stopAutoScroll()
+        stopSpeechPlayback()
+        autoScrollEnabled = true
+        autoScrollTarget = min(max(visibleParagraphIndex, 0), paragraphs.count - 1)
         let delay = ReaderAutomationPolicy.clampedDelay(autoScrollDelay)
+        let coordinator = playbackCoordinator
+        let token = coordinator.beginAutoScroll()
         autoScrollTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                guard !Task.isCancelled, autoScrollEnabled else { return }
-                if autoScrollTarget < paragraphs.count - 1 { autoScrollTarget += 1; visibleParagraphIndex = autoScrollTarget } else { stopAutoScroll() }
+                guard !Task.isCancelled,
+                      coordinator.accepts(token, for: .autoScroll(generation: token)),
+                      autoScrollEnabled else { return }
+                switch ReaderAutomationPolicy.decision(currentTarget: autoScrollTarget, maximumTarget: paragraphs.count - 1, canAdvanceChapter: false) {
+                case .advance(let target):
+                    autoScrollTarget = target
+                    visibleParagraphIndex = target
+                case .nextChapter, .stop:
+                    stopAutoScroll()
+                }
             }
         }
     }
 
-    private func stopAutoScroll() { autoScrollTask?.cancel(); autoScrollTask = nil; autoScrollEnabled = false }
+    private func stopAutoScroll() {
+        autoScrollTask?.cancel()
+        autoScrollTask = nil
+        autoScrollEnabled = false
+        if case .autoScroll = playbackCoordinator.mode {
+            playbackCoordinator.stop()
+        }
+    }
+
+    private func stopSpeechPlayback() {
+        speechController.stop()
+        playbackCoordinator.stop()
+        speechPausedForScene = false
+    }
 
 
     @MainActor private func load(_ article: RSSArticlePreview) async {
-        isLoading = true; errorMessage = nil; showingCachedContent = false; defer { isLoading = false }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        isLoading = true
+        errorMessage = nil
+        showingCachedContent = false
+        defer {
+            if generation == loadGeneration {
+                isLoading = false
+            }
+        }
         // Read stale entries too. A reader should remain useful offline; the
         // network request below is still attempted and replaces the cache when
         // fresh content is available.
@@ -225,11 +320,19 @@ struct RSSArticleReaderView: View {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, !(200..<400).contains(http.statusCode) { throw URLError(.badServerResponse) }
             try Task.checkCancellation()
+            guard generation == loadGeneration, article.id == currentArticle.id else { return }
             let html = ResponseTextDecoder().decode(data: data, headers: [:])
             let parsed = RSSArticleContentParser().parseParagraphs(from: html)
-            if !parsed.isEmpty { paragraphs = parsed; contentFingerprint = makeContentFingerprint(parsed, articleID: article.id); appState.rssArticleContentCacheStore.save(parsed, for: article, contentHTML: article.contentHTML ?? html); showingCachedContent = false }
+            guard generation == loadGeneration, article.id == currentArticle.id else { return }
+            if !parsed.isEmpty {
+                paragraphs = parsed
+                contentFingerprint = makeContentFingerprint(parsed, articleID: article.id)
+                appState.rssArticleContentCacheStore.save(parsed, for: article, contentHTML: article.contentHTML ?? html)
+                showingCachedContent = false
+            }
         } catch is CancellationError { return }
         catch {
+            guard generation == loadGeneration, article.id == currentArticle.id else { return }
             if paragraphs.isEmpty {
                 paragraphs = fallbackParagraphs(for: article)
                 contentFingerprint = makeContentFingerprint(paragraphs, articleID: article.id)

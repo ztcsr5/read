@@ -207,34 +207,30 @@ struct SettingsView: View {
             guard let url = try result.get().first else { return }
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let data = try Data(contentsOf: url)
-            let snapshot: AppDataBackupSnapshot
-            if let full = try? decoder.decode(AppDataBackupSnapshot.self, from: data) {
-                snapshot = full
-            } else {
-                // Keep backups exported by schema v1 readable while new exports use the full envelope.
-                let legacy = try decoder.decode(BookshelfBackupSnapshot.self, from: data)
-                snapshot = AppDataBackupSnapshot(
-                    schemaVersion: 1,
-                    exportedAt: legacy.exportedAt,
-                    bookshelf: legacy,
-                    sources: appState.sourceStore.backupSnapshot(),
-                    purifyRules: appState.purifyRuleStore.backupSnapshot(),
-                    rssState: appState.rssArticleStateStore.backupSnapshot(),
-                    readerPreferences: [:]
-                )
+            let data: Data
+            do {
+                data = try Data(contentsOf: url)
+            } catch {
+                throw AppDataBackupError.fileReadFailed(error.localizedDescription)
             }
-            guard snapshot.schemaVersion >= 1 && snapshot.schemaVersion <= 3,
-                  appState.bookshelfStore.restore(snapshot.bookshelf),
-                  appState.sourceStore.restore(snapshot.sources),
-                  appState.purifyRuleStore.restore(snapshot.purifyRules) else {
-                backupMessage = "备份版本不受支持"
-                return
-            }
-            appState.rssArticleStateStore.restore(snapshot.rssState)
-            restoreReaderPreferences(snapshot.readerPreferences)
+            let snapshot = try AppDataBackupCodec.decode(
+                data: data,
+                fallbackSources: appState.sourceStore.backupSnapshot(),
+                fallbackPurifyRules: appState.purifyRuleStore.backupSnapshot(),
+                fallbackRSSState: appState.rssArticleStateStore.backupSnapshot()
+            )
+            // Capture the complete current state before the first mutation so
+            // any later store failure can restore all stores and preferences.
+            let previousSnapshot = appDataBackupSnapshot()
+            try AppDataBackupRestorer.restore(
+                snapshot,
+                previous: previousSnapshot,
+                restoreBookshelf: { appState.bookshelfStore.restore($0) },
+                restoreSources: { appState.sourceStore.restore($0) },
+                restorePurifyRules: { appState.purifyRuleStore.restore($0) },
+                restoreRSSState: { appState.rssArticleStateStore.restore($0) },
+                restorePreferences: { restoreReaderPreferences($0) }
+            )
             updateCacheSummary()
             updateRSSCacheSummary()
             backupMessage = "已恢复 \(snapshot.bookshelf.books.count) 本书、\(snapshot.sources.sources.count) 个书源和 \(snapshot.purifyRules.count) 条规则"

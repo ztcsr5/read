@@ -52,7 +52,11 @@ struct ReaderView: View {
     @State private var tocQuery = ""
     @State private var tocReversed = false
     @State private var autoScrollEnabled = false
-    @State private var autoScrollTarget = 0
+    /// Scroll mode targets paragraphs; paged/cover modes target pages.
+    /// Keep these indices separate so a mode switch never interprets a page
+    /// number as a paragraph (or vice versa).
+    @State private var scrollParagraphTarget = 0
+    @State private var pagedPageIndex = 0
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var sleepTimerTask: Task<Void, Never>?
     @State private var positionPersistTask: Task<Void, Never>?
@@ -65,6 +69,7 @@ struct ReaderView: View {
     @State private var lastVisibleParagraphUpdateAt = Date.distantPast
     @State private var readerContentFingerprint = ""
     @State private var speechPausedForScene = false
+    @State private var autoScrollPausedForScene = false
     @StateObject private var playbackCoordinator = ReaderPlaybackCoordinator()
     @StateObject private var speechController = ReaderSpeechController()
     @AppStorage("reader.fontSize") private var fontSize: Double = 19
@@ -140,7 +145,7 @@ struct ReaderView: View {
         }
         if readerMode != .scroll {
             let pageCount = max(pagedBlocks.count, 1)
-            let page = min(max(autoScrollTarget + 1, 1), pageCount)
+            let page = min(max(pagedPageIndex + 1, 1), pageCount)
             parts.append("页 \(page)/\(pageCount)")
         }
         return parts.joined(separator: " · ")
@@ -149,9 +154,9 @@ struct ReaderView: View {
     private var maximumReaderTarget: Int {
         switch readerMode {
         case .scroll:
-            return max(content.paragraphs.count - 1, 0)
+            return positionMapping.maximumParagraphIndex
         case .pageTurn, .cover:
-            return max(pagedBlocks.count - 1, 0)
+            return positionMapping.maximumPageIndex
         }
     }
 
@@ -224,6 +229,13 @@ struct ReaderView: View {
         ].joined(separator: "|")
     }
 
+    private var positionMapping: ReaderPositionMapping {
+        ReaderPositionMapping(
+            paragraphCount: content.paragraphs.count,
+            pageFirstParagraphs: pagedBlocks.compactMap(\.firstParagraphIndex)
+        )
+    }
+
     var body: some View {
         ZStack {
             readerBackdrop
@@ -293,7 +305,9 @@ struct ReaderView: View {
             sessionStartedAt = Date()
             rebuildPagedBlocksCache()
             readerContentFingerprint = makeContentFingerprint(content)
-            autoScrollTarget = initialAutoScrollTarget()
+            let initial = initialAutoScrollTarget()
+            scrollParagraphTarget = initial.paragraph
+            pagedPageIndex = initial.page
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             applyIdleTimerPreference()
             scheduleSleepTimer()
@@ -312,8 +326,7 @@ struct ReaderView: View {
             stopAutoScroll()
             sleepTimerTask?.cancel()
             sleepTimerTask = nil
-            speechController.stop()
-            playbackCoordinator.stop()
+            stopSpeechPlayback()
             restoreIdleTimerPreference()
             appState.releaseTabChromeHidden(owner: tabChromeOwner)
             appState.bookshelfStore.recordReadingSession(
@@ -329,26 +342,33 @@ struct ReaderView: View {
         }
         .onChange(of: scenePhase) { phase in
             if phase != .active {
-                autoScrollTask?.cancel()
-                autoScrollTask = nil
                 if autoScrollEnabled {
-                    autoScrollEnabled = false
-                    playbackCoordinator.stop()
+                    autoScrollPausedForScene = true
+                    stopAutoScroll(clearScenePause: false)
                 }
                 if speechController.isSpeaking && !speechController.isPaused {
                     speechController.pause()
                     playbackCoordinator.pauseSpeech()
                     speechPausedForScene = true
                 }
-            } else if speechPausedForScene && speechController.isPaused {
-                speechController.resume()
-                playbackCoordinator.resumeSpeech()
-                speechPausedForScene = false
+            } else {
+                if autoScrollPausedForScene {
+                    autoScrollPausedForScene = false
+                    startAutoScroll()
+                }
+                if speechPausedForScene && speechController.isPaused {
+                    speechController.resume()
+                    playbackCoordinator.resumeSpeech()
+                    speechPausedForScene = false
+                }
             }
         }
-        .onChange(of: autoScrollTarget) { _ in
+        .onChange(of: scrollParagraphTarget) { _ in
             // Persisting the whole bookshelf serializes JSON to disk. Debounce
             // target changes so paging/auto-scroll stays on the rendering path.
+            scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
+        }
+        .onChange(of: pagedPageIndex) { _ in
             scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
         }
         .onChange(of: content) { updatedContent in
@@ -359,11 +379,12 @@ struct ReaderView: View {
         }
         .onChange(of: readerModeRawValue) { _ in
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            let paragraph = positionMapping.clampParagraph(visibleParagraphIndex)
             stopAutoScroll()
-            speechController.stop()
-            playbackCoordinator.stop()
-            speechPausedForScene = false
-            autoScrollTarget = initialAutoScrollTarget()
+            stopSpeechPlayback()
+            scrollParagraphTarget = paragraph
+            pagedPageIndex = positionMapping.page(containingParagraph: paragraph)
+            persistReadingPosition(paragraphIndexOverride: paragraph)
         }
         .onChange(of: initialParagraphIndex) { target in
             guard let target, content.paragraphs.indices.contains(target) else { return }
@@ -371,7 +392,8 @@ struct ReaderView: View {
         }
         .onChange(of: readerPageCacheKey) { _ in
             rebuildPagedBlocksCache()
-            autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
+            scrollParagraphTarget = positionMapping.clampParagraph(scrollParagraphTarget)
+            pagedPageIndex = min(max(pagedPageIndex, 0), positionMapping.maximumPageIndex)
             scheduleReadingPositionPersistence(paragraphIndex: currentParagraphIndexForPersistence())
         }
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showOverlay)
@@ -441,7 +463,7 @@ struct ReaderView: View {
             currentParagraphIndex: speechController.currentParagraphIndex,
             scrollTarget: content.paragraphs.indices.contains(speechController.currentParagraphIndex)
                 ? speechController.currentParagraphIndex
-                : (content.paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil),
+                : (content.paragraphs.indices.contains(scrollParagraphTarget) ? scrollParagraphTarget : nil),
             scrollRequestKey: nativeScrollRequestKey,
             animatedScrollDuration: autoScrollEnabled ? max(ReaderAutomationPolicy.clampedDelay(autoScrollDelay) * 0.9, 0.25) : 0.35,
             textSelectionEnabled: textSelectionEnabled,
@@ -451,9 +473,9 @@ struct ReaderView: View {
         )
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
-            if autoScrollTarget > 0 {
+            if scrollParagraphTarget > 0 {
                 DispatchQueue.main.async {
-                    paragraphJumpRequest = ParagraphJumpRequest(index: autoScrollTarget)
+                    paragraphJumpRequest = ParagraphJumpRequest(index: scrollParagraphTarget)
                 }
             }
         }
@@ -465,7 +487,8 @@ struct ReaderView: View {
 
     private var nativeScrollRequestKey: String {
         [
-            String(autoScrollTarget),
+            String(scrollParagraphTarget),
+            String(pagedPageIndex),
             paragraphJumpRequest?.id.uuidString ?? "none",
             String(speechController.currentParagraphIndex),
             autoScrollEnabled ? "auto" : "manual"
@@ -482,24 +505,24 @@ struct ReaderView: View {
     }
 
     private var horizontalPagedReaderContent: some View {
-        TabView(selection: $autoScrollTarget) {
+        TabView(selection: $pagedPageIndex) {
             ForEach(pagedBlocks) { page in
                 readerPage(for: page)
                 .tag(page.id)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .onChange(of: autoScrollTarget) { target in
+        .onChange(of: pagedPageIndex) { target in
             updatePagedVisibleParagraph(pageIndex: target)
         }
         .onChange(of: speechController.currentParagraphIndex) { target in
             guard target >= 0 else { return }
-            autoScrollTarget = pageIndex(containingParagraph: target)
+            pagedPageIndex = pageIndex(containingParagraph: target)
         }
     }
 
     private var coverPagedReaderContent: some View {
-        let safeIndex = min(max(autoScrollTarget, 0), max(pagedBlocks.count - 1, 0))
+        let safeIndex = min(max(pagedPageIndex, 0), max(pagedBlocks.count - 1, 0))
         return ZStack {
             if pagedBlocks.indices.contains(safeIndex) {
                 readerPage(for: pagedBlocks[safeIndex])
@@ -514,19 +537,19 @@ struct ReaderView: View {
             DragGesture(minimumDistance: 24)
                 .onEnded { value in
                     if value.translation.width < -42 {
-                        moveReaderTarget(to: autoScrollTarget + 1)
+                        moveReaderTarget(to: pagedPageIndex + 1)
                     } else if value.translation.width > 42 {
-                        moveReaderTarget(to: autoScrollTarget - 1)
+                        moveReaderTarget(to: pagedPageIndex - 1)
                     }
                 }
         )
-        .animation(.easeInOut(duration: 0.22), value: autoScrollTarget)
-        .onChange(of: autoScrollTarget) { target in
+        .animation(.easeInOut(duration: 0.22), value: pagedPageIndex)
+        .onChange(of: pagedPageIndex) { target in
             updatePagedVisibleParagraph(pageIndex: target)
         }
         .onChange(of: speechController.currentParagraphIndex) { target in
             guard target >= 0 else { return }
-            autoScrollTarget = pageIndex(containingParagraph: target)
+            pagedPageIndex = pageIndex(containingParagraph: target)
         }
     }
 
@@ -731,7 +754,7 @@ struct ReaderView: View {
                     }
                     if speechController.isSpeaking {
                         toolButton(icon: "stop.fill", title: "停止") {
-                            speechController.stop()
+                            stopSpeechPlayback()
                             showSettings = false
                         }
                     }
@@ -1380,10 +1403,10 @@ struct ReaderView: View {
         visibleParagraphIndex = safeIndex
         switch readerMode {
         case .scroll:
-            autoScrollTarget = safeIndex
+            scrollParagraphTarget = safeIndex
             paragraphJumpRequest = ParagraphJumpRequest(index: safeIndex)
         case .pageTurn, .cover:
-            autoScrollTarget = pageIndex(containingParagraph: safeIndex)
+            pagedPageIndex = pageIndex(containingParagraph: safeIndex)
         }
         persistReadingPosition(paragraphIndexOverride: safeIndex)
     }
@@ -1398,7 +1421,7 @@ struct ReaderView: View {
         showSettings = false
         showOverlay = false
         stopAutoScroll()
-        speechController.stop()
+        stopSpeechPlayback()
         onSelectChapter?(target)
     }
 
@@ -1419,9 +1442,9 @@ struct ReaderView: View {
     private func runTapAction(_ action: ReaderTapAction) {
         switch action {
         case .previousPage:
-            moveReaderTarget(to: autoScrollTarget - 1)
+            moveReaderTarget(to: currentReaderTarget - 1)
         case .nextPage:
-            moveReaderTarget(to: autoScrollTarget + 1)
+            moveReaderTarget(to: currentReaderTarget + 1)
         case .previousChapter:
             selectRelativeChapter(offset: -1)
         case .nextChapter:
@@ -1435,16 +1458,19 @@ struct ReaderView: View {
 
     private func moveReaderTarget(to rawTarget: Int) {
         let target = min(max(rawTarget, 0), maximumReaderTarget)
-        autoScrollTarget = target
-        let resolvedParagraphIndex: Int
-        switch readerMode {
-        case .scroll:
-            resolvedParagraphIndex = min(target, max(content.paragraphs.count - 1, 0))
-        case .pageTurn, .cover:
-            resolvedParagraphIndex = paragraphIndex(forPage: target)
+        if readerMode == .scroll {
+            scrollParagraphTarget = target
+            paragraphJumpRequest = ParagraphJumpRequest(index: target)
+        } else {
+            pagedPageIndex = target
         }
+        let resolvedParagraphIndex = positionMapping.paragraph(for: target, mode: readerMode)
         visibleParagraphIndex = resolvedParagraphIndex
         scheduleReadingPositionPersistence(paragraphIndex: resolvedParagraphIndex)
+    }
+
+    private var currentReaderTarget: Int {
+        readerMode == .scroll ? scrollParagraphTarget : pagedPageIndex
     }
 
     private func toggleOverlay() {
@@ -1499,13 +1525,31 @@ struct ReaderView: View {
     private func beginSpeechPlayback() {
         stopAutoScroll()
         let coordinator = playbackCoordinator
+        let controller = speechController
+        let progressStore = appState.bookshelfStore
+        let currentBookID = bookID
+        let currentChapterIndex = chapterIndex
+        let currentChapterTitle = content.title
+        let currentTotalChapters = totalChapters ?? 0
         let token = coordinator.beginSpeech()
         speechController.onFinished = { [onSpeechFinished] in
-            guard let onSpeechFinished else { return }
             Task { @MainActor in
                 guard coordinator.accepts(token, for: .speech(generation: token)) else { return }
+                // The speech controller clears its active index when the
+                // queue drains, so persist the last completed paragraph before
+                // handing the owner the next-chapter callback.
+                let finishedParagraph = controller.lastFinishedParagraphIndex
+                if finishedParagraph >= 0 {
+                    progressStore.updateReadingProgress(
+                        bookID: currentBookID,
+                        chapterIndex: currentChapterIndex,
+                        chapterTitle: currentChapterTitle,
+                        totalChapters: currentTotalChapters,
+                        paragraphIndex: finishedParagraph
+                    )
+                }
                 coordinator.stop()
-                onSpeechFinished()
+                onSpeechFinished?()
             }
         }
         speechPausedForScene = false
@@ -1518,12 +1562,20 @@ struct ReaderView: View {
         )
     }
 
+    /// One exit path for every manual/navigation/lifecycle stop. Keeping the
+    /// AVSpeech controller and the generation coordinator in sync prevents a
+    /// late completion callback from reviving a newer reader session.
+    private func stopSpeechPlayback() {
+        speechController.stop()
+        playbackCoordinator.stop()
+        speechPausedForScene = false
+    }
+
     private func toggleAutoScroll() {
         if autoScrollEnabled {
             stopAutoScroll()
         } else {
-            speechController.stop()
-            speechPausedForScene = false
+            stopSpeechPlayback()
             startAutoScroll()
         }
     }
@@ -1531,7 +1583,12 @@ struct ReaderView: View {
     private func startAutoScroll() {
         stopAutoScroll()
         autoScrollEnabled = true
-        autoScrollTarget = min(max(autoScrollTarget, 0), maximumReaderTarget)
+        let currentTarget = min(max(currentReaderTarget, 0), maximumReaderTarget)
+        if readerMode == .scroll {
+            scrollParagraphTarget = currentTarget
+        } else {
+            pagedPageIndex = currentTarget
+        }
         let delay = ReaderAutomationPolicy.clampedDelay(autoScrollDelay)
         let coordinator = playbackCoordinator
         let token = coordinator.beginAutoScroll()
@@ -1543,12 +1600,18 @@ struct ReaderView: View {
                           coordinator.accepts(token, for: .autoScroll(generation: token)),
                           autoScrollEnabled else { return }
                     switch ReaderAutomationPolicy.decision(
-                        currentTarget: autoScrollTarget,
+                        currentTarget: currentReaderTarget,
                         maximumTarget: maximumReaderTarget,
                         canAdvanceChapter: canSelectRelativeChapter(offset: 1)
                     ) {
                     case .advance(let target):
-                        autoScrollTarget = target
+                        if readerMode == .scroll {
+                            scrollParagraphTarget = target
+                            visibleParagraphIndex = target
+                            paragraphJumpRequest = ParagraphJumpRequest(index: target)
+                        } else {
+                            pagedPageIndex = target
+                        }
                     case .nextChapter:
                         stopAutoScroll()
                         selectRelativeChapter(offset: 1)
@@ -1560,7 +1623,10 @@ struct ReaderView: View {
         }
     }
 
-    private func stopAutoScroll() {
+    private func stopAutoScroll(clearScenePause: Bool = true) {
+        if clearScenePause {
+            autoScrollPausedForScene = false
+        }
         autoScrollEnabled = false
         autoScrollTask?.cancel()
         autoScrollTask = nil
@@ -1578,7 +1644,7 @@ struct ReaderView: View {
             try? await Task.sleep(nanoseconds: duration)
             guard !Task.isCancelled else { return }
             stopAutoScroll()
-            speechController.stop()
+            stopSpeechPlayback()
             sleepTimerMinutes = 0
             appState.record(DiagnosticEvent(level: .info, stage: "reader.sleepTimer", sourceName: content.title, message: "睡眠定时已结束"))
             sleepTimerTask = nil
@@ -1626,7 +1692,7 @@ struct ReaderView: View {
         scheduleReadingPositionPersistence(paragraphIndex: index)
     }
 
-    private func initialAutoScrollTarget() -> Int {
+    private func initialAutoScrollTarget() -> (paragraph: Int, page: Int) {
         let paragraphIndex: Int
         if let initialParagraphIndex {
             paragraphIndex = initialParagraphIndex
@@ -1634,18 +1700,13 @@ struct ReaderView: View {
             guard let stored = appState.bookshelfStore.book(id: bookID),
                   stored.currentChapterIndex == chapterIndex,
                   let storedParagraphIndex = stored.currentParagraphIndex else {
-                return 0
+                return (0, 0)
             }
             paragraphIndex = storedParagraphIndex
         }
-        let safeParagraph = min(max(paragraphIndex, 0), max(content.paragraphs.count - 1, 0))
+        let safeParagraph = positionMapping.clampParagraph(paragraphIndex)
         visibleParagraphIndex = safeParagraph
-        switch readerMode {
-        case .scroll:
-            return safeParagraph
-        case .pageTurn, .cover:
-            return pageIndex(containingParagraph: safeParagraph)
-        }
+        return (safeParagraph, positionMapping.page(containingParagraph: safeParagraph))
     }
 
     private func persistReadingPosition(paragraphIndexOverride: Int? = nil) {
@@ -1680,7 +1741,7 @@ struct ReaderView: View {
         case .scroll:
             return min(max(visibleParagraphIndex, 0), content.paragraphs.count - 1)
         case .pageTurn, .cover:
-            return paragraphIndex(forPage: autoScrollTarget)
+            return paragraphIndex(forPage: pagedPageIndex)
         }
     }
 
@@ -1832,6 +1893,9 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     @Published var isSpeaking = false
     @Published var isPaused = false
     @Published var currentParagraphIndex = -1
+    /// Last non-title paragraph whose utterance completed. The owner uses it
+    /// to persist the final reading position before handing off chapters.
+    @Published private(set) var lastFinishedParagraphIndex = -1
 
     private let synthesizer = AVSpeechSynthesizer()
     private var queue = ReaderSpeechQueue()
@@ -1863,6 +1927,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         try? AVAudioSession.sharedInstance().setActive(true, options: [])
         isSpeaking = true
         isPaused = false
+        lastFinishedParagraphIndex = -1
         speakNext()
     }
 
@@ -1893,6 +1958,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
         isSpeaking = false
         isPaused = false
         currentParagraphIndex = -1
+        lastFinishedParagraphIndex = -1
         queue.clear()
     }
 
@@ -1919,6 +1985,7 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
             guard let self, self.isSpeaking, self.activeUtterance === utterance else { return }
+            self.lastFinishedParagraphIndex = self.currentParagraphIndex
             self.activeUtterance = nil
             self.speakNext()
         }

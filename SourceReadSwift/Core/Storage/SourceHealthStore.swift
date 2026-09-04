@@ -1,6 +1,6 @@
 import Foundation
 
-enum SourceHealthStatus: String, Codable, Sendable {
+enum SourceHealthStatus: String, Codable, Hashable, Sendable {
     case passed
     case warning
     case failed

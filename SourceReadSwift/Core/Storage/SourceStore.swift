@@ -159,11 +159,19 @@ final class SourceStore: ObservableObject {
 
     @discardableResult
     func restore(_ snapshot: SourceLibrarySnapshot) -> Bool {
-        sources = snapshot.sources.filter { !$0.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        rssSources = snapshot.rssSources.filter { !$0.sourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        catalogs = snapshot.catalogs.filter { !$0.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let normalizedSources = snapshot.sources.filter { !$0.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let normalizedRSSSources = snapshot.rssSources.filter { !$0.sourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let normalizedCatalogs = snapshot.catalogs.filter { !$0.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         do {
-            try persist()
+            let normalized = SourceLibrarySnapshot(
+                sources: normalizedSources,
+                rssSources: normalizedRSSSources,
+                catalogs: normalizedCatalogs
+            )
+            try persistence.save(normalized)
+            sources = normalizedSources
+            rssSources = normalizedRSSSources
+            catalogs = normalizedCatalogs
             lastError = nil
             return true
         } catch {

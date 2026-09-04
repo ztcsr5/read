@@ -270,11 +270,30 @@ final class BookshelfStore: ObservableObject {
             }
             return updated
         }
-        books = normalizedBooks
-        groups = normalizedGroups
-        persistGroups()
-        persist()
-        return lastError == nil
+        let previousBooks = books
+        let previousGroups = groups
+        do {
+            // Save both files before publishing the new in-memory state. If
+            // the second write fails, put the first file back so a restore
+            // cannot leave a half-written bookshelf on disk.
+            try groupPersistence.save(normalizedGroups)
+            do {
+                try persistence.save(normalizedBooks)
+            } catch {
+                try? groupPersistence.save(previousGroups)
+                throw error
+            }
+            books = normalizedBooks
+            groups = normalizedGroups
+            lastError = nil
+            return true
+        } catch {
+            // Keep the published state aligned with the still-valid snapshot.
+            books = previousBooks
+            groups = previousGroups
+            lastError = error.localizedDescription
+            return false
+        }
     }
 
     var recentBooks: [BookshelfBook] {

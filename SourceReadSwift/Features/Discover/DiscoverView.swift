@@ -250,6 +250,7 @@ final class DiscoverViewModel: ObservableObject {
     private weak var appState: AppState?
     private var activeSearchID: UUID?
     private var searchTask: Task<Void, Never>?
+    private var searchGeneration = 0
     private var activeKeyword = ""
     private var rawResults: [SearchBook] = []
 
@@ -258,6 +259,7 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     func cancelSearch() {
+        searchGeneration &+= 1
         searchTask?.cancel()
         searchTask = nil
         activeSearchID = nil
@@ -265,10 +267,13 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     func startSearch() {
+        searchGeneration &+= 1
+        let generation = searchGeneration
         searchTask?.cancel()
         searchTask = Task { @MainActor [weak self] in
-            await self?.search()
-            self?.searchTask = nil
+            await self?.search(generation: generation)
+            guard let self, self.searchGeneration == generation else { return }
+            self.searchTask = nil
         }
     }
 
@@ -285,10 +290,23 @@ final class DiscoverViewModel: ObservableObject {
         applyResultFilter()
     }
 
-    func search() async {
+    func search(generation: Int) async {
         guard let appState else { return }
+        guard generation == searchGeneration else { return }
         let keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !keyword.isEmpty else { return }
+        guard !keyword.isEmpty else {
+            activeSearchID = nil
+            isSearching = false
+            errorMessage = nil
+            results = []
+            unfilteredResults = []
+            rawResults = []
+            totalResultCount = 0
+            hitSourceCount = 0
+            checkedSourceCount = 0
+            sourceFailures = []
+            return
+        }
         activeKeyword = keyword
 
         let searchID = UUID()
@@ -305,7 +323,7 @@ final class DiscoverViewModel: ObservableObject {
         hitSourceCount = 0
         checkedSourceCount = 0
         defer {
-            if activeSearchID == searchID {
+            if activeSearchID == searchID, searchGeneration == generation {
                 isSearching = false
             }
         }
@@ -322,7 +340,7 @@ final class DiscoverViewModel: ObservableObject {
         var failures: [String] = []
 
         for batch in sources.chunked(into: 12) {
-            guard activeSearchID == searchID, !Task.isCancelled else { return }
+            guard activeSearchID == searchID, searchGeneration == generation, !Task.isCancelled else { return }
             await withTaskGroup(of: (BookSource, Result<[SearchBook], SourceEngineError>).self) { group in
                 for source in batch {
                     group.addTask {
@@ -334,7 +352,7 @@ final class DiscoverViewModel: ObservableObject {
                 }
 
                 for await (source, result) in group {
-                    guard activeSearchID == searchID, !Task.isCancelled else {
+                    guard activeSearchID == searchID, searchGeneration == generation, !Task.isCancelled else {
                         group.cancelAll()
                         return
                     }
@@ -368,7 +386,7 @@ final class DiscoverViewModel: ObservableObject {
             hitSourceCount = hitSources.count
         }
 
-        guard activeSearchID == searchID else { return }
+        guard activeSearchID == searchID, searchGeneration == generation else { return }
         totalResultCount = allBooks.count
         unfilteredResults = filtered(allBooks, keyword: keyword)
         results = unfilteredResults

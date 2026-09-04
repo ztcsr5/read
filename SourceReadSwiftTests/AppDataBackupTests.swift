@@ -60,4 +60,106 @@ final class AppDataBackupTests: XCTestCase {
         XCTAssertEqual(decoded.bookshelf.books.first?.title, "测试书")
         XCTAssertEqual(decoded.readerPreferences["reader.fontSize"], BackupPreferenceValue.double(20))
     }
+
+    func testBackupCodecRejectsEmptyWhitespaceAndMalformedInput() {
+        let sources = SourceLibrarySnapshot(sources: [])
+        let rules: [PurifyRule] = []
+        let state = RSSArticleStateSnapshot(readIDs: [], favoriteIDs: [])
+        for data in [Data(), Data(" \n\t".utf8), Data("{not-json}".utf8)] {
+            XCTAssertThrowsError(try AppDataBackupCodec.decode(
+                data: data,
+                fallbackSources: sources,
+                fallbackPurifyRules: rules,
+                fallbackRSSState: state
+            ))
+        }
+    }
+
+    func testBackupCodecReadsLegacyBookshelfWithoutOverwritingOtherStores() throws {
+        let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let book = BookshelfBook(
+            id: "legacy-book", title: "旧书", author: "作者", coverURL: nil,
+            sourceName: "本地", sourceURL: "local://text", bookURL: "legacy-book",
+            intro: nil, addedAt: fixedDate
+        )
+        let legacy = BookshelfBackupSnapshot(exportedAt: fixedDate, books: [book], groups: [])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(legacy)
+        let fallbackSource = SourceLibrarySnapshot(sources: [BookSource(bookSourceName: "保留", bookSourceUrl: "local://source")])
+        let decoded = try AppDataBackupCodec.decode(
+            data: data,
+            fallbackSources: fallbackSource,
+            fallbackPurifyRules: [],
+            fallbackRSSState: RSSArticleStateSnapshot(readIDs: ["r"], favoriteIDs: [])
+        )
+        XCTAssertEqual(decoded.schemaVersion, 1)
+        XCTAssertEqual(decoded.bookshelf.books.first?.id, "legacy-book")
+        XCTAssertEqual(decoded.sources.sources.first?.bookSourceName, "保留")
+        XCTAssertEqual(decoded.rssState.readIDs, ["r"])
+    }
+
+    func testBackupCodecRejectsUnsupportedSchema() throws {
+        let snapshot = AppDataBackupSnapshot(
+            schemaVersion: 99,
+            bookshelf: BookshelfBackupSnapshot(books: [], groups: []),
+            sources: SourceLibrarySnapshot(sources: []),
+            purifyRules: [],
+            rssState: RSSArticleStateSnapshot(readIDs: [], favoriteIDs: []),
+            readerPreferences: [:]
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        XCTAssertThrowsError(try AppDataBackupCodec.decode(
+            data: data,
+            fallbackSources: SourceLibrarySnapshot(sources: []),
+            fallbackPurifyRules: [],
+            fallbackRSSState: RSSArticleStateSnapshot(readIDs: [], favoriteIDs: [])
+        )) { error in
+            XCTAssertEqual(error as? AppDataBackupError, .unsupportedSchema(99))
+        }
+    }
+
+    @MainActor
+    func testBackupRestorerRollsBackWhenPurifyRulesFail() {
+        let previous = AppDataBackupSnapshot(
+            bookshelf: BookshelfBackupSnapshot(books: [], groups: []),
+            sources: SourceLibrarySnapshot(sources: []),
+            purifyRules: [PurifyRule(id: "old", pattern: "old")],
+            rssState: RSSArticleStateSnapshot(readIDs: ["old"], favoriteIDs: []),
+            readerPreferences: ["reader.mode": .string("scroll")]
+        )
+        let incoming = AppDataBackupSnapshot(
+            bookshelf: BookshelfBackupSnapshot(books: [], groups: []),
+            sources: SourceLibrarySnapshot(sources: []),
+            purifyRules: [PurifyRule(id: "new", pattern: "new")],
+            rssState: RSSArticleStateSnapshot(readIDs: ["new"], favoriteIDs: []),
+            readerPreferences: ["reader.mode": .string("paged")]
+        )
+        var bookshelf = previous.bookshelf
+        var sources = previous.sources
+        var rules = previous.purifyRules
+        var rss = previous.rssState
+        var preferences = previous.readerPreferences
+
+        XCTAssertThrowsError(try AppDataBackupRestorer.restore(
+            incoming,
+            previous: previous,
+            restoreBookshelf: { bookshelf = $0; return true },
+            restoreSources: { sources = $0; return true },
+            restorePurifyRules: { snapshot in
+                if snapshot == incoming.purifyRules { return false }
+                rules = snapshot
+                return true
+            },
+            restoreRSSState: { rss = $0 },
+            restorePreferences: { preferences = $0 }
+        )) { error in
+            XCTAssertEqual(error as? AppDataBackupError, .purifyRulesRestoreFailed)
+        }
+        XCTAssertEqual(bookshelf, previous.bookshelf)
+        XCTAssertEqual(sources, previous.sources)
+        XCTAssertEqual(rules, previous.purifyRules)
+        XCTAssertEqual(rss, previous.rssState)
+        XCTAssertEqual(preferences, previous.readerPreferences)
+    }
 }

@@ -62,6 +62,20 @@ jobs:
           ditto -c -k --keepParent unsigned-ipa/Payload SourceReadSwift-unsigned.ipa
           ls -lh SourceReadSwift-unsigned.ipa
 
+      - name: Summarize IPA artifact
+        run: |
+          set -euo pipefail
+          SIZE_BYTES="$(stat -f%z SourceReadSwift-unsigned.ipa)"
+          SHA256="$(shasum -a 256 SourceReadSwift-unsigned.ipa | awk '{print $1}')"
+          echo "IPA size: ${SIZE_BYTES} bytes"
+          echo "IPA SHA-256: ${SHA256}"
+          {
+            echo "## Unsigned IPA"
+            echo "- file: `SourceReadSwift-unsigned.ipa`"
+            echo "- size: ${SIZE_BYTES} bytes"
+            echo "- SHA-256: `${SHA256}`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:

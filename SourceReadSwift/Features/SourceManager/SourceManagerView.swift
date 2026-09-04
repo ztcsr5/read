@@ -1088,9 +1088,12 @@ struct SourceManagerView: View {
                     Button {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         batchCheckTask?.cancel()
+                        guard let sessionID = batchCheck?.id else { return }
                         batchCheckTask = Task { @MainActor in
-                            await runBatchSourceCheck()
-                            batchCheckTask = nil
+                            await runBatchSourceCheck(sessionID: sessionID)
+                            if batchCheck?.id == sessionID {
+                                batchCheckTask = nil
+                            }
                         }
                     } label: {
                         Label(batchCheck?.isRunning == true ? "测试中..." : "开始批量测试", systemImage: "play.circle")
@@ -1147,6 +1150,9 @@ struct SourceManagerView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
+                                Text("耗时 \(result.elapsedMilliseconds) ms")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
                             }
                         }
                     }
@@ -1196,6 +1202,7 @@ struct SourceManagerView: View {
             lines.append("")
             lines.append("[\(result.status.title)] \(result.sourceName)")
             lines.append("url: \(result.sourceURL)")
+            lines.append("duration: \(result.elapsedMilliseconds) ms")
             lines.append("message: \(result.message)")
         }
         return lines.joined(separator: "\n")
@@ -1365,8 +1372,8 @@ struct SourceManagerView: View {
     }
 
     @MainActor
-    private func runBatchSourceCheck() async {
-        guard var state = batchCheck else { return }
+    private func runBatchSourceCheck(sessionID: UUID) async {
+        guard var state = batchCheck, state.id == sessionID else { return }
         let keyword = state.keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else {
             state.results = [
@@ -1377,7 +1384,7 @@ struct SourceManagerView: View {
                     message: "请输入测试关键词。"
                 )
             ]
-            batchCheck = state
+            if batchCheck?.id == sessionID { batchCheck = state }
             return
         }
 
@@ -1393,7 +1400,7 @@ struct SourceManagerView: View {
         // feel frozen, while avoiding an unbounded request burst.
         for batch in state.sources.chunked(into: 4) {
             guard !Task.isCancelled else { return }
-            guard batchCheck != nil else { return }
+            guard batchCheck?.id == sessionID else { return }
             await withTaskGroup(of: BatchCheckOutcome.self) { group in
                 for source in batch {
                     group.addTask {
@@ -1411,22 +1418,34 @@ struct SourceManagerView: View {
                         group.cancelAll()
                         return
                     }
-                    guard var latest = batchCheck else { return }
+                    guard var latest = batchCheck, latest.id == sessionID else {
+                        group.cancelAll()
+                        return
+                    }
                     var result = outcome.result
                     if let deep = outcome.deepCheck {
                         result = SourceBatchCheckResult(
                             sourceName: result.sourceName,
                             sourceURL: result.sourceURL,
                             status: deep.status,
-                            message: "\(result.message) \(deep.message)"
+                            message: "\(result.message) \(deep.message)",
+                            elapsedMilliseconds: result.elapsedMilliseconds
                         )
                     }
                     latest.checkedCount += 1
                     latest.results.append(result)
                     latest.results.sort { lhs, rhs in
-                        let left = state.sources.firstIndex { $0.bookSourceUrl == lhs.sourceURL } ?? Int.max
-                        let right = state.sources.firstIndex { $0.bookSourceUrl == rhs.sourceURL } ?? Int.max
-                        return left < right
+                        if lhs.status.priority != rhs.status.priority {
+                            return lhs.status.priority < rhs.status.priority
+                        }
+                        if lhs.elapsedMilliseconds != rhs.elapsedMilliseconds {
+                            return lhs.elapsedMilliseconds > rhs.elapsedMilliseconds
+                        }
+                        return lhs.sourceName.localizedCaseInsensitiveCompare(rhs.sourceName) == .orderedAscending
+                    }
+                    guard batchCheck?.id == sessionID, !Task.isCancelled else {
+                        group.cancelAll()
+                        return
                     }
                     batchCheck = latest
 
@@ -1465,7 +1484,9 @@ struct SourceManagerView: View {
             }
         }
 
-        guard var finished = batchCheck else { return }
+        guard !Task.isCancelled,
+              var finished = batchCheck,
+              finished.id == sessionID else { return }
         finished.isRunning = false
         batchCheck = finished
     }
@@ -1476,6 +1497,7 @@ struct SourceManagerView: View {
         engine: SourceEngine,
         deepCheck: Bool
     ) async -> BatchCheckOutcome {
+        let startedAt = Date()
         var loginMessage = ""
         var login: BatchLoginOutcome?
         if source.loginCheckJs?.nilIfEmpty != nil {
@@ -1515,7 +1537,7 @@ struct SourceManagerView: View {
             }
             return BatchCheckOutcome(
                 source: source,
-                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message),
+                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: status, message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)),
                 resultCount: books.count,
                 login: login,
                 deepCheck: deepOutcome
@@ -1526,7 +1548,7 @@ struct SourceManagerView: View {
             let classified = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
             return BatchCheckOutcome(
                 source: source,
-                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message),
+                result: SourceBatchCheckResult(sourceName: source.bookSourceName, sourceURL: source.bookSourceUrl, status: SourceBatchCheckStatus(classified), message: message, elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)),
                 resultCount: 0,
                 login: login,
                 deepCheck: nil
@@ -1779,6 +1801,30 @@ private struct SourceVisualDetailView: View {
         return result
     }
 
+    /// Normalize persisted history into the same structured model used by
+    /// batch diagnostics. This keeps the visual detail screen and exported
+    /// reports on one four-stage contract instead of parsing display strings.
+    private var latestDiagnosticReport: SourceDiagnosticReport? {
+        guard !latestDiagnostics.isEmpty else { return nil }
+        let steps = SourceDiagnosticStage.allCases.compactMap { stage -> SourceDiagnosticStep? in
+            guard let record = latestDiagnostics[stage.rawValue] else { return nil }
+            return SourceDiagnosticStep(
+                stage: stage,
+                status: record.status,
+                requestSummary: stage == .search ? "keyword=\(diagnosticKeyword)" : nil,
+                responseSummary: record.message,
+                matchCount: record.resultCount,
+                elapsedMilliseconds: record.elapsedMilliseconds
+            )
+        }
+        return SourceDiagnosticReport(
+            sourceName: source.bookSourceName,
+            sourceURL: source.bookSourceUrl,
+            keyword: diagnosticKeyword,
+            steps: steps
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1818,9 +1864,13 @@ private struct SourceVisualDetailView: View {
                         HStack {
                             Text("最近一次动态诊断").font(.headline)
                             Spacer()
-                            Text(latestDiagnostics.isEmpty ? "未运行" : "按阶段记录")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            if let report = latestDiagnosticReport {
+                                statusPill(report.overallStatus.shortTitle, color: report.overallStatus.color)
+                            } else {
+                                Text("未运行")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         TextField("诊断关键词", text: $diagnosticKeyword)
                             .textFieldStyle(.roundedBorder)
@@ -2100,6 +2150,21 @@ private struct SourceBatchCheckResult: Identifiable, Sendable {
     let sourceURL: String
     let status: SourceBatchCheckStatus
     let message: String
+    let elapsedMilliseconds: Int
+
+    init(
+        sourceName: String,
+        sourceURL: String,
+        status: SourceBatchCheckStatus,
+        message: String,
+        elapsedMilliseconds: Int = 0
+    ) {
+        self.sourceName = sourceName
+        self.sourceURL = sourceURL
+        self.status = status
+        self.message = message
+        self.elapsedMilliseconds = max(0, elapsedMilliseconds)
+    }
 }
 
 private struct BatchLoginOutcome: Sendable {
@@ -2173,6 +2238,14 @@ private enum SourceBatchCheckStatus: Equatable, Sendable {
     case requiresLogin
     case verificationRequired
     case blocked
+
+    var priority: Int {
+        switch self {
+        case .failed, .blocked, .verificationRequired, .requiresLogin: return 0
+        case .warning: return 1
+        case .passed: return 2
+        }
+    }
 
     init(_ status: SourceHealthStatus) {
         switch status {
