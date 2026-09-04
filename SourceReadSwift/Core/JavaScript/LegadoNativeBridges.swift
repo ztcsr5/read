@@ -265,6 +265,18 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
                 input: arguments.first,
                 passphrase: arguments.count > 1 ? arguments[1] : nil
             )
+        case "rsaEncrypt", "RSA_encrypt", "RSA_encryptWithPrivate":
+            return services.rsa(
+                operation: method,
+                value: RuleExecutionContext.bridgeString(arguments.first),
+                key: RuleExecutionContext.bridgeString(arguments.count > 1 ? arguments[1] : "")
+            )
+        case "rsaDecrypt", "RSA_decrypt", "RSA_decryptWithPublic":
+            return services.rsa(
+                operation: method,
+                value: RuleExecutionContext.bridgeString(arguments.first),
+                key: RuleExecutionContext.bridgeString(arguments.count > 1 ? arguments[1] : "")
+            )
         case "sandboxPath":
             return services.sandboxURL.path
             default:

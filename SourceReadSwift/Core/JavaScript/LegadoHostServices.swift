@@ -6,6 +6,7 @@ import CryptoSwift
 import ZIPFoundation
 import CommonCrypto
 import Compression
+import Security
 
 /// Native services required by Legado JavaScript sources.  All filesystem access is
 /// constrained to the app container; relative paths live under Documents/LegadoSandbox.
@@ -162,6 +163,41 @@ final class LegadoHostServices {
             executionContext.log("AES failed: \(error.localizedDescription)")
             return operation.localizedCaseInsensitiveContains("bytearray") ? ([] as NSArray) : ""
         }
+    }
+
+    // MARK: - RSA
+
+    /// Legado's RSA helpers exchange base64 strings.  Accept both PEM and
+    /// bare DER keys and keep failures deterministic (empty string) so a source
+    /// can fall back to its alternate endpoint instead of crashing JSCore.
+    func rsa(operation: String, value: String, key: String) -> String {
+        let isPrivate = operation.localizedCaseInsensitiveContains("private") ||
+            (operation.localizedCaseInsensitiveContains("decrypt") &&
+             !operation.localizedCaseInsensitiveContains("decryptWithPublic"))
+        let keyData: Data
+        if key.contains("BEGIN") {
+            let body = key.components(separatedBy: .newlines).filter { !$0.contains("BEGIN") && !$0.contains("END") }.joined()
+            guard let data = Data(base64Encoded: body) else { return "" }
+            keyData = data
+        } else if let data = Data(base64Encoded: Self.normalizedBase64(key)) {
+            keyData = data
+        } else { return "" }
+        let attributes: [CFString: Any] = [
+            kSecAttrKeyType: kSecAttrKeyTypeRSA,
+            kSecAttrKeyClass: isPrivate ? kSecAttrKeyClassPrivate : kSecAttrKeyClassPublic,
+            kSecAttrKeySizeInBits: keyData.count * 8
+        ]
+        guard let secKey = SecKeyCreateWithData(keyData as CFData, attributes as CFDictionary, nil) else { return "" }
+        let algorithm: SecKeyAlgorithm = .rsaEncryptionPKCS1
+        let decrypt = operation.localizedCaseInsensitiveContains("decrypt")
+        if decrypt {
+            guard let cipher = Data(base64Encoded: Self.normalizedBase64(value)), SecKeyIsAlgorithmSupported(secKey, .decrypt, algorithm),
+                  let clear = SecKeyCreateDecryptedData(secKey, algorithm, cipher as CFData, nil) as Data? else { return "" }
+            return String(data: clear, encoding: .utf8) ?? clear.base64EncodedString()
+        }
+        guard let clear = value.data(using: .utf8), SecKeyIsAlgorithmSupported(secKey, .encrypt, algorithm),
+              let cipher = SecKeyCreateEncryptedData(secKey, algorithm, clear as CFData, nil) as Data? else { return "" }
+        return cipher.base64EncodedString()
     }
 
     /// Generic raw-byte cipher bridge used by CryptoJS WordArray shims and by

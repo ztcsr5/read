@@ -1464,3 +1464,36 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 - Revert `e51b50c..ab15846` together to restore the previous dynamic request,
   cookie and fixture behavior.
+
+## 2026-09-05 - Stage 10: Java/Flutter Legado compatibility surface
+
+### Implemented
+
+- Extended the JavaScriptCore prelude with URL/URI normalization, dual
+  constructor ordering, `URLConnection` request properties/timeouts/streams,
+  response metadata and fixture-routed status handling.
+- Expanded `StringBuilder`, `HashMap`, `ArrayList` and `Pattern/Matcher` to the
+  high-frequency Android Legado method surface, including mutable map entries,
+  indexed list operations and matcher replacement/region helpers.
+- Fixed CryptoJS binary `WordArray` stringify/truncation semantics and added a
+  dependency-free RIPEMD-160 implementation. Added Security.framework RSA
+  bridge aliases with deterministic empty failure behavior.
+- Added offline Stage 10 XCTest coverage for the new Java facade, source/window
+  metadata, cache/field helpers, Flutter utility aliases and binary WordArray.
+
+### Verification
+
+- `node ci-log/extract-prelude.js` and `node --check ci-log/js-prelude-check.js`
+  pass on Windows after decoding Swift's escaped JavaScript layer.
+- `git diff --check` passes; Swift/XCTest/IPA remain pending GitHub Actions
+  because this Windows host has no Xcode/UIKit toolchain.
+
+### Next
+
+- Commit this complete Stage 10 pass once, push
+  `codex/swift-v2-lifetime-reader`, then inspect iOS XCTest and unsigned IPA
+  Actions for compiler annotations, test failures and artifact evidence.
+
+### Rollback
+
+- Revert the Stage 10 commit to restore the Stage 9 dynamic body/cookie bridge.
