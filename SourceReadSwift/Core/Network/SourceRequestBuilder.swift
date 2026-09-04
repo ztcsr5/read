@@ -30,6 +30,11 @@ struct SourceRequestBuilder {
         applyDefaultNavigationHeaders(to: &headers, sourceBase: source.bookSourceUrl)
 
         let body = directive.body ?? sourceOptions.body
+        let timeout = resolvedTimeout(
+            directive: directive,
+            source: source,
+            options: sourceOptions.timeout
+        )
         let method: SourceHTTPMethod = {
             if directive.method == .post { return .post }
             if directive.method == .head { return .head }
@@ -45,24 +50,33 @@ struct SourceRequestBuilder {
             headers: headers,
             body: body,
             expectedCharset: charset,
-            timeout: 12
+            timeout: timeout
         )
     }
 
     private func parseHeaders(_ text: String?) -> [String: String] {
         guard let text, !text.isEmpty else { return [:] }
-        if let data = text.data(using: .utf8),
+        let decoded = decodeEscapes(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = decoded.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            return object.reduce(into: [:]) { result, item in
-                result[item.key] = String(describing: item.value)
-            }
+            return stringMap(object)
         }
-        return [:]
+        return decoded
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" || $0 == ";" })
+            .reduce(into: [:]) { result, line in
+                let value = String(line)
+                let parts = value.split(separator: ":", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { return }
+                let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let headerValue = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { return }
+                result[key] = decodeEscapes(headerValue)
+            }
     }
 
     private func stringMap(_ object: [String: Any]) -> [String: String] {
         object.reduce(into: [:]) { result, item in
-            result[item.key] = String(describing: item.value)
+            result[item.key] = stringify(item.value)
         }
     }
 
@@ -122,10 +136,11 @@ struct SourceRequestBuilder {
         }
     }
 
-    private func requestOptions(_ source: BookSource, keyword: String?, page: Int?) -> (method: SourceHTTPMethod?, body: Data?, headers: [String: String]) {
+    private func requestOptions(_ source: BookSource, keyword: String?, page: Int?) -> (method: SourceHTTPMethod?, body: Data?, headers: [String: String], timeout: TimeInterval?) {
         var method: SourceHTTPMethod?
         var body: Data?
         var headers: [String: String] = [:]
+        var timeout: TimeInterval?
 
         func apply(_ object: [String: Any]) {
             for key in ["method", "httpMethod", "type"] {
@@ -159,6 +174,11 @@ struct SourceRequestBuilder {
                 body = encoded
                 method = .post
             }
+            if timeout == nil,
+               let rawTimeout = firstValue(in: object, keys: ["timeout", "timeoutMs", "connectTimeout"]),
+               let parsed = timeoutSeconds(rawTimeout) {
+                timeout = parsed
+            }
         }
 
         if let customConfig = source.customConfig,
@@ -170,7 +190,50 @@ struct SourceRequestBuilder {
         apply(source.raw.reduce(into: [String: Any]()) { result, item in
             result[item.key] = item.value
         })
-        return (method, body, headers)
+        return (method, body, headers, timeout)
+    }
+
+    private func resolvedTimeout(
+        directive: SourceURLDirective,
+        source: BookSource,
+        options: TimeInterval?
+    ) -> TimeInterval {
+        let raw = directive.timeout
+            ?? options
+            ?? timeoutValue(source.customConfig)
+            ?? timeoutValue(source.raw)
+            ?? 12
+        return min(max(raw, 1), 120)
+    }
+
+    private func timeoutValue(_ raw: [String: String]) -> TimeInterval? {
+        for key in ["timeout", "timeoutMs", "connectTimeout"] {
+            if let value = raw[key], let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)), number > 0 {
+                return number >= 100 ? number / 1_000 : number
+            }
+        }
+        return nil
+    }
+
+    private func timeoutValue(_ text: String?) -> TimeInterval? {
+        guard let text,
+              let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        for key in ["timeout", "timeoutMs", "connectTimeout"] {
+            if let value = object[key], let number = timeoutSeconds(value) { return number }
+        }
+        return nil
+    }
+
+    private func timeoutSeconds(_ value: Any) -> TimeInterval? {
+        let number: Double?
+        if let value = value as? NSNumber {
+            number = value.doubleValue
+        } else {
+            number = Double(String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard let number, number > 0 else { return nil }
+        return number >= 100 ? number / 1_000 : number
     }
 
     private func applyDefaultNavigationHeaders(to headers: inout [String: String], sourceBase: String) {
@@ -237,11 +300,18 @@ struct SourceRequestBuilder {
         }
         if let object = value as? [String: Any] {
             let interpolated = object.reduce(into: [String: String]()) { result, item in
-                result[item.key] = interpolate(String(describing: item.value), keyword: keyword, page: page)
+                result[item.key] = interpolate(stringify(item.value), keyword: keyword, page: page)
             }
             let contentType = headers.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value ?? ""
             if contentType.localizedCaseInsensitiveContains("application/json"),
-               let data = try? JSONSerialization.data(withJSONObject: interpolated, options: [.sortedKeys]) {
+               let jsonObject = object.reduce(into: [String: Any]()) { result, item in
+                   if let stringValue = item.value as? String {
+                       result[item.key] = interpolate(stringValue, keyword: keyword, page: page)
+                   } else {
+                       result[item.key] = item.value
+                   }
+               },
+               let data = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys]) {
                 return data
             }
             let form = interpolated
@@ -257,6 +327,29 @@ struct SourceRequestBuilder {
             return data
         }
         return Data(String(describing: value).utf8)
+    }
+
+    private func stringify(_ value: Any) -> String {
+        if let value = value as? String { return decodeEscapes(value) }
+        if let value = value as? NSNumber { return value.stringValue }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+        return String(describing: value)
+    }
+
+    private func decodeEscapes(_ value: String) -> String {
+        guard value.contains("\\") else { return value }
+        return value
+            .replacingOccurrences(of: "\\r\\n", with: "\r\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\r", with: "\r")
+            .replacingOccurrences(of: "\\t", with: "\t")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\'", with: "'")
+            .replacingOccurrences(of: "\\\\", with: "\\")
     }
 
     private func urlEncode(_ value: String) -> String {

@@ -2032,96 +2032,30 @@ private struct SourceVisualDetailView: View {
     @MainActor
     private func executeDynamicDiagnostic(keyword: String) async {
         let engine = appState.engine
+        let execution = await engine.runPipelineReport(source: source, keyword: keyword, page: 1, timeout: 10)
 
-        func elapsed(_ startedAt: Date) -> Int {
-            max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
-        }
-
-        func appendResult(
-            key: String,
-            title: String,
-            status: SourceHealthStatus,
-            message: String,
-            milliseconds: Int,
-            count: Int = 0
-        ) {
+        for step in execution.result.steps {
+            let message = step.responseSummary?.nilIfEmpty
+                ?? step.failureClassification?.nilIfEmpty
+                ?? "\(step.stage.title) 未返回摘要"
             dynamicResults.append(SourceVisualDiagnosticStage(
-                key: key,
-                title: title,
-                status: status,
+                key: step.stage.rawValue,
+                title: step.stage.title,
+                status: step.status,
                 message: message,
-                elapsedMilliseconds: milliseconds,
-                resultCount: count
+                elapsedMilliseconds: step.elapsedMilliseconds ?? 0,
+                resultCount: step.matchCount
             ))
             appState.sourceDiagnosticHistoryStore.record(
                 source: source,
-                stage: key,
-                status: status,
+                stage: step.stage.rawValue,
+                status: step.status,
                 message: message,
-                elapsedMilliseconds: milliseconds,
-                resultCount: count
+                elapsedMilliseconds: step.elapsedMilliseconds,
+                resultCount: step.matchCount
             )
         }
 
-        let searchStartedAt = Date()
-        let search = await AsyncTimeout.run(seconds: 10) {
-            await engine.searchBooks(source: source, keyword: keyword, page: 1)
-        } ?? .failure(.network("Search timed out"))
-        switch search {
-        case .failure(let error):
-            let status = SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "search")
-            appendResult(key: "search", title: "搜索", status: status, message: error.displayMessage, milliseconds: elapsed(searchStartedAt))
-            return
-        case .success(let books):
-            let status: SourceHealthStatus = books.isEmpty ? .warning : .passed
-            appendResult(
-                key: "search",
-                title: "搜索",
-                status: status,
-                message: books.isEmpty ? "请求成功但结果为空；检查搜索规则和分页占位符。" : "搜索通过：\(books.count) 条结果。",
-                milliseconds: elapsed(searchStartedAt),
-                count: books.count
-            )
-            guard let first = books.first else { return }
-
-            let detailStartedAt = Date()
-            let detail = await AsyncTimeout.run(seconds: 10) {
-                await engine.getBookDetail(source: source, book: first)
-            } ?? .failure(.network("Detail timed out"))
-            switch detail {
-            case .failure(let error):
-                appendResult(key: "detail", title: "详情", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "detail"), message: error.displayMessage, milliseconds: elapsed(detailStartedAt))
-                return
-            case .success(let book):
-                appendResult(key: "detail", title: "详情", status: .passed, message: "详情通过：\(book.name)", milliseconds: elapsed(detailStartedAt), count: 1)
-
-                let tocStartedAt = Date()
-                let toc = await AsyncTimeout.run(seconds: 10) {
-                    await engine.getChapterList(source: source, book: book)
-                } ?? .failure(.network("TOC timed out"))
-                switch toc {
-                case .failure(let error):
-                    appendResult(key: "toc", title: "目录", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "toc"), message: error.displayMessage, milliseconds: elapsed(tocStartedAt))
-                    return
-                case .success(let chapters):
-                    let tocStatus: SourceHealthStatus = chapters.isEmpty ? .warning : .passed
-                    appendResult(key: "toc", title: "目录", status: tocStatus, message: chapters.isEmpty ? "目录为空；检查 chapterList/chapterUrl。" : "目录通过：\(chapters.count) 章。", milliseconds: elapsed(tocStartedAt), count: chapters.count)
-                    guard let firstChapter = chapters.first else { return }
-
-                    let contentStartedAt = Date()
-                    let content = await AsyncTimeout.run(seconds: 10) {
-                        await engine.getContent(source: source, chapter: firstChapter)
-                    } ?? .failure(.network("Content timed out"))
-                    switch content {
-                    case .failure(let error):
-                        appendResult(key: "content", title: "正文", status: SourceDiagnosticClassifier.status(message: error.displayMessage, stage: "content"), message: error.displayMessage, milliseconds: elapsed(contentStartedAt))
-                    case .success(let chapterContent):
-                        let contentStatus: SourceHealthStatus = chapterContent.paragraphs.isEmpty ? .warning : .passed
-                        appendResult(key: "content", title: "正文", status: contentStatus, message: chapterContent.paragraphs.isEmpty ? "正文为空；检查 ruleContent.content 和净化规则。" : "正文通过：\(chapterContent.paragraphs.count) 段。", milliseconds: elapsed(contentStartedAt), count: chapterContent.paragraphs.count)
-                    }
-                }
-            }
-        }
     }
 }
 

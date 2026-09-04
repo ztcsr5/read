@@ -240,6 +240,41 @@ final class BookSourceTests: XCTestCase {
         XCTAssertEqual(request.expectedCharset, "gbk")
     }
 
+    func testRequestBuilderUsesDirectiveTimeoutAndClampsValue() {
+        let source = BookSource(
+            bookSourceName: "Timeout Source",
+            bookSourceUrl: "https://example.com",
+            searchUrl: #"https://example.com/search,{"timeoutMs":2500}"#,
+            customConfig: #"{"timeout":1}"#,
+            raw: ["timeout": "0.5"]
+        )
+        let request = SourceRequestBuilder().buildSearchRequest(
+            source: source,
+            searchUrl: source.searchUrl!,
+            keyword: "test",
+            page: 1
+        )
+        XCTAssertEqual(request.timeout, 2.5, accuracy: 0.001)
+
+        let clamped = SourceRequestBuilder().buildPageRequest(
+            source: source,
+            urlText: #"https://example.com/page,{"timeout":9999}"#
+        )
+        XCTAssertEqual(clamped.timeout, 120, accuracy: 0.001)
+    }
+
+    func testRequestBuilderPrefersCustomConfigTimeoutOverRawTimeout() {
+        let source = BookSource(
+            bookSourceName: "Timeout Precedence",
+            bookSourceUrl: "https://example.com",
+            searchUrl: "https://example.com/search",
+            customConfig: #"{"timeoutMs":2000}"#,
+            raw: ["timeout": "8"]
+        )
+        let request = SourceRequestBuilder().buildPageRequest(source: source, urlText: source.searchUrl!)
+        XCTAssertEqual(request.timeout, 2, accuracy: 0.001)
+    }
+
     func testRequestBuilderReadsLegadoTypeDataAndUserAgentAliases() {
         let source = BookSource(
             bookSourceName: "Legado Alias Source",

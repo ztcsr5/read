@@ -106,4 +106,58 @@ final class SourceURLDirectiveTests: XCTestCase {
         XCTAssertNil(directive.body)
         XCTAssertEqual(directive.headers["X-Probe"], "1")
     }
+
+    func testParseCharsetAndEncodingTrailingDirectives() {
+        let charset = SourceURLDirectiveParser().parse(
+            #"https://example.com/search@Charset:gbk"#
+        )
+        XCTAssertEqual(charset.urlText, "https://example.com/search")
+        XCTAssertEqual(charset.expectedCharset, "gbk")
+
+        let encoding = SourceURLDirectiveParser().parse(
+            #"https://example.com/search@Encoding:UTF-8"#
+        )
+        XCTAssertEqual(encoding.expectedCharset, "UTF-8")
+    }
+
+    func testParseJSONTimeoutOptionsAsSecondsOrMilliseconds() {
+        let seconds = SourceURLDirectiveParser().parse(
+            #"https://example.com/search,{"timeout":2}"#
+        )
+        XCTAssertEqual(seconds.timeout, 2, accuracy: 0.001)
+
+        let milliseconds = SourceURLDirectiveParser().parse(
+            #"https://example.com/search,{"timeoutMs":1500}"#
+        )
+        XCTAssertEqual(milliseconds.timeout, 1.5, accuracy: 0.001)
+    }
+
+    func testParsePlainHeaderAndEscapedBody() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/api@Header:X-Test: 1\nReferer: https://example.com\n@Body:a=1\nb=2"#
+        )
+
+        XCTAssertEqual(directive.headers["X-Test"], "1")
+        XCTAssertEqual(directive.headers["Referer"], "https://example.com")
+        XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "a=1\nb=2")
+        XCTAssertEqual(directive.method, .post)
+    }
+
+    func testParseEscapedBodyAndCharsetTogether() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/api@Charset:gbk@Body:q=hello\npage=2"#
+        )
+
+        XCTAssertEqual(directive.expectedCharset, "gbk")
+        XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), "q=hello\npage=2")
+        XCTAssertEqual(directive.method, .post)
+    }
+
+    func testParseJSONBodyPreservesNumbersAndBooleans() {
+        let directive = SourceURLDirectiveParser().parse(
+            #"https://example.com/api,{"headers":{"Content-Type":"application/json"},"body":{"page":2,"enabled":true}}"#
+        )
+
+        XCTAssertEqual(String(data: directive.body ?? Data(), encoding: .utf8), #"{"enabled":true,"page":2}"#)
+    }
 }

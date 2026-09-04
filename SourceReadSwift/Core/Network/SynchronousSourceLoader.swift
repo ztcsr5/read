@@ -3,13 +3,14 @@ import Foundation
 struct SynchronousSourceLoader {
     private let requestBuilder = SourceRequestBuilder()
 
-    func load(urlText: String, source: BookSource, timeout: TimeInterval = 20) -> String {
+    func load(urlText: String, source: BookSource, timeout: TimeInterval? = nil) -> String {
         loadResponse(urlText: urlText, source: source, timeout: timeout)?.body ?? ""
     }
 
-    func loadResponse(urlText: String, source: BookSource, timeout: TimeInterval = 20, cookieHeader: String? = nil) -> SourceResponse? {
+    func loadResponse(urlText: String, source: BookSource, timeout: TimeInterval? = nil, cookieHeader: String? = nil) -> SourceResponse? {
         let request = requestBuilder.buildPageRequest(source: source, urlText: urlText)
-        var urlRequest = URLRequest(url: request.url, timeoutInterval: timeout)
+        let effectiveTimeout = timeout ?? request.timeout
+        var urlRequest = URLRequest(url: request.url, timeoutInterval: effectiveTimeout)
         urlRequest.httpMethod = request.method.rawValue
         urlRequest.httpBody = request.body
         for (key, value) in request.headers {
@@ -37,7 +38,7 @@ struct SynchronousSourceLoader {
             semaphore.signal()
         }.resume()
 
-        let deadline = DispatchTime.now() + timeout
+        let deadline = DispatchTime.now() + effectiveTimeout
         guard semaphore.wait(timeout: deadline) == .success,
               let result = resultBox.load() else {
             return nil

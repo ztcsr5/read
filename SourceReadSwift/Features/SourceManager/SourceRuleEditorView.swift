@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SourceRuleEditorView: View {
     let source: BookSource
@@ -18,6 +19,8 @@ struct SourceRuleEditorView: View {
     @State private var previewStage: RulePreviewEvaluator.Stage?
     @State private var isPreviewing = false
     @State private var validationBlocked = false
+    @State private var previewHistory: [RulePreviewHistoryEntry] = []
+    @State private var initialDraft: RuleDraftSnapshot?
 
     init(source: BookSource, onSave: @escaping (BookSource) -> Void, onCancel: @escaping () -> Void) {
         self.source = source
@@ -75,9 +78,16 @@ struct SourceRuleEditorView: View {
                     .disabled(isPreviewing || previewSample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if !previewOutput.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(previewStage.map { "\($0.rawValue) · \(previewMatchCount) 条" } ?? "预览结果")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text(previewStage.map { "\($0.rawValue) · \(previewMatchCount) 条" } ?? "预览结果")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("复制") {
+                                    UIPasteboard.general.string = previewMessage
+                                }
+                                .font(.caption)
+                            }
                             Text(previewMessage)
                                 .font(.system(.footnote, design: .monospaced))
                                 .textSelection(.enabled)
@@ -90,6 +100,34 @@ struct SourceRuleEditorView: View {
                     Text("本地样本预览（不联网）")
                 } footer: {
                     Text("输入脱敏 HTML/JSON 样本，单步执行当前规则；预览不会保存书源或 Cookie。")
+                }
+                if !previewHistory.isEmpty {
+                    Section("预览历史") {
+                        ForEach(previewHistory) { entry in
+                            HStack(alignment: .top, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("\(entry.stage.rawValue) · \(entry.matchedCount) 条")
+                                        .font(.caption.weight(.semibold))
+                                    Text(entry.message)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                    Text(entry.date, format: .dateTime.hour().minute().second())
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Spacer(minLength: 4)
+                                Button("恢复") {
+                                    restore(entry)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        Button("清空预览历史", role: .destructive) {
+                            previewHistory.removeAll()
+                        }
+                        .font(.caption)
+                    }
                 }
                 if !issues.isEmpty {
                     Section("校验结果") {
@@ -122,10 +160,22 @@ struct SourceRuleEditorView: View {
             .onChange(of: tocRule) { _ in clearValidation() }
             .onChange(of: contentRule) { _ in clearValidation() }
             .onChange(of: selectedSection) { _ in clearPreview() }
+            .onAppear {
+                if initialDraft == nil {
+                    initialDraft = RuleDraftSnapshot(searchURL: searchURL, searchRule: searchRule, detailRule: detailRule, tocRule: tocRule, contentRule: contentRule)
+                }
+            }
             .navigationTitle("规则编辑 · \(source.bookSourceName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消", action: onCancel) }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if initialDraft != nil && hasDraftChanges {
+                        Button("撤销草稿") {
+                            restoreInitialDraft()
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         let drafts = currentDrafts
@@ -229,9 +279,55 @@ struct SourceRuleEditorView: View {
                 previewOutput = result.message
                 previewMatchCount = result.matchedCount
                 previewStage = result.stage
+                previewHistory.insert(
+                    RulePreviewHistoryEntry(
+                        stage: result.stage,
+                        matchedCount: result.matchedCount,
+                        message: result.message,
+                        sample: sample,
+                        ruleText: text
+                    ),
+                    at: 0
+                )
+                previewHistory = Array(previewHistory.prefix(8))
                 isPreviewing = false
             }
         }
+    }
+
+    private var hasDraftChanges: Bool {
+        guard let initialDraft else { return false }
+        return initialDraft.searchURL != searchURL
+            || initialDraft.searchRule != searchRule
+            || initialDraft.detailRule != detailRule
+            || initialDraft.tocRule != tocRule
+            || initialDraft.contentRule != contentRule
+    }
+
+    private func restoreInitialDraft() {
+        guard let initialDraft else { return }
+        searchURL = initialDraft.searchURL
+        searchRule = initialDraft.searchRule
+        detailRule = initialDraft.detailRule
+        tocRule = initialDraft.tocRule
+        contentRule = initialDraft.contentRule
+        clearValidation()
+        clearPreview()
+    }
+
+    private func restore(_ entry: RulePreviewHistoryEntry) {
+        selectedSection = entry.stage.selectionIndex
+        switch entry.stage {
+        case .search: searchRule = entry.ruleText
+        case .detail: detailRule = entry.ruleText
+        case .toc: tocRule = entry.ruleText
+        case .content: contentRule = entry.ruleText
+        }
+        previewSample = entry.sample
+        previewOutput = entry.message
+        previewMatchCount = entry.matchedCount
+        previewStage = entry.stage
+        clearValidation()
     }
 
     private static func text(_ rule: SourceRule?) -> String {
@@ -247,4 +343,33 @@ private struct ValidationGroup: Identifiable {
     let field: String
     let messages: [String]
     var id: String { field }
+}
+
+private struct RuleDraftSnapshot: Sendable {
+    let searchURL: String
+    let searchRule: String
+    let detailRule: String
+    let tocRule: String
+    let contentRule: String
+}
+
+private struct RulePreviewHistoryEntry: Identifiable, Sendable {
+    let id = UUID()
+    let date = Date()
+    let stage: RulePreviewEvaluator.Stage
+    let matchedCount: Int
+    let message: String
+    let sample: String
+    let ruleText: String
+}
+
+private extension RulePreviewEvaluator.Stage {
+    var selectionIndex: Int {
+        switch self {
+        case .search: return 0
+        case .detail: return 1
+        case .toc: return 2
+        case .content: return 3
+        }
+    }
 }

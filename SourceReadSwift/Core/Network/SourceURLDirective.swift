@@ -6,19 +6,22 @@ struct SourceURLDirective: Equatable {
     var headers: [String: String]
     var body: Data?
     var expectedCharset: String?
+    var timeout: TimeInterval?
 
     init(
         urlText: String,
         method: SourceHTTPMethod = .get,
         headers: [String: String] = [:],
         body: Data? = nil,
-        expectedCharset: String? = nil
+        expectedCharset: String? = nil,
+        timeout: TimeInterval? = nil
     ) {
         self.urlText = urlText
         self.method = method
         self.headers = headers
         self.body = body
         self.expectedCharset = expectedCharset
+        self.timeout = timeout
     }
 }
 
@@ -29,6 +32,7 @@ struct SourceURLDirectiveParser {
         var method: SourceHTTPMethod = .get
         var body: Data?
         var expectedCharset: String?
+        var timeout: TimeInterval?
 
         let directives = splitURLAndTrailingDirectives(working)
         working = directives.url
@@ -36,8 +40,11 @@ struct SourceURLDirectiveParser {
             headers.merge(parseStringMap(headerText), uniquingKeysWith: { _, new in new })
         }
         if let bodyText = directives.body {
-            body = Data(bodyText.utf8)
+            body = Data(decodeEscapes(bodyText).utf8)
             method = .post
+        }
+        if let charsetText = directives.charset {
+            expectedCharset = charsetText.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         }
 
         let split = splitURLAndJSONOptions(working)
@@ -60,19 +67,25 @@ struct SourceURLDirectiveParser {
             expectedCharset = firstString(in: options, keys: ["charset", "encoding", "encode"])?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .nilIfEmpty
+            if let rawTimeout = firstValue(in: options, keys: ["timeout", "timeoutMs", "connectTimeout"]),
+               let parsed = timeoutSeconds(rawTimeout) {
+                timeout = parsed
+            }
         }
 
-        return SourceURLDirective(urlText: working, method: method, headers: headers, body: body, expectedCharset: expectedCharset)
+        return SourceURLDirective(urlText: working, method: method, headers: headers, body: body, expectedCharset: expectedCharset, timeout: timeout)
     }
 
-    private func splitURLAndTrailingDirectives(_ text: String) -> (url: String, header: String?, body: String?) {
+    private func splitURLAndTrailingDirectives(_ text: String) -> (url: String, header: String?, body: String?, charset: String?) {
         var markers: [(name: String, range: Range<String.Index>)] = []
         let aliases: [(name: String, marker: String)] = [
             ("header", "@Header:"),
             ("header", "@Headers:"),
             ("body", "@Body:"),
             ("body", "@Post:"),
-            ("body", "@RequestBody:")
+            ("body", "@RequestBody:"),
+            ("charset", "@Charset:"),
+            ("charset", "@Encoding:")
         ]
         for alias in aliases {
             var searchStart = text.startIndex
@@ -89,11 +102,12 @@ struct SourceURLDirectiveParser {
         markers.sort { $0.range.lowerBound < $1.range.lowerBound }
 
         guard let first = markers.first else {
-            return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil, nil)
+            return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil, nil, nil)
         }
 
         var header: String?
         var body: String?
+        var charset: String?
         for index in markers.indices {
             let marker = markers[index]
             let contentStart = marker.range.upperBound
@@ -107,13 +121,15 @@ struct SourceURLDirectiveParser {
             let content = String(text[contentStart..<contentEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
             if marker.name == "header" {
                 header = content
-            } else {
+            } else if marker.name == "body" {
                 body = content
+            } else {
+                charset = content
             }
         }
 
         let url = String(text[..<first.range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (url, header, body)
+        return (url, header, body, charset)
     }
 
     private func splitURLAndJSONOptions(_ text: String) -> (url: String, options: [String: Any]?) {
@@ -131,7 +147,7 @@ struct SourceURLDirectiveParser {
     }
 
     private func parseStringMap(_ text: String) -> [String: String] {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = decodeEscapes(text).trimmingCharacters(in: .whitespacesAndNewlines)
         if let data = trimmed.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             return stringMap(object)
@@ -146,7 +162,7 @@ struct SourceURLDirectiveParser {
             let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
             let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { return }
-            result[key] = value
+            result[key] = decodeEscapes(value)
         }
     }
 
@@ -162,7 +178,7 @@ struct SourceURLDirectiveParser {
 
     private func stringMap(_ object: [String: Any]) -> [String: String] {
         object.reduce(into: [:]) { result, item in
-            result[item.key] = String(describing: item.value)
+            result[item.key] = stringify(item.value)
         }
     }
 
@@ -181,7 +197,7 @@ struct SourceURLDirectiveParser {
 
     private func encodeBodyOption(_ value: Any, headers: [String: String]) -> Data? {
         if let text = value as? String {
-            return Data(text.utf8)
+            return Data(decodeEscapes(text).utf8)
         }
         if let object = value as? [String: Any] {
             let contentType = headers.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value ?? ""
@@ -192,7 +208,7 @@ struct SourceURLDirectiveParser {
             let form = object
                 .sorted { $0.key < $1.key }
                 .map { key, value in
-                    "\(urlEncode(key))=\(urlEncode(String(describing: value)))"
+                    "\(urlEncode(key))=\(urlEncode(stringify(value)))"
                 }
                 .joined(separator: "&")
             return Data(form.utf8)
@@ -201,7 +217,41 @@ struct SourceURLDirectiveParser {
            let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
             return data
         }
-        return Data(String(describing: value).utf8)
+        return Data(stringify(value).utf8)
+    }
+
+    private func stringify(_ value: Any) -> String {
+        if let value = value as? String { return decodeEscapes(value) }
+        if let value = value as? NSNumber { return value.stringValue }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+        return String(describing: value)
+    }
+
+    private func timeoutSeconds(_ value: Any) -> TimeInterval? {
+        let number: Double?
+        if let value = value as? NSNumber {
+            number = value.doubleValue
+        } else {
+            number = Double(String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard let number, number > 0 else { return nil }
+        return number >= 100 ? number / 1_000 : number
+    }
+
+    private func decodeEscapes(_ value: String) -> String {
+        guard value.contains("\\") else { return value }
+        return value
+            .replacingOccurrences(of: "\\r\\n", with: "\r\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\r", with: "\r")
+            .replacingOccurrences(of: "\\t", with: "\t")
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\'", with: "'")
+            .replacingOccurrences(of: "\\\\", with: "\\")
     }
 
     private func urlEncode(_ value: String) -> String {
