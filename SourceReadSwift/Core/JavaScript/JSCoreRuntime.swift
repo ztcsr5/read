@@ -2101,6 +2101,9 @@ final class JSCoreRuntime {
         };
         Packages.java.net = Packages.java.net || {};
         Packages.java.net.URL = Packages.java.net.URL || function(value, baseValue) {
+          // Legado sources are inconsistent about using `new`; mirror the
+          // forgiving Java facade and return a proper instance either way.
+          if (!(this instanceof Packages.java.net.URL)) return new Packages.java.net.URL(value, baseValue);
           var first = String(value == null ? '' : value);
           var second = String(baseValue == null ? '' : baseValue);
           function hasScheme(text) { return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(String(text || '')); }
