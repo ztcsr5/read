@@ -1344,3 +1344,27 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Rollback
 
 - Revert the single Stage 5 bridge/test commit and this entry to restore the prior JSON resolver and JS compatibility surface.
+
+## 2026-09-04 - Stage 6: unified Legado source pipeline closure
+
+### Implemented
+
+- Unified Search -> Detail -> TOC -> Content execution into the production `SourcePipeline` and exposed structured execution/report results for UI diagnostics and regression tests.
+- Added directive-aware request handling for charset/encoding/body/JSON options, bounded timeout variants, and preserved response metadata needed by Legado JavaScript sources.
+- Connected source diagnostics and rule-editor previews to the same pipeline-oriented evidence model so successful prefixes remain available when a later stage fails.
+
+### Verification
+
+- Commit: `d39507c` (pipeline implementation and optional-timeout test correction).
+- GitHub Actions iOS build/XCTest: [run 33870395138](https://github.com/ztcsr5/read/actions/runs/33870395138) — success.
+- GitHub Actions unsigned IPA: [run 33870395014](https://github.com/ztcsr5/read/actions/runs/33870395014) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9935754059`, 6,188,595 bytes. IPA SHA-256 was not retrieved for this run and is intentionally not reported.
+- `git diff --check` passes locally; Windows has no Xcode/UIKit runtime, so Actions remains the Swift compile/XCTest/IPA gate.
+
+### Open device checks
+
+- Real Legado source diversity, Web 写源 LAN access, reader gesture feel and sustained 120 Hz cadence still require a ProMotion iPhone plus Instruments/device verification.
+
+### Rollback
+
+- Revert `408a8c4..d39507c` together to restore the pre-pipeline source execution path and request-directive behavior.
