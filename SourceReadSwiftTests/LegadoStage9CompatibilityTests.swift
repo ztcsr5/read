@@ -38,12 +38,12 @@ final class LegadoStage9CompatibilityTests: XCTestCase {
         var bytes = [];
         var value;
         while ((value = stream.read()) >= 0) bytes.push(value);
-        bytesToStr(bytes)
+        bytes.map(function(item) { return typeof item + ':' + String(item); }).join('|')
         """, variables: ["compressed": compressed])
         guard case .success(let value) = result else {
             return XCTFail("expected inflate success: \(result)")
         }
-        XCTAssertEqual(value, "hello legado")
+        XCTAssertEqual(value, "number:104|number:101|number:108|number:108|number:111|number:32|number:108|number:101|number:103|number:97|number:100|number:111", "inflate diagnostic: \(value)")
     }
 
     func testIntegerLongImporterAndDigestApis() throws {

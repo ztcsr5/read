@@ -203,6 +203,14 @@ final class LegadoHostServices {
             candidates.append(Array(input.dropFirst(2).dropLast(4)))
         }
         for candidate in candidates where !candidate.isEmpty {
+            if #available(iOS 13.0, macOS 10.15, *) {
+                // Foundation's NSData decompressor delegates to the system
+                // zlib implementation and is reliable for small streams.
+                if let data = try? (Data(candidate) as NSData).decompressed(using: .zlib),
+                   !data.isEmpty {
+                    return data.map { NSNumber(value: $0) } as NSArray
+                }
+            }
             if let output = inflateCandidate(candidate) {
                 return output.map { NSNumber(value: $0) } as NSArray
             }
