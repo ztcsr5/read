@@ -11,8 +11,8 @@ final class SourceEngineDynamicAjaxFixtureTests: XCTestCase {
             bookSourceName: "Dynamic ajax fixture",
             bookSourceUrl: "https://fixture.local/",
             searchUrl: "@js: var boot = java.ajax('https://fixture.local/bootstrap'); java.put('token', boot.header('X-Nonce')); return 'https://fixture.local/search';",
-            header: #"{"X-Token":"{{token}}"}"#,
-            ruleSearch: SourceRule(fields: ["bookList": "$.books", "name": "$.name", "bookUrl": "$.url"])
+            ruleSearch: SourceRule(fields: ["bookList": "$.books", "name": "$.name", "bookUrl": "$.url"]),
+            header: #"{"X-Token":"{{token}}"}"#
         )
         let network = DynamicAjaxFixtureNetwork()
         let engine = LegadoSourceEngine(network: network)
