@@ -222,12 +222,12 @@ final class JSCoreRuntime {
         let stringToBytesCharset: @convention(block) (String, String) -> NSArray = { value, charset in
             Self.data(for: value, charset: charset).map { NSNumber(value: $0) } as NSArray
         }
-        let bytesToString: @convention(block) (NSArray) -> String = { values in
-            let bytes = values.compactMap(Self.byteValue)
+        let bytesToString: @convention(block) (JSValue) -> String = { value in
+            let bytes = Self.byteValues(from: value)
             return String(data: Data(bytes), encoding: .utf8) ?? ""
         }
-        let bytesToStringCharset: @convention(block) (NSArray, String) -> String = { values, charset in
-            let bytes = values.compactMap(Self.byteValue)
+        let bytesToStringCharset: @convention(block) (JSValue, String) -> String = { value, charset in
+            let bytes = Self.byteValues(from: value)
             return Self.string(from: Data(bytes), charset: charset)
         }
         let digestBytes: @convention(block) (NSArray, String) -> NSArray = { values, algorithm in
@@ -2657,6 +2657,27 @@ final class JSCoreRuntime {
             }
         }
         return nil
+    }
+
+    /// JavaScriptCore may invoke an NSArray-typed block with a JSValue wrapper
+    /// for a JavaScript array. Reading the elements through `atIndex` keeps
+    /// bridged NSNumber/JSValue values intact instead of silently producing an
+    /// empty NSArray on iOS.
+    private static func byteValues(from value: JSValue) -> [UInt8] {
+        if value.isArray {
+            let length = max(0, Int(value.forProperty("length")?.toInt32() ?? 0))
+            return (0..<length).compactMap { byteValue(value.atIndex($0)) }
+        }
+        if value.isString { return Array((value.toString() ?? "").utf8) }
+        if let object = value.toObject() { return objectBytes(object) }
+        return []
+    }
+
+    private static func objectBytes(_ value: Any) -> [UInt8] {
+        if let values = value as? NSArray { return values.compactMap(byteValue) }
+        if let values = value as? [Any] { return values.compactMap(byteValue) }
+        if let values = value as? Data { return Array(values) }
+        return byteValue(value).map { [$0] } ?? []
     }
 
     private static func data(for value: String, charset: String) -> Data {
