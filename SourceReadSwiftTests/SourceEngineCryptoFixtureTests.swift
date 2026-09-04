@@ -86,7 +86,7 @@ final class SourceEngineCryptoFixtureTests: XCTestCase {
                 "nextContentUrl": "a.next@href"
             ]),
             raw: [
-                "bodyJs": "if (result.indexOf('PAGE_ONE') >= 0) { var boot = java.ajax('https://fixture.local/bootstrap'); java.put('cursor', boot.header('X-Cursor')); } return result.replace('CURSOR_PLACEHOLDER', java.get('cursor'));"
+                "bodyJs": "if (result.indexOf('PAGE_ONE') >= 0) { var boot = java.ajax('https://fixture.local/bootstrap'); java.put('cursor', boot.header('X-Cursor')); } return result.replace(' PAGE_ONE', '').replace('CURSOR_PLACEHOLDER', java.get('cursor'));"
             ]
         )
         let chapter = BookChapter(

@@ -65,7 +65,9 @@ struct SourceRequestBuilder {
         headers["Accept", default: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"]
         applyDefaultNavigationHeaders(to: &headers, sourceBase: source.bookSourceUrl)
 
-        let body = directive.body.map { interpolateData($0, values: persistentValues) } ?? sourceOptions.body
+        let body = directive.body.map {
+            interpolateData($0, values: persistentValues, headers: headers)
+        } ?? sourceOptions.body
         let timeout = resolvedTimeout(
             directive: directive,
             source: source,
@@ -366,7 +368,8 @@ struct SourceRequestBuilder {
         persistentValues: [String: String] = [:]
     ) -> Data? {
         if let text = value as? String {
-            return Data(interpolatePersistentValues(interpolate(text, keyword: keyword, page: page), values: persistentValues).utf8)
+            let interpolated = interpolate(interpolatePersistentValues(text, values: persistentValues), keyword: keyword, page: page)
+            return Data(interpolateBodyText(interpolated, values: persistentValues, headers: headers).utf8)
         }
         if let object = value as? [String: Any] {
             let interpolated = object.reduce(into: [String: String]()) { result, item in
@@ -421,10 +424,40 @@ struct SourceRequestBuilder {
         }
     }
 
-    private func interpolateData(_ data: Data, values: [String: String]) -> Data {
+    private func interpolateData(_ data: Data, values: [String: String], headers: [String: String]) -> Data {
         guard !values.isEmpty,
               let text = String(data: data, encoding: .utf8) else { return data }
-        return Data(interpolatePersistentValues(text, values: values).utf8)
+        return Data(interpolateBodyText(text, values: values, headers: headers).utf8)
+    }
+
+    /// Interpolate dynamic Legado values without corrupting JSON/XML bodies.
+    /// Form-style `@Body:` directives commonly carry spaces, CJK text or
+    /// ampersands in a placeholder value; Android URL-encodes those values at
+    /// request time while preserving the `&` separators and literal payload.
+    private func interpolateBodyText(
+        _ text: String,
+        values: [String: String],
+        headers: [String: String]
+    ) -> String {
+        let contentType = headers.first {
+            $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame
+        }?.value ?? ""
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isJSON = contentType.localizedCaseInsensitiveContains("application/json")
+            || trimmed.hasPrefix("{")
+            || trimmed.hasPrefix("[")
+        if isJSON {
+            return interpolatePersistentValues(text, values: values)
+        }
+
+        var output = text.replacingOccurrences(of: "&amp;", with: "&")
+        for (key, value) in values where !key.isEmpty {
+            let encoded = urlEncode(value)
+            output = output
+                .replacingOccurrences(of: "{{\(key)}}", with: encoded)
+                .replacingOccurrences(of: "{\(key)}", with: encoded)
+        }
+        return output
     }
 
     private func stringify(_ value: Any) -> String {

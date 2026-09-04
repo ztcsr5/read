@@ -26,32 +26,50 @@ final class LegadoHostServices {
     // MARK: - Cookie
 
     func cookie(url rawURL: String, key: String?) -> String {
+        let contextHeader = executionContext.string(for: "cookieHeader")
         guard let url = URL(string: rawURL),
               let cookies = HTTPCookieStorage.shared.cookies(for: url) else {
-            return executionContext.string(for: "cookieHeader")
+            if let key, !key.isEmpty {
+                return CookieHeaderParser.pairs(fromCookieHeader: contextHeader)
+                    .first(where: { $0.name == key })?.value ?? ""
+            }
+            return contextHeader
         }
         if let key, !key.isEmpty {
-            return cookies.first(where: { $0.name == key })?.value ?? ""
+            return CookieHeaderParser.pairs(fromCookieHeader: CookieHeaderParser.merge(
+                HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? "",
+                into: contextHeader.nilIfEmpty
+            )).first(where: { $0.name == key })?.value ?? ""
         }
-        return HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? ""
+        let stored = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"] ?? ""
+        return CookieHeaderParser.merge(stored, into: contextHeader.nilIfEmpty)
     }
 
     @discardableResult
     func setCookie(url rawURL: String, value: String) -> String {
         let existing = executionContext.string(for: "cookieHeader").nilIfEmpty
-        let pairs = CookieHeaderParser.setCookieValues(from: ["Set-Cookie": value])
-            .compactMap { CookieHeaderParser.cookiePair(fromSetCookie: $0) }
+        // `cookie.setCookie` receives a request Cookie header, not a single
+        // Set-Cookie response field. Parse every pair and ignore attributes
+        // such as Path/Domain so `sid=1; theme=dark` keeps both values.
+        let pairs = CookieHeaderParser.pairs(fromCookieHeader: value)
+            .filter { !Self.cookieAttributes.contains($0.name.lowercased()) }
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
         let merged = CookieHeaderParser.merge(pairs.isEmpty ? value : pairs, into: existing)
         executionContext.setValue(merged, for: "cookieHeader")
         guard let url = URL(string: rawURL), !value.isEmpty else { return merged }
-        for item in CookieHeaderParser.setCookieValues(from: ["Set-Cookie": value]) {
+        for pair in CookieHeaderParser.pairs(fromCookieHeader: value)
+            .filter({ !Self.cookieAttributes.contains($0.name.lowercased()) }) {
+            let item = "\(pair.name)=\(pair.value); Path=/"
             HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": item], for: url)
                 .forEach(HTTPCookieStorage.shared.setCookie)
         }
         return merged
     }
+
+    private static let cookieAttributes: Set<String> = [
+        "path", "domain", "expires", "max-age", "secure", "httponly", "samesite"
+    ]
 
     // MARK: - Text/encoding
 

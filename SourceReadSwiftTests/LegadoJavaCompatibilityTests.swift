@@ -269,7 +269,7 @@ final class LegadoJavaCompatibilityTests: XCTestCase {
         }
         XCTAssertEqual(object["title"] as? String, "One")
         XCTAssertEqual(object["imported"] as? String, "imported")
-        XCTAssertEqual(object["cookie"] as? String, "sid=1")
+        XCTAssertEqual(object["cookie"] as? String, "sid=fixture")
         XCTAssertEqual(object["content"] as? String, "New")
         XCTAssertEqual(object["responseCode"] as? Int, 201)
         XCTAssertEqual(requests.count, 1)
