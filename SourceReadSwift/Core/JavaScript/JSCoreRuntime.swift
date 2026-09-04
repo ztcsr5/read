@@ -570,7 +570,7 @@ java.bytesToStr = function(value) {
     if ((first & 0xe0) === 0xc0) { code = first & 0x1f; needed = 1; }
     else if ((first & 0xf0) === 0xe0) { code = first & 0x0f; needed = 2; }
     else if ((first & 0xf8) === 0xf0) { code = first & 0x07; needed = 3; }
-    else { out += '\ufffd'; continue; }
+    else { out += '\\ufffd'; continue; }
     var valid = true;
     for (var j = 0; j < needed; j++) {
       if (i >= list.length) { valid = false; break; }
@@ -579,7 +579,7 @@ java.bytesToStr = function(value) {
       code = (code << 6) | (continuation & 0x3f);
     }
     if (!valid || (needed === 1 && code < 0x80) || (needed === 2 && code < 0x800) || (needed === 3 && code < 0x10000) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
-      out += '\ufffd';
+      out += '\\ufffd';
       continue;
     }
     if (code <= 0xffff) out += String.fromCharCode(code);
@@ -742,7 +742,7 @@ java.bytesToStr = function(value) {
           return __javaArray(value).map(function(item) { return Number(item == null ? 0 : item) & 255; });
         }
         function __hexToJavaBytes(value) {
-          var text = String(value == null ? '' : value).replace(/\s+/g, '').toLowerCase();
+          var text = String(value == null ? '' : value).replace(/\\s+/g, '').toLowerCase();
           if ((text.length & 1) !== 0) return __asJavaList([]);
           var out = [];
           for (var i = 0; i < text.length; i += 2) {
