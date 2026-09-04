@@ -485,6 +485,7 @@ final class LegadoJXNodeFactoryBridge: NSObject, LegadoJXNodeFactoryExport {
     func html(_ value: String) -> LegadoElementBridge
     func outerHtml() -> String
     func attr(_ name: String) -> String
+    func rawAttr(_ name: String) -> String
     // Element mutators return the element itself (matching Jsoup's fluent API).
     func attr(_ name: String, _ value: String) -> LegadoElementBridge
     func absUrl(_ name: String) -> String
@@ -588,6 +589,7 @@ final class LegadoElementBridge: NSObject, LegadoElementExport {
         }
         return (try? element.attr(name)) ?? ""
     }
+    func rawAttr(_ name: String) -> String { (try? element.attr(name)) ?? "" }
     func attr(_ name: String, _ value: String) -> LegadoElementBridge { _ = try? element.attr(name, value); return self }
     func absUrl(_ name: String) -> String { (try? element.absUrl(name)) ?? "" }
     func hasAttr(_ name: String) -> Bool { element.hasAttr(name) }

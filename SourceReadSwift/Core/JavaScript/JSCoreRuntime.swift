@@ -1009,7 +1009,13 @@ final class JSCoreRuntime {
         java.fetch = function(url, options) {
           options = options || {};
           var method = String(options.method || 'GET').toUpperCase();
-          if (method === 'POST' || options.body != null) return java.post(url, options.body || '', options.headers || {});
+          if (method === 'POST' || options.body != null) {
+            // Preserve Fetch/Legado request options in the directive text so the
+            // native request parser and diagnostics can observe method/body/headers.
+            var requestOptions = { method: method, body: options.body == null ? '' : options.body, headers: options.headers || {} };
+            var target = String(url || '') + ',' + JSON.stringify(requestOptions);
+            return __bridgeResponse('', String(url || ''), __native_ajaxResponse(target, ''));
+          }
           var target = String(url);
           return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(options.headers || options)));
         };
@@ -1759,7 +1765,7 @@ final class JSCoreRuntime {
             var selection = java.jsoup.select(html, selector);
             if (!selection || typeof selection.first !== 'function' || selection.isEmpty()) return '';
             var node = selection.first();
-            return node && typeof node.attr === 'function' ? String(node.attr(String(attr || '')) || '') : '';
+              return node && typeof node.rawAttr === 'function' ? String(node.rawAttr(String(attr || '')) || '') : (node && typeof node.attr === 'function' ? String(node.attr(String(attr || '')) || '') : '');
           },
           clean: function(html) { return java.htmlFormat(String(html || '')); }
         };
@@ -1788,7 +1794,7 @@ final class JSCoreRuntime {
           var selection = java.jsoup.select(String(html || ''), String(selector || 'body'));
           if (!selection || typeof selection.first !== 'function' || selection.isEmpty()) return '';
           var node = selection.first();
-          return node && typeof node.attr === 'function' ? String(node.attr(name) || '') : '';
+           return node && typeof node.rawAttr === 'function' ? String(node.rawAttr(name) || '') : (node && typeof node.attr === 'function' ? String(node.attr(name) || '') : '');
         }
         function clean(html) { return java.htmlFormat(String(html == null ? '' : html)); }
         function htmlFormat(value) { return java.htmlFormat(value); }
