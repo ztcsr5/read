@@ -202,6 +202,15 @@ final class LegadoHostServices {
             candidates.append(Array(input.dropFirst(2).dropLast(4)))
         }
         for candidate in candidates where !candidate.isEmpty {
+            // The one-shot API can report 0 for a valid stream when the
+            // destination buffer is not large enough.  The streaming API
+            // gives us the exact status and lets us grow the destination
+            // without guessing the uncompressed size.
+            if let output = inflateCandidate(candidate) {
+                return output.map { NSNumber(value: $0) } as NSArray
+            }
+            // Keep a one-shot fallback for older Compression implementations
+            // which do not expose a useful stream status for tiny payloads.
             var capacity = max(1024, candidate.count * 4)
             for _ in 0..<8 {
                 var output = Array(repeating: UInt8(0), count: capacity)
@@ -226,6 +235,46 @@ final class LegadoHostServices {
         }
         executionContext.log("InflaterInputStream failed to decode payload")
         return []
+    }
+
+    private func inflateCandidate(_ candidate: [UInt8]) -> [UInt8]? {
+        guard !candidate.isEmpty else { return nil }
+        var stream = compression_stream()
+        guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+            return nil
+        }
+        defer { compression_stream_destroy(&stream) }
+
+        var output: [UInt8] = []
+        var destination = Array(repeating: UInt8(0), count: max(4096, candidate.count * 4))
+        var source = candidate
+        return source.withUnsafeMutableBytes { sourceBuffer in
+            guard let sourcePointer = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else { return nil }
+            stream.src_ptr = sourcePointer
+            stream.src_size = source.count
+            var iterations = 0
+            while iterations < 256 {
+                iterations += 1
+                let status = destination.withUnsafeMutableBytes { destinationBuffer -> compression_status in
+                    stream.dst_ptr = destinationBuffer.bindMemory(to: UInt8.self).baseAddress!
+                    stream.dst_size = destinationBuffer.count
+                    return compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE))
+                }
+                let produced = destination.count - stream.dst_size
+                if produced > 0 {
+                    output.append(contentsOf: destination.prefix(produced))
+                }
+                if status == COMPRESSION_STATUS_END { return output }
+                if status == COMPRESSION_STATUS_ERROR { return nil }
+                if stream.src_size == 0 && produced == 0 { return nil }
+                if produced == destination.count {
+                    let nextCount = min(destination.count * 2, 16 * 1024 * 1024)
+                    if nextCount == destination.count { return nil }
+                    destination = Array(repeating: UInt8(0), count: nextCount)
+                }
+            }
+            return nil
+        }
     }
 
     // MARK: - Files and ZIP
@@ -354,7 +403,16 @@ final class LegadoHostServices {
     private func bytes(from value: Any?) -> [UInt8] {
         if let data = value as? Data { return Array(data) }
         if let values = value as? [UInt8] { return values }
+        if let values = value as? [Int] { return values.map { UInt8(clamping: $0) } }
         if let values = value as? [NSNumber] { return values.map(\.uint8Value) }
+        if let values = value as? [Any] {
+            return values.compactMap {
+                if let number = $0 as? NSNumber { return number.uint8Value }
+                if let number = $0 as? Int { return UInt8(clamping: number) }
+                if let number = $0 as? UInt8 { return number }
+                return nil
+            }
+        }
         if let values = value as? NSArray { return values.compactMap { ($0 as? NSNumber)?.uint8Value } }
         return Array(RuleExecutionContext.bridgeString(value).utf8)
     }

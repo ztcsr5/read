@@ -531,7 +531,7 @@ final class JSCoreRuntime {
         java.base64Decode = function(value) { return __native_base64Decode(String(value)); };
         java.base64DecodeToByteArray = function(value) {
           var encoded = value && value.length != null && typeof value !== 'string'
-            ? String(__native_bytesToString(value) || '')
+            ? String(__native_bytesToString(__javaBytes(value)) || '')
             : String(value == null ? '' : value);
           return __asJavaList(__native_base64DecodeBytes(encoded));
         };
@@ -541,17 +541,17 @@ final class JSCoreRuntime {
         java.unbase64 = java.base64Decode;
         java.decodeBase64 = java.base64Decode;
         java.inflate = function(value) {
-          return __asJavaList(__nativeLegado.invoke({ method: 'inflateBytes', args: [value && value.length != null ? value : []] }));
+          return __asJavaList(__nativeLegado.invoke({ method: 'inflateBytes', args: [__javaBytes(value)] }));
         };
         java.copyOfRange = function(value, start, end) {
-          var source = value && value.length != null ? Array.prototype.slice.call(value) : [];
+          var source = __javaBytes(value);
           var from = Math.max(0, Number(start || 0)), to = Math.max(from, Number(end || 0));
           var out = source.slice(from, to);
           while (out.length < to - from) out.push(0);
           return __asJavaList(out);
         };
         java.asList = function() {
-          if (arguments.length === 1 && arguments[0] && arguments[0].length != null && typeof arguments[0] !== 'string') return __asJavaList(Array.prototype.slice.call(arguments[0]));
+          if (arguments.length === 1 && arguments[0] && typeof arguments[0] !== 'string') return __asJavaList(__javaArray(arguments[0]));
           return __asJavaList(Array.prototype.slice.call(arguments));
         };
         java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
@@ -673,6 +673,11 @@ final class JSCoreRuntime {
           };
         }
         function __asJavaList(list) {
+          // Never mutate an NSArray/host object returned by JavaScriptCore.  A
+          // native NSArray can expose no writable indexed properties, causing
+          // `slice.call(...)` and JSON.stringify to silently produce `[]`.
+          // Always copy into a real JS Array before adding Java-style aliases.
+          if (!Array.isArray(list)) list = __javaArray(list);
           list.get = function(index) { return list[Number(index)]; };
           list.first = function() { return list.length ? list[0] : null; };
           list.last = function() { return list.length ? list[list.length - 1] : null; };
@@ -681,6 +686,32 @@ final class JSCoreRuntime {
           list.toArray = function() { return Array.prototype.slice.call(list); };
           list.contains = function(value) { return list.indexOf(value) >= 0; };
           return list;
+        }
+        function __javaArray(value) {
+          if (value == null) return [];
+          if (typeof value === 'string') return Array.prototype.slice.call(__native_stringToBytes(value));
+          if (typeof value.toArray === 'function') {
+            try { return __javaArray(value.toArray()); } catch (_) {}
+          }
+          var length = value.length;
+          if (length == null && value.count != null) {
+            try { length = typeof value.count === 'function' ? value.count() : value.count; } catch (_) {}
+          }
+          if (length == null || isNaN(Number(length))) return [];
+          length = Math.max(0, Number(length));
+          var out = [];
+          for (var i = 0; i < length; i++) {
+            var item;
+            try { item = value[i]; } catch (_) { item = null; }
+            if (item == null && typeof value.objectAtIndex === 'function') {
+              try { item = value.objectAtIndex(i); } catch (_) {}
+            }
+            out.push(item);
+          }
+          return out;
+        }
+        function __javaBytes(value) {
+          return __javaArray(value).map(function(item) { return Number(item == null ? 0 : item) & 255; });
         }
         function __jsonPathTokens(path) {
           var text = String(path || '');
@@ -1910,20 +1941,27 @@ final class JSCoreRuntime {
               return __native_base64EncodeBytes(bytes);
             }, encode: function(value) {
               var bytes = value && value.length != null && typeof value !== 'string' ? value : __native_stringToBytes(String(value == null ? '' : value));
-              return __asJavaList(Array.prototype.slice.call(bytes));
+              // java.util.Base64.Encoder.encode(byte[]) returns the ASCII
+              // bytes of the encoded payload (not the original input bytes).
+              return __asJavaList(__native_stringToBytes(__native_base64EncodeBytes(__javaBytes(bytes))));
             } };
           },
           getDecoder: function() {
-            return { decode: function(value) { return java.base64DecodeToByteArray(String(value == null ? '' : value)); } };
+            return { decode: function(value) {
+              var encoded = value && value.length != null && typeof value !== 'string'
+                ? String(__native_bytesToString(__javaBytes(value)) || '')
+                : String(value == null ? '' : value);
+              return java.base64DecodeToByteArray(encoded);
+            } };
           },
           encodeToString: function(value) { return value && value.length != null ? __native_base64EncodeBytes(value) : java.base64Encode(String(value || '')); },
           encode: function(value) {
-            var encoded = __native_base64EncodeBytes(value && value.length != null ? value : []);
+            var encoded = __native_base64EncodeBytes(value && value.length != null ? __javaBytes(value) : []);
             return __asJavaList(__native_stringToBytes(encoded));
           },
           decode: function(value) {
             var encoded = value && value.length != null && typeof value !== 'string'
-              ? String(__native_bytesToString(value) || '')
+              ? String(__native_bytesToString(__javaBytes(value)) || '')
               : String(value == null ? '' : value);
             return java.base64DecodeToByteArray(encoded);
           }
