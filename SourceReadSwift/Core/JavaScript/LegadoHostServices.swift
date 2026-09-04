@@ -1,6 +1,7 @@
 import Foundation
 import JavaScriptCore
 import CoreFoundation
+import CryptoKit
 import CryptoSwift
 import ZIPFoundation
 import CommonCrypto
@@ -212,7 +213,7 @@ final class LegadoHostServices {
         let salted = bytes.count >= 16 && Array(bytes.prefix(8)) == Array("Salted__".utf8)
         let salt = salted ? Array(bytes[8..<16]) : []
         let ciphertext = salted ? Array(bytes.dropFirst(16)) : bytes
-        let password = bytes(from: passphrase)
+        let password = self.bytes(from: passphrase)
         guard !ciphertext.isEmpty else { return [] }
 
         var derived: [UInt8] = []
