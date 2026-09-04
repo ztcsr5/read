@@ -270,11 +270,32 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
     private static func arguments(_ value: Any?) -> [Any] {
         if let value = value as? JSValue, value.isArray {
             let length = max(0, Int(value.forProperty("length")?.toInt32() ?? 0))
-            return (0..<length).map { value.atIndex($0) as Any }
+            return (0..<length).map { nativeValue(value.atIndex($0)) }
         }
         if let value = value as? [Any] { return value }
         if let value = value as? NSArray { return value.map { $0 } }
         return value.map { [$0] } ?? []
+    }
+
+    /// Convert one argument without using JSValue.toArray(), whose deep bridge
+    /// is known to drop indexed members for host-backed arrays on older iOS.
+    /// Scalars become Foundation values (so existing bridgeString callers keep
+    /// working); arrays are copied through indexed access and remain lossless.
+    private static func nativeValue(_ value: JSValue) -> Any {
+        if value.isString { return value.toString() ?? "" }
+        if value.isNumber { return value.toNumber() }
+        if value.isBoolean { return value.toBool() }
+        if value.isNull || value.isUndefined { return NSNull() }
+        if value.isArray {
+            let length = max(0, Int(value.forProperty("length")?.toInt32() ?? 0))
+            return (0..<length).map { nativeValue(value.atIndex($0)) } as NSArray
+        }
+        if let dictionary = value.toDictionary() {
+            return dictionary.reduce(into: [String: Any]()) {
+                $0[String(describing: $1.key)] = $1.value
+            } as NSDictionary
+        }
+        return value.toObject() ?? value
     }
 }
 
