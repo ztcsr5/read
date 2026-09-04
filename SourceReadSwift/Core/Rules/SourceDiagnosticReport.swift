@@ -206,7 +206,10 @@ enum SourceDiagnosticRedactor {
         return trimmed.split(separator: "&", omittingEmptySubsequences: false).map { part in
             guard let equals = part.firstIndex(of: "=") else { return String(part) }
             let key = String(part[..<equals]).trimmingCharacters(in: .whitespacesAndNewlines)
-            return "\(key)=\(isSensitive(key) ? \"<redacted>\" : String(part[part.index(after: equals)...]))"
+            let redactedValue = isSensitive(key)
+                ? "<redacted>"
+                : String(part[part.index(after: equals)...])
+            return "\(key)=\(redactedValue)"
         }.joined(separator: "&")
     }
 
@@ -283,7 +286,10 @@ struct SourceDiagnosticBatchReport: Identifiable, Codable, Hashable, Sendable {
                 let elapsed = step.elapsedMilliseconds.map { " · \($0) ms" } ?? ""
                 let code = step.responseStatusCode.map { " · HTTP \($0)" } ?? ""
                 lines.append("  - \(step.stage.rawValue): \(step.status.rawValue)\(count)\(elapsed)\(code)")
-                if let request = step.requestMethod { lines.append("    request: \(request) \(step.finalURL ?? step.requestSummary ?? \"\")") }
+                if let request = step.requestMethod {
+                    let destination = step.finalURL ?? step.requestSummary ?? ""
+                    lines.append("    request: \(request) \(destination)")
+                }
                 if let body = step.requestBody, !body.isEmpty { lines.append("    body: \(body)") }
                 if let message = step.responseSummary, !message.isEmpty { lines.append("    response: \(message)") }
             }
