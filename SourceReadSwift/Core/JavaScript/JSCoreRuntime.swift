@@ -560,33 +560,33 @@ final class JSCoreRuntime {
           if (arguments.length === 1 && arguments[0] && typeof arguments[0] !== 'string') return __asJavaList(__javaArray(arguments[0]));
           return __asJavaList(Array.prototype.slice.call(arguments));
         };
-java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
-java.bytesToStr = function(value) {
-  var list = __javaArray(value), out = '', i = 0;
-  while (i < list.length) {
-    var first = Number(list[i++] == null ? 0 : list[i - 1]) & 255;
-    if (first < 0x80) { out += String.fromCharCode(first); continue; }
-    var code = 0, needed = 0;
-    if ((first & 0xe0) === 0xc0) { code = first & 0x1f; needed = 1; }
-    else if ((first & 0xf0) === 0xe0) { code = first & 0x0f; needed = 2; }
-    else if ((first & 0xf8) === 0xf0) { code = first & 0x07; needed = 3; }
-    else { out += '\\ufffd'; continue; }
-    var valid = true;
-    for (var j = 0; j < needed; j++) {
-      if (i >= list.length) { valid = false; break; }
-      var continuation = Number(list[i++] == null ? 0 : list[i - 1]) & 255;
-      if ((continuation & 0xc0) !== 0x80) { valid = false; break; }
-      code = (code << 6) | (continuation & 0x3f);
-    }
-    if (!valid || (needed === 1 && code < 0x80) || (needed === 2 && code < 0x800) || (needed === 3 && code < 0x10000) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
-      out += '\\ufffd';
-      continue;
-    }
-    if (code <= 0xffff) out += String.fromCharCode(code);
-    else { code -= 0x10000; out += String.fromCharCode(0xd800 + (code >> 10), 0xdc00 + (code & 0x3ff)); }
-  }
-  return out;
-};
+        java.strToBytes = function(value) { return __asJavaList(__native_stringToBytes(String(value || ''))); };
+        java.bytesToStr = function(value) {
+          var list = __javaArray(value), out = '', i = 0;
+          while (i < list.length) {
+            var first = Number(list[i++] == null ? 0 : list[i - 1]) & 255;
+            if (first < 0x80) { out += String.fromCharCode(first); continue; }
+            var code = 0, needed = 0;
+            if ((first & 0xe0) === 0xc0) { code = first & 0x1f; needed = 1; }
+            else if ((first & 0xf0) === 0xe0) { code = first & 0x0f; needed = 2; }
+            else if ((first & 0xf8) === 0xf0) { code = first & 0x07; needed = 3; }
+            else { out += '\\ufffd'; continue; }
+            var valid = true;
+            for (var j = 0; j < needed; j++) {
+              if (i >= list.length) { valid = false; break; }
+              var continuation = Number(list[i++] == null ? 0 : list[i - 1]) & 255;
+              if ((continuation & 0xc0) !== 0x80) { valid = false; break; }
+              code = (code << 6) | (continuation & 0x3f);
+            }
+            if (!valid || (needed === 1 && code < 0x80) || (needed === 2 && code < 0x800) || (needed === 3 && code < 0x10000) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+              out += '\\ufffd';
+              continue;
+            }
+            if (code <= 0xffff) out += String.fromCharCode(code);
+            else { code -= 0x10000; out += String.fromCharCode(0xd800 + (code >> 10), 0xdc00 + (code & 0x3ff)); }
+          }
+          return out;
+        };
         java.hexEncodeToString = function(value) {
           var list = value && value.length != null ? value : __native_stringToBytes(String(value || ''));
           var out = '';
@@ -2795,7 +2795,7 @@ java.bytesToStr = function(value) {
                     Int(value.forProperty("count")?.toInt32() ?? 0)
                 )
             )
-            if length == 0, let object = value.toObject() as? NSArray, !object.isEmpty {
+            if length == 0, let object = value.toObject() as? NSArray, object.count > 0 {
                 return object.compactMap(Self.byteValue)
             }
             return (0..<length).compactMap { byteValue(value.atIndex($0)) }
