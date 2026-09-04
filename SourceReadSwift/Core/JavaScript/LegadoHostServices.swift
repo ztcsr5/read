@@ -202,17 +202,11 @@ final class LegadoHostServices {
             candidates.append(Array(input.dropFirst(2).dropLast(4)))
         }
         for candidate in candidates where !candidate.isEmpty {
-            // The one-shot API can report 0 for a valid stream when the
-            // destination buffer is not large enough.  The streaming API
-            // gives us the exact status and lets us grow the destination
-            // without guessing the uncompressed size.
-            if let output = inflateCandidate(candidate) {
-                return output.map { NSNumber(value: $0) } as NSArray
-            }
-            // Keep a one-shot fallback for older Compression implementations
-            // which do not expose a useful stream status for tiny payloads.
+            // The one-shot API is available across all supported iOS SDKs.
+            // Grow the destination until the stream fits; this avoids relying
+            // on SDK-specific `compression_stream` initializers.
             var capacity = max(1024, candidate.count * 4)
-            for _ in 0..<8 {
+            for _ in 0..<10 {
                 var output = Array(repeating: UInt8(0), count: capacity)
                 let decoded = candidate.withUnsafeBytes { source in
                     output.withUnsafeMutableBytes { destination in
@@ -235,56 +229,6 @@ final class LegadoHostServices {
         }
         executionContext.log("InflaterInputStream failed to decode payload")
         return []
-    }
-
-    private func inflateCandidate(_ candidate: [UInt8]) -> [UInt8]? {
-        guard !candidate.isEmpty else { return nil }
-        // `compression_stream` is imported as a value type with an explicit
-        // memberwise initializer on the macOS/iOS SDK used by CI.  Keep all
-        // pointers and sizes zeroed until `compression_stream_init` fills the
-        // codec state.
-        var stream = compression_stream(
-            dst_ptr: nil,
-            dst_size: 0,
-            src_ptr: nil,
-            src_size: 0,
-            state: nil
-        )
-        guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
-            return nil
-        }
-        defer { compression_stream_destroy(&stream) }
-
-        var output: [UInt8] = []
-        var destination = Array(repeating: UInt8(0), count: max(4096, candidate.count * 4))
-        var source = candidate
-        return source.withUnsafeMutableBytes { (sourceBuffer: UnsafeMutableRawBufferPointer) -> [UInt8]? in
-            guard let sourcePointer = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else { return nil }
-            stream.src_ptr = sourcePointer
-            stream.src_size = source.count
-            var iterations = 0
-            while iterations < 256 {
-                iterations += 1
-                let status = destination.withUnsafeMutableBytes { destinationBuffer -> compression_status in
-                    stream.dst_ptr = destinationBuffer.bindMemory(to: UInt8.self).baseAddress!
-                    stream.dst_size = destinationBuffer.count
-                    return compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE))
-                }
-                let produced = destination.count - stream.dst_size
-                if produced > 0 {
-                    output.append(contentsOf: destination.prefix(produced))
-                }
-                if status == COMPRESSION_STATUS_END { return output }
-                if status == COMPRESSION_STATUS_ERROR { return nil }
-                if stream.src_size == 0 && produced == 0 { return nil }
-                if produced == destination.count {
-                    let nextCount = min(destination.count * 2, 16 * 1024 * 1024)
-                    if nextCount == destination.count { return nil }
-                    destination = Array(repeating: UInt8(0), count: nextCount)
-                }
-            }
-            return nil
-        }
     }
 
     // MARK: - Files and ZIP
