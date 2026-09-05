@@ -577,9 +577,17 @@ private struct BookshelfCollectionView: View {
         _isManaging = State(initialValue: startsManaging)
     }
 
-    private var displayBooks: [BookshelfBook] {
-        guard let selectedGroupName else { return books }
-        return books.filter { $0.groupName == selectedGroupName }
+    /// The collection receives an initial projection from the root page, but
+    /// mutations (batch delete, grouping, source refresh) happen in the shared
+    /// store. Resolve ids back to the live store on every render so a row can
+    /// never survive after its book was deleted or updated.
+    private var liveBooks: [BookshelfBook] {
+        books.compactMap { appState.bookshelfStore.book(id: $0.id) }
+    }
+
+    private var liveDisplayBooks: [BookshelfBook] {
+        guard let selectedGroupName else { return liveBooks }
+        return liveBooks.filter { $0.groupName == selectedGroupName }
     }
 
     var body: some View {
@@ -597,14 +605,14 @@ private struct BookshelfCollectionView: View {
                         }
                     }
                 }
-                if displayBooks.isEmpty {
+                if liveDisplayBooks.isEmpty {
                     EmptyStateCard(
                         systemImage: "books.vertical",
                         title: selectedGroupName == nil ? "\(title)暂无书籍" : "该分组暂无书籍",
                         message: selectedGroupName == nil ? "返回主页导入或搜索书籍后会显示在这里。" : "长按书籍可移动到其他分组。"
                     )
                 } else {
-                    ForEach(displayBooks) { book in
+                    ForEach(liveDisplayBooks) { book in
                         Group {
                             if isManaging {
                                 Button {
