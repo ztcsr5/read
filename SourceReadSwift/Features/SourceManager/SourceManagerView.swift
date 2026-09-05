@@ -383,7 +383,7 @@ struct SourceManagerView: View {
                 bookSourceBatchToolbar
             }
             if appState.sourceStore.sources.isEmpty {
-                EmptyStateCard(systemImage: "tray", title: "暂无书源", message: "点击右上角 + 导入书源 JSON")
+                EmptyStateCard(systemImage: "tray", title: "暂无书源", message: "点击上方“导入书源”导入 JSON，或打开 Web 写源创建书源")
             } else if filteredBookSources.isEmpty {
                 CenterTextEmptyState("没有匹配的书源", minHeight: 220)
             } else {

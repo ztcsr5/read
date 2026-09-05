@@ -1520,7 +1520,7 @@ struct ReaderView: View {
     }
 
     private var currentReaderTarget: Int {
-        readerMode == .scroll ? scrollParagraphTarget : pagedPageIndex
+        readerMode == .scroll ? visibleParagraphIndex : pagedPageIndex
     }
 
     private func toggleOverlay() {
@@ -1745,10 +1745,6 @@ struct ReaderView: View {
               content.paragraphs.indices.contains(index),
               index != visibleParagraphIndex else { return }
         visibleParagraphIndex = index
-        // Keep the scroll target in lockstep with native TextKit visibility.
-        // Otherwise starting auto-scroll after a manual swipe can jump back
-        // to the last programmatic target instead of continuing from here.
-        scrollParagraphTarget = index
         scheduleReadingPositionPersistence(paragraphIndex: index)
     }
 

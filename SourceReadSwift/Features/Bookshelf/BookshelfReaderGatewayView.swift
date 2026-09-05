@@ -221,6 +221,10 @@ struct BookshelfReaderGatewayView: View {
                     totalChapters: chapters.count
                 )
             },
+            autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+            onSpeechAutoplayConsumed: {
+                autoplaySpeechAfterHandoff = false
+            },
             autoplayAutoScrollOnAppear: autoplayAutoScrollAfterHandoff,
             onAutoScrollAutoplayConsumed: {
                 autoplayAutoScrollAfterHandoff = false
@@ -228,10 +232,6 @@ struct BookshelfReaderGatewayView: View {
             onAutoScrollFinished: {
                 guard chapters.indices.contains(safeIndex + 1) else { return }
                 autoplayAutoScrollAfterHandoff = true
-            },
-            autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
-            onSpeechAutoplayConsumed: {
-                autoplaySpeechAfterHandoff = false
             },
             initialOverlayVisible: showReaderChromeAfterChapterSelection
         )

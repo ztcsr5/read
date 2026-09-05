@@ -488,6 +488,10 @@ struct ChapterLoadingView: View {
                 errorMessage = nil
                  isUsingStaleCache = false
              },
+             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+             onSpeechAutoplayConsumed: {
+                 autoplaySpeechAfterHandoff = false
+             },
              autoplayAutoScrollOnAppear: autoplayAutoScrollAfterHandoff,
              onAutoScrollAutoplayConsumed: {
                  autoplayAutoScrollAfterHandoff = false
@@ -500,10 +504,6 @@ struct ChapterLoadingView: View {
                  errorMessage = nil
                  isUsingStaleCache = false
              },
-             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
-            onSpeechAutoplayConsumed: {
-                autoplaySpeechAfterHandoff = false
-            },
             initialOverlayVisible: showReaderChromeAfterChapterSelection
         )
         .id("reader-\(effectiveChapter.url)")
