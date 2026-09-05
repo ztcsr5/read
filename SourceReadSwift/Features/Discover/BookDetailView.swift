@@ -480,30 +480,21 @@ struct ChapterLoadingView: View {
             onCacheNextChapters: {
                 Task { await cacheNextChaptersFromReader() }
             },
-             onSpeechFinished: {
+            onSpeechFinished: {
                 guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
                 autoplaySpeechAfterHandoff = true
                 currentChapter = next
                 content = nil
                 errorMessage = nil
-                 isUsingStaleCache = false
-             },
-             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
-             onSpeechAutoplayConsumed: {
-                 autoplaySpeechAfterHandoff = false
-             },
-             autoplayAutoScrollOnAppear: autoplayAutoScrollAfterHandoff,
-             onAutoScrollAutoplayConsumed: {
-                 autoplayAutoScrollAfterHandoff = false
-             },
-             onAutoScrollFinished: {
-                 guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
-                 autoplayAutoScrollAfterHandoff = true
-                 currentChapter = next
-                 content = nil
-                 errorMessage = nil
-                 isUsingStaleCache = false
-             },
+                isUsingStaleCache = false
+            },
+            autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+            onSpeechAutoplayConsumed: { autoplaySpeechAfterHandoff = false },
+            autoplayAutoScrollOnAppear: autoplayAutoScrollAfterHandoff,
+            onAutoScrollAutoplayConsumed: { autoplayAutoScrollAfterHandoff = false },
+            onAutoScrollFinished: {
+                autoplayAutoScrollAfterHandoff = true
+            },
             initialOverlayVisible: showReaderChromeAfterChapterSelection
         )
         .id("reader-\(effectiveChapter.url)")

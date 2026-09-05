@@ -60,7 +60,7 @@ struct SourcePipelineResult: Identifiable, Codable, Hashable, Sendable {
     var overallStatus: SourceHealthStatus { report.overallStatus }
     var isComplete: Bool {
         guard let content else { return false }
-        return !content.paragraphs.isEmpty
+        return content.paragraphs.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             && !chapters.isEmpty
             && detail != nil
             && !searchBooks.isEmpty

@@ -536,8 +536,7 @@ struct ReaderView: View {
             String(scrollParagraphTarget),
             String(pagedPageIndex),
             paragraphJumpRequest?.id.uuidString ?? "none",
-            String(speechController.currentParagraphIndex),
-            autoScrollEnabled ? "auto" : "manual"
+            String(speechController.currentParagraphIndex)
         ].joined(separator: "|")
     }
 
@@ -1639,11 +1638,9 @@ struct ReaderView: View {
         stopAutoScroll()
         autoScrollEnabled = true
         let currentTarget = min(max(currentReaderTarget, 0), maximumReaderTarget)
-        if readerMode == .scroll {
-            scrollParagraphTarget = currentTarget
-        } else {
-            pagedPageIndex = currentTarget
-        }
+        // Starting playback is not a navigation request. Leave TextKit at the
+        // current pixel offset; only the next tick issues a paragraph jump.
+        visibleParagraphIndex = positionMapping.paragraph(for: currentTarget, mode: readerMode)
         let delay = ReaderAutomationPolicy.clampedDelay(autoScrollDelay)
         let coordinator = playbackCoordinator
         let token = coordinator.beginAutoScroll()

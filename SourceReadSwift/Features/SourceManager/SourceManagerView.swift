@@ -22,6 +22,30 @@ struct SourceManagerView: View {
     @State private var sourceLogin: BookSource?
     @State private var sourceHistory: BookSource?
     @State private var sourceVisualDetail: BookSource?
+    @State private var pendingDetailAction: SourceDetailAction?
+
+    private enum SourceDetailAction {
+        case test(BookSource)
+        case rules(BookSource)
+        case json(BookSource)
+    }
+
+    private func routeFromDetail(_ action: SourceDetailAction) {
+        guard pendingDetailAction == nil else { return }
+        pendingDetailAction = action
+        sourceVisualDetail = nil
+    }
+
+    private func presentPendingDetailAction() {
+        let action = pendingDetailAction
+        pendingDetailAction = nil
+        switch action {
+        case .test(let source): sourceTest = SourceTestState(source: source)
+        case .rules(let source): sourceRuleEditor = source
+        case .json(let source): sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source))
+        case nil: break
+        }
+    }
     @State private var rssEditor: RSSSource?
     @State private var isManagingBookSources = false
     @State private var selectedBookSourceURLs: Set<String> = []
@@ -178,13 +202,13 @@ struct SourceManagerView: View {
                 SourceDiagnosticHistoryView(source: source)
                     .environmentObject(appState)
             }
-            .sheet(item: $sourceVisualDetail) { source in
+            .sheet(item: $sourceVisualDetail, onDismiss: presentPendingDetailAction) { source in
                 SourceVisualDetailView(
                     source: source,
                     health: appState.sourceHealthStore.record(for: source),
-                    onTest: { sourceTest = SourceTestState(source: source) },
-                    onEditRules: { sourceRuleEditor = source },
-                    onEditJSON: { sourceJSONEditor = SourceJSONEditorState(title: source.bookSourceName, json: prettyJSON(source)) }
+                    onTest: { routeFromDetail(.test(source)) },
+                    onEditRules: { routeFromDetail(.rules(source)) },
+                    onEditJSON: { routeFromDetail(.json(source)) }
                 )
                 .environmentObject(appState)
             }
@@ -545,7 +569,7 @@ struct SourceManagerView: View {
 
                 Button("批量测试") {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    let selected = filteredBookSources.filter { selectedBookSourceURLs.contains($0.bookSourceUrl) }
+                    let selected = appState.sourceStore.sources.filter { selectedBookSourceURLs.contains($0.bookSourceUrl) }
                     batchCheck = SourceBatchCheckState(sources: selected)
                 }
                 .disabled(selectedBookSourceURLs.isEmpty)
@@ -1850,15 +1874,15 @@ private struct SourceVisualDetailView: View {
                     .podcastCard()
 
                     VStack(spacing: 10) {
-                        Button { dismiss(); onTest() } label: {
+                        Button { onTest() } label: {
                             Label("运行全链路测试", systemImage: "play.circle.fill").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        Button { dismiss(); onEditRules() } label: {
+                        Button { onEditRules() } label: {
                             Label("编辑规则", systemImage: "slider.horizontal.3").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        Button { dismiss(); onEditJSON() } label: {
+                        Button { onEditJSON() } label: {
                             Label("编辑 JSON", systemImage: "curlybraces").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
