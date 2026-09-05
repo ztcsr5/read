@@ -76,9 +76,9 @@ final class SourceDiagnosticBatchReportTests: XCTestCase {
                 steps: [SourceDiagnosticStep(
                     stage: .search,
                     status: .passed,
-                    responseContentEncodings: ["gzip"],
                     responseEncodedByteCount: 94,
                     responseDecodedByteCount: 480,
+                    responseContentEncodings: ["gzip"],
                     responseWasDecoded: true
                 )]
             )]
