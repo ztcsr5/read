@@ -58,7 +58,13 @@ struct SmartWebReaderView: View {
                                     .padding(12)
                                 }
                         } else {
-                            ContentUnavailableView("网页阅读模式", systemImage: "safari", description: Text("粘贴网页地址后打开。提取正文会移除导航、广告和脚本，只保留可阅读内容。"))
+                            VStack(spacing: 10) {
+                                Image(systemName: "safari").font(.system(size: 34)).foregroundStyle(.secondary)
+                                Text("网页阅读模式").font(.headline)
+                                Text("粘贴网页地址后打开。提取正文会移除导航、广告和脚本，只保留可阅读内容。")
+                                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 220)
                         }
                         if let errorMessage {
                             Text(errorMessage).font(.footnote).foregroundStyle(.red)
