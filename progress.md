@@ -1895,8 +1895,8 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 ### Verification after push
 
-- iOS build/XCTest: [run 33982702625](https://github.com/ztcsr5/read/actions/runs/33982702625) — in progress at handoff.
-- Unsigned IPA: [run 33982702596](https://github.com/ztcsr5/read/actions/runs/33982702596) — in progress at handoff.
+- iOS build/XCTest: [run 33982823986](https://github.com/ztcsr5/read/actions/runs/33982823986) — success.
+- Unsigned IPA: [run 33982823896](https://github.com/ztcsr5/read/actions/runs/33982823896) — success; unsigned artifact available from the run.
 
 ### Rollback
 
