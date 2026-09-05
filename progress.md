@@ -1844,3 +1844,22 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Push the Stage 19B batch to `codex/swift-v2-lifetime-reader`, wait for both
   iOS XCTest and unsigned-IPA workflows, then fix any compiler/test failures
   before starting the next large stage.
+
+## 2026-09-06 - Stage 20A: search UX and smart web reading surface (in progress)
+
+### Implemented in this batch
+
+- Added an explicit `智能网页阅读` entry to the Discover navigation bar instead of leaving the existing concept implicit.
+- Added a native `WKWebView` page preview with a one-tap `提取正文并阅读` action.
+- Added `SmartWebArticleExtractor`, which removes navigation/scripts/boilerplate and projects article blocks into the native text reader surface.
+- Added deterministic extractor tests for boilerplate removal, title selection and malformed HTML fallback.
+
+### Verification
+
+- `git diff --check` and source-level inspection are pending before commit.
+- Windows has no Xcode/UIKit runtime; iOS compilation/XCTest and unsigned IPA remain GitHub Actions gates.
+- Sustained ProMotion frame pacing and extraction quality across arbitrary public pages still require physical-device and corpus checks.
+
+### Next
+
+- Complete Stage 20A search result grouping/status polish and root-page visual review, then commit/push once for both Actions.

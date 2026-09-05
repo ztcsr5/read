@@ -5,6 +5,7 @@ struct DiscoverView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = DiscoverViewModel()
     @State private var pendingShelfAddBook: SearchBook?
+    @State private var showSmartWebReader = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,16 @@ struct DiscoverView: View {
             .pageBackground()
             .navigationTitle("发现")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showSmartWebReader = true
+                    } label: {
+                        Image(systemName: "safari")
+                    }
+                    .accessibilityLabel("智能网页阅读")
+                }
+            }
             .task {
                 viewModel.bind(appState: appState)
             }
@@ -47,6 +58,9 @@ struct DiscoverView: View {
                 if let book = pendingShelfAddBook {
                     Text("确认把《\(book.name)》加入书架并开始跟踪阅读进度？")
                 }
+            }
+            .sheet(isPresented: $showSmartWebReader) {
+                SmartWebReaderView()
             }
         }
     }
@@ -218,8 +232,21 @@ struct DiscoverView: View {
                 .foregroundStyle(.secondary)
             }
 
-            ForEach(viewModel.results) { book in
-                searchResultCard(book)
+            ForEach(viewModel.groupedResults, id: \.source) { group in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "books.vertical")
+                        Text(group.source)
+                            .font(.subheadline.weight(.bold))
+                        Text("\(group.books.count) 条")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(AppTheme.accent)
+                    ForEach(group.books) { book in
+                        searchResultCard(book)
+                    }
+                }
             }
         }
     }
@@ -273,6 +300,18 @@ final class DiscoverViewModel: ObservableObject {
     @Published var checkedSourceCount = 0
     @Published var totalResultCount = 0
     @Published var sourceFailures: [String] = []
+
+    struct ResultGroup: Identifiable {
+        let source: String
+        let books: [SearchBook]
+        var id: String { source }
+    }
+
+    var groupedResults: [ResultGroup] {
+        Dictionary(grouping: results, by: { $0.sourceName })
+            .map { ResultGroup(source: $0.key, books: $0.value) }
+            .sorted { $0.source.localizedStandardCompare($1.source) == .orderedAscending }
+    }
 
     private weak var appState: AppState?
     private var activeSearchID: UUID?
