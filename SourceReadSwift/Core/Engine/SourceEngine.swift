@@ -368,7 +368,8 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         stage: String
     ) async -> Result<SourceResponse, SourceEngineError> {
         let primary = await network.load(request)
-        if case .success(let response) = primary {
+        if case .success(let rawResponse) = primary {
+            let response = ResponseBodyDecoder().normalize(rawResponse, preferredCharset: request.expectedCharset)
             persistentState(for: source).ingestResponse(response)
             recordEvidence(source: source, stage: stage, request: request, response: response)
             await emitResponseObservation(response, request: request, source: source, stage: stage)

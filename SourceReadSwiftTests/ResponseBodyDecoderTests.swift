@@ -20,4 +20,19 @@ final class ResponseBodyDecoderTests: XCTestCase {
         XCTAssertEqual(decoder.decode(data: plain, headers: ["Content-Encoding": "br"]), plain)
         XCTAssertEqual(decoder.decode(data: plain, headers: [:]), plain)
     }
+
+    func testNormalizesSourceResponseForInjectedClients() {
+        let response = SourceResponse(
+            url: URL(string: "https://fixture.example/compressed")!,
+            statusCode: 200,
+            headers: ["Content-Encoding": "gzip", "Content-Type": "text/plain; charset=utf-8"],
+            body: "",
+            data: Data(gzip)
+        )
+
+        let normalized = ResponseBodyDecoder().normalize(response)
+        XCTAssertEqual(normalized.body, "hello legado")
+        XCTAssertEqual(normalized.data, Data("hello legado".utf8))
+        XCTAssertEqual(normalized.headers["Content-Encoding"], "gzip")
+    }
 }

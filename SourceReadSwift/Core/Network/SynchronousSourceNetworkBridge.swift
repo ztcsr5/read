@@ -31,10 +31,10 @@ struct SynchronousSourceNetworkBridge {
         }
         guard semaphore.wait(timeout: .now() + effectiveTimeout) == .success else { return nil }
         let result = box.load()
-        if case .success(let response) = result {
-            persistentState?.ingestResponse(response)
-        }
-        return result
+        guard case .success(let response) = result else { return result }
+        let normalized = ResponseBodyDecoder().normalize(response, preferredCharset: request.expectedCharset)
+        persistentState?.ingestResponse(normalized)
+        return .success(normalized)
     }
 
     static func loadResponse(

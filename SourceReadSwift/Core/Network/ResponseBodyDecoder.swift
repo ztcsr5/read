@@ -30,6 +30,29 @@ struct ResponseBodyDecoder: Sendable {
         return candidate
     }
 
+    /// Applies transport decoding to an already materialized response.  This
+    /// is used at the engine boundary as well as by URLSession so injected
+    /// fixture clients and WebView/bridge adapters observe identical bytes.
+    /// The original body is retained when a custom client has no binary data
+    /// to normalize (for example a text-only test double).
+    func normalize(_ response: SourceResponse, preferredCharset: String? = nil) -> SourceResponse {
+        guard !response.data.isEmpty else { return response }
+        let decodedData = decode(data: response.data, headers: response.headers)
+        guard decodedData != response.data else { return response }
+        let body = ResponseTextDecoder().decode(
+            data: decodedData,
+            headers: response.headers,
+            preferredCharset: preferredCharset
+        )
+        return SourceResponse(
+            url: response.url,
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: body,
+            data: decodedData
+        )
+    }
+
     private func decodeOne(_ data: Data, encoding: String) -> Data? {
         switch encoding {
         case "identity":
