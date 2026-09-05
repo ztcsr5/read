@@ -47,6 +47,26 @@ final class SourceRequestBuilderDynamicStateTests: XCTestCase {
         )
     }
 
+    func testPersistentURLValuesEncodeDelimitersAndPreserveExistingEscapes() throws {
+        let source = BookSource(
+            bookSourceName: "URL dynamic fixture",
+            bookSourceUrl: "https://fixture.example/"
+        )
+        let request = SourceRequestBuilder().buildPageRequest(
+            source: source,
+            urlText: "https://fixture.example/chapter/{cursor}?token={{token}}",
+            persistentValues: [
+                "cursor": "第 2 章/part",
+                "token": "abc%2fdef&next"
+            ]
+        )
+
+        XCTAssertEqual(
+            request.url.absoluteString,
+            "https://fixture.example/chapter/%E7%AC%AC%202%20%E7%AB%A0%2Fpart?token=abc%2Fdef%26next"
+        )
+    }
+
     func testPersistentValuesEncodeTextSourceOptionBody() throws {
         let source = BookSource(
             bookSourceName: "Form dynamic fixture",

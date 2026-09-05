@@ -44,7 +44,7 @@ struct SourceRequestBuilder {
         // can URL-encode them (for example `p 2` became a literal space).  Each
         // component is expanded at its own boundary below instead.
         let directive = directiveParser.parse(resolvedText)
-        let resolvedURLText = interpolatePersistentValues(directive.urlText, values: persistentValues)
+        let resolvedURLText = interpolateURLValues(directive.urlText, values: persistentValues)
         let url = resolveURL(resolvedURLText, base: source.bookSourceUrl)
         let sourceOptions = requestOptions(
             source,
@@ -426,6 +426,22 @@ struct SourceRequestBuilder {
         }
     }
 
+    /// Expand dynamic Legado values at the URL boundary.  A cursor or token
+    /// often contains spaces, CJK text, `&`, or an already escaped byte.  Raw
+    /// interpolation can create an invalid URL or accidentally add a second
+    /// layer of percent encoding, so encode delimiters while preserving valid
+    /// `%HH` sequences already supplied by the source script.
+    private func interpolateURLValues(_ text: String, values: [String: String]) -> String {
+        guard !values.isEmpty else { return text }
+        return values.keys.sorted { $0.count > $1.count }.reduce(text) { output, key in
+            guard !key.isEmpty, let value = values[key] else { return output }
+            let encoded = urlEncodePreservingEscapes(value)
+            return output
+                .replacingOccurrences(of: "{{\(key)}}", with: encoded)
+                .replacingOccurrences(of: "{\(key)}", with: encoded)
+        }
+    }
+
     private func interpolateData(_ data: Data, values: [String: String], headers: [String: String]) -> Data {
         guard !values.isEmpty,
               let text = String(data: data, encoding: .utf8) else { return data }
@@ -489,5 +505,48 @@ struct SourceRequestBuilder {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._*")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private func urlEncodePreservingEscapes(_ value: String) -> String {
+        let bytes = Array(value.utf8)
+        let hex = Array("0123456789ABCDEF".utf8)
+        var output = ""
+        output.reserveCapacity(value.utf8.count)
+        var index = 0
+        while index < bytes.count {
+            if bytes[index] == 37, index + 2 < bytes.count,
+               isHex(bytes[index + 1]), isHex(bytes[index + 2]) {
+                output.append("%")
+                output.append(String(decoding: [hex[Int(hexValue(bytes[index + 1]))]], as: UTF8.self))
+                output.append(String(decoding: [hex[Int(hexValue(bytes[index + 2]))]], as: UTF8.self))
+                index += 3
+                continue
+            }
+            let byte = bytes[index]
+            if (byte >= 48 && byte <= 57)
+                || (byte >= 65 && byte <= 90)
+                || (byte >= 97 && byte <= 122)
+                || byte == 45 || byte == 46 || byte == 95 || byte == 126 {
+                output.append(String(decoding: [byte], as: UTF8.self))
+            } else {
+                output.append("%")
+                output.append(String(decoding: [hex[Int(byte >> 4)]], as: UTF8.self))
+                output.append(String(decoding: [hex[Int(byte & 0x0F)]], as: UTF8.self))
+            }
+            index += 1
+        }
+        return output
+    }
+
+    private func isHex(_ byte: UInt8) -> Bool {
+        (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
+    }
+
+    private func hexValue(_ byte: UInt8) -> UInt8 {
+        switch byte {
+        case 48...57: return byte - 48
+        case 65...70: return byte - 55
+        default: return byte - 87
+        }
     }
 }
