@@ -1864,6 +1864,45 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 
 - Stage 20B: root-page visual polish, source-manager batch UX review and remaining 23-item issue closure.
 
+## 2026-09-06 - Stage 20B: root navigation and source-manager polish (in CI)
+
+### Implemented in this batch
+
+- Added bottom tail spacing to the bookshelf, discovery and source-manager
+  root scroll surfaces so the final card/row remains readable above the
+  floating tab bar and inline batch actions.
+- Reduced the source-manager status card footprint and hierarchy: compact
+  count badge, tighter metrics, smaller explanatory copy and a shorter action
+  row suitable for compact iPhone screens.
+- Consolidated source import into the status card (`导入书源`) instead of a
+  duplicate navigation-bar `+` entry; Web 写源 is now reachable from the same
+  source-management surface.
+- Removed the duplicate Web 写源 entry from 设置; source management is now the
+  single canonical entry point.
+- Removed the permanent no-op CADisplayLink driver. The app keeps
+  `CADisableMinimumFrameDurationOnPhone` and scene-level high-refresh anchors,
+  while avoiding an idle main-run-loop callback that competes with SwiftUI
+  layout. This is an adaptive ProMotion request, not a claim of sustained
+  120 FPS without device/Instruments evidence.
+
+### Verification before CI
+
+- `git diff --check` passed.
+- `node ci-log/extract-prelude.js` passed (`164531` bytes extracted).
+- `node --check ci-log/js-prelude-check.js` passed.
+- Commit: `a9d1cb7 feat: polish root navigation and high-refresh rendering`.
+- Pushed to `origin/codex/swift-v2-lifetime-reader`.
+
+### Verification after push
+
+- iOS build/XCTest: [run 33982702625](https://github.com/ztcsr5/read/actions/runs/33982702625) — in progress at handoff.
+- Unsigned IPA: [run 33982702596](https://github.com/ztcsr5/read/actions/runs/33982702596) — in progress at handoff.
+
+### Rollback
+
+- Revert `a9d1cb7` to restore the Stage 20A navigation, source-card and
+  display-link behavior.
+
 ### CI correction log
 
 - First Stage 20A Actions run exposed a SwiftUI `toolbar(content:)` overload ambiguity in `SmartWebReaderView`; replaced it with the compatible `navigationBarItems` API and pushed commit `0946340`.
