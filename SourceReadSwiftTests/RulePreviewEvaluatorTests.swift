@@ -40,4 +40,22 @@ final class RulePreviewEvaluatorTests: XCTestCase {
         XCTAssertTrue(result.hasMatches)
         XCTAssertEqual(result.message, "A\nB")
     }
+
+    func testPreviewEvidenceCapturesNormalizationRequestAndParsedOutput() {
+        let result = RulePreviewEvaluator().preview(
+            sample: "\u{FEFF}{\"items\":[{\"title\":\"One\"},{\"title\":\"Two\"}]}",
+            ruleText: #"{"bookList":"$.items[*].title"}"#,
+            stage: .search,
+            baseURL: URL(string: "https://fixture.example/search?q=book")
+        )
+
+        XCTAssertEqual(result.evidence.requestMethod, "LOCAL")
+        XCTAssertEqual(result.evidence.requestURL, "https://fixture.example/search?q=book")
+        XCTAssertEqual(result.evidence.format, "JSON")
+        XCTAssertTrue(result.evidence.normalizationApplied)
+        XCTAssertEqual(result.evidence.selectedRule, "$.items[*].title")
+        XCTAssertEqual(result.evidence.parsedOutput, ["One", "Two"])
+        XCTAssertEqual(result.evidence.outputByteCount, "One\nTwo".utf8.count)
+        XCTAssertEqual(result.evidence.normalizedResponse.first, "{")
+    }
 }

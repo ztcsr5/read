@@ -26,9 +26,27 @@ struct RulePreviewEvaluator {
         let stage: Stage
         let values: [String]
         let message: String
+        let evidence: Evidence
 
         var matchedCount: Int { values.count }
         var hasMatches: Bool { !values.isEmpty }
+    }
+
+    /// Deterministic evidence for the editor's offline preview.  Keeping the
+    /// normalized byte counts and selected rule beside the output makes a
+    /// preview explainable without opening a network inspector, and gives the
+    /// UI the same kind of transport/normalization breadcrumbs as diagnostics.
+    struct Evidence: Equatable, Sendable {
+        let requestMethod: String
+        let requestURL: String
+        let inputByteCount: Int
+        let normalizedByteCount: Int
+        let format: String
+        let selectedRule: String
+        let normalizedResponse: String
+        let parsedOutput: [String]
+        let outputByteCount: Int
+        let normalizationApplied: Bool
     }
 
     func preview(
@@ -37,29 +55,60 @@ struct RulePreviewEvaluator {
         stage: Stage,
         baseURL: URL? = URL(string: "https://fixture.invalid/")
     ) -> Result {
+        let normalizedSample = ResponseFormatDetector.normalizedBody(sample)
+        let baseEvidence = Evidence(
+            requestMethod: "LOCAL",
+            requestURL: baseURL?.absoluteString ?? "fixture://local/",
+            inputByteCount: sample.utf8.count,
+            normalizedByteCount: normalizedSample.utf8.count,
+            format: Self.format(of: normalizedSample),
+            selectedRule: "",
+            normalizedResponse: normalizedSample,
+            parsedOutput: [],
+            outputByteCount: 0,
+            normalizationApplied: normalizedSample != sample
+        )
         let trimmed = ruleText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return Result(stage: stage, values: [], message: "规则为空")
+            return Result(stage: stage, values: [], message: "规则为空", evidence: baseEvidence)
         }
         let rule = parseRule(trimmed, preferredKeys: stage.preferredKeys)
         guard !rule.isEmpty else {
-            return Result(stage: stage, values: [], message: "规则对象没有可执行字段")
+            return Result(
+                stage: stage,
+                values: [],
+                message: "规则对象没有可执行字段",
+                evidence: baseEvidence.with(selectedRule: rule)
+            )
         }
+
+        let evidence = baseEvidence.with(selectedRule: rule)
 
         let context = RuleExecutionContext()
         let analyzer = LegadoRuleAnalyzer(executionContext: context)
-        let listValues = analyzer.stringList(content: sample, rule: rule, baseURL: baseURL)
+        let listValues = analyzer.stringList(content: normalizedSample, rule: rule, baseURL: baseURL)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !listValues.isEmpty {
-            return Result(stage: stage, values: listValues, message: listValues.joined(separator: "\n"))
+            let message = listValues.joined(separator: "\n")
+            return Result(
+                stage: stage,
+                values: listValues,
+                message: message,
+                evidence: evidence.with(outputByteCount: message.utf8.count, parsedOutput: listValues)
+            )
         }
-        let scalar = analyzer.string(content: sample, rule: rule, baseURL: baseURL)
+        let scalar = analyzer.string(content: normalizedSample, rule: rule, baseURL: baseURL)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if scalar.isEmpty {
-            return Result(stage: stage, values: [], message: "未提取到结果")
+            return Result(stage: stage, values: [], message: "未提取到结果", evidence: evidence)
         }
-        return Result(stage: stage, values: [scalar], message: scalar)
+        return Result(
+            stage: stage,
+            values: [scalar],
+            message: scalar,
+            evidence: evidence.with(outputByteCount: scalar.utf8.count, parsedOutput: [scalar])
+        )
     }
 
     func evaluate(
@@ -83,5 +132,35 @@ struct RulePreviewEvaluator {
             }
         }
         return object.values.compactMap { $0 as? String }.first ?? ""
+    }
+
+    private static func format(of body: String) -> String {
+        if ResponseFormatDetector.jsonObject(from: body) != nil { return "JSON" }
+        let lowercased = body.lowercased()
+        if lowercased.contains("<html") || lowercased.contains("<div") || lowercased.contains("<article") {
+            return "HTML"
+        }
+        return "文本"
+    }
+}
+
+private extension RulePreviewEvaluator.Evidence {
+    func with(
+        selectedRule: String? = nil,
+        outputByteCount: Int? = nil,
+        parsedOutput: [String]? = nil
+    ) -> Self {
+        Self(
+            requestMethod: requestMethod,
+            requestURL: requestURL,
+            inputByteCount: inputByteCount,
+            normalizedByteCount: normalizedByteCount,
+            format: format,
+            selectedRule: selectedRule ?? self.selectedRule,
+            normalizedResponse: normalizedResponse,
+            parsedOutput: parsedOutput ?? self.parsedOutput,
+            outputByteCount: outputByteCount ?? self.outputByteCount,
+            normalizationApplied: normalizationApplied
+        )
     }
 }

@@ -17,6 +17,7 @@ struct SourceRuleEditorView: View {
     @State private var previewOutput = ""
     @State private var previewMatchCount = 0
     @State private var previewStage: RulePreviewEvaluator.Stage?
+    @State private var previewEvidence: RulePreviewEvaluator.Evidence?
     @State private var isPreviewing = false
     @State private var validationBlocked = false
     @State private var previewHistory: [RulePreviewHistoryEntry] = []
@@ -94,6 +95,24 @@ struct SourceRuleEditorView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            if let evidence = previewEvidence {
+                                DisclosureGroup("预览证据") {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(previewEvidenceMessage(evidence))
+                                        Text("request: \(evidence.requestMethod) \(evidence.requestURL)")
+                                        Text("rule: \(evidence.selectedRule)")
+                                        Text("parsed: \(evidence.parsedOutput.count) 条")
+                                        Text(evidence.normalizedResponse)
+                                            .lineLimit(8)
+                                            .textSelection(.enabled)
+                                            .padding(8)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    }
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 } header: {
@@ -236,6 +255,7 @@ struct SourceRuleEditorView: View {
         previewOutput = ""
         previewMatchCount = 0
         previewStage = nil
+        previewEvidence = nil
     }
 
     private var currentRuleBinding: Binding<String> {
@@ -279,11 +299,13 @@ struct SourceRuleEditorView: View {
                 previewOutput = result.message
                 previewMatchCount = result.matchedCount
                 previewStage = result.stage
+                previewEvidence = result.evidence
                 previewHistory.insert(
                     RulePreviewHistoryEntry(
                         stage: result.stage,
                         matchedCount: result.matchedCount,
                         message: result.message,
+                        evidence: result.evidence,
                         sample: sample,
                         ruleText: text
                     ),
@@ -327,6 +349,7 @@ struct SourceRuleEditorView: View {
         previewOutput = entry.message
         previewMatchCount = entry.matchedCount
         previewStage = entry.stage
+        previewEvidence = entry.evidence
         clearValidation()
     }
 
@@ -336,6 +359,11 @@ struct SourceRuleEditorView: View {
         guard let data = try? JSONEncoder().encode(rule.fields),
               let value = String(data: data, encoding: .utf8) else { return "" }
         return value
+    }
+
+    private func previewEvidenceMessage(_ evidence: RulePreviewEvaluator.Evidence) -> String {
+        let normalized = evidence.normalizationApplied ? "normalized" : "as-is"
+        return "evidence: \(evidence.format) · \(normalized) · input \(evidence.inputByteCount)B → \(evidence.normalizedByteCount)B · output \(evidence.outputByteCount)B"
     }
 }
 
@@ -359,6 +387,7 @@ private struct RulePreviewHistoryEntry: Identifiable, Sendable {
     let stage: RulePreviewEvaluator.Stage
     let matchedCount: Int
     let message: String
+    let evidence: RulePreviewEvaluator.Evidence
     let sample: String
     let ruleText: String
 }
