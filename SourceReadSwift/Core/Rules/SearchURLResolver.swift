@@ -8,7 +8,8 @@ struct SearchURLResolver {
         keyword: String,
         page: Int,
         persistentState: RulePersistentState = RulePersistentState(),
-        network: SourceNetworkClient? = nil
+        network: SourceNetworkClient? = nil,
+        executionContext: RuleExecutionContext? = nil
     ) -> Result<String, SourceEngineError> {
         guard let searchUrl = source.searchUrl, !searchUrl.isEmpty else {
             return .failure(.invalidSource("searchUrl \u{4e3a}\u{7a7a}"))
@@ -26,14 +27,14 @@ struct SearchURLResolver {
         let trimmed = interpolated.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("@js:") {
             let script = String(trimmed.dropFirst(4))
-            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState, network: network)
+            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState, network: network, executionContext: executionContext)
         }
 
         if trimmed.hasPrefix("<js>"), trimmed.hasSuffix("</js>") {
             let start = trimmed.index(trimmed.startIndex, offsetBy: 4)
             let end = trimmed.index(trimmed.endIndex, offsetBy: -5)
             let script = String(trimmed[start..<end])
-            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState, network: network)
+            return evaluateScript(script, source: source, variables: scriptVariables, persistentState: persistentState, network: network, executionContext: executionContext)
         }
 
         if trimmed.contains("<js>"), trimmed.contains("</js>") {
@@ -42,7 +43,8 @@ struct SearchURLResolver {
                 source: source,
                 variables: scriptVariables,
                 persistentState: persistentState,
-                network: network
+                network: network,
+                executionContext: executionContext
             )
         }
 
@@ -54,13 +56,14 @@ struct SearchURLResolver {
         source: BookSource,
         variables: [String: Any],
         persistentState: RulePersistentState,
-        network: SourceNetworkClient?
+        network: SourceNetworkClient?,
+        executionContext: RuleExecutionContext?
     ) -> Result<String, SourceEngineError> {
         var output = text
         while let startRange = output.range(of: "<js>"),
               let endRange = output.range(of: "</js>", range: startRange.upperBound..<output.endIndex) {
             let script = String(output[startRange.upperBound..<endRange.lowerBound])
-            switch evaluateScript(script, source: source, variables: variables, persistentState: persistentState, network: network) {
+            switch evaluateScript(script, source: source, variables: variables, persistentState: persistentState, network: network, executionContext: executionContext) {
             case .success(let value):
                 output.replaceSubrange(startRange.lowerBound..<endRange.upperBound, with: value)
             case .failure(let error):
@@ -75,17 +78,19 @@ struct SearchURLResolver {
         source: BookSource,
         variables: [String: Any],
         persistentState: RulePersistentState,
-        network: SourceNetworkClient?
+        network: SourceNetworkClient?,
+        executionContext: RuleExecutionContext?
     ) -> Result<String, SourceEngineError> {
-        let direct = makeRuntime(source: source, persistentState: persistentState, network: network).evaluate(script, variables: variables)
+        let runtime = makeRuntime(source: source, persistentState: persistentState, network: network, executionContext: executionContext)
+        let direct = runtime.evaluate(script, variables: variables)
         if case .failure(.javascript) = direct, script.contains("return") {
-            return makeRuntime(source: source, persistentState: persistentState, network: network).evaluate("(function(){\(script)})()", variables: variables)
+            return runtime.evaluate("(function(){\(script)})()", variables: variables)
         }
         return direct
     }
 
-    private func makeRuntime(source: BookSource, persistentState: RulePersistentState, network: SourceNetworkClient?) -> JSCoreRuntime {
-        let context = RuleExecutionContext(
+    private func makeRuntime(source: BookSource, persistentState: RulePersistentState, network: SourceNetworkClient?, executionContext sharedContext: RuleExecutionContext? = nil) -> JSCoreRuntime {
+        let context = sharedContext ?? RuleExecutionContext(
             initialValues: ["source": source, "baseUrl": source.bookSourceUrl],
             persistentState: persistentState,
             networkHandler: { urlText in

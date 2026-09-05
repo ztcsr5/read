@@ -71,6 +71,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
     let responseDecodedByteCount: Int?
     let responseContentEncodings: [String]?
     let responseWasDecoded: Bool
+    let javascript: [SourceJavaScriptEvidence]?
     let retryCount: Int
     let failureCode: SourceDiagnosticFailureKind?
     let retryable: Bool
@@ -81,7 +82,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
              requestBody, requestHeaders, responseStatusCode, responseHeaders,
              cookieSummary, finalURL, responseEncodedByteCount,
              responseDecodedByteCount, responseContentEncodings, responseWasDecoded,
-             retryCount, failureCode, retryable
+             javascript, retryCount, failureCode, retryable
     }
 
     init(
@@ -104,6 +105,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         responseDecodedByteCount: Int? = nil,
         responseContentEncodings: [String]? = nil,
         responseWasDecoded: Bool = false,
+        javascript: [SourceJavaScriptEvidence]? = nil,
         retryCount: Int = 0,
         failureCode: SourceDiagnosticFailureKind? = nil,
         retryable: Bool? = nil
@@ -127,6 +129,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         self.responseDecodedByteCount = responseDecodedByteCount
         self.responseContentEncodings = responseContentEncodings
         self.responseWasDecoded = responseWasDecoded
+        self.javascript = javascript?.map(SourceDiagnosticRedactor.javascript)
         self.retryCount = max(0, retryCount)
         self.failureCode = failureCode
         self.retryable = retryable ?? failureCode?.isRetryable ?? false
@@ -154,6 +157,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
             responseDecodedByteCount: try container.decodeIfPresent(Int.self, forKey: .responseDecodedByteCount),
             responseContentEncodings: try container.decodeIfPresent([String].self, forKey: .responseContentEncodings),
             responseWasDecoded: try container.decodeIfPresent(Bool.self, forKey: .responseWasDecoded) ?? false,
+            javascript: try container.decodeIfPresent([SourceJavaScriptEvidence].self, forKey: .javascript),
             retryCount: try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0,
             failureCode: try container.decodeIfPresent(SourceDiagnosticFailureKind.self, forKey: .failureCode),
             retryable: try container.decodeIfPresent(Bool.self, forKey: .retryable)
@@ -270,6 +274,41 @@ enum SourceDiagnosticRedactor {
         }.joined(separator: "&")
     }
 
+    static func javascript(_ value: SourceJavaScriptEvidence) -> SourceJavaScriptEvidence {
+        SourceJavaScriptEvidence(
+            originalScript: script(value.originalScript),
+            normalizedScript: script(value.normalizedScript),
+            features: value.features,
+            exception: value.exception.map(script),
+            succeeded: value.succeeded
+        )
+    }
+
+    private static func script(_ value: String) -> String {
+        // Keep diagnostics useful without exporting obvious credential values
+        // embedded in JS literals or exception strings.
+        var output = value
+        let assignmentPatterns = [
+            #"(?i)(cookie|token|password|passwd|secret|authorization)\s*[:=]\s*(['\"])[^'\"]*\2"#,
+            #"(?i)(cookie|token|password|passwd|secret|authorization)\s*=\s*[^;&,\s]+"#
+        ]
+        for pattern in assignmentPatterns {
+            output = output.replacingOccurrences(of: pattern, with: "$1=<redacted>", options: .regularExpression)
+        }
+
+        let callPatterns = [
+            // Legado sources most often persist secrets through host calls
+            // rather than object-literal assignments. Keep the key visible
+            // for debugging while replacing only the value argument.
+            #"(?i)(\bjava\.(?:put|putVar|setVariable)\s*\(\s*['\"](?:cookie|token|password|passwd|secret|authorization)['\"]\s*,\s*)(['\"])[^'\"]*\2"#,
+            #"(?i)(\bcookie\.(?:setCookie|set)\s*\(\s*)(['\"])[^'\"]*\2"#
+        ]
+        for pattern in callPatterns {
+            output = output.replacingOccurrences(of: pattern, with: "$1$2<redacted>$2", options: .regularExpression)
+        }
+        return output
+    }
+
     private static func isSensitive(_ key: String) -> Bool {
         let normalized = key.lowercased().replacingOccurrences(of: "_", with: "-")
         return sensitiveKeys.contains(normalized)
@@ -356,8 +395,26 @@ struct SourceDiagnosticBatchReport: Identifiable, Codable, Hashable, Sendable {
                     let mode = step.responseWasDecoded ? "decoded" : "raw"
                     lines.append("    transport: \(encodings.joined(separator: ",")) · \(mode) · bytes \(encoded)→\(decoded)")
                 }
+                if let javascript = step.javascript, !javascript.isEmpty {
+                    let featureSet = javascript.flatMap { $0.features }.uniquedPreservingOrder()
+                    let failed = javascript.filter { !$0.succeeded }.count
+                    let suffix = failed > 0 ? " · failed=\(failed)" : ""
+                    lines.append("    javascript: \(featureSet.joined(separator: ","))\(suffix)")
+                    for item in javascript where !item.succeeded {
+                        if let exception = item.exception, !exception.isEmpty {
+                            lines.append("      error: \(exception.prefix(240))")
+                        }
+                    }
+                }
             }
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniquedPreservingOrder() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

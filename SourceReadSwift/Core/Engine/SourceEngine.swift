@@ -112,7 +112,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         ))
 
         let searchUrl: String
-        switch searchURLResolver.resolve(source: source, keyword: keyword, page: page, persistentState: executionState, network: network) {
+        switch searchURLResolver.resolve(source: source, keyword: keyword, page: page, persistentState: executionState, network: network, executionContext: executionContext) {
         case .success(let value):
             searchUrl = value
         case .failure(let error):
@@ -129,7 +129,8 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "search.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleSearch], network: network, stateOverride: executionState)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleSearch], network: network, stateOverride: executionState, executionContext: executionContext)
+            recordJavaScriptEvidence(source: source, stage: "search", context: executionContext)
             guard !transformedResponse.body.isEmpty else {
                 let error = SourceEngineError.empty("\u{641c}\u{7d22}\u{54cd}\u{5e94}\u{4e3a}\u{7a7a}")
                 await emitFailure(error, stage: "search.empty", source: source, details: ["url": transformedResponse.url.absoluteString])
@@ -178,7 +179,8 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "detail.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleBookInfo], network: network, stateOverride: executionState)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleBookInfo], network: network, stateOverride: executionState, executionContext: executionContext)
+            recordJavaScriptEvidence(source: source, stage: "detail", context: executionContext)
             let parsed = BookDetailParser(executionContext: executionContext).parse(source: source, book: book, response: transformedResponse)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "detail.parse", source: source, details: ["url": transformedResponse.url.absoluteString])
@@ -223,7 +225,8 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         )
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: executionState)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: executionState, executionContext: executionContext)
+            recordJavaScriptEvidence(source: source, stage: "toc", context: executionContext)
             let parsed = parseChapterListPage(source: source, book: book, response: transformedResponse, executionContext: executionContext)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
@@ -277,7 +280,8 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         let globalPurifyRules = await purifyRules()
         switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.load") {
         case .success(let response):
-            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: executionState)
+            let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: executionState, executionContext: executionContext)
+            recordJavaScriptEvidence(source: source, stage: "content", context: executionContext)
             let parsed = parseContentPage(
                 source: source,
                 chapter: chapter,
@@ -442,7 +446,30 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         guard let normalizedStage else { return }
         let key = source.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         evidenceLock.lock()
-        evidence[key, default: [:]][normalizedStage] = SourceDiagnosticEvidence(request: request, response: response)
+        let javascript = evidence[key]?[normalizedStage]?.javascript ?? []
+        evidence[key, default: [:]][normalizedStage] = SourceDiagnosticEvidence(request: request, response: response, javascript: javascript)
+        evidenceLock.unlock()
+    }
+
+    private func recordJavaScriptEvidence(
+        source: BookSource,
+        stage: String,
+        context: RuleExecutionContext
+    ) {
+        let normalizedStage: SourceDiagnosticStage?
+        if stage.lowercased().hasPrefix("search") { normalizedStage = .search }
+        else if stage.lowercased().hasPrefix("detail") { normalizedStage = .detail }
+        else if stage.lowercased().hasPrefix("toc") { normalizedStage = .toc }
+        else if stage.lowercased().hasPrefix("content") { normalizedStage = .content }
+        else { normalizedStage = nil }
+        guard let normalizedStage else { return }
+        let scripts = context.javascriptEvidenceSnapshot()
+        guard !scripts.isEmpty else { return }
+        let key = source.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        evidenceLock.lock()
+        if let existing = evidence[key]?[normalizedStage] {
+            evidence[key]?[normalizedStage] = existing.with(javascript: scripts)
+        }
         evidenceLock.unlock()
     }
 
@@ -476,7 +503,8 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         source: BookSource,
         rules: [SourceRule?] = [],
         network: SourceNetworkClient? = nil,
-        stateOverride: RulePersistentState? = nil
+        stateOverride: RulePersistentState? = nil,
+        executionContext sharedExecutionContext: RuleExecutionContext? = nil
     ) -> SourceResponse {
         var scripts: [String] = []
         if let sourceScript = bodyJSScript(source) { scripts.append(sourceScript) }
@@ -485,47 +513,60 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         }
         guard !scripts.isEmpty else { return response }
         let state = stateOverride ?? persistentState(for: source)
-        let context = RuleExecutionContext(
-            initialValues: ["baseUrl": response.url.absoluteString, "source": source],
-            persistentState: state,
-            networkHandler: { encoded in
-                if let network {
-                    return SynchronousSourceNetworkBridge.loadBody(
+        let context: RuleExecutionContext
+        if let sharedExecutionContext {
+            context = sharedExecutionContext
+            context.bind([
+                "baseUrl": response.url.absoluteString,
+                "source": source,
+                "result": response.body,
+                "html": response.body,
+                "body": response.body
+            ])
+        } else {
+            let localContext = RuleExecutionContext(
+                initialValues: ["baseUrl": response.url.absoluteString, "source": source],
+                persistentState: state,
+                networkHandler: { encoded in
+                    if let network {
+                        return SynchronousSourceNetworkBridge.loadBody(
+                            urlText: encoded,
+                            source: source,
+                            network: network,
+                            cookieHeader: state.get("cookieHeader").nilIfEmpty,
+                            persistentValues: state.snapshot(),
+                            persistentState: state
+                        )
+                    }
+                    return SynchronousSourceLoader().load(
                         urlText: encoded,
                         source: source,
-                        network: network,
                         cookieHeader: state.get("cookieHeader").nilIfEmpty,
                         persistentValues: state.snapshot(),
                         persistentState: state
                     )
                 }
-                return SynchronousSourceLoader().load(
-                    urlText: encoded,
-                    source: source,
-                    cookieHeader: state.get("cookieHeader").nilIfEmpty,
-                    persistentValues: state.snapshot(),
-                    persistentState: state
-                )
-            }
-        )
-        context.responseHandler = { encoded in
-            if let network {
-                return SynchronousSourceNetworkBridge.loadResponse(
-                    urlText: encoded,
-                    source: source,
-                    network: network,
-                    cookieHeader: context.string(for: "cookieHeader"),
-                    persistentValues: state.snapshot(),
-                    persistentState: state
-                )
-            }
-            return SynchronousSourceLoader().loadResponse(
-                urlText: encoded,
-                source: source,
-                cookieHeader: context.string(for: "cookieHeader"),
-                persistentValues: state.snapshot(),
-                persistentState: state
             )
+            localContext.responseHandler = { encoded in
+                if let network {
+                    return SynchronousSourceNetworkBridge.loadResponse(
+                        urlText: encoded,
+                        source: source,
+                        network: network,
+                        cookieHeader: localContext.string(for: "cookieHeader"),
+                        persistentValues: state.snapshot(),
+                        persistentState: state
+                    )
+                }
+                return SynchronousSourceLoader().loadResponse(
+                    urlText: encoded,
+                    source: source,
+                    cookieHeader: localContext.string(for: "cookieHeader"),
+                    persistentValues: state.snapshot(),
+                    persistentState: state
+                )
+            }
+            context = localContext
         }
         var output = response.body
         for script in scripts {
@@ -632,7 +673,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.next.load") {
             case .success(let response):
                 let state = persistentState(for: source)
-                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: state)
+                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: state, executionContext: executionContext)
                 switch parseChapterListPage(source: source, book: book, response: transformedResponse, executionContext: executionContext) {
                 case .success(let page):
                     let offset = chapters.count
@@ -691,7 +732,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.next.load") {
             case .success(let response):
                 let state = persistentState(for: source)
-                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: state)
+                let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: state, executionContext: executionContext)
                 switch parseContentPage(
                     source: source,
                     chapter: chapter,

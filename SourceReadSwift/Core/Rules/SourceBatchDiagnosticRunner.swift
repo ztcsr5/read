@@ -135,6 +135,7 @@ struct SourceBatchDiagnosticRunner: Sendable {
                 responseDecodedByteCount: evidence.responseDecodedByteCount,
                 responseContentEncodings: evidence.responseContentEncodings,
                 responseWasDecoded: evidence.responseWasDecoded,
+                javascript: evidence.javascript,
                 retryCount: step.retryCount,
                 failureCode: step.failureCode,
                 retryable: step.retryable

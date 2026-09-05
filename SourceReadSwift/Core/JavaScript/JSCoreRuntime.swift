@@ -46,6 +46,8 @@ final class JSCoreRuntime {
             return .failure(.javascript("Legado bridge prelude failed: \(baseBridgeError)"))
         }
         executionContext.bind(variables)
+        let normalization = LegadoJavaScriptCompatibility.normalize(script)
+        let executableScript = normalization.normalizedScript
         context.exception = nil
         for (key, value) in variables {
             var jsCompatibleValue = value
@@ -177,16 +179,44 @@ final class JSCoreRuntime {
                 context.evaluateScript(injectScript)
             }
         }
-        guard let result = context.evaluateScript(script) else {
+        guard let result = context.evaluateScript(executableScript) else {
             if let exception = context.exception {
-                return .failure(.javascript(exception.toString()))
+                let message = exception.toString()
+                executionContext.recordJavaScript(SourceJavaScriptEvidence(
+                    originalScript: normalization.originalScript,
+                    normalizedScript: executableScript,
+                    features: normalization.features,
+                    exception: message,
+                    succeeded: false
+                ))
+                return .failure(.javascript(message))
             }
+            executionContext.recordJavaScript(SourceJavaScriptEvidence(
+                originalScript: normalization.originalScript,
+                normalizedScript: executableScript,
+                features: normalization.features,
+                succeeded: true
+            ))
             return .success("")
         }
         if let exception = context.exception {
+            let message = exception.toString()
             context.exception = nil
-            return .failure(.javascript(exception.toString()))
+            executionContext.recordJavaScript(SourceJavaScriptEvidence(
+                originalScript: normalization.originalScript,
+                normalizedScript: executableScript,
+                features: normalization.features,
+                exception: message,
+                succeeded: false
+            ))
+            return .failure(.javascript(message))
         }
+        executionContext.recordJavaScript(SourceJavaScriptEvidence(
+            originalScript: normalization.originalScript,
+            normalizedScript: executableScript,
+            features: normalization.features,
+            succeeded: true
+        ))
         synchronizeExecutionContextFromJavaScript()
         return .success(result.toString())
     }
@@ -528,7 +558,12 @@ final class JSCoreRuntime {
         // every root namespace with `typeof` before reusing an existing value.
         if (typeof java === 'undefined' || java === null) java = {};
         // Legado scripts use browser globals even in a bare JavaScriptCore context.
-        if (typeof window === 'undefined' || window === null) window = {};
+        // JavaScriptCore on older iOS versions has no globalThis; use the
+        // current global object while keeping `window` as a writable facade.
+        if (typeof globalThis === 'undefined' || globalThis === null) {
+          globalThis = this;
+        }
+        if (typeof window === 'undefined' || window === null) window = globalThis;
         if (typeof document === 'undefined' || document === null) document = {};
         var __cache_store = (typeof __cache_store !== 'undefined' && __cache_store) || {};
         var __field_store = (typeof __field_store !== 'undefined' && __field_store) || {};
@@ -1183,7 +1218,7 @@ final class JSCoreRuntime {
           var bodyValue = __bridgeBody(value);
           var statusValue = __bridgeStatusCode(code);
           var headerMap = __bridgeHeaders(responseHeaders);
-          return {
+          var response = {
             statusCode: statusValue,
             // `code` and `status` are numeric aliases in Fetch-like sources;
             // `statusCode` remains the callable/legacy-compatible member.
@@ -1215,6 +1250,143 @@ final class JSCoreRuntime {
             length: value.length,
             toString: function() { return value; },
             valueOf: function() { return value; }
+          };
+          // The native bridge is synchronous, but many Android sources use
+          // Promise-style response handling. A response is thenable and the
+          // callback is invoked immediately with the same materialized value.
+          response.then = function(onFulfilled, onRejected) {
+            try {
+              var next = typeof onFulfilled === 'function' ? onFulfilled(response) : response;
+              return __syncPromise(next);
+            } catch (error) {
+              return __syncPromiseRejected(error);
+            }
+          };
+          response.catch = function(onRejected) { return __syncPromise(response).catch(onRejected); };
+          response.finally = function(onFinally) { return __syncPromise(response).finally(onFinally); };
+          return response;
+        }
+        // Minimal synchronous Promise facade. It deliberately does not queue
+        // work: JavaScriptCore callbacks must return before Swift can continue.
+        function __syncPromise(value, rejected) {
+          if (!rejected && value && value.__state && typeof value.then === 'function') return value;
+          var state = rejected ? 'rejected' : 'fulfilled';
+          var promise = {
+            __value: value,
+            __state: state,
+            then: function(onFulfilled, onRejected) {
+              try {
+                if (promise.__state === 'fulfilled') {
+                  return __syncPromise(typeof onFulfilled === 'function' ? onFulfilled(promise.__value) : promise.__value);
+                }
+                if (typeof onRejected === 'function') return __syncPromise(onRejected(promise.__value));
+                return __syncPromiseRejected(promise.__value);
+              } catch (error) { return __syncPromiseRejected(error); }
+            },
+            catch: function(onRejected) { return promise.then(null, onRejected); },
+            finally: function(onFinally) {
+              try {
+                var next = typeof onFinally === 'function' ? onFinally() : null;
+                if (next && typeof next.then === 'function') {
+                  return next.then(function() { return promise; });
+                }
+                return promise;
+              } catch (error) { return __syncPromiseRejected(error); }
+            },
+            valueOf: function() { return promise.__value; },
+            toString: function() { return String(promise.__value == null ? '' : promise.__value); }
+          };
+          return promise;
+        }
+        function __syncPromiseRejected(error) { return __syncPromise(error, true); }
+        // Always prefer the synchronous constructor when the host exposes a
+        // native Promise. Native `then` callbacks are queued on a microtask,
+        // which means a Legado rule would otherwise return a pending Promise
+        // to Swift before its callback has produced the value.
+        function __syncPromiseConstructor(executor) {
+          var settled = false, value, rejected = false;
+          function resolve(next) { if (!settled) { settled = true; value = next; } }
+          function reject(error) { if (!settled) { settled = true; value = error; rejected = true; } }
+          try { if (typeof executor === 'function') executor(resolve, reject); }
+          catch (error) { reject(error); }
+          return __syncPromise(value, rejected);
+        }
+        try { Promise = __syncPromiseConstructor; } catch (_) {
+          if (typeof Promise === 'undefined' || Promise === null) Promise = __syncPromiseConstructor;
+        }
+        if (typeof Promise !== 'undefined' && Promise !== null) {
+          Promise.resolve = function(value) { return __syncPromise(value); };
+          Promise.reject = function(error) { return __syncPromiseRejected(error); };
+          Promise.all = function(values) {
+            var list = values && typeof values.length === 'number' ? values : [], out = [];
+            for (var i = 0; i < list.length; i++) {
+              var item = list[i];
+              if (item && item.__state) {
+                if (item.__state === 'rejected') return __syncPromiseRejected(item.__value);
+                item = item.__value;
+              }
+              out.push(item);
+            }
+            return __syncPromise(out);
+          };
+          Promise.race = function(values) {
+            var list = values && typeof values.length === 'number' ? values : [];
+            return list.length ? __syncPromise(list[0] && list[0].__state ? list[0].__value : list[0]) : __syncPromise([]);
+          };
+        }
+        if (typeof queueMicrotask === 'undefined') queueMicrotask = function(callback) {
+          if (typeof callback === 'function') callback();
+        };
+        if (typeof setTimeout === 'undefined') setTimeout = function(callback, _) {
+          if (typeof callback === 'function') callback();
+          return 0;
+        };
+        if (typeof clearTimeout === 'undefined') clearTimeout = function(_) {};
+        if (typeof URLSearchParams === 'undefined') {
+          URLSearchParams = function(init) {
+            var pairs = [];
+            var input = init || '';
+            if (typeof input === 'object' && typeof input !== 'string') {
+              for (var key in input) if (Object.prototype.hasOwnProperty.call(input, key)) pairs.push([String(key), String(input[key])]);
+            } else {
+              String(input).replace(/^\?/, '').split('&').forEach(function(part) {
+                if (!part) return;
+                var pieces = part.split('='), key = pieces.shift() || '', val = pieces.join('=');
+                try { key = decodeURIComponent(key.replace(/\+/g, ' ')); } catch (_) {}
+                try { val = decodeURIComponent(val.replace(/\+/g, ' ')); } catch (_) {}
+                pairs.push([key, val]);
+              });
+            }
+            this.append = function(key, value) { pairs.push([String(key), String(value)]); };
+            this.set = function(key, value) { this.delete(key); this.append(key, value); };
+            this.get = function(key) { key = String(key); for (var i = 0; i < pairs.length; i++) if (pairs[i][0] === key) return pairs[i][1]; return null; };
+            this.getAll = function(key) { key = String(key); return pairs.filter(function(pair) { return pair[0] === key; }).map(function(pair) { return pair[1]; }); };
+            this.has = function(key) { return this.get(key) !== null; };
+            this.delete = function(key) { key = String(key); pairs = pairs.filter(function(pair) { return pair[0] !== key; }); };
+            this.toString = function() { return pairs.map(function(pair) { return encodeURIComponent(pair[0]) + '=' + encodeURIComponent(pair[1]); }).join('&'); };
+            this.forEach = function(callback) { pairs.forEach(function(pair) { callback(pair[1], pair[0], this); }, this); };
+          };
+        }
+        if (typeof Headers === 'undefined') {
+          Headers = function(init) {
+            var map = {};
+            if (init && typeof init === 'object') for (var key in init) map[String(key).toLowerCase()] = String(init[key]);
+            this.get = function(key) { return map[String(key).toLowerCase()] || null; };
+            this.has = function(key) { return Object.prototype.hasOwnProperty.call(map, String(key).toLowerCase()); };
+            this.set = function(key, value) { map[String(key).toLowerCase()] = String(value); };
+            this.append = this.set;
+            this.delete = function(key) { delete map[String(key).toLowerCase()]; };
+            this.toJSON = function() { return map; };
+          };
+        }
+        if (typeof Response === 'undefined') {
+          Response = function(body, init) {
+            var text = String(body == null ? '' : body), options = init || {};
+            this.status = Number(options.status || 200); this.ok = this.status >= 200 && this.status < 300;
+            this.url = String(options.url || ''); this.headers = new Headers(options.headers || {});
+            this.text = function() { return __syncPromise(text); };
+            this.json = function() { try { return __syncPromise(JSON.parse(text)); } catch (error) { return __syncPromiseRejected(error); } };
+            this.body = function() { return __syncPromise(text); };
           };
         }
         java.put = function(key, value) {

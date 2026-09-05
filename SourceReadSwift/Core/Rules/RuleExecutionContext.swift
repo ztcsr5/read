@@ -14,6 +14,7 @@ final class RuleExecutionContext: @unchecked Sendable {
     private var values: [String: Any] = [:]
     private let persistentState: RulePersistentState
     private var recordedLogs: [String] = []
+    private var javascriptEvidence: [SourceJavaScriptEvidence] = []
 
     var networkHandler: NetworkHandler?
     var responseHandler: ResponseHandler?
@@ -120,6 +121,22 @@ final class RuleExecutionContext: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return recordedLogs
+    }
+
+    /// Keep the latest normalized JavaScript fragments for source diagnostics.
+    /// The scripts themselves are safe to retain here; redaction happens when
+    /// they are copied into an exported diagnostic step.
+    func recordJavaScript(_ evidence: SourceJavaScriptEvidence) {
+        lock.lock()
+        javascriptEvidence.append(evidence)
+        if javascriptEvidence.count > 16 { javascriptEvidence.removeFirst(javascriptEvidence.count - 16) }
+        lock.unlock()
+    }
+
+    func javascriptEvidenceSnapshot() -> [SourceJavaScriptEvidence] {
+        lock.lock()
+        defer { lock.unlock() }
+        return javascriptEvidence
     }
 
     func snapshot() -> [String: Any] {
