@@ -55,7 +55,8 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key)] = String(describing: item.value)
             }
-            let text = ResponseTextDecoder().decode(data: data, headers: headers, preferredCharset: request.expectedCharset)
+            let decodedData = ResponseBodyDecoder().decode(data: data, headers: headers)
+            let text = ResponseTextDecoder().decode(data: decodedData, headers: headers, preferredCharset: request.expectedCharset)
             // Foundation does not reliably parse a combined Set-Cookie field
             // when Expires contains a comma. Parse each cookie value first,
             // then persist the complete response set for the next stage.
@@ -68,7 +69,7 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
                 statusCode: http.statusCode,
                 headers: headers,
                 body: text,
-                data: data
+                data: decodedData
             ))
         } catch {
             return .failure(.network(error.localizedDescription))

@@ -99,8 +99,9 @@ struct SynchronousSourceLoader {
             let merged = CookieHeaderParser.merge(setCookie, into: previous)
             if !merged.isEmpty { persistentState.put(merged, for: "cookieHeader") }
         }
-        let body = ResponseTextDecoder().decode(data: result.data, headers: result.headers, preferredCharset: request.expectedCharset)
-        return SourceResponse(url: responseURL, statusCode: result.statusCode, headers: result.headers, body: body, data: result.data)
+        let decodedData = ResponseBodyDecoder().decode(data: result.data, headers: result.headers)
+        let body = ResponseTextDecoder().decode(data: decodedData, headers: result.headers, preferredCharset: request.expectedCharset)
+        return SourceResponse(url: responseURL, statusCode: result.statusCode, headers: result.headers, body: body, data: decodedData)
     }
 }
 
