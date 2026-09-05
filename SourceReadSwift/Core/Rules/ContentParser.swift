@@ -21,7 +21,10 @@ struct ContentParser {
             statusCode: response.statusCode,
             headers: response.headers,
             body: body,
-            data: response.data
+            data: response.data,
+            encodedByteCount: response.encodedByteCount,
+            bodyWasDecoded: response.bodyWasDecoded,
+            contentEncodings: response.contentEncodings
         )
         if ResponseFormatDetector.prefersJSON(body: body, headers: response.headers) {
             return parseJSON(source: source, chapter: chapter, response: normalizedResponse, globalPurifyRules: globalPurifyRules)

@@ -67,6 +67,10 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
     let responseHeaders: [String: String]?
     let cookieSummary: String?
     let finalURL: String?
+    let responseEncodedByteCount: Int?
+    let responseDecodedByteCount: Int?
+    let responseContentEncodings: [String]?
+    let responseWasDecoded: Bool
     let retryCount: Int
     let failureCode: SourceDiagnosticFailureKind?
     let retryable: Bool
@@ -75,7 +79,9 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         case id, stage, status, requestSummary, responseSummary, matchCount,
              elapsedMilliseconds, failureClassification, requestMethod,
              requestBody, requestHeaders, responseStatusCode, responseHeaders,
-             cookieSummary, finalURL, retryCount, failureCode, retryable
+             cookieSummary, finalURL, responseEncodedByteCount,
+             responseDecodedByteCount, responseContentEncodings, responseWasDecoded,
+             retryCount, failureCode, retryable
     }
 
     init(
@@ -94,6 +100,10 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         responseHeaders: [String: String]? = nil,
         cookieSummary: String? = nil,
         finalURL: String? = nil,
+        responseEncodedByteCount: Int? = nil,
+        responseDecodedByteCount: Int? = nil,
+        responseContentEncodings: [String]? = nil,
+        responseWasDecoded: Bool = false,
         retryCount: Int = 0,
         failureCode: SourceDiagnosticFailureKind? = nil,
         retryable: Bool? = nil
@@ -113,6 +123,10 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         self.responseHeaders = responseHeaders.map(SourceDiagnosticRedactor.headers)
         self.cookieSummary = cookieSummary.map(SourceDiagnosticRedactor.value)
         self.finalURL = finalURL
+        self.responseEncodedByteCount = responseEncodedByteCount
+        self.responseDecodedByteCount = responseDecodedByteCount
+        self.responseContentEncodings = responseContentEncodings
+        self.responseWasDecoded = responseWasDecoded
         self.retryCount = max(0, retryCount)
         self.failureCode = failureCode
         self.retryable = retryable ?? failureCode?.isRetryable ?? false
@@ -136,6 +150,10 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
             responseHeaders: try container.decodeIfPresent([String: String].self, forKey: .responseHeaders),
             cookieSummary: try container.decodeIfPresent(String.self, forKey: .cookieSummary),
             finalURL: try container.decodeIfPresent(String.self, forKey: .finalURL),
+            responseEncodedByteCount: try container.decodeIfPresent(Int.self, forKey: .responseEncodedByteCount),
+            responseDecodedByteCount: try container.decodeIfPresent(Int.self, forKey: .responseDecodedByteCount),
+            responseContentEncodings: try container.decodeIfPresent([String].self, forKey: .responseContentEncodings),
+            responseWasDecoded: try container.decodeIfPresent(Bool.self, forKey: .responseWasDecoded) ?? false,
             retryCount: try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0,
             failureCode: try container.decodeIfPresent(SourceDiagnosticFailureKind.self, forKey: .failureCode),
             retryable: try container.decodeIfPresent(Bool.self, forKey: .retryable)
@@ -332,6 +350,12 @@ struct SourceDiagnosticBatchReport: Identifiable, Codable, Hashable, Sendable {
                 }
                 if let body = step.requestBody, !body.isEmpty { lines.append("    body: \(body)") }
                 if let message = step.responseSummary, !message.isEmpty { lines.append("    response: \(message)") }
+                if let encodings = step.responseContentEncodings, !encodings.isEmpty {
+                    let encoded = step.responseEncodedByteCount.map(String.init) ?? "?"
+                    let decoded = step.responseDecodedByteCount.map(String.init) ?? "?"
+                    let mode = step.responseWasDecoded ? "decoded" : "raw"
+                    lines.append("    transport: \(encodings.joined(separator: ",")) · \(mode) · bytes \(encoded)→\(decoded)")
+                }
             }
         }
         return lines.joined(separator: "\n")

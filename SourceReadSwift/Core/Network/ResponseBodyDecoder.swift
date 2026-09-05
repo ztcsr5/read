@@ -7,7 +7,17 @@ import Foundation
 /// therefore conservative: a failed or unsupported transform returns the
 /// original bytes instead of exposing a partial payload to the rule engine.
 struct ResponseBodyDecoder: Sendable {
+    struct DecodeResult: Sendable {
+        let data: Data
+        let encodings: [String]
+        let wasDecoded: Bool
+    }
+
     func decode(data: Data, headers: [String: String]) -> Data {
+        decodeResult(data: data, headers: headers).data
+    }
+
+    func decodeResult(data: Data, headers: [String: String]) -> DecodeResult {
         let value = headers.first { key, _ in
             key.caseInsensitiveCompare("Content-Encoding") == .orderedSame
         }?.value ?? ""
@@ -15,7 +25,9 @@ struct ResponseBodyDecoder: Sendable {
             .split(separator: ",", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
-        guard !encodings.isEmpty else { return data }
+        guard !encodings.isEmpty else {
+            return DecodeResult(data: data, encodings: [], wasDecoded: false)
+        }
 
         // Content codings are applied left-to-right and removed in reverse.
         // Decode transactionally so an unsupported outer layer never leaks a
@@ -23,11 +35,11 @@ struct ResponseBodyDecoder: Sendable {
         var candidate = data
         for encoding in encodings.reversed() {
             guard let decoded = decodeOne(candidate, encoding: encoding) else {
-                return data
+                return DecodeResult(data: data, encodings: encodings, wasDecoded: false)
             }
             candidate = decoded
         }
-        return candidate
+        return DecodeResult(data: candidate, encodings: encodings, wasDecoded: candidate != data)
     }
 
     /// Applies transport decoding to an already materialized response.  This
@@ -37,8 +49,26 @@ struct ResponseBodyDecoder: Sendable {
     /// to normalize (for example a text-only test double).
     func normalize(_ response: SourceResponse, preferredCharset: String? = nil) -> SourceResponse {
         guard !response.data.isEmpty else { return response }
-        let decodedData = decode(data: response.data, headers: response.headers)
-        guard decodedData != response.data else { return response }
+        let decoded = decodeResult(data: response.data, headers: response.headers)
+        let decodedData = decoded.data
+        guard decoded.wasDecoded else {
+            // Keep the observed coding list even when the payload is already
+            // inflated by an intermediary or the coding is unsupported. This
+            // gives diagnostics enough transport evidence to distinguish a
+            // raw response from a successfully decoded one without exposing a
+            // partial transform to source rules.
+            guard !decoded.encodings.isEmpty else { return response }
+            return SourceResponse(
+                url: response.url,
+                statusCode: response.statusCode,
+                headers: response.headers,
+                body: response.body,
+                data: response.data,
+                encodedByteCount: response.encodedByteCount ?? response.data.count,
+                bodyWasDecoded: response.bodyWasDecoded,
+                contentEncodings: decoded.encodings
+            )
+        }
         let body = ResponseTextDecoder().decode(
             data: decodedData,
             headers: response.headers,
@@ -49,7 +79,10 @@ struct ResponseBodyDecoder: Sendable {
             statusCode: response.statusCode,
             headers: response.headers,
             body: body,
-            data: decodedData
+            data: decodedData,
+            encodedByteCount: response.encodedByteCount ?? response.data.count,
+            bodyWasDecoded: true,
+            contentEncodings: decoded.encodings
         )
     }
 

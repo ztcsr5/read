@@ -21,6 +21,33 @@ struct SourceResponse: Sendable {
     let headers: [String: String]
     let body: String
     let data: Data
+    /// Byte count before transport decoding when the adapter supplied a
+    /// compressed payload.  Plain text-only fixtures leave this nil.
+    let encodedByteCount: Int?
+    /// True when `data`/`body` were produced by decoding Content-Encoding.
+    let bodyWasDecoded: Bool
+    /// Normalized Content-Encoding tokens observed on the response.
+    let contentEncodings: [String]
+
+    init(
+        url: URL,
+        statusCode: Int,
+        headers: [String: String],
+        body: String,
+        data: Data,
+        encodedByteCount: Int? = nil,
+        bodyWasDecoded: Bool = false,
+        contentEncodings: [String] = []
+    ) {
+        self.url = url
+        self.statusCode = statusCode
+        self.headers = headers
+        self.body = body
+        self.data = data
+        self.encodedByteCount = encodedByteCount
+        self.bodyWasDecoded = bodyWasDecoded
+        self.contentEncodings = contentEncodings
+    }
 }
 
 protocol SourceNetworkClient: Sendable {
@@ -55,7 +82,8 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key)] = String(describing: item.value)
             }
-            let decodedData = ResponseBodyDecoder().decode(data: data, headers: headers)
+            let decoded = ResponseBodyDecoder().decodeResult(data: data, headers: headers)
+            let decodedData = decoded.data
             let text = ResponseTextDecoder().decode(data: decodedData, headers: headers, preferredCharset: request.expectedCharset)
             // Foundation does not reliably parse a combined Set-Cookie field
             // when Expires contains a comma. Parse each cookie value first,
@@ -69,7 +97,10 @@ final class URLSessionSourceNetworkClient: SourceNetworkClient, @unchecked Senda
                 statusCode: http.statusCode,
                 headers: headers,
                 body: text,
-                data: decodedData
+                data: decodedData,
+                encodedByteCount: decoded.wasDecoded ? data.count : nil,
+                bodyWasDecoded: decoded.wasDecoded,
+                contentEncodings: decoded.encodings
             ))
         } catch {
             return .failure(.network(error.localizedDescription))

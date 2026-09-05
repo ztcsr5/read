@@ -549,7 +549,16 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             if !candidate.isEmpty { output = value }
         }
         guard output != response.body else { return response }
-        return SourceResponse(url: response.url, statusCode: response.statusCode, headers: response.headers, body: output, data: Data(output.utf8))
+        return SourceResponse(
+            url: response.url,
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: output,
+            data: Data(output.utf8),
+            encodedByteCount: response.encodedByteCount,
+            bodyWasDecoded: response.bodyWasDecoded,
+            contentEncodings: response.contentEncodings
+        )
     }
 
     private func parseContentPage(

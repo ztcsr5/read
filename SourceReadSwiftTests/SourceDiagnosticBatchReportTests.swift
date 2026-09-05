@@ -63,4 +63,28 @@ final class SourceDiagnosticBatchReportTests: XCTestCase {
         XCTAssertNil(step.requestMethod)
         XCTAssertEqual(step.retryCount, 0)
     }
+
+    func testExportIncludesTransportDecodingEvidence() {
+        let report = SourceDiagnosticBatchReport(
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            finishedAt: Date(timeIntervalSince1970: 1_001),
+            keyword: "book",
+            reports: [SourceDiagnosticReport(
+                sourceName: "Compressed fixture",
+                sourceURL: "https://fixture.example",
+                keyword: "book",
+                steps: [SourceDiagnosticStep(
+                    stage: .search,
+                    status: .passed,
+                    responseContentEncodings: ["gzip"],
+                    responseEncodedByteCount: 94,
+                    responseDecodedByteCount: 480,
+                    responseWasDecoded: true
+                )]
+            )]
+        )
+
+        let text = report.exportText()
+        XCTAssertTrue(text.contains("transport: gzip · decoded · bytes 94→480"))
+    }
 }

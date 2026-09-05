@@ -13,6 +13,15 @@ final class ResponseBodyDecoderTests: XCTestCase {
         XCTAssertEqual(decoder.decode(data: Data(gzip), headers: ["content-encoding": "gzip"]), expected)
     }
 
+    func testDecodeResultExposesTransportMetadata() {
+        let decoder = ResponseBodyDecoder()
+        let result = decoder.decodeResult(data: Data(gzip), headers: ["Content-Encoding": "gzip"])
+
+        XCTAssertEqual(result.data, Data("hello legado".utf8))
+        XCTAssertEqual(result.encodings, ["gzip"])
+        XCTAssertTrue(result.wasDecoded)
+    }
+
     func testPreservesUnsupportedOrAlreadyDecodedPayload() {
         let decoder = ResponseBodyDecoder()
         let plain = Data("already decoded".utf8)
@@ -34,6 +43,27 @@ final class ResponseBodyDecoderTests: XCTestCase {
         XCTAssertEqual(normalized.body, "hello legado")
         XCTAssertEqual(normalized.data, Data("hello legado".utf8))
         XCTAssertEqual(normalized.headers["Content-Encoding"], "gzip")
+        XCTAssertEqual(normalized.encodedByteCount, gzip.count)
+        XCTAssertEqual(normalized.contentEncodings, ["gzip"])
+        XCTAssertTrue(normalized.bodyWasDecoded)
+    }
+
+    func testNormalizeRetainsUnsupportedTransportMetadataWithoutPartialDecode() {
+        let payload = Data("already decoded".utf8)
+        let response = SourceResponse(
+            url: URL(string: "https://fixture.example/unsupported")!,
+            statusCode: 200,
+            headers: ["Content-Encoding": "br"],
+            body: "already decoded",
+            data: payload
+        )
+
+        let normalized = ResponseBodyDecoder().normalize(response)
+        XCTAssertEqual(normalized.body, response.body)
+        XCTAssertEqual(normalized.data, payload)
+        XCTAssertEqual(normalized.encodedByteCount, payload.count)
+        XCTAssertEqual(normalized.contentEncodings, ["br"])
+        XCTAssertFalse(normalized.bodyWasDecoded)
     }
 
     func testDecodesStackedContentCodingsInReverseOrder() {

@@ -63,6 +63,16 @@ final class SourceEngineCompressedFixtureTests: XCTestCase {
         XCTAssertEqual(execution.result.searchBooks.first?.name, "Compressed Book")
         XCTAssertEqual(execution.result.chapters.first?.title, "Chapter 1")
         XCTAssertEqual(execution.result.content?.paragraphs, ["Compressed content"])
+
+        let searchEvidence = try XCTUnwrap(engine.diagnosticEvidence(sourceURL: source.bookSourceUrl, stage: .search))
+        XCTAssertEqual(searchEvidence.responseContentEncodings, ["gzip"])
+        XCTAssertTrue(searchEvidence.responseWasDecoded)
+        XCTAssertEqual(searchEvidence.responseEncodedByteCount, 94)
+        XCTAssertGreaterThan(searchEvidence.responseDecodedByteCount, searchEvidence.responseEncodedByteCount ?? 0)
+
+        let tocEvidence = try XCTUnwrap(engine.diagnosticEvidence(sourceURL: source.bookSourceUrl, stage: .toc))
+        XCTAssertEqual(tocEvidence.responseContentEncodings, ["deflate"])
+        XCTAssertTrue(tocEvidence.responseWasDecoded)
     }
 }
 

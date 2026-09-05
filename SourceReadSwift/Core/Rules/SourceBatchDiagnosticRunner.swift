@@ -131,6 +131,10 @@ struct SourceBatchDiagnosticRunner: Sendable {
                 responseHeaders: evidence.responseHeaders,
                 cookieSummary: evidence.cookieSummary,
                 finalURL: evidence.finalURL,
+                responseEncodedByteCount: evidence.responseEncodedByteCount,
+                responseDecodedByteCount: evidence.responseDecodedByteCount,
+                responseContentEncodings: evidence.responseContentEncodings,
+                responseWasDecoded: evidence.responseWasDecoded,
                 retryCount: step.retryCount,
                 failureCode: step.failureCode,
                 retryable: step.retryable

@@ -12,7 +12,16 @@ struct SearchResultParser {
 
     func parse(source: BookSource, response: SourceResponse) -> Result<[SearchBook], SourceEngineError> {
         let normalized = ResponseFormatDetector.normalizedBody(response.body)
-        let normalizedResponse = SourceResponse(url: response.url, statusCode: response.statusCode, headers: response.headers, body: normalized, data: response.data)
+        let normalizedResponse = SourceResponse(
+            url: response.url,
+            statusCode: response.statusCode,
+            headers: response.headers,
+            body: normalized,
+            data: response.data,
+            encodedByteCount: response.encodedByteCount,
+            bodyWasDecoded: response.bodyWasDecoded,
+            contentEncodings: response.contentEncodings
+        )
         if ResponseFormatDetector.prefersJSON(body: normalized, headers: response.headers) {
             return parseJSON(source: source, response: normalizedResponse)
         }

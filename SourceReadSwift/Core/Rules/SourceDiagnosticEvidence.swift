@@ -12,6 +12,10 @@ struct SourceDiagnosticEvidence: Sendable {
     let responseHeaders: [String: String]
     let cookieSummary: String?
     let finalURL: String
+    let responseEncodedByteCount: Int?
+    let responseDecodedByteCount: Int
+    let responseContentEncodings: [String]
+    let responseWasDecoded: Bool
 
     init(
         request: SourceRequest,
@@ -28,6 +32,10 @@ struct SourceDiagnosticEvidence: Sendable {
             key.caseInsensitiveCompare("Set-Cookie") == .orderedSame
         }?.value
         self.finalURL = response.url.absoluteString
+        self.responseEncodedByteCount = response.encodedByteCount
+        self.responseDecodedByteCount = response.data.count
+        self.responseContentEncodings = response.contentEncodings
+        self.responseWasDecoded = response.bodyWasDecoded
     }
 }
 
