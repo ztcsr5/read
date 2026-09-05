@@ -78,10 +78,8 @@ struct SourceRequestBuilder {
             options: sourceOptions.timeout
         )
         let method: SourceHTTPMethod = {
-            if directive.method == .post { return .post }
-            if directive.method == .head { return .head }
-            if sourceOptions.method == .post { return .post }
-            if sourceOptions.method == .head { return .head }
+            if directive.method != .get { return directive.method }
+            if let configured = sourceOptions.method, configured != .get { return configured }
             if body != nil { return .post }
             return .get
         }()
@@ -193,10 +191,8 @@ struct SourceRequestBuilder {
         func apply(_ object: [String: Any]) {
             for key in ["method", "httpMethod", "type"] {
                 guard let methodText = object[key] as? String else { continue }
-                switch methodText.uppercased() {
-                case "POST": method = .post
-                case "HEAD": method = .head
-                default: break
+                if let parsedMethod = SourceHTTPMethod(rawValue: methodText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) {
+                    method = parsedMethod
                 }
             }
             if let nested = object["headers"] as? [String: Any] {
@@ -226,7 +222,7 @@ struct SourceRequestBuilder {
                    persistentValues: persistentValues
                ) {
                 body = encoded
-                method = .post
+                if method == nil || method == .get { method = .post }
             }
             if timeout == nil,
                let rawTimeout = firstValue(in: object, keys: ["timeout", "timeoutMs", "connectTimeout"]),

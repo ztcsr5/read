@@ -53,16 +53,13 @@ struct SourceURLDirectiveParser {
             for key in ["headers", "header", "bookSourceHeader"] {
                 headers.merge(parseHeadersOption(options[key]), uniquingKeysWith: { _, new in new })
             }
-            if let methodText = firstString(in: options, keys: ["method", "httpMethod", "type"]) {
-                switch methodText.uppercased() {
-                case "POST": method = .post
-                case "HEAD": method = .head
-                default: break
-                }
+            if let methodText = firstString(in: options, keys: ["method", "httpMethod", "type"]),
+               let parsedMethod = SourceHTTPMethod(rawValue: methodText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) {
+                method = parsedMethod
             }
             if let bodyOption = firstValue(in: options, keys: ["body", "requestBody", "postBody", "data"]) {
                 body = encodeBodyOption(bodyOption, headers: headers)
-                method = .post
+                if method == .get { method = .post }
             }
             expectedCharset = firstString(in: options, keys: ["charset", "encoding", "encode"])?
                 .trimmingCharacters(in: .whitespacesAndNewlines)

@@ -659,15 +659,23 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         var seenURLs: Set<String> = [firstURL.absoluteString]
         var pagesLoaded = 1
         let maxPages = 30
+        var stopReason: String?
 
-        while let currentNext = nextURLText, pagesLoaded < maxPages {
+        while let currentNext = nextURLText {
+            if pagesLoaded >= maxPages {
+                stopReason = "max-pages"
+                break
+            }
             let request = requestBuilder.buildPageRequest(
                 source: source,
                 urlText: currentNext,
                 persistentValues: persistentState(for: source).snapshot()
             )
             let absolute = request.url.absoluteString
-            guard !seenURLs.contains(absolute) else { break }
+            guard !seenURLs.contains(absolute) else {
+                stopReason = "duplicate-url"
+                break
+            }
             seenURLs.insert(absolute)
 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.next.load") {
@@ -698,6 +706,21 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             }
         }
 
+        if let stopReason {
+            await diagnostics.emit(.init(
+                level: .info,
+                stage: "toc.pagination.stop",
+                sourceName: source.bookSourceName,
+                message: "目录分页停止",
+                details: [
+                    "reason": stopReason,
+                    "url": nextURLText ?? firstURL.absoluteString,
+                    "pagesLoaded": String(pagesLoaded),
+                    "maxPages": String(maxPages)
+                ]
+            ))
+        }
+
         return chapters.isEmpty ? .failure(.empty("Chapter list is empty")) : .success(chapters)
     }
 
@@ -715,8 +738,14 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         var finalNextURL = nextURLText
         var pagesLoaded = 1
         let maxPages = 8
+        var stopReason: String?
 
-        while let currentNext = nextURLText, pagesLoaded < maxPages {
+        while let currentNext = nextURLText {
+            if pagesLoaded >= maxPages {
+                stopReason = "max-pages"
+                finalNextURL = nil
+                break
+            }
             let request = requestBuilder.buildPageRequest(
                 source: source,
                 urlText: currentNext,
@@ -724,6 +753,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             )
             let absolute = request.url.absoluteString
             guard !seenURLs.contains(absolute) else {
+                stopReason = "duplicate-url"
                 finalNextURL = nil
                 break
             }
@@ -755,6 +785,21 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
                 nextURLText = nil
                 finalNextURL = currentNext
             }
+        }
+
+        if let stopReason {
+            await diagnostics.emit(.init(
+                level: .info,
+                stage: "content.pagination.stop",
+                sourceName: source.bookSourceName,
+                message: "正文分页停止",
+                details: [
+                    "reason": stopReason,
+                    "url": nextURLText ?? firstURL.absoluteString,
+                    "pagesLoaded": String(pagesLoaded),
+                    "maxPages": String(maxPages)
+                ]
+            ))
         }
 
         return .success(ChapterContent(

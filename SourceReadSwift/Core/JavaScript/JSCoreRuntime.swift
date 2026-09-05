@@ -413,17 +413,21 @@ final class JSCoreRuntime {
         }
         let ajaxHandler = self.ajaxHandler
         weak var weakSelf = self
+        let responseMetadata: (SourceResponse) -> NSDictionary = { response in
+            [
+                "body": response.body,
+                "url": response.url.absoluteString,
+                "statusCode": response.statusCode,
+                "headers": response.headers,
+                "bytes": response.data.map { NSNumber(value: $0) }
+            ] as NSDictionary
+        }
         let ajaxResponse: @convention(block) (String, String) -> NSDictionary = { url, headers in
             guard let runtime = weakSelf else { return [:] }
             let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
             if let response = runtime.executionContext.responseHandler?(requestText) {
                 runtime.executionContext.ingestResponse(response)
-                return [
-                    "body": response.body,
-                    "url": response.url.absoluteString,
-                    "statusCode": response.statusCode,
-                    "headers": response.headers
-                ] as NSDictionary
+                return responseMetadata(response)
             }
             let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
             return ["body": body, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
@@ -433,7 +437,10 @@ final class JSCoreRuntime {
             let requestText = runtime.requestText(url: url, body: nil, headers: headers, includeStoredBody: false)
             if let response = runtime.executionContext.responseHandler?(requestText) {
                 runtime.executionContext.ingestResponse(response)
-                return response.data.map { NSNumber(value: $0) } as NSArray
+                if !response.data.isEmpty {
+                    return response.data.map { NSNumber(value: $0) } as NSArray
+                }
+                return Array(response.body.utf8).map { NSNumber(value: $0) } as NSArray
             }
             let body = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
             return Array(body.utf8).map { NSNumber(value: $0) } as NSArray
@@ -455,12 +462,23 @@ final class JSCoreRuntime {
             let requestText = runtime.requestText(url: url, body: body, headers: headers, includeStoredBody: true)
             if let response = runtime.executionContext.responseHandler?(requestText) {
                 runtime.executionContext.ingestResponse(response)
-                return [
-                    "body": response.body,
-                    "url": response.url.absoluteString,
-                    "statusCode": response.statusCode,
-                    "headers": response.headers
-                ] as NSDictionary
+                return responseMetadata(response)
+            }
+            let value = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
+            return ["body": value, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
+        }
+        let requestResponse: @convention(block) (String, String, String, String) -> NSDictionary = { url, body, headers, method in
+            guard let runtime = weakSelf else { return [:] }
+            let requestText = runtime.requestText(
+                url: url,
+                body: body,
+                headers: headers,
+                includeStoredBody: true,
+                method: method
+            )
+            if let response = runtime.executionContext.responseHandler?(requestText) {
+                runtime.executionContext.ingestResponse(response)
+                return responseMetadata(response)
             }
             let value = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
             return ["body": value, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
@@ -540,6 +558,7 @@ final class JSCoreRuntime {
         context.setObject(ajaxBytes, forKeyedSubscript: "__native_ajaxBytes" as NSString)
         context.setObject(post, forKeyedSubscript: "__native_post" as NSString)
         context.setObject(postResponse, forKeyedSubscript: "__native_postResponse" as NSString)
+        context.setObject(requestResponse, forKeyedSubscript: "__native_requestResponse" as NSString)
         context.setObject(put, forKeyedSubscript: "__native_put" as NSString)
         context.setObject(getStore, forKeyedSubscript: "__native_getStore" as NSString)
         context.setObject(removeElements, forKeyedSubscript: "__native_removeElements" as NSString)
@@ -1147,11 +1166,14 @@ final class JSCoreRuntime {
         // `response.statusCode()`/`response.code` forms.  A callable Number
         // object keeps both spellings coercible in concatenation/JSON while
         // still allowing invocation.
-        function __bridgeBody(value) {
+        function __bridgeBody(value, rawBytes) {
           var body = new String(value == null ? '' : String(value));
+          var byteSnapshot = rawBytes && rawBytes.length ? __javaBytes(rawBytes) : null;
           body.string = function() { return String(body); };
           body.text = body.string;
-          body.bytes = function() { return __asJavaList(__native_stringToBytes(String(body))); };
+          body.bytes = function() {
+            return __asJavaList(byteSnapshot ? byteSnapshot.slice() : __native_stringToBytes(String(body)));
+          };
           body.byteArray = body.bytes;
           body.length = String(body).length;
           body.json = function() {
@@ -1215,7 +1237,7 @@ final class JSCoreRuntime {
           var finalUrl = meta.url !== undefined ? String(meta.url || responseUrl || '') : String(responseUrl || '');
           var code = meta.statusCode !== undefined ? Number(meta.statusCode) : 200;
           var responseHeaders = meta.headers || {};
-          var bodyValue = __bridgeBody(value);
+          var bodyValue = __bridgeBody(value, meta.bytes);
           var statusValue = __bridgeStatusCode(code);
           var headerMap = __bridgeHeaders(responseHeaders);
           var response = {
@@ -1414,16 +1436,14 @@ final class JSCoreRuntime {
         };
         java.fetch = function(url, options) {
           options = options || {};
+          var target = String(url || '');
           var method = String(options.method || 'GET').toUpperCase();
-          if (method === 'POST' || options.body != null) {
-            // Preserve Fetch/Legado request options in the directive text so the
-            // native request parser and diagnostics can observe method/body/headers.
-            var requestOptions = { method: method, body: options.body == null ? '' : options.body, headers: options.headers || {} };
-            var target = String(url || '') + ',' + JSON.stringify(requestOptions) + '@Body:' + String(requestOptions.body || '');
-            return __bridgeResponse('', String(url || ''), __native_ajaxResponse(target, ''));
+          var body = options.body == null ? '' : __bridgeString(options.body);
+          var headers = __bridgeString(options.headers || {});
+          if (method !== 'GET' || body) {
+            return __bridgeResponse('', target, __native_requestResponse(target, body, headers, method));
           }
-          var target = String(url);
-          return __bridgeResponse('', target, __native_ajaxResponse(target, __bridgeString(options.headers || options)));
+          return __bridgeResponse('', target, __native_ajaxResponse(target, headers));
         };
         java.post = function(url, body, headers) {
           var target = String(url);
@@ -1490,8 +1510,8 @@ final class JSCoreRuntime {
             var headerText = __bridgeString(config.headers);
             var outgoingBody = config.body || '';
             if (!outgoingBody && config.output && typeof config.output.toByteArray === 'function') outgoingBody = String(__native_bytesToString(__javaBytes(config.output.toByteArray())) || '');
-            if (config.method === 'POST' || config.method === 'PUT' || config.method === 'PATCH' || config.doOutput || outgoingBody) {
-              config.response = __bridgeResponse('', target, __native_postResponse(target, outgoingBody, headerText));
+            if (config.method === 'POST' || config.method === 'PUT' || config.method === 'PATCH' || config.method === 'DELETE' || config.method === 'OPTIONS' || config.doOutput || outgoingBody) {
+              config.response = __bridgeResponse('', target, __native_requestResponse(target, outgoingBody, headerText, config.method));
             } else {
               config.response = __bridgeResponse('', target, __native_ajaxResponse(target, headerText));
             }
@@ -1532,12 +1552,12 @@ final class JSCoreRuntime {
                 var part = encodeURIComponent(String(key)) + '=' + encodeURIComponent(String(value));
                 config.body = config.body ? config.body + '&' + part : part;
               }
-              config.method = 'POST'; config.response = null;
+              if (config.method === 'GET') config.method = 'POST'; config.response = null;
               return api;
             },
             requestBody: function(value) {
               config.body = String(value || '');
-              config.method = 'POST'; config.response = null;
+              if (config.method === 'GET') config.method = 'POST'; config.response = null;
               return api;
             },
             timeout: function(value) { config.connectTimeout = config.readTimeout = Number(value || 0); return api; },
@@ -1545,7 +1565,7 @@ final class JSCoreRuntime {
             setReadTimeout: function(value) { config.readTimeout = Number(value || 0); return api; },
             getConnectTimeout: function() { return config.connectTimeout; },
             getReadTimeout: function() { return config.readTimeout; },
-            setDoOutput: function(value) { config.doOutput = !!value; if (config.doOutput) config.method = 'POST'; config.response = null; return api; },
+            setDoOutput: function(value) { config.doOutput = !!value; if (config.doOutput && config.method === 'GET') config.method = 'POST'; config.response = null; return api; },
             getDoOutput: function() { return config.doOutput; },
             setRequestMethod: function(value) { config.method = String(value || 'GET').toUpperCase(); config.response = null; return api; },
             getRequestMethod: function() { return config.method; },
@@ -1561,9 +1581,28 @@ final class JSCoreRuntime {
             get: function() {
               config.method = 'GET'; return response();
             },
+            head: function() {
+              config.method = 'HEAD'; return response();
+            },
             post: function(body) {
               if (arguments.length > 0) config.body = __bridgeString(body);
               config.method = 'POST'; return response();
+            },
+            put: function(body) {
+              if (arguments.length > 0) config.body = __bridgeString(body);
+              config.method = 'PUT'; return response();
+            },
+            patch: function(body) {
+              if (arguments.length > 0) config.body = __bridgeString(body);
+              config.method = 'PATCH'; return response();
+            },
+            delete: function(body) {
+              if (arguments.length > 0) config.body = __bridgeString(body);
+              config.method = 'DELETE'; return response();
+            },
+            options: function(body) {
+              if (arguments.length > 0) config.body = __bridgeString(body);
+              config.method = 'OPTIONS'; return response();
             },
             body: function() {
               return response().body();
@@ -3147,9 +3186,21 @@ final class JSCoreRuntime {
         }
     }
 
-    private func requestText(url: String, body: String?, headers explicitHeaders: String, includeStoredBody: Bool) -> String {
+    private func requestText(
+        url: String,
+        body: String?,
+        headers explicitHeaders: String,
+        includeStoredBody: Bool,
+        method: String? = nil
+    ) -> String {
         var output = url
         let headers = mergedHeaders(explicitHeaders)
+        let normalizedMethod = method?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if let normalizedMethod,
+           !normalizedMethod.isEmpty,
+           normalizedMethod != "GET" {
+            output = applyingMethodOverride(normalizedMethod, to: output)
+        }
         if !headers.isEmpty, !output.localizedCaseInsensitiveContains("@Header:") {
             output += "@Header:\(jsonString(headers))"
         }
@@ -3159,6 +3210,28 @@ final class JSCoreRuntime {
             output += "@Body:\(bodyText)"
         }
         return output
+    }
+
+    /// Preserve a caller-supplied method when the URL already contains a
+    /// Legado JSON options object. Appending a second options block would make
+    /// the directive parser treat the URL as a literal suffix.
+    private func applyingMethodOverride(_ method: String, to text: String) -> String {
+        guard let comma = text.firstIndex(of: ",") else {
+            return text + ",{\"method\":\"\(method)\"}"
+        }
+        let url = String(text[..<comma])
+        let suffix = String(text[text.index(after: comma)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard suffix.hasPrefix("{"),
+              let data = suffix.data(using: .utf8),
+              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return text
+        }
+        object["method"] = method
+        guard let encoded = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let json = String(data: encoded, encoding: .utf8) else {
+            return text
+        }
+        return url + "," + json
     }
 
     private func mergedHeaders(_ explicitHeaders: String) -> [String: String] {
