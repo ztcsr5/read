@@ -8,12 +8,14 @@ import XCTest
 /// instead of waiting on a real event loop.
 final class LegadoJavaScriptCompatibilityTests: XCTestCase {
     func testNormalizationStripsAwaitAndAsyncOutsideLiterals() {
-        let source = #"""// await in a comment
+        let source = #"""
+            // await in a comment
             var text = "await async Promise";
             var pattern = /await\s+async/;
             async function load(value) { return await Promise.resolve(value); }
             var arrow = async (value) => await Promise.resolve(value);
-            load(text)"""#
+            load(text)
+            """#
 
         let normalized = LegadoJavaScriptCompatibility.normalize(source)
 
