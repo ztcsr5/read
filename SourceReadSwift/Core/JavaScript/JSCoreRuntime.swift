@@ -1539,7 +1539,7 @@ final class JSCoreRuntime {
             var headerText = __bridgeString(config.headers);
             var outgoingBody = config.body || '';
             if (!outgoingBody && config.output && typeof config.output.toByteArray === 'function') outgoingBody = String(__native_bytesToString(__javaBytes(config.output.toByteArray())) || '');
-            if (config.method === 'POST' || config.method === 'PUT' || config.method === 'PATCH' || config.method === 'DELETE' || config.method === 'OPTIONS' || config.doOutput || outgoingBody) {
+            if (config.method === 'POST' || config.method === 'PUT' || config.method === 'PATCH' || config.method === 'DELETE' || config.method === 'HEAD' || config.method === 'OPTIONS' || config.doOutput || outgoingBody) {
               config.response = __bridgeResponse('', target, __native_requestResponse(target, outgoingBody, headerText, config.method, false));
             } else {
               config.response = __bridgeResponse('', target, __native_ajaxResponse(target, headerText));
