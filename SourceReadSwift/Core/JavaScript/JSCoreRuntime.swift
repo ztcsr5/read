@@ -181,7 +181,7 @@ final class JSCoreRuntime {
         }
         guard let result = context.evaluateScript(executableScript) else {
             if let exception = context.exception {
-                let message = exception.toString()
+                let message = exception.toString() ?? "JavaScript exception"
                 executionContext.recordJavaScript(SourceJavaScriptEvidence(
                     originalScript: normalization.originalScript,
                     normalizedScript: executableScript,
@@ -200,7 +200,7 @@ final class JSCoreRuntime {
             return .success("")
         }
         if let exception = context.exception {
-            let message = exception.toString()
+            let message = exception.toString() ?? "JavaScript exception"
             context.exception = nil
             executionContext.recordJavaScript(SourceJavaScriptEvidence(
                 originalScript: normalization.originalScript,
@@ -1349,11 +1349,11 @@ final class JSCoreRuntime {
             if (typeof input === 'object' && typeof input !== 'string') {
               for (var key in input) if (Object.prototype.hasOwnProperty.call(input, key)) pairs.push([String(key), String(input[key])]);
             } else {
-              String(input).replace(/^\?/, '').split('&').forEach(function(part) {
+              String(input).replace(/^\\?/, '').split('&').forEach(function(part) {
                 if (!part) return;
                 var pieces = part.split('='), key = pieces.shift() || '', val = pieces.join('=');
-                try { key = decodeURIComponent(key.replace(/\+/g, ' ')); } catch (_) {}
-                try { val = decodeURIComponent(val.replace(/\+/g, ' ')); } catch (_) {}
+                try { key = decodeURIComponent(key.replace(/\\+/g, ' ')); } catch (_) {}
+                try { val = decodeURIComponent(val.replace(/\\+/g, ' ')); } catch (_) {}
                 pairs.push([key, val]);
               });
             }
@@ -3142,7 +3142,7 @@ final class JSCoreRuntime {
         context.exception = nil
         context.evaluateScript(prelude)
         if let exception = context.exception {
-            baseBridgeError = exception.toString()
+            baseBridgeError = exception.toString() ?? "JavaScript bridge prelude exception"
             context.exception = nil
         }
     }
