@@ -44,7 +44,7 @@ final class LegadoJavaScriptCompatibilityTests: XCTestCase {
     func testAwaitJavaAjaxAndThenableResponse() throws {
         let runtime = fixtureRuntime { request in
             XCTAssertEqual(request, "https://fixture.local/ajax")
-            return response(body: "ajax-body", url: "https://fixture.local/ajax", headers: ["X-Test": "ajax"])
+            return self.response(body: "ajax-body", url: "https://fixture.local/ajax", headers: ["X-Test": "ajax"])
         }
 
         let result = runtime.evaluate("await java.ajax('https://fixture.local/ajax').then(function(r) { return r.header('X-Test') + ':' + r.body(); }).valueOf()")
@@ -56,7 +56,7 @@ final class LegadoJavaScriptCompatibilityTests: XCTestCase {
         let runtime = fixtureRuntime { request in
             let url = request.contains("/one") ? "https://fixture.local/one" : "https://fixture.local/two"
             let name = url.split(separator: "/").last.map(String.init) ?? ""
-            return response(body: name, url: url, headers: ["X-Source": name])
+            return self.response(body: name, url: url, headers: ["X-Source": name])
         }
 
         let result = runtime.evaluate("var list = await java.ajaxAll(['https://fixture.local/one', 'https://fixture.local/two']); list.map(function(r) { return r.body(); }).join(',')")
@@ -67,9 +67,9 @@ final class LegadoJavaScriptCompatibilityTests: XCTestCase {
     func testAwaitJavaFetchAndGetStrResponse() throws {
         let runtime = fixtureRuntime { request in
             if request.contains("/fetch") {
-                return response(body: "fetch-body", url: "https://fixture.local/fetch", headers: ["Content-Type": "text/plain"])
+                return self.response(body: "fetch-body", url: "https://fixture.local/fetch", headers: ["Content-Type": "text/plain"])
             }
-            return response(body: "<h1>Title</h1>", url: "https://fixture.local/str", headers: [:])
+            return self.response(body: "<h1>Title</h1>", url: "https://fixture.local/str", headers: [:])
         }
 
         let fetch = runtime.evaluate("await java.fetch('https://fixture.local/fetch').then(function(r) { return r.text(); }).valueOf()")
