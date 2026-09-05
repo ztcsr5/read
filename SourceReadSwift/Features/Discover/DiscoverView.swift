@@ -172,7 +172,7 @@ struct DiscoverView: View {
                     .controlSize(.large)
                 Text("正在搜索")
                     .font(.headline)
-                Text("已检测 \(viewModel.checkedSourceCount)/\(appState.sourceStore.sources.count) 个源")
+                Text("已检测 \(viewModel.checkedSourceCount)/\(viewModel.enabledSourceCount) 个源")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Button("取消搜索") {
@@ -185,6 +185,10 @@ struct DiscoverView: View {
             EmptyStateCard(systemImage: "exclamationmark.triangle", title: "搜索失败", message: error)
         } else if viewModel.hasUnfilteredResults && viewModel.results.isEmpty {
             EmptyStateCard(systemImage: "line.3.horizontal.decrease.circle", title: "没有符合筛选的结果", message: "换一个筛选词，或切换书名、作者、来源范围。")
+        } else if viewModel.results.isEmpty, viewModel.hasFinishedSearch {
+            EmptyStateCard(systemImage: "magnifyingglass", title: viewModel.hasRawResults ? "没有精准匹配" : "没有搜索结果", message: viewModel.hasRawResults ? "书源已返回候选书籍，切换模糊模式可查看相关结果。" : "书源已完成搜索，尝试更换关键词或书源。")
+        } else if viewModel.results.isEmpty, viewModel.wasCancelled {
+            EmptyStateCard(systemImage: "pause.circle", title: "搜索已取消", message: "再次提交关键词可以重新搜索。")
         } else if viewModel.results.isEmpty {
             Text("输入书名后，会从启用的小说书源里搜索")
                 .font(.system(size: 15, weight: .regular))
@@ -292,6 +296,9 @@ final class DiscoverViewModel: ObservableObject {
     @Published var results: [SearchBook] = []
     private var unfilteredResults: [SearchBook] = []
     var hasUnfilteredResults: Bool { !unfilteredResults.isEmpty }
+    var hasRawResults: Bool { !rawResults.isEmpty }
+    @Published private(set) var hasFinishedSearch = false
+    @Published private(set) var wasCancelled = false
     var filterSummary: String {
         resultFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : " · 筛选后 \(results.count) 条"
     }
@@ -311,11 +318,14 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     var groupedResults: [ResultGroup] {
-        Dictionary(grouping: results, by: { "\($0.sourceUrl)|\($0.sourceName)" })
+        Dictionary(grouping: results, by: { $0.sourceUrl.isEmpty ? $0.sourceName : $0.sourceUrl })
             .map { _, books in
                 ResultGroup(source: books.first?.sourceName ?? "未知书源", sourceURL: books.first?.sourceUrl ?? "", books: books)
             }
-            .sorted { $0.source.localizedStandardCompare($1.source) == .orderedAscending }
+            .sorted {
+                if $0.source == $1.source { return $0.id < $1.id }
+                return $0.source.localizedStandardCompare($1.source) == .orderedAscending
+            }
     }
 
     private weak var appState: AppState?
@@ -331,12 +341,14 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     var hasSearchState: Bool {
-        isSearching || !results.isEmpty || !unfilteredResults.isEmpty || errorMessage != nil
+        isSearching || hasFinishedSearch || wasCancelled || hasRawResults || !results.isEmpty || errorMessage != nil
     }
 
     func clearSearch() {
         cancelSearch()
         activeKeyword = ""
+        hasFinishedSearch = false
+        wasCancelled = false
         results = []
         unfilteredResults = []
         rawResults = []
@@ -355,6 +367,7 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     func cancelSearch() {
+        wasCancelled = isSearching
         searchGeneration &+= 1
         searchTask?.cancel()
         searchTask = nil
@@ -364,9 +377,12 @@ final class DiscoverViewModel: ObservableObject {
 
     func startSearch() {
         let submitted = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !submitted.isEmpty, submitted == lastSubmittedKeyword, !isSearching, !results.isEmpty {
+        if !submitted.isEmpty, submitted == lastSubmittedKeyword, isSearching {
             return
         }
+        lastSubmittedKeyword = submitted
+        isSearching = !submitted.isEmpty
+        wasCancelled = false
         searchGeneration &+= 1
         let generation = searchGeneration
         searchTask?.cancel()
@@ -391,8 +407,8 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     func search(generation: Int) async {
-        guard let appState else { return }
         guard generation == searchGeneration else { return }
+        guard let appState else { isSearching = false; return }
         let keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else {
             activeSearchID = nil
@@ -410,6 +426,8 @@ final class DiscoverViewModel: ObservableObject {
         }
         activeKeyword = keyword
         lastSubmittedKeyword = keyword
+        hasFinishedSearch = false
+        wasCancelled = false
 
         let searchID = UUID()
         activeSearchID = searchID
@@ -476,14 +494,13 @@ final class DiscoverViewModel: ObservableObject {
                     }
                     if checkedSourceCount % 6 == 0 || !allBooks.isEmpty && checkedSourceCount % 3 == 0 {
                         unfilteredResults = filtered(allBooks, keyword: keyword)
-                        results = unfilteredResults
                         applyResultFilter()
                         totalResultCount = allBooks.count
                     }
                 }
             }
+            guard activeSearchID == searchID, searchGeneration == generation, !Task.isCancelled else { return }
             unfilteredResults = filtered(allBooks, keyword: keyword)
-            results = unfilteredResults
             applyResultFilter()
             totalResultCount = allBooks.count
             hitSourceCount = hitSources.count
@@ -492,11 +509,13 @@ final class DiscoverViewModel: ObservableObject {
         guard activeSearchID == searchID, searchGeneration == generation else { return }
         totalResultCount = allBooks.count
         unfilteredResults = filtered(allBooks, keyword: keyword)
-        results = unfilteredResults
         applyResultFilter()
         hitSourceCount = hitSources.count
-        if results.isEmpty {
-            errorMessage = failures.isEmpty ? "没有搜索结果，请检查关键词或书源规则。" : failures.prefix(8).joined(separator: "\n")
+        hasFinishedSearch = true
+        // No exact match and a user filter are not engine failures. Only an
+        // entirely failed source run takes the error state.
+        if rawResults.isEmpty, failures.count == sources.count {
+            errorMessage = failures.prefix(8).joined(separator: "\n")
         }
     }
 
