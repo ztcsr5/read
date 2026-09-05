@@ -33,4 +33,10 @@ final class SearchBookMatcherTests: XCTestCase {
         let otherSource = SearchBook(name: "测试书", author: "乙", coverUrl: nil, bookUrl: "book", sourceName: "B", sourceUrl: "https://b", intro: nil)
         XCTAssertEqual(SearchBookMatcher.deduplicated([first, duplicate, otherSource]).count, 2)
     }
+
+    func testCanonicalURLPreservesCaseSensitivePath() {
+        let upper = SearchBook(name: "测试书", author: nil, coverUrl: nil, bookUrl: "https://a.example/Novel/A", sourceName: "A", sourceUrl: "https://a.example", intro: nil)
+        let lower = SearchBook(name: "测试书", author: nil, coverUrl: nil, bookUrl: "https://a.example/Novel/a", sourceName: "A", sourceUrl: "https://a.example", intro: nil)
+        XCTAssertEqual(SearchBookMatcher.deduplicated([upper, lower]).count, 2)
+    }
 }

@@ -15,6 +15,7 @@ struct BookshelfReaderGatewayView: View {
     @State private var showSourceSwitcher = false
     @State private var sourceSwitchState = SourceSwitchState()
     @State private var autoplaySpeechAfterHandoff = false
+    @State private var autoplayAutoScrollAfterHandoff = false
     @State private var showReaderChromeAfterChapterSelection = false
     @State private var didApplyInitialBookmark = false
     @State private var didApplyInitialChapter = false
@@ -219,6 +220,14 @@ struct BookshelfReaderGatewayView: View {
                     chapterTitle: chapters[nextIndex].title,
                     totalChapters: chapters.count
                 )
+            },
+            autoplayAutoScrollOnAppear: autoplayAutoScrollAfterHandoff,
+            onAutoScrollAutoplayConsumed: {
+                autoplayAutoScrollAfterHandoff = false
+            },
+            onAutoScrollFinished: {
+                guard chapters.indices.contains(safeIndex + 1) else { return }
+                autoplayAutoScrollAfterHandoff = true
             },
             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
             onSpeechAutoplayConsumed: {

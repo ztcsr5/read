@@ -327,6 +327,7 @@ struct ChapterLoadingView: View {
     @State private var isUsingStaleCache = false
     @State private var isCachingNext = false
     @State private var autoplaySpeechAfterHandoff = false
+    @State private var autoplayAutoScrollAfterHandoff = false
     @State private var showReaderChromeAfterChapterSelection = false
     @State private var preloadTask: Task<Void, Never>?
     @AppStorage("reader.preloadChapterCount") private var preloadChapterCount = ReaderPreloadPolicy.defaultCount
@@ -479,15 +480,27 @@ struct ChapterLoadingView: View {
             onCacheNextChapters: {
                 Task { await cacheNextChaptersFromReader() }
             },
-            onSpeechFinished: {
+             onSpeechFinished: {
                 guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
                 autoplaySpeechAfterHandoff = true
                 currentChapter = next
                 content = nil
                 errorMessage = nil
-                isUsingStaleCache = false
-            },
-            autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
+                 isUsingStaleCache = false
+             },
+             autoplayAutoScrollOnAppear: autoplayAutoScrollAfterHandoff,
+             onAutoScrollAutoplayConsumed: {
+                 autoplayAutoScrollAfterHandoff = false
+             },
+             onAutoScrollFinished: {
+                 guard let next = chapters.first(where: { $0.index == effectiveChapter.index + 1 }) else { return }
+                 autoplayAutoScrollAfterHandoff = true
+                 currentChapter = next
+                 content = nil
+                 errorMessage = nil
+                 isUsingStaleCache = false
+             },
+             autoplaySpeechOnAppear: autoplaySpeechAfterHandoff,
             onSpeechAutoplayConsumed: {
                 autoplaySpeechAfterHandoff = false
             },

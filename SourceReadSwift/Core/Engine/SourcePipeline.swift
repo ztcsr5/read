@@ -59,7 +59,11 @@ struct SourcePipelineResult: Identifiable, Codable, Hashable, Sendable {
 
     var overallStatus: SourceHealthStatus { report.overallStatus }
     var isComplete: Bool {
-        content != nil && chapters.isEmpty == false && detail != nil && searchBooks.isEmpty == false
+        guard let content else { return false }
+        return !content.paragraphs.isEmpty
+            && !chapters.isEmpty
+            && detail != nil
+            && !searchBooks.isEmpty
     }
 }
 
@@ -140,7 +144,7 @@ extension SourceEngine {
         }
 
         let searchStarted = Date()
-        let search = await withTimeout(seconds: timeout) { await self.searchBooks(source: source, keyword: cleanKeyword, page: page) }
+        let search = await AsyncTimeout.run(seconds: timeout) { await self.searchBooks(source: source, keyword: cleanKeyword, page: page) }
             ?? .failure(.network("搜索超时（超过 \(Int(timeout)) 秒）"))
         switch search {
         case .failure(let error):
@@ -163,7 +167,7 @@ extension SourceEngine {
             guard let first = books.first else { return failure(.empty("搜索结果为空"), stage: .search, start: searchStarted) }
 
             let detailStarted = Date()
-            let detailResult = await withTimeout(seconds: timeout) { await self.getBookDetail(source: source, book: first) }
+            let detailResult = await AsyncTimeout.run(seconds: timeout) { await self.getBookDetail(source: source, book: first) }
                 ?? .failure(.network("详情超时（超过 \(Int(timeout)) 秒）"))
             switch detailResult {
             case .failure(let error):
@@ -185,7 +189,7 @@ extension SourceEngine {
             return SourcePipelineExecution(result: makeResult(), error: .empty("详情结果为空"))
         }
         let tocStarted = Date()
-        let tocResult = await withTimeout(seconds: timeout) { await self.getChapterList(source: source, book: detail) }
+        let tocResult = await AsyncTimeout.run(seconds: timeout) { await self.getChapterList(source: source, book: detail) }
             ?? .failure(.network("目录超时（超过 \(Int(timeout)) 秒）"))
         switch tocResult {
         case .failure(let error):
@@ -210,23 +214,27 @@ extension SourceEngine {
             return SourcePipelineExecution(result: makeResult(), error: .empty("目录为空"))
         }
         let contentStarted = Date()
-        let contentResult = await withTimeout(seconds: timeout) { await self.getContent(source: source, chapter: firstChapter) }
+        let contentResult = await AsyncTimeout.run(seconds: timeout) { await self.getContent(source: source, chapter: firstChapter) }
             ?? .failure(.network("正文超时（超过 \(Int(timeout)) 秒）"))
         switch contentResult {
         case .failure(let error):
             return failure(error, stage: .content, start: contentStarted, count: 0)
         case .success(let value):
             content = value
+            let isEmptyContent = value.paragraphs.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             steps.append(SourceDiagnosticStep(
                 stage: .content,
-                status: value.paragraphs.isEmpty ? .warning : .passed,
+                status: isEmptyContent ? .failed : .passed,
                 requestSummary: firstChapter.url,
                 responseSummary: "正文 \(value.paragraphs.count) 段",
                 matchCount: value.paragraphs.count,
                 elapsedMilliseconds: elapsed(contentStarted),
-                failureClassification: value.paragraphs.isEmpty ? "empty-result" : nil,
-                failureCode: value.paragraphs.isEmpty ? .emptyResult : nil
+                failureClassification: isEmptyContent ? "empty-result" : nil,
+                failureCode: isEmptyContent ? .emptyResult : nil
             ))
+            if isEmptyContent {
+                return SourcePipelineExecution(result: makeResult(), error: .empty("正文为空"))
+            }
             return SourcePipelineExecution(result: makeResult(), error: nil)
         }
     }
@@ -253,19 +261,5 @@ extension SourceEngine {
         let execution = await runPipelineExecution(source: source, keyword: keyword, page: page, timeout: timeout)
         if let error = execution.error { return .failure(error) }
         return .success(execution.result)
-    }
-}
-
-private func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async -> Result<T, SourceEngineError>) async -> Result<T, SourceEngineError>? {
-    await withTaskGroup(of: Result<T, SourceEngineError>?.self) { group in
-        group.addTask { await operation() }
-        group.addTask {
-            let nanoseconds = UInt64(max(0, seconds) * 1_000_000_000)
-            if nanoseconds > 0 { try? await Task.sleep(nanoseconds: nanoseconds) }
-            return nil
-        }
-        let first = await group.next() ?? nil
-        group.cancelAll()
-        return first
     }
 }

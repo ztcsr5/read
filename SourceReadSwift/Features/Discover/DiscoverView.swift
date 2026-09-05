@@ -199,7 +199,7 @@ struct DiscoverView: View {
     private var resultsList: some View {
         LazyVStack(spacing: 14) {
             HStack {
-                Text("已检测 \(viewModel.checkedSourceCount)/\(appState.sourceStore.sources.count) 个源 · 命中 \(viewModel.hitSourceCount) 个源 · 结果 \(viewModel.totalResultCount) 条\(viewModel.filterSummary)")
+                Text("已检测 \(viewModel.checkedSourceCount)/\(viewModel.enabledSourceCount) 个源 · 命中 \(viewModel.hitSourceCount) 个源 · 结果 \(viewModel.totalResultCount) 条\(viewModel.filterSummary)")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -233,7 +233,7 @@ struct DiscoverView: View {
                 .foregroundStyle(.secondary)
             }
 
-            ForEach(viewModel.groupedResults, id: \.source) { group in
+            ForEach(viewModel.groupedResults) { group in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 6) {
                         Image(systemName: "books.vertical")
@@ -301,16 +301,20 @@ final class DiscoverViewModel: ObservableObject {
     @Published var checkedSourceCount = 0
     @Published var totalResultCount = 0
     @Published var sourceFailures: [String] = []
+    @Published private(set) var enabledSourceCount = 0
 
     struct ResultGroup: Identifiable {
         let source: String
+        let sourceURL: String
         let books: [SearchBook]
-        var id: String { source }
+        var id: String { sourceURL.isEmpty ? source : sourceURL }
     }
 
     var groupedResults: [ResultGroup] {
-        Dictionary(grouping: results, by: { $0.sourceName })
-            .map { ResultGroup(source: $0.key, books: $0.value) }
+        Dictionary(grouping: results, by: { "\($0.sourceUrl)|\($0.sourceName)" })
+            .map { _, books in
+                ResultGroup(source: books.first?.sourceName ?? "未知书源", sourceURL: books.first?.sourceUrl ?? "", books: books)
+            }
             .sorted { $0.source.localizedStandardCompare($1.source) == .orderedAscending }
     }
 
@@ -319,6 +323,7 @@ final class DiscoverViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var searchGeneration = 0
     private var activeKeyword = ""
+    private var lastSubmittedKeyword = ""
     private var rawResults: [SearchBook] = []
 
     func bind(appState: AppState) {
@@ -339,6 +344,8 @@ final class DiscoverViewModel: ObservableObject {
         hitSourceCount = 0
         checkedSourceCount = 0
         sourceFailures = []
+        enabledSourceCount = 0
+        lastSubmittedKeyword = ""
         errorMessage = nil
         resultFilter = ""
         resultFilterScope = .all
@@ -356,6 +363,10 @@ final class DiscoverViewModel: ObservableObject {
     }
 
     func startSearch() {
+        let submitted = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !submitted.isEmpty, submitted == lastSubmittedKeyword, !isSearching, !results.isEmpty {
+            return
+        }
         searchGeneration &+= 1
         let generation = searchGeneration
         searchTask?.cancel()
@@ -394,9 +405,11 @@ final class DiscoverViewModel: ObservableObject {
             hitSourceCount = 0
             checkedSourceCount = 0
             sourceFailures = []
+            enabledSourceCount = 0
             return
         }
         activeKeyword = keyword
+        lastSubmittedKeyword = keyword
 
         let searchID = UUID()
         activeSearchID = searchID
@@ -418,6 +431,7 @@ final class DiscoverViewModel: ObservableObject {
         }
 
         let sources = appState.sourceStore.sources.filter(\.enabled)
+        enabledSourceCount = sources.count
         guard !sources.isEmpty else {
             errorMessage = "没有可用书源，请先到书源管理导入书源。"
             return

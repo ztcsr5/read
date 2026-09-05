@@ -55,6 +55,7 @@ struct NativeReaderTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.updateVisibleParagraphCallback(onVisibleParagraph)
         context.coordinator.update(textView: textView, configuration: configuration, scrollTarget: scrollTarget, scrollRequestKey: scrollRequestKey)
         context.coordinator.updateHighlight(currentParagraphIndex, in: textView, color: highlightColor)
         textView.isSelectable = textSelectionEnabled
@@ -114,7 +115,7 @@ struct NativeReaderTextView: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate, UIScrollViewDelegate {
         private weak var textView: UITextView?
-        private let visibleParagraphCallback: (Int) -> Void
+        private var visibleParagraphCallback: (Int) -> Void
         private var configuration: Configuration?
         private var paragraphRanges: [NSRange] = []
         private var lastHighlightedParagraph = -1
@@ -131,6 +132,10 @@ struct NativeReaderTextView: UIViewRepresentable {
             self.textView = textView
             textView.delegate = self
             textView.scrollsToTop = true
+        }
+
+        func updateVisibleParagraphCallback(_ callback: @escaping (Int) -> Void) {
+            visibleParagraphCallback = callback
         }
 
         func update(textView: UITextView, configuration newConfiguration: Configuration, scrollTarget: Int?, scrollRequestKey: String?) {
@@ -308,7 +313,9 @@ enum ReaderNativeTextLayout {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = CGFloat(configuration.lineSpacing)
         paragraphStyle.paragraphSpacing = CGFloat(configuration.paragraphSpacing)
-        paragraphStyle.headIndent = CGFloat(configuration.paragraphIndent)
+        // Indent only the first line. Applying the same value to `headIndent`
+        // indents every wrapped line and makes long paragraphs look clipped.
+        paragraphStyle.headIndent = 0
         paragraphStyle.firstLineHeadIndent = CGFloat(configuration.paragraphIndent)
         paragraphStyle.alignment = .natural
         let paragraphAttributes: [NSAttributedString.Key: Any] = [

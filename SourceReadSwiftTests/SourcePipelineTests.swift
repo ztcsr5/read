@@ -81,6 +81,21 @@ final class SourcePipelineTests: XCTestCase {
         XCTAssertEqual(execution.result.report.firstFailure?.stage, .content)
     }
 
+    func testEmptyContentIsFailureInsteadOfFalseSuccess() async {
+        let chapter = BookChapter(title: "One", url: "https://fixture.example/chapter/1", bookUrl: "https://fixture.example/book/1", index: 0, isVip: false)
+        let detail = BookDetail(name: "Book", author: nil, coverUrl: nil, bookUrl: chapter.bookUrl, tocUrl: nil, sourceName: "Fixture", sourceUrl: "https://fixture.example", intro: nil, latestChapter: nil)
+        let searchBook = SearchBook(name: "Book", author: nil, coverUrl: nil, bookUrl: detail.bookUrl, sourceName: "Fixture", sourceUrl: "https://fixture.example", intro: nil)
+        let empty = ChapterContent(chapter: chapter, title: chapter.title, paragraphs: ["", "  \n"], nextContentUrl: nil)
+        let engine = PipelineStubEngine(search: .success([searchBook]), detail: .success(detail), toc: .success([chapter]), content: .success(empty))
+
+        let execution = await engine.runPipelineReport(source: fixtureSource(), keyword: "book", timeout: 1)
+
+        XCTAssertFalse(execution.isSuccess)
+        XCTAssertEqual(execution.error, .empty("正文为空"))
+        XCTAssertFalse(execution.result.isComplete)
+        XCTAssertEqual(execution.result.steps.last?.status, .failed)
+    }
+
     func testPipelineTimeoutIsClassifiedAsNetworkAndKeepsSearchStep() async {
         let engine = PipelineStubEngine(
             search: .success([]), detail: nil, toc: nil, content: nil,

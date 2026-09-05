@@ -35,6 +35,9 @@ struct ReaderView: View {
     /// chapter handoff. It is intentionally one-shot and consumed on appear.
     var autoplaySpeechOnAppear: Bool = false
     var onSpeechAutoplayConsumed: (() -> Void)? = nil
+    var autoplayAutoScrollOnAppear: Bool = false
+    var onAutoScrollAutoplayConsumed: (() -> Void)? = nil
+    var onAutoScrollFinished: (() -> Void)? = nil
     /// Keeps the reader controls visible when navigation originated in the
     /// chapter list. A fresh chapter view otherwise starts with the chrome
     /// hidden and can be mistaken for the root tab UI.
@@ -332,6 +335,12 @@ struct ReaderView: View {
                 onSpeechAutoplayConsumed?()
                 DispatchQueue.main.async {
                     beginSpeechPlayback()
+                }
+            }
+            if autoplayAutoScrollOnAppear {
+                onAutoScrollAutoplayConsumed?()
+                DispatchQueue.main.async {
+                    startAutoScroll()
                 }
             }
         }
@@ -1660,6 +1669,7 @@ struct ReaderView: View {
                         }
                     case .nextChapter:
                         stopAutoScroll()
+                        onAutoScrollFinished?()
                         selectRelativeChapter(offset: 1)
                     case .stop:
                         stopAutoScroll()
@@ -1735,6 +1745,10 @@ struct ReaderView: View {
               content.paragraphs.indices.contains(index),
               index != visibleParagraphIndex else { return }
         visibleParagraphIndex = index
+        // Keep the scroll target in lockstep with native TextKit visibility.
+        // Otherwise starting auto-scroll after a manual swipe can jump back
+        // to the last programmatic target instead of continuing from here.
+        scrollParagraphTarget = index
         scheduleReadingPositionPersistence(paragraphIndex: index)
     }
 

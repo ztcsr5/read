@@ -46,20 +46,26 @@ enum SearchBookMatcher {
         return books.filter { book in
             let name = normalized(book.name)
             guard !name.isEmpty else { return false }
-            let normalizedURL = book.bookUrl
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                .lowercased()
-            let source = book.sourceUrl
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                .lowercased()
+            let normalizedURL = canonicalURL(book.bookUrl)
+            let source = canonicalURL(book.sourceUrl)
             let id = "\(source)|\(normalizedURL)"
             // Some sources return the same item once as an absolute URL and
             // once as a path. Keep distinct source URLs, but collapse exact
             // duplicates from the same source regardless of slash casing.
             return seenIDs.insert(id).inserted
         }
+    }
+
+    static func canonicalURL(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let components = URLComponents(string: trimmed), components.scheme != nil else {
+            return trimmed
+        }
+        var normalized = components
+        normalized.scheme = components.scheme?.lowercased()
+        normalized.host = components.host?.lowercased()
+        return normalized.string ?? trimmed
     }
 
     private static func score(_ book: SearchBook, query: String) -> Int {
