@@ -1926,6 +1926,14 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Revert `e66e4d1` if historical comparison is needed; use the current
   diagnostic-only hook for the supported iOS 16 build.
 
+### Stage 20B final CI evidence
+
+- Current release head: `1d9e0cc` (`fix: restore iOS 16 compatible refresh hook`).
+- iOS build/XCTest: [run 33984405010](https://github.com/ztcsr5/read/actions/runs/33984405010) — success.
+- Unsigned IPA: [run 33984405092](https://github.com/ztcsr5/read/actions/runs/33984405092) — success.
+- The failed experimental commits `e66e4d1`, `cbfb348` and `2b974cb` are
+  superseded; they are retained only in git history for auditability.
+
 ### CI correction log
 
 - First Stage 20A Actions run exposed a SwiftUI `toolbar(content:)` overload ambiguity in `SmartWebReaderView`; replaced it with the compatible `navigationBarItems` API and pushed commit `0946340`.
