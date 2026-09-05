@@ -15,6 +15,7 @@ final class RuleExecutionContext: @unchecked Sendable {
     private let persistentState: RulePersistentState
     private var recordedLogs: [String] = []
     private var javascriptEvidence: [SourceJavaScriptEvidence] = []
+    private var executionStage: String?
 
     var networkHandler: NetworkHandler?
     var responseHandler: ResponseHandler?
@@ -25,13 +26,31 @@ final class RuleExecutionContext: @unchecked Sendable {
         persistentState: RulePersistentState = RulePersistentState(),
         networkHandler: NetworkHandler? = nil,
         responseHandler: ResponseHandler? = nil,
-        logHandler: LogHandler? = nil
+        logHandler: LogHandler? = nil,
+        stage: String? = nil
     ) {
         self.networkHandler = networkHandler
         self.responseHandler = responseHandler
         self.logHandler = logHandler
+        self.executionStage = stage
         self.persistentState = persistentState
         bind(initialValues)
+    }
+
+    /// The production engine sets this to `search`, `detail`, `toc`, or
+    /// `content` before evaluating a rule.  Keeping the marker in the shared
+    /// context means a JavaScript exception remains attributable even when a
+    /// source uses several nested `@js:`/`bodyJs` fragments.
+    func setExecutionStage(_ stage: String?) {
+        lock.lock()
+        executionStage = stage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        lock.unlock()
+    }
+
+    var currentExecutionStage: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return executionStage
     }
 
     func bind(_ newValues: [String: Any]) {
@@ -115,6 +134,12 @@ final class RuleExecutionContext: @unchecked Sendable {
         recordedLogs.append(message)
         lock.unlock()
         logHandler?(message)
+    }
+
+    /// Standardized bridge diagnostics are deliberately short and are later
+    /// redacted together with JavaScript evidence before export.
+    func recordBridgeFailure(_ bridge: String, message: String) {
+        log("bridge.error \(bridge): \(message)")
     }
 
     func logs() -> [String] {

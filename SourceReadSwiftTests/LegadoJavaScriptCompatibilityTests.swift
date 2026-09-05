@@ -158,6 +158,26 @@ final class LegadoJavaScriptCompatibilityTests: XCTestCase {
         XCTAssertTrue(failureEvidence?.features.contains("await") == true)
     }
 
+    func testJavaScriptEvidenceIncludesStageErrorTypeAndBoundedStack() throws {
+        let context = RuleExecutionContext()
+        context.setExecutionStage("content.bodyJs")
+        let runtime = JSCoreRuntime(executionContext: context)
+
+        let result = runtime.evaluate("throw new TypeError('fixture failure')")
+        guard case .failure(.javascript(let message)) = result else {
+            return XCTFail("expected JavaScript failure")
+        }
+        XCTAssertTrue(message.contains("fixture failure"))
+        let evidence = try XCTUnwrap(context.javascriptEvidenceSnapshot().last)
+        XCTAssertEqual(evidence.stage, "content.bodyJs")
+        XCTAssertEqual(evidence.exceptionType, "TypeError")
+        XCTAssertTrue(evidence.exception?.contains("fixture failure") == true)
+        if let stack = evidence.stackTrace {
+            XCTAssertLessThanOrEqual(stack.utf8.count, 4_096)
+            XCTAssertTrue(stack.contains("TypeError"))
+        }
+    }
+
     func testDiagnosticJSONRedactsSecretsInsideJavaScriptEvidence() throws {
         let evidence = SourceJavaScriptEvidence(
             originalScript: "var token = 'secret-token'; java.put('token', 'secret-token'); cookie.setCookie('sid=secret-cookie'); return token;",
@@ -170,6 +190,7 @@ final class LegadoJavaScriptCompatibilityTests: XCTestCase {
             stage: .search,
             status: .failed,
             javascript: [evidence],
+            executionLogs: ["bridge.error java.unknown: token=secret-token"],
             failureCode: .javascript
         )
         let data = try JSONEncoder().encode(step)
@@ -179,10 +200,12 @@ final class LegadoJavaScriptCompatibilityTests: XCTestCase {
         XCTAssertFalse(json.contains("secret-token"))
         XCTAssertFalse(json.contains("secret-cookie"))
         XCTAssertFalse(json.contains("secret-auth"))
+        XCTAssertFalse(json.contains("secret-token"))
 
         let decoded = try JSONDecoder().decode(SourceDiagnosticStep.self, from: data)
         XCTAssertEqual(decoded.javascript?.first?.succeeded, false)
         XCTAssertEqual(decoded.failureCode, .javascript)
+        XCTAssertEqual(decoded.executionLogs?.count, 1)
     }
 
     func testEngineRunsAsyncBodyJsAndAttachesEvidenceToContentStage() async throws {

@@ -280,6 +280,7 @@ final class LegadoJavaHostBridge: NSObject, LegadoJavaHostExport {
         case "sandboxPath":
             return services.sandboxURL.path
             default:
+                executionContext.recordBridgeFailure("java.\(method)", message: "unsupported host method")
                 return ""
             }
         }()
@@ -378,6 +379,7 @@ final class LegadoRuleHostBridge: NSObject, LegadoRuleHostExport {
             let elements = selector.isEmpty ? [document] : Array(try document.select(selector))
             return LegadoElementsBridge(elements: elements, baseURL: baseURL)
         } catch {
+            executionContext.recordBridgeFailure("rule.getElements", message: error.localizedDescription)
             executionContext.log("Rule getElements failed: \(rule) - \(error.localizedDescription)")
             return LegadoElementsBridge(elements: [], baseURL: baseURL)
         }
@@ -425,6 +427,7 @@ final class LegadoJsoupBridge: NSObject, LegadoJsoupExport {
             let document = try SwiftSoup.parse(html, normalizedBaseURL(baseURL))
             return LegadoElementBridge(element: document, baseURL: baseURL)
         } catch {
+            executionContext.recordBridgeFailure("jsoup.parse", message: error.localizedDescription)
             executionContext.log("Jsoup.parse failed: \(error.localizedDescription)")
             let document = try! SwiftSoup.parse("", normalizedBaseURL(baseURL))
             return LegadoElementBridge(element: document, baseURL: baseURL)

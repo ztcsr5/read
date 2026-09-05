@@ -247,7 +247,53 @@ extension SourceEngine {
         page: Int = 1,
         timeout: TimeInterval = 20
     ) async -> SourcePipelineExecution {
-        await runPipelineExecution(source: source, keyword: keyword, page: page, timeout: timeout)
+        let execution = await runPipelineExecution(source: source, keyword: keyword, page: page, timeout: timeout)
+        guard let provider = self as? SourceDiagnosticEvidenceProvider else { return execution }
+        let report = execution.result.report
+        let enrichedSteps = report.steps.map { step in
+            guard let evidence = provider.diagnosticEvidence(sourceURL: report.sourceURL, stage: step.stage) else {
+                return step
+            }
+            return SourceDiagnosticStep(
+                id: step.id,
+                stage: step.stage,
+                status: step.status,
+                requestSummary: step.requestSummary,
+                responseSummary: step.responseSummary,
+                matchCount: step.matchCount,
+                elapsedMilliseconds: step.elapsedMilliseconds,
+                failureClassification: step.failureClassification,
+                requestMethod: evidence.requestMethod,
+                requestBody: evidence.requestBody,
+                requestHeaders: evidence.requestHeaders,
+                responseStatusCode: evidence.responseStatusCode,
+                responseHeaders: evidence.responseHeaders,
+                cookieSummary: evidence.cookieSummary,
+                finalURL: evidence.finalURL,
+                responseEncodedByteCount: evidence.responseEncodedByteCount,
+                responseDecodedByteCount: evidence.responseDecodedByteCount,
+                responseContentEncodings: evidence.responseContentEncodings,
+                responseWasDecoded: evidence.responseWasDecoded,
+                javascript: evidence.javascript,
+                executionLogs: evidence.executionLogs,
+                retryCount: step.retryCount,
+                failureCode: step.failureCode,
+                retryable: step.retryable
+            )
+        }
+        let enrichedResult = SourcePipelineResult(
+            id: execution.result.id,
+            sourceName: execution.result.sourceName,
+            sourceURL: execution.result.sourceURL,
+            keyword: execution.result.keyword,
+            startedAt: execution.result.startedAt,
+            searchBooks: execution.result.searchBooks,
+            detail: execution.result.detail,
+            chapters: execution.result.chapters,
+            content: execution.result.content,
+            steps: enrichedSteps
+        )
+        return SourcePipelineExecution(result: enrichedResult, error: execution.error)
     }
 
     /// Compatibility wrapper for callers that only need a conventional

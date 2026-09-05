@@ -83,6 +83,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         let executionContext = RuleExecutionContext(persistentState: executionState, logHandler: { [diagnostics] message in
             Task { await diagnostics.emit(.init(level: .info, stage: "search.js", sourceName: source.bookSourceName, message: message)) }
         })
+        executionContext.setExecutionStage("search")
         executionContext.networkHandler = { [network] encoded in
             self.syncLoad(
                 encoded: encoded,
@@ -152,6 +153,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         let executionContext = RuleExecutionContext(persistentState: executionState, logHandler: { [diagnostics] message in
             Task { await diagnostics.emit(.init(level: .info, stage: "detail.js", sourceName: source.bookSourceName, message: message)) }
         })
+        executionContext.setExecutionStage("detail")
         executionContext.networkHandler = { [network] encoded in
             self.syncLoad(
                 encoded: encoded,
@@ -197,6 +199,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         let executionContext = RuleExecutionContext(persistentState: executionState, logHandler: { [diagnostics] message in
             Task { await diagnostics.emit(.init(level: .info, stage: "toc.js", sourceName: source.bookSourceName, message: message)) }
         })
+        executionContext.setExecutionStage("toc")
         executionContext.networkHandler = { [network] encoded in
             self.syncLoad(
                 encoded: encoded,
@@ -272,6 +275,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         let executionContext = RuleExecutionContext(persistentState: executionState, logHandler: { [diagnostics] message in
             Task { await diagnostics.emit(.init(level: .info, stage: "content.js", sourceName: source.bookSourceName, message: message)) }
         })
+        executionContext.setExecutionStage("content")
         executionContext.networkHandler = { [network] encoded in
             self.syncLoad(
                 encoded: encoded,
@@ -373,6 +377,7 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
                 Task { await diagnostics.emit(.init(level: .info, stage: "loginCheck.js", sourceName: source.bookSourceName, message: message)) }
             }
         )
+        context.setExecutionStage("login")
         let runtime = JSCoreRuntime(executionContext: context)
         let evaluated = runtime.evaluate(script, variables: [
             "source": source,
@@ -504,11 +509,12 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
         else { normalizedStage = nil }
         guard let normalizedStage else { return }
         let scripts = context.javascriptEvidenceSnapshot()
-        guard !scripts.isEmpty else { return }
+        let logs = context.logs()
+        guard !scripts.isEmpty || !logs.isEmpty else { return }
         let key = source.bookSourceUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         evidenceLock.lock()
         if let existing = evidence[key]?[normalizedStage] {
-            evidence[key]?[normalizedStage] = existing.with(javascript: scripts)
+            evidence[key]?[normalizedStage] = existing.with(javascript: scripts, executionLogs: logs)
         }
         evidenceLock.unlock()
     }

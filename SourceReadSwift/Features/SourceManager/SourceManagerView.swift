@@ -1752,6 +1752,7 @@ private struct SourceVisualDetailView: View {
     @State private var diagnosticKeyword = "斗破苍穹"
     @State private var dynamicResults: [SourceVisualDiagnosticStage] = []
     @State private var isRunningDiagnostic = false
+    @State private var latestExecutionReport: SourceDiagnosticReport?
 
     private var stages: [(String, String, String, Bool)] {
         [
@@ -1798,6 +1799,10 @@ private struct SourceVisualDetailView: View {
         )
     }
 
+    private var visibleDiagnosticReport: SourceDiagnosticReport? {
+        latestExecutionReport ?? latestDiagnosticReport
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1837,7 +1842,7 @@ private struct SourceVisualDetailView: View {
                         HStack {
                             Text("最近一次动态诊断").font(.headline)
                             Spacer()
-                            if let report = latestDiagnosticReport {
+                            if let report = visibleDiagnosticReport {
                                 statusPill(report.overallStatus.shortTitle, color: report.overallStatus.color)
                             } else {
                                 Text("未运行")
@@ -1869,6 +1874,7 @@ private struct SourceVisualDetailView: View {
                             ForEach(dynamicResults) { result in
                                 dynamicDiagnosticResultRow(result)
                             }
+                            diagnosticEvidenceSection
                         }
                     }
                     .podcastCard()
@@ -1898,6 +1904,61 @@ private struct SourceVisualDetailView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    @ViewBuilder
+    private var diagnosticEvidenceSection: some View {
+        let steps = visibleDiagnosticReport?.steps ?? []
+        let actionable = steps.filter { step in
+            !(step.executionLogs?.isEmpty ?? true) || !(step.javascript?.isEmpty ?? true)
+        }
+        if !actionable.isEmpty {
+            DisclosureGroup("执行证据（\(actionable.count) 个阶段）") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(actionable) { step in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(step.stage.title)
+                                .font(.caption.weight(.semibold))
+                            if let logs = step.executionLogs, !logs.isEmpty {
+                                ForEach(Array(logs.suffix(8).enumerated()), id: \.offset) { _, log in
+                                    Text(log)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            if let javascript = step.javascript, !javascript.isEmpty {
+                                ForEach(Array(javascript.suffix(4).enumerated()), id: \.offset) { _, evidence in
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Image(systemName: evidence.succeeded ? "checkmark.circle" : "xmark.octagon")
+                                            .foregroundStyle(evidence.succeeded ? .green : .red)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(evidence.exceptionType ?? (evidence.succeeded ? "JavaScript" : "JavaScript error"))
+                                                .font(.caption2.weight(.semibold))
+                                            if let exception = evidence.exception, !exception.isEmpty {
+                                                Text(exception)
+                                                    .font(.caption2.monospaced())
+                                                    .foregroundStyle(.secondary)
+                                                    .textSelection(.enabled)
+                                            }
+                                            if let stack = evidence.stackTrace, !stack.isEmpty {
+                                                Text(stack)
+                                                    .font(.caption2.monospaced())
+                                                    .foregroundStyle(.tertiary)
+                                                    .lineLimit(4)
+                                                    .textSelection(.enabled)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .font(.caption)
+        }
     }
 
     private func statusPill(_ title: String, color: Color) -> some View {
@@ -1979,6 +2040,7 @@ private struct SourceVisualDetailView: View {
         guard !keyword.isEmpty else { return }
         isRunningDiagnostic = true
         dynamicResults = []
+        latestExecutionReport = nil
         Task { @MainActor in
             await executeDynamicDiagnostic(keyword: keyword)
             isRunningDiagnostic = false
@@ -1989,6 +2051,7 @@ private struct SourceVisualDetailView: View {
     private func executeDynamicDiagnostic(keyword: String) async {
         let engine = appState.engine
         let execution = await engine.runPipelineReport(source: source, keyword: keyword, page: 1, timeout: 10)
+        latestExecutionReport = execution.result.report
 
         for step in execution.result.steps {
             let message = step.responseSummary?.nilIfEmpty

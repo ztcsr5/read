@@ -140,6 +140,18 @@ final class LegadoNativeBridgeTests: XCTestCase {
         XCTAssertEqual(executionContext.logs(), ["bridge-ready"])
     }
 
+    func testMissingNetworkHandlerProducesStructuredBridgeDiagnostic() throws {
+        let executionContext = RuleExecutionContext()
+        let runtime = JSCoreRuntime(executionContext: executionContext)
+
+        let result = runtime.evaluate("java.ajax('https://fixture.local/missing').body()")
+        guard case .success(let value) = result else {
+            return XCTFail("missing handler should return an empty compatibility response")
+        }
+        XCTAssertEqual(value, "")
+        XCTAssertTrue(executionContext.logs().contains { $0.contains("bridge.error java.ajax") })
+    }
+
     func testLegadoRuleAnalyzerRoutesHTMLAndJSONThroughOneContext() throws {
         let analyzer = LegadoRuleAnalyzer()
         let html = "<div class='item'><a href='/a'>Alpha</a></div><div class='item'><a href='/b'>Beta</a></div>"

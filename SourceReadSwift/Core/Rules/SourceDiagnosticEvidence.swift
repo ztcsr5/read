@@ -7,20 +7,56 @@ struct SourceJavaScriptEvidence: Codable, Hashable, Sendable {
     let normalizedScript: String
     let features: [String]
     let exception: String?
+    /// Stage is optional for reports created by older builds.  New runtime
+    /// records use the same value as the enclosing pipeline stage.
+    let stage: String?
+    /// JavaScriptCore exposes the error name and stack separately from the
+    /// user-facing message. Keeping both makes source repair actionable while
+    /// allowing the exporter to redact secrets in each field.
+    let exceptionType: String?
+    let stackTrace: String?
     let succeeded: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case originalScript, normalizedScript, features, exception, stage,
+             exceptionType, stackTrace, succeeded
+    }
 
     init(
         originalScript: String,
         normalizedScript: String,
         features: [String],
         exception: String? = nil,
-        succeeded: Bool
+        succeeded: Bool,
+        stage: String? = nil,
+        exceptionType: String? = nil,
+        stackTrace: String? = nil
     ) {
         self.originalScript = originalScript
         self.normalizedScript = normalizedScript
         self.features = features
         self.exception = exception
+        self.stage = stage
+        self.exceptionType = exceptionType
+        self.stackTrace = stackTrace
         self.succeeded = succeeded
+    }
+
+    /// Keep reports produced before stage/type/stack diagnostics were added
+    /// readable.  `decodeIfPresent` is intentional here: old reports contain
+    /// the same JavaScript object but do not have the three new keys.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            originalScript: try container.decode(String.self, forKey: .originalScript),
+            normalizedScript: try container.decode(String.self, forKey: .normalizedScript),
+            features: try container.decodeIfPresent([String].self, forKey: .features) ?? [],
+            exception: try container.decodeIfPresent(String.self, forKey: .exception),
+            succeeded: try container.decodeIfPresent(Bool.self, forKey: .succeeded) ?? false,
+            stage: try container.decodeIfPresent(String.self, forKey: .stage),
+            exceptionType: try container.decodeIfPresent(String.self, forKey: .exceptionType),
+            stackTrace: try container.decodeIfPresent(String.self, forKey: .stackTrace)
+        )
     }
 }
 
@@ -41,11 +77,13 @@ struct SourceDiagnosticEvidence: Sendable {
     let responseContentEncodings: [String]
     let responseWasDecoded: Bool
     let javascript: [SourceJavaScriptEvidence]
+    let executionLogs: [String]
 
     init(
         request: SourceRequest,
         response: SourceResponse,
-        javascript: [SourceJavaScriptEvidence] = []
+        javascript: [SourceJavaScriptEvidence] = [],
+        executionLogs: [String] = []
     ) {
         self.requestMethod = request.method.rawValue
         self.requestBody = request.body.flatMap { String(data: $0, encoding: .utf8) }
@@ -63,9 +101,13 @@ struct SourceDiagnosticEvidence: Sendable {
         self.responseContentEncodings = response.contentEncodings
         self.responseWasDecoded = response.bodyWasDecoded
         self.javascript = javascript
+        self.executionLogs = executionLogs
     }
 
-    func with(javascript: [SourceJavaScriptEvidence]) -> SourceDiagnosticEvidence {
+    func with(
+        javascript: [SourceJavaScriptEvidence],
+        executionLogs: [String]? = nil
+    ) -> SourceDiagnosticEvidence {
         SourceDiagnosticEvidence(
             requestMethod: requestMethod,
             requestBody: requestBody,
@@ -78,7 +120,8 @@ struct SourceDiagnosticEvidence: Sendable {
             responseDecodedByteCount: responseDecodedByteCount,
             responseContentEncodings: responseContentEncodings,
             responseWasDecoded: responseWasDecoded,
-            javascript: javascript
+            javascript: javascript,
+            executionLogs: executionLogs ?? self.executionLogs
         )
     }
 
@@ -94,7 +137,8 @@ struct SourceDiagnosticEvidence: Sendable {
         responseDecodedByteCount: Int,
         responseContentEncodings: [String],
         responseWasDecoded: Bool,
-        javascript: [SourceJavaScriptEvidence]
+        javascript: [SourceJavaScriptEvidence],
+        executionLogs: [String]
     ) {
         self.requestMethod = requestMethod
         self.requestBody = requestBody
@@ -108,6 +152,7 @@ struct SourceDiagnosticEvidence: Sendable {
         self.responseContentEncodings = responseContentEncodings
         self.responseWasDecoded = responseWasDecoded
         self.javascript = javascript
+        self.executionLogs = executionLogs
     }
 }
 

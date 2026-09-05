@@ -72,6 +72,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
     let responseContentEncodings: [String]?
     let responseWasDecoded: Bool
     let javascript: [SourceJavaScriptEvidence]?
+    let executionLogs: [String]?
     let retryCount: Int
     let failureCode: SourceDiagnosticFailureKind?
     let retryable: Bool
@@ -82,7 +83,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
              requestBody, requestHeaders, responseStatusCode, responseHeaders,
              cookieSummary, finalURL, responseEncodedByteCount,
              responseDecodedByteCount, responseContentEncodings, responseWasDecoded,
-             javascript, retryCount, failureCode, retryable
+             javascript, executionLogs, retryCount, failureCode, retryable
     }
 
     init(
@@ -106,6 +107,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         responseContentEncodings: [String]? = nil,
         responseWasDecoded: Bool = false,
         javascript: [SourceJavaScriptEvidence]? = nil,
+        executionLogs: [String]? = nil,
         retryCount: Int = 0,
         failureCode: SourceDiagnosticFailureKind? = nil,
         retryable: Bool? = nil
@@ -130,6 +132,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         self.responseContentEncodings = responseContentEncodings
         self.responseWasDecoded = responseWasDecoded
         self.javascript = javascript?.map(SourceDiagnosticRedactor.javascript)
+        self.executionLogs = executionLogs?.map(SourceDiagnosticRedactor.log)
         self.retryCount = max(0, retryCount)
         self.failureCode = failureCode
         self.retryable = retryable ?? failureCode?.isRetryable ?? false
@@ -158,6 +161,7 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
             responseContentEncodings: try container.decodeIfPresent([String].self, forKey: .responseContentEncodings),
             responseWasDecoded: try container.decodeIfPresent(Bool.self, forKey: .responseWasDecoded) ?? false,
             javascript: try container.decodeIfPresent([SourceJavaScriptEvidence].self, forKey: .javascript),
+            executionLogs: try container.decodeIfPresent([String].self, forKey: .executionLogs),
             retryCount: try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0,
             failureCode: try container.decodeIfPresent(SourceDiagnosticFailureKind.self, forKey: .failureCode),
             retryable: try container.decodeIfPresent(Bool.self, forKey: .retryable)
@@ -280,8 +284,18 @@ enum SourceDiagnosticRedactor {
             normalizedScript: script(value.normalizedScript),
             features: value.features,
             exception: value.exception.map(script),
-            succeeded: value.succeeded
+            succeeded: value.succeeded,
+            stage: value.stage,
+            exceptionType: value.exceptionType.map(script),
+            stackTrace: value.stackTrace.map(script)
         )
+    }
+
+    static func log(_ value: String) -> String {
+        // Logs are useful for classifying a failed bridge call, but they can
+        // contain interpolated request values. Reuse the same conservative
+        // redaction pass used for JS exception strings.
+        script(value)
     }
 
     private static func script(_ value: String) -> String {
