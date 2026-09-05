@@ -70,11 +70,7 @@ struct SmartWebReaderView: View {
             .pageBackground()
             .navigationTitle("智能网页阅读")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(content: {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: { dismiss() }) { Text("关闭") }
-                }
-            })
+            .navigationBarItems(leading: Button("关闭") { dismiss() })
         }
     }
 
