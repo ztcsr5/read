@@ -2004,3 +2004,48 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Next
 
 - Push this stage and wait for both GitHub Actions workflows. Then begin Stage 22 Legado fixture expansion: paginated rules, dynamic cookie/token chains, Ajax and compressed/encrypted responses, plus rule-editor preview/logging.
+
+## 2026-09-06 - Stage 22: Legado pagination identity and stop diagnostics
+
+### Implemented
+
+- Added `SourcePaginationURLIdentity` for stable pagination de-duplication.
+  It normalizes scheme/host case, default HTTP(S) ports, dot segments,
+  unreserved percent escapes, fragments and (by default) query ordering while
+  preserving reserved path escapes such as `%2F`.
+- Updated TOC and正文 pagination to use canonical URL identities, including
+  final response URLs, so redirects and equivalent URL spellings cannot reopen
+  an already loaded page.
+- Added explicit pagination stop reasons: `duplicate-url`, `max-pages`,
+  `empty-page`, `load-failure`, `parse-failure` and `no-next-url`.
+- Added structured evidence for `attemptedURL`, `canonicalURL`, `pagesLoaded`,
+  `retainedItemCount` and `maxPages`; first-page failures now emit the same
+  diagnostic shape as later-page failures.
+
+### Regression coverage
+
+- Canonical URL identity equivalence and reserved-escape preservation.
+- TOC canonical duplicate detection, empty-page prefix retention and stop
+  evidence.
+-正文 load-failure prefix retention and stop evidence.
+
+### Verification
+
+- `git diff --check` passed on Windows (only expected LF-to-CRLF warnings).
+- `node ci-log/extract-prelude.js` passed (`164531` bytes extracted).
+- `node --check ci-log/js-prelude-check.js` passed.
+- Windows cannot run Swift/Xcode/UIKit/XCTest locally; GitHub Actions is the
+  authoritative compile/test and unsigned-IPA gate for commit `2e35a46`.
+- Sustained 120 Hz remains a real-device/Instruments acceptance item.
+
+### Rollback
+
+- Revert commit `2e35a46` to restore raw absolute-string pagination identity and
+  the previous pagination diagnostics.
+
+### Next
+
+- After both Actions complete, continue Stage 22 Legado fixture expansion:
+  dynamic URL/header/body token injection, mixed `ajaxAll` responses,
+  compressed/Base64/AES/bodyJs combinations, and the remaining rule-editor
+  execution-log/export gaps.
