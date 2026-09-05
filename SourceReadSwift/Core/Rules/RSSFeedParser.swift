@@ -2,7 +2,23 @@ import Foundation
 import SwiftSoup
 
 struct RSSArticlePreview: Identifiable, Codable, Hashable, Sendable {
-    var id: String { [sourceURL ?? "", title, link ?? "", pubDate ?? ""].joined(separator: "|") }
+    /// Prefer an upstream guid, then the canonical article link, so a feed
+    /// refresh that changes a title/date does not orphan read state and cache
+    /// entries. The title/date fallback is only used by linkless feeds.
+    var id: String {
+        let stableIdentity = guid?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? link?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? [title, pubDate ?? ""].joined(separator: "|")
+        return [sourceURL ?? "", stableIdentity].joined(separator: "|")
+    }
+
+    /// The pre-stable-ID format is kept so existing read/favorite/cache data
+    /// remains readable after upgrading the app.
+    var legacyID: String { [sourceURL ?? "", title, link ?? "", pubDate ?? ""].joined(separator: "|") }
+
+    var stateIDs: [String] { id == legacyID ? [id] : [id, legacyID] }
+
+    let guid: String?
     let sourceURL: String?
     let title: String
     let link: String?
@@ -14,7 +30,8 @@ struct RSSArticlePreview: Identifiable, Codable, Hashable, Sendable {
     /// when the linked page is unavailable.
     let contentHTML: String?
 
-    init(title: String, link: String?, pubDate: String?, description: String?, sourceURL: String? = nil, imageURL: String? = nil, contentHTML: String? = nil) {
+    init(title: String, link: String?, pubDate: String?, description: String?, sourceURL: String? = nil, imageURL: String? = nil, contentHTML: String? = nil, guid: String? = nil) {
+        self.guid = guid
         self.sourceURL = sourceURL
         self.title = title
         self.link = link
@@ -24,10 +41,11 @@ struct RSSArticlePreview: Identifiable, Codable, Hashable, Sendable {
         self.contentHTML = contentHTML
     }
 
-    private enum CodingKeys: String, CodingKey { case sourceURL, title, link, pubDate, description, imageURL, contentHTML }
+    private enum CodingKeys: String, CodingKey { case guid, sourceURL, title, link, pubDate, description, imageURL, contentHTML }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        guid = try container.decodeIfPresent(String.self, forKey: .guid)
         sourceURL = try container.decodeIfPresent(String.self, forKey: .sourceURL)
         title = try container.decode(String.self, forKey: .title)
         link = try container.decodeIfPresent(String.self, forKey: .link)
@@ -60,7 +78,8 @@ struct RSSFeedParser {
                 description: firstXMLValue(in: item, tags: ["description", "summary"]),
                 sourceURL: sourceURL,
                 imageURL: firstImageURL(in: item, baseURL: sourceURL),
-                contentHTML: firstRawXMLValue(in: item, tags: ["content:encoded", "content"])
+                contentHTML: firstRawXMLValue(in: item, tags: ["content:encoded", "content"]),
+                guid: firstXMLValue(in: item, tags: ["guid", "id"])
             )
         }
         // Feeds often repeat an item in multiple channels/pages. Keep the

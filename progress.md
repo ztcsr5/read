@@ -1970,3 +1970,37 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - iOS build/XCTest: [run 33981351831](https://github.com/ztcsr5/read/actions/runs/33981351831) — success.
 - Unsigned IPA: [run 33981351869](https://github.com/ztcsr5/read/actions/runs/33981351869) — success; download artifact from the run for self-signing.
 - Final Stage 20A commit: `4a80fa5` (plus the preceding grouped-search and CI-fix commits on the same branch).
+
+## 2026-09-06 - Stage 21: EPUB/RSS complete reader regression
+
+### Implemented
+
+- Stabilized `RSSArticlePreview` identity around feed `guid`/Atom `id`, then canonical link, while preserving the legacy title/link/date key for migration.
+- Added backward-compatible RSS read/favorite/paragraph state lookup and cache lookup; writes migrate legacy IDs to the stable key and remove duplicate entries.
+- Debounced RSS paragraph-position persistence to keep UserDefaults writes off the scroll frame path; outgoing articles are flushed before navigation and auto-scroll advances persist immediately.
+- Restored saved RSS paragraph positions into the native TextKit surface after cached, network, or fallback content becomes available.
+- Normalized EPUB ZIP paths across percent encoding, leading slashes, dot segments, Windows separators, query strings and fragments; cover properties are case-insensitive.
+- EPUB3 navigation now prefers `epub:type="toc"` over landmarks/page-list navigation and falls back only when no typed TOC exists.
+
+### Regression coverage
+
+- RSS guid stability when title/link/date change.
+- Legacy RSS state and content-cache migration.
+- Encoded EPUB OPF/chapter path lookup with query parameters.
+- EPUB typed TOC precedence over landmarks.
+
+### Verification
+
+- `git diff --check` passed on Windows (only expected LF-to-CRLF normalization warnings).
+- `node ci-log/extract-prelude.js` passed (`164531` bytes extracted).
+- `node --check ci-log/js-prelude-check.js` passed.
+- Windows cannot run Swift/Xcode/UIKit/XCTest locally; GitHub Actions is the authoritative compile/test and unsigned-IPA gate.
+- Sustained 120 Hz remains a real-device/Instruments acceptance item; this stage does not claim simulator or Windows proof of frame pacing.
+
+### Rollback
+
+- Revert the single Stage 21 commit to restore the prior RSS identity/cache behavior and EPUB path/navigation behavior.
+
+### Next
+
+- Push this stage and wait for both GitHub Actions workflows. Then begin Stage 22 Legado fixture expansion: paginated rules, dynamic cookie/token chains, Ajax and compressed/encrypted responses, plus rule-editor preview/logging.

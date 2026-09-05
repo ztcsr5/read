@@ -63,4 +63,22 @@ final class RSSArticleStateStoreTests: XCTestCase {
         XCTAssertNil(store.paragraphPosition(for: article))
         defaults.removePersistentDomain(forName: suite)
     }
+
+    func testReadsLegacyStateAfterArticleIdentityUpgradeAndMigratesOnWrite() {
+        let suite = "RSSArticleStateStoreTests.migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let article = RSSArticlePreview(title: "New title", link: "https://example.com/new", pubDate: "today", description: nil, sourceURL: "https://feed.one", guid: "post-1")
+        defaults.set([article.legacyID], forKey: "rss.article.readIDs")
+        defaults.set([article.legacyID: 4], forKey: "rss.article.paragraphPositions")
+
+        let store = RSSArticleStateStore(defaults: defaults)
+        XCTAssertTrue(store.isRead(article))
+        XCTAssertEqual(store.paragraphPosition(for: article), 4)
+        store.markRead(article)
+        store.updateParagraphPosition(6, for: article)
+
+        XCTAssertEqual(store.readIDs, Set([article.id]))
+        XCTAssertEqual(store.paragraphPositions, [article.id: 6])
+        defaults.removePersistentDomain(forName: suite)
+    }
 }

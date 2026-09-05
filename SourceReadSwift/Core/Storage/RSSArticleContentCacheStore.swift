@@ -48,19 +48,19 @@ final class RSSArticleContentCacheStore: ObservableObject {
     }
 
     func paragraphs(for article: RSSArticlePreview, maxAge: TimeInterval? = nil) -> [String]? {
-        guard let entry = entries.first(where: { $0.articleID == article.id }) else { return nil }
+        guard let entry = entries.first(where: { article.stateIDs.contains($0.articleID) }) else { return nil }
         if let maxAge, Date().timeIntervalSince(entry.cachedAt) > maxAge { return nil }
         return entry.paragraphs
     }
 
     func contentHTML(for article: RSSArticlePreview, maxAge: TimeInterval? = nil) -> String? {
-        guard let entry = entries.first(where: { $0.articleID == article.id }) else { return nil }
+        guard let entry = entries.first(where: { article.stateIDs.contains($0.articleID) }) else { return nil }
         if let maxAge, Date().timeIntervalSince(entry.cachedAt) > maxAge { return nil }
         return entry.contentHTML
     }
 
     func cachedAt(for article: RSSArticlePreview) -> Date? {
-        entries.first(where: { $0.articleID == article.id })?.cachedAt
+        entries.first(where: { article.stateIDs.contains($0.articleID) })?.cachedAt
     }
 
     func isStale(for article: RSSArticlePreview, maxAge: TimeInterval = RSSFeedCacheStore.defaultMaxAge) -> Bool {
@@ -74,7 +74,7 @@ final class RSSArticleContentCacheStore: ObservableObject {
             .filter { !$0.isEmpty }
         guard !normalized.isEmpty else { return }
         let entry = RSSArticleContentCacheEntry(articleID: article.id, paragraphs: normalized, contentHTML: contentHTML, cachedAt: Date())
-        entries.removeAll { $0.articleID == article.id }
+        entries.removeAll { article.stateIDs.contains($0.articleID) }
         entries.insert(entry, at: 0)
         if entries.count > maxEntries { entries.removeLast(entries.count - maxEntries) }
         persist()

@@ -182,6 +182,36 @@ final class LocalEPUBBookParserTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testNormalizesEncodedPackagePathAndHrefQueryBeforeArchiveLookup() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("encoded-package.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="OPS%20Files/package.opf"/></rootfiles></container>"#, to: archive)
+        try add("OPS Files/package.opf", text: #"<package><metadata><dc:title>Encoded package</dc:title></metadata><manifest><item id="c1" href="text/chapter%20one.xhtml?cache=1" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>"#, to: archive)
+        try add("OPS Files/text/chapter one.xhtml", text: #"<html><body><h1>Chapter</h1><p>Body</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.chapters.first?.sourcePath, "OPS Files/text/chapter one.xhtml")
+        XCTAssertEqual(book.chapters.first?.paragraphs, ["Chapter", "Body"])
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testPrefersTypedTOCNavOverLandmarksNav() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let epubURL = root.appendingPathComponent("typed-nav.epub")
+        guard let archive = Archive(url: epubURL, accessMode: .create) else { return XCTFail("failed to create epub archive") }
+        try add("META-INF/container.xml", text: #"<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>"#, to: archive)
+        try add("book.opf", text: #"<package><metadata><dc:title>Typed nav</dc:title></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>"#, to: archive)
+        try add("nav.xhtml", text: #"<html><body><nav epub:type="landmarks"><a href="cover.xhtml">封面</a></nav><nav epub:type="toc"><a href="chapter.xhtml">正文</a></nav></body></html>"#, to: archive)
+        try add("chapter.xhtml", text: #"<html><body><h1>Chapter</h1><p>Body</p></body></html>"#, to: archive)
+
+        let book = try LocalEPUBBookParser().parse(fileURL: epubURL)
+        XCTAssertEqual(book.navigationEntries.map(\.title), ["正文"])
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func add(_ path: String, text: String, to archive: Archive) throws {
         try add(path, data: Data(text.utf8), to: archive)
     }

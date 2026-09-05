@@ -43,4 +43,19 @@ final class RSSArticleContentCacheStoreTests: XCTestCase {
         XCTAssertNil(store.contentHTML(for: article, maxAge: -1))
         try? FileManager.default.removeItem(at: url)
     }
+
+    func testReadsLegacyCacheAfterStableArticleIdentityUpgrade() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rss-content-cache-migration-\(UUID().uuidString).json")
+        let article = RSSArticlePreview(title: "New title", link: "https://example.com/new", pubDate: "today", description: nil, sourceURL: "https://feed.one", guid: "post-1")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let legacy = RSSArticleContentCacheEntry(articleID: article.legacyID, paragraphs: ["Legacy body"], contentHTML: "<p>Legacy body</p>", cachedAt: Date())
+        try? encoder.encode([legacy]).write(to: url)
+
+        let store = RSSArticleContentCacheStore(fileURL: url)
+        XCTAssertEqual(store.paragraphs(for: article), ["Legacy body"])
+        store.save(["Fresh body"], for: article)
+        XCTAssertEqual(store.entries.map(\.articleID), [article.id])
+        try? FileManager.default.removeItem(at: url)
+    }
 }

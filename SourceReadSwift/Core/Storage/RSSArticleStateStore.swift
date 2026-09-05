@@ -21,28 +21,37 @@ final class RSSArticleStateStore: ObservableObject {
         } ?? [:]
     }
 
-    func isRead(_ article: RSSArticlePreview) -> Bool { readIDs.contains(article.id) }
-    func isFavorite(_ article: RSSArticlePreview) -> Bool { favoriteIDs.contains(article.id) }
+    func isRead(_ article: RSSArticlePreview) -> Bool { article.stateIDs.contains(where: readIDs.contains) }
+    func isFavorite(_ article: RSSArticlePreview) -> Bool { article.stateIDs.contains(where: favoriteIDs.contains) }
 
     func markRead(_ article: RSSArticlePreview) {
+        for legacyID in article.stateIDs where legacyID != article.id {
+            readIDs.remove(legacyID)
+        }
         readIDs.insert(article.id)
         persist()
     }
 
     func toggleFavorite(_ article: RSSArticlePreview) {
-        if favoriteIDs.contains(article.id) {
-            favoriteIDs.remove(article.id)
+        if article.stateIDs.contains(where: favoriteIDs.contains) {
+            article.stateIDs.forEach { favoriteIDs.remove($0) }
         } else {
             favoriteIDs.insert(article.id)
         }
         persist()
     }
 
-    func paragraphPosition(for article: RSSArticlePreview) -> Int? { paragraphPositions[article.id] }
+    func paragraphPosition(for article: RSSArticlePreview) -> Int? {
+        article.stateIDs.compactMap { paragraphPositions[$0] }.first
+    }
 
     func updateParagraphPosition(_ position: Int, for article: RSSArticlePreview) {
         let normalized = max(0, position)
-        guard paragraphPositions[article.id] != normalized else { return }
+        let hadLegacyEntries = article.stateIDs.dropFirst().contains { paragraphPositions[$0] != nil }
+        for legacyID in article.stateIDs where legacyID != article.id {
+            paragraphPositions.removeValue(forKey: legacyID)
+        }
+        guard paragraphPositions[article.id] != normalized || hadLegacyEntries else { return }
         paragraphPositions[article.id] = normalized
         persist()
     }

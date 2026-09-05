@@ -12,9 +12,11 @@ struct RSSArticleReaderView: View {
     @State private var contentFingerprint = ""
     @State private var showingCachedContent = false
     @State private var visibleParagraphIndex = 0
+    @State private var pendingPositionRestore: Int?
     @State private var autoScrollEnabled = false
     @State private var autoScrollTarget = 0
     @State private var autoScrollTask: Task<Void, Never>?
+    @State private var positionPersistTask: Task<Void, Never>?
     @State private var reloadToken = UUID()
     @State private var loadGeneration = 0
     @State private var lastVisibleParagraphUpdateAt = Date.distantPast
@@ -64,6 +66,10 @@ struct RSSArticleReaderView: View {
         if paragraphs.indices.contains(speechController.currentParagraphIndex) {
             return speechController.currentParagraphIndex
         }
+        if let pendingPositionRestore,
+           paragraphs.indices.contains(pendingPositionRestore) {
+            return pendingPositionRestore
+        }
         return autoScrollEnabled && paragraphs.indices.contains(autoScrollTarget) ? autoScrollTarget : nil
     }
 
@@ -73,6 +79,7 @@ struct RSSArticleReaderView: View {
             reloadToken.uuidString,
             String(autoScrollTarget),
             String(speechController.currentParagraphIndex),
+            String(pendingPositionRestore ?? -1),
             autoScrollEnabled ? "auto" : "manual"
         ].joined(separator: "|")
     }
@@ -101,10 +108,12 @@ struct RSSArticleReaderView: View {
             let clamped = min(max(visibleParagraphIndex, 0), count - 1)
             if clamped != visibleParagraphIndex {
                 visibleParagraphIndex = clamped
-                appState.rssArticleStateStore.updateParagraphPosition(clamped, for: currentArticle)
+                persistParagraphPosition(clamped)
             }
         }
         .onDisappear {
+            positionPersistTask?.cancel()
+            persistParagraphPosition(visibleParagraphIndex)
             stopAutoScroll()
             stopSpeechPlayback()
         }
@@ -179,7 +188,7 @@ struct RSSArticleReaderView: View {
                     onVisibleParagraph: { index in
                         guard !autoScrollEnabled, paragraphs.indices.contains(index), index != visibleParagraphIndex else { return }
                         visibleParagraphIndex = index
-                        appState.rssArticleStateStore.updateParagraphPosition(index, for: currentArticle)
+                        scheduleParagraphPositionPersistence(index)
                     }
                 )
                 .ignoresSafeArea(.container, edges: .bottom)
@@ -297,13 +306,26 @@ struct RSSArticleReaderView: View {
     private func selectArticle(offset: Int) {
         let target = selectedIndex + offset
         guard articles.indices.contains(target) else { return }
+        // Commit the outgoing article before selectedIndex changes. Otherwise
+        // a pending debounced callback would write the old paragraph under the
+        // incoming article's identity.
+        positionPersistTask?.cancel()
+        persistParagraphPosition(visibleParagraphIndex)
         selectedIndex = target
         appState.rssArticleStateStore.markRead(articles[target])
     }
 
     private func resetReaderSession() {
         loadGeneration &+= 1
-        stopAutoScroll()
+        // selectedIndex has already changed when this callback runs. Do not
+        // persist the outgoing article's position using currentArticle (which
+        // now points at the incoming article).
+        autoScrollTask?.cancel()
+        autoScrollTask = nil
+        autoScrollEnabled = false
+        if case .autoScroll = playbackCoordinator.mode {
+            playbackCoordinator.stop()
+        }
         stopSpeechPlayback()
         paragraphs = []
         contentFingerprint = ""
@@ -312,9 +334,12 @@ struct RSSArticleReaderView: View {
         statusMessage = nil
         visibleParagraphIndex = 0
         autoScrollTarget = 0
+        pendingPositionRestore = nil
         lastVisibleParagraphUpdateAt = .distantPast
         speechPausedForScene = false
         autoScrollPausedForScene = false
+        positionPersistTask?.cancel()
+        positionPersistTask = nil
     }
 
     private func toggleSpeech() {
@@ -360,6 +385,14 @@ struct RSSArticleReaderView: View {
                 case .advance(let target):
                     autoScrollTarget = target
                     visibleParagraphIndex = target
+                    // Auto-scroll bypasses NativeReaderTextView's manual
+                    // visibility callback. Persist each advance so closing
+                    // the reader (or being interrupted by a scene change)
+                    // resumes from the paragraph the user actually reached.
+                    appState.rssArticleStateStore.updateParagraphPosition(
+                        target,
+                        for: currentArticle
+                    )
                 case .nextChapter, .stop:
                     stopAutoScroll()
                 }
@@ -368,11 +401,44 @@ struct RSSArticleReaderView: View {
     }
 
     private func stopAutoScroll() {
+        if paragraphs.indices.contains(visibleParagraphIndex) {
+            persistParagraphPosition(visibleParagraphIndex)
+        }
         autoScrollTask?.cancel()
         autoScrollTask = nil
         autoScrollEnabled = false
         if case .autoScroll = playbackCoordinator.mode {
             playbackCoordinator.stop()
+        }
+    }
+
+    private func scheduleParagraphPositionPersistence(_ index: Int) {
+        positionPersistTask?.cancel()
+        positionPersistTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: ReaderPerformancePolicy.positionPersistenceDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            persistParagraphPosition(index)
+            positionPersistTask = nil
+        }
+    }
+
+    private func persistParagraphPosition(_ index: Int) {
+        guard !paragraphs.isEmpty else { return }
+        let safeIndex = min(max(index, 0), paragraphs.count - 1)
+        appState.rssArticleStateStore.updateParagraphPosition(safeIndex, for: currentArticle)
+    }
+
+    /// NativeReaderTextView preserves its current pixel offset by design. A
+    /// one-shot target is needed when cached or freshly fetched paragraphs are
+    /// first installed, otherwise a restored paragraph index would be stored
+    /// correctly but the surface would still render from paragraph zero.
+    private func requestPositionRestore(_ index: Int, generation: Int) {
+        guard !paragraphs.isEmpty else { return }
+        let safeIndex = min(max(index, 0), paragraphs.count - 1)
+        pendingPositionRestore = safeIndex
+        DispatchQueue.main.async {
+            guard generation == loadGeneration else { return }
+            pendingPositionRestore = nil
         }
     }
 
@@ -400,6 +466,8 @@ struct RSSArticleReaderView: View {
         }
         if let savedPosition = appState.rssArticleStateStore.paragraphPosition(for: article) {
             visibleParagraphIndex = max(0, savedPosition)
+        } else {
+            visibleParagraphIndex = 0
         }
         // Read stale entries too. A reader should remain useful offline; the
         // network request below is still attempted and replaces the cache when
@@ -411,6 +479,7 @@ struct RSSArticleReaderView: View {
                 contentFingerprint = makeContentFingerprint(cached, articleID: article.id)
                 showingCachedContent = true
                 statusMessage = "网络加载中 · 当前显示离线缓存"
+                requestPositionRestore(visibleParagraphIndex, generation: generation)
             }
         }
         if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article) {
@@ -418,6 +487,7 @@ struct RSSArticleReaderView: View {
             contentFingerprint = makeContentFingerprint(cached, articleID: article.id)
             showingCachedContent = true
             statusMessage = "网络加载中 · 当前显示离线缓存"
+            requestPositionRestore(visibleParagraphIndex, generation: generation)
         }
         guard let link = article.link, let url = URL(string: link) else {
             if paragraphs.isEmpty {
@@ -442,6 +512,7 @@ struct RSSArticleReaderView: View {
                 appState.rssArticleContentCacheStore.save(parsed, for: article, contentHTML: article.contentHTML ?? html)
                 showingCachedContent = false
                 statusMessage = nil
+                requestPositionRestore(visibleParagraphIndex, generation: generation)
             }
         } catch is CancellationError { return }
         catch {
@@ -449,6 +520,7 @@ struct RSSArticleReaderView: View {
             if paragraphs.isEmpty {
                 paragraphs = fallbackParagraphs(for: article)
                 contentFingerprint = makeContentFingerprint(paragraphs, articleID: article.id)
+                requestPositionRestore(visibleParagraphIndex, generation: generation)
             }
             if paragraphs.isEmpty {
                 errorMessage = error.localizedDescription

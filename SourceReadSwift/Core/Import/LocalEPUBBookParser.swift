@@ -10,12 +10,13 @@ struct LocalEPUBBookParser {
             throw LocalEPUBImportError.invalidArchive
         }
         let containerXML = try stringEntry("META-INF/container.xml", in: archive)
-        guard let opfPath = try firstMatch(
+        guard let rawOPFPath = try firstMatch(
             in: containerXML,
             pattern: #"full-path\s*=\s*["']([^"']+)["']"#
         ) else {
             throw LocalEPUBImportError.missingPackageDocument
         }
+        let opfPath = normalizeArchivePath(rawOPFPath)
         let opfXML = try stringEntry(opfPath, in: archive)
         let basePath = URL(fileURLWithPath: opfPath).deletingLastPathComponent().relativePath
         let metadata = metadata(from: opfXML, fallbackTitle: fileURL.deletingPathExtension().lastPathComponent)
@@ -105,8 +106,9 @@ struct LocalEPUBBookParser {
     }
 
     private func stringEntry(_ path: String, in archive: Archive) throws -> String {
-        guard let entry = archive[path] else {
-            throw LocalEPUBImportError.missingEntry(path)
+        let archivePath = normalizeArchivePath(path)
+        guard let entry = archive[archivePath] else {
+            throw LocalEPUBImportError.missingEntry(archivePath)
         }
         var data = Data()
         _ = try archive.extract(entry) { chunk in
@@ -235,8 +237,16 @@ struct LocalEPUBBookParser {
     }
 
     private func navEntriesList(from html: String, basePath: String) -> [NavigationEntry] {
-        guard let document = try? SwiftSoup.parse(html),
-              let links = try? document.select("nav a").array() else { return [] }
+        guard let document = try? SwiftSoup.parse(html) else { return [] }
+        // Prefer the semantic table-of-contents nav. EPUB3 files may also
+        // contain landmarks/page-list navs, which are not reader chapters.
+        let navs = (try? document.select("nav").array()) ?? []
+        let tocNavs = navs.filter { nav in
+            let type = (try? nav.attr("epub:type"))?.lowercased() ?? ""
+            return type.split { $0 == " " || $0 == "\t" || $0 == "\n" }.contains("toc")
+        }
+        let selectedNavs = tocNavs.isEmpty ? navs : tocNavs
+        let links = selectedNavs.flatMap { (try? $0.select("a").array()) ?? [] }
         var result: [NavigationEntry] = []
         for link in links {
             do {
@@ -355,7 +365,7 @@ struct LocalEPUBBookParser {
                 pattern: #"<meta[^>]+name\s*=\s*["']cover["'][^>]+content\s*=\s*["']([^"']+)["']"#
             ) { return raw }
             return manifest.first(where: { item in
-                item.properties.split(separator: " ").contains { $0 == "cover-image" }
+                item.properties.split(separator: " ").contains { $0.lowercased() == "cover-image" }
             })?.id
         }()
         guard let item = manifest.first(where: { $0.id == coverID })
@@ -395,12 +405,26 @@ struct LocalEPUBBookParser {
     }
 
     private func normalizeEPUBPath(basePath: String, href: String) -> String {
-        let rawHref = href.components(separatedBy: "#").first ?? href
+        let rawHref: String = {
+            guard let boundary = href.firstIndex(where: { $0 == "#" || $0 == "?" }) else { return href }
+            return String(href[..<boundary])
+        }()
         let cleanHref = rawHref.removingPercentEncoding ?? rawHref
         if basePath == "." || basePath == "/" || basePath.isEmpty {
-            return cleanHref
+            return normalizeArchivePath(cleanHref)
         }
-        return ([basePath, cleanHref].joined(separator: "/") as NSString)
+        return normalizeArchivePath(
+            ([basePath, cleanHref].joined(separator: "/") as NSString).standardizingPath
+        )
+    }
+
+    /// ZIP entry names are slash-separated POSIX paths even when a source
+    /// emits a leading slash, percent-encoding or dot segments. Keeping one
+    /// canonical form makes container, OPF, spine, navigation and cover
+    /// lookups agree across EPUB producers.
+    private func normalizeArchivePath(_ path: String) -> String {
+        let decoded = path.removingPercentEncoding ?? path
+        return (decoded.replacingOccurrences(of: "\\", with: "/") as NSString)
             .standardizingPath
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }

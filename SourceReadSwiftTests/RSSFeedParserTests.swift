@@ -123,4 +123,18 @@ final class RSSFeedParserTests: XCTestCase {
 
         XCTAssertEqual(articles.map(\.title), ["Same", "Other"])
     }
+
+    func testUsesGuidAsStableIdentityWhenTitleAndDateChange() {
+        let first = RSSFeedParser().parseArticles(from: """
+        <rss><channel><item><guid>post-1</guid><title>旧标题</title><link>/old</link><pubDate>yesterday</pubDate></item></channel></rss>
+        """, sourceURL: "https://example.com/feed").first!
+        let refreshed = RSSFeedParser().parseArticles(from: """
+        <rss><channel><item><guid>post-1</guid><title>新标题</title><link>/new</link><pubDate>today</pubDate></item></channel></rss>
+        """, sourceURL: "https://example.com/feed").first!
+
+        XCTAssertEqual(first.id, refreshed.id)
+        XCTAssertNotEqual(first.legacyID, refreshed.legacyID)
+        XCTAssertEqual(refreshed.guid, "post-1")
+    }
+
 }
