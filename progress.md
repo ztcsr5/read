@@ -1694,3 +1694,53 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Next
 
 - Stage 17: expand JavaScript compatibility beyond the current QuickJS/JavaScriptCore subset (Legado host shims, async/promise bridges and parity fixtures), then feed pass/fail reasons into the same evidence model.
+
+## 2026-09-05 - Stage 17: Legado JavaScript async/Promise compatibility (complete)
+
+### Implemented
+
+- Added a lexical-safe `LegadoJavaScriptCompatibility` normalizer for `@js:` and
+  `<js>` wrappers, `await`, async functions/arrows, Promise chains and common
+  async host APIs. String, comment and regular-expression literals are kept
+  byte-for-byte intact.
+- Extended the JavaScriptCore prelude with a synchronous Promise facade,
+  `Promise.resolve/reject/all/race`, thenable responses, `globalThis`,
+  `URLSearchParams`, `Headers`, `Response`, `queueMicrotask` and timer aliases.
+- Kept Search URL, bodyJs and Search → Detail → TOC → Content execution on the
+  same `RuleExecutionContext`, so async/Promise feature evidence survives
+  paginated follow-up requests and enters the existing diagnostic report.
+- Added redacted raw/normalized JS evidence and deterministic XCTest coverage
+  for normalization, ajax/ajaxAll/fetch, Promise chains, rejection handling,
+  wrappers and literal-safety behavior.
+
+### Verification
+
+- Local: `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js`
+  and `git diff --check` pass. Windows has no Swift/Xcode/UIKit runtime.
+- iOS build/XCTest: [run 33948719788](https://github.com/ztcsr5/read/actions/runs/33948719788) — success (Run 278).
+- Unsigned IPA: [run 33948719798](https://github.com/ztcsr5/read/actions/runs/33948719798) — success (Run 275).
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9964170560`,
+  6,392,287 bytes. GitHub artifact package digest was not exposed by the
+  unauthenticated API and is intentionally not guessed.
+- The green CI gate proves compilation, XCTest execution and packaging for the
+  deterministic fixtures; broad public-source compatibility and sustained
+  ProMotion 120 Hz still require a physical iPhone/source corpus.
+
+### Commits
+
+- `c8ac5b7 feat: expand Legado async JavaScript compatibility`
+- `a26b22e fix: compile JavaScript compatibility bridge`
+- `d1e2aa4 test: fix multiline Legado fixture literal`
+- `c42a109 test: use valid multiline Swift fixture`
+- `fa54113 test: make fixture response capture explicit`
+
+### Rollback
+
+- Revert commits `c8ac5b7` through `fa54113` together to restore the Stage 16
+  JavaScript bridge and compact rule-preview evidence.
+
+### Next
+
+- Stage 18: source-rule parity expansion beyond async syntax—Legado Java/HTTP
+  host surface, import-script behavior, pagination state and representative
+  offline fixtures—then connect the outcomes to visual source-detail testing.
