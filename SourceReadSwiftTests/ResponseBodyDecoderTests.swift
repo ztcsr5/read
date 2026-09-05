@@ -35,4 +35,22 @@ final class ResponseBodyDecoderTests: XCTestCase {
         XCTAssertEqual(normalized.data, Data("hello legado".utf8))
         XCTAssertEqual(normalized.headers["Content-Encoding"], "gzip")
     }
+
+    func testDecodesStackedContentCodingsInReverseOrder() {
+        let decoder = ResponseBodyDecoder()
+        let stacked = [
+            120, 156, 147, 239, 230, 96, 0, 1, 166, 255, 218, 122, 158, 62, 231, 252,
+            124, 3, 79, 120, 250, 250, 251, 156, 100, 103, 168, 231, 243, 250, 199,
+            199, 192, 192, 0, 0, 150, 92, 9, 8
+        ].map(UInt8.init)
+
+        XCTAssertEqual(
+            decoder.decode(data: Data(stacked), headers: ["Content-Encoding": "gzip, deflate"]),
+            Data("stacked legado".utf8)
+        )
+        XCTAssertEqual(
+            decoder.decode(data: Data(gzip), headers: ["Content-Encoding": "x-gzip"]),
+            Data("hello legado".utf8)
+        )
+    }
 }
