@@ -1903,6 +1903,28 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Revert `a9d1cb7` to restore the Stage 20A navigation, source-card and
   display-link behavior.
 
+### Stage 20B follow-up: activate the scene frame-rate request
+
+- Commit `e66e4d1` applies the computed `CAFrameRateRange` to each active
+  `UIWindowScene.preferredFrameRateRange`. Earlier code only recorded the
+  range in diagnostics, so this closes the gap between the 120 Hz capability
+  declaration and the runtime request while keeping iOS free to adapt on
+  non-ProMotion hardware.
+- No always-running display link was reintroduced; the reader remains on the
+  native TextKit/SwiftUI path.
+
+### Verification
+
+- `git diff --check` passed.
+- `node ci-log/extract-prelude.js` passed (`164531` bytes extracted).
+- `node --check ci-log/js-prelude-check.js` passed.
+- GitHub Actions for `e66e4d1`: iOS XCTest and unsigned IPA are pending; do
+  not treat this stage as green until both runs report `success`.
+
+### Rollback
+
+- Revert `e66e4d1` to restore the previous diagnostic-only frame-rate hook.
+
 ### CI correction log
 
 - First Stage 20A Actions run exposed a SwiftUI `toolbar(content:)` overload ambiguity in `SmartWebReaderView`; replaced it with the compatible `navigationBarItems` API and pushed commit `0946340`.
