@@ -38,14 +38,12 @@ enum FrameRateCoordinator {
         guard maximum > 0 else { return }
 
         let preferred = ReaderPerformancePolicy.preferredRefreshRate(maximumFramesPerSecond: maximum)
-        guard let range = preferredRange(maximumFramesPerSecond: maximum) else { return }
-        // UIView.preferredFrameRateRange is the iOS 15+ API that actually
-        // requests a cadence. The zero-sized anchor applies it to its native
-        // surface; the scene hook below remains responsible for reapplying the
-        // request when a window reconnects or moves between scenes.
+        // `CADisableMinimumFrameDurationOnPhone` removes the app-imposed 60 Hz
+        // floor. UIKit/SwiftUI choose the highest supported cadence adaptively;
+        // there is no public UIWindowScene frame-range setter in the iOS 16 SDK.
         PerformanceSignpost.event(
             "frame.rate",
-            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred) min=\(range.minimum)"
+            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
         )
     }
 }
@@ -72,11 +70,6 @@ struct FrameRateSceneAnchor: UIViewRepresentable {
             guard let window,
                   window !== appliedWindow else { return }
             appliedWindow = window
-            if let range = FrameRateCoordinator.preferredRange(
-                maximumFramesPerSecond: window.screen.maximumFramesPerSecond
-            ) {
-                preferredFrameRateRange = range
-            }
             FrameRateCoordinator.apply(to: window.windowScene)
         }
     }

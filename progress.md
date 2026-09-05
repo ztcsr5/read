@@ -1903,27 +1903,28 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Revert `a9d1cb7` to restore the Stage 20A navigation, source-card and
   display-link behavior.
 
-### Stage 20B follow-up: activate the scene frame-rate request
+### Stage 20B follow-up: high-refresh capability hook
 
-- Commit `e66e4d1` applies the computed `CAFrameRateRange` to each active
-  `UIWindowScene.preferredFrameRateRange`. Earlier code only recorded the
-  range in diagnostics, so this closes the gap between the 120 Hz capability
-  declaration and the runtime request while keeping iOS free to adapt on
-  non-ProMotion hardware.
-- No always-running display link was reintroduced; the reader remains on the
-  native TextKit/SwiftUI path.
+- The attempted scene-level frame-rate setter (`e66e4d1`) was rejected by the
+  iOS 16 SDK and was superseded before release. The supported implementation
+  remains `CADisableMinimumFrameDurationOnPhone=true` plus the native
+  TextKit/SwiftUI reader surface and diagnostic ceiling calculation.
+- No always-running display link was reintroduced; this avoids idle main-run-
+  loop work competing with SwiftUI layout.
 
 ### Verification
 
 - `git diff --check` passed.
 - `node ci-log/extract-prelude.js` passed (`164531` bytes extracted).
 - `node --check ci-log/js-prelude-check.js` passed.
-- GitHub Actions for `e66e4d1`: iOS XCTest and unsigned IPA are pending; do
-  not treat this stage as green until both runs report `success`.
+- GitHub Actions for `e66e4d1`: failed at compile time because
+  `UIWindowScene.preferredFrameRateRange` is not available in the target SDK;
+  the commit was superseded by the current fix.
 
 ### Rollback
 
-- Revert `e66e4d1` to restore the previous diagnostic-only frame-rate hook.
+- Revert `e66e4d1` if historical comparison is needed; use the current
+  diagnostic-only hook for the supported iOS 16 build.
 
 ### CI correction log
 
