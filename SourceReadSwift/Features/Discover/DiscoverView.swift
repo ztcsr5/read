@@ -15,6 +15,7 @@ struct DiscoverView: View {
 
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
+                .padding(.bottom, 22)
             }
             .contentShape(Rectangle())
             .onTapGesture {

@@ -108,6 +108,11 @@ struct SourceManagerView: View {
                 }
                 .padding(.horizontal, AppTheme.pagePadding)
                 .padding(.top, 10)
+                // Keep the last source row clear of the floating root tab bar.
+                // The root inset handles the global chrome; this small tail
+                // spacing also covers the inline batch toolbar when it is
+                // expanded on compact screens.
+                .padding(.bottom, 18)
             }
             .scrollDismissesKeyboard(.interactively)
             .pageBackground()
@@ -120,15 +125,6 @@ struct SourceManagerView: View {
                             toggleManagementForCurrentTab()
                         }
                     }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        showImportSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("导入源")
                 }
             }
             .sheet(isPresented: $showImportSheet) {
@@ -271,23 +267,32 @@ struct SourceManagerView: View {
     }
 
     private var webServiceCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "globe")
-                    .font(.title3)
-                Text("源库状态")
-                    .font(.headline)
-                Spacer()
-                Text("\(sourceCounts.total)")
-                    .font(.headline)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AppTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("源库状态")
+                        .font(.subheadline.weight(.bold))
+                    Text("书源、仓库与 RSS")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(sourceCounts.total) 项")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(AppTheme.accent.opacity(0.12), in: Capsule())
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 statusPill("书源 \(sourceCounts.books)", color: .blue)
                 statusPill("仓库 \(sourceCounts.catalogs)", color: .purple)
                 statusPill("RSS \(sourceCounts.rss)", color: .orange)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     let enabled = appState.sourceStore.sources.filter(\.enabled)
@@ -304,11 +309,29 @@ struct SourceManagerView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showImportSheet = true
+            } label: {
+                Label("导入书源", systemImage: "tray.and.arrow.down")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("导入书源")
+            NavigationLink {
+                SourceWritingView(server: appState.sourceWritingServer)
+                    .environmentObject(appState)
+            } label: {
+                Label("Web 写源", systemImage: "network")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
             Text("支持 JSON、URL、阅读分享链接、仓库、RSS，以及搜索 → 详情 → 目录 → 正文全链路测试。")
-                .font(.footnote)
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .podcastCard()
+        .padding(14)
+        .glassPanel(cornerRadius: 18, material: .thinMaterial, strokeOpacity: 0.08, shadowOpacity: 0.06)
     }
 
     private var tabPicker: some View {
