@@ -25,7 +25,7 @@ struct SmartWebReaderView: View {
                         .padding(.bottom, 90)
                     }
                     .safeAreaInset(edge: .bottom) {
-                        Button { article = nil } label: {
+                        Button { self.article = nil } label: {
                             Label("返回网页", systemImage: "safari")
                         }
                         .buttonStyle(.borderedProminent)
