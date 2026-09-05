@@ -1867,3 +1867,9 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### CI correction log
 
 - First Stage 20A Actions run exposed a SwiftUI `toolbar(content:)` overload ambiguity in `SmartWebReaderView`; replaced it with the compatible `navigationBarItems` API and pushed commit `0946340`.
+
+### Stage 20A CI evidence
+
+- iOS build/XCTest: [run 33981351831](https://github.com/ztcsr5/read/actions/runs/33981351831) — success.
+- Unsigned IPA: [run 33981351869](https://github.com/ztcsr5/read/actions/runs/33981351869) — success; download artifact from the run for self-signing.
+- Final Stage 20A commit: `4a80fa5` (plus the preceding grouped-search and CI-fix commits on the same branch).
