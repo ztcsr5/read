@@ -377,7 +377,10 @@ final class DiscoverViewModel: ObservableObject {
 
     func startSearch() {
         let submitted = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !submitted.isEmpty, submitted == lastSubmittedKeyword, isSearching {
+        if !submitted.isEmpty,
+           submitted == lastSubmittedKeyword,
+           !isSearching,
+           (hasFinishedSearch || hasRawResults || !results.isEmpty) {
             return
         }
         lastSubmittedKeyword = submitted
