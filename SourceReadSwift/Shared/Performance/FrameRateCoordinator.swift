@@ -38,12 +38,14 @@ enum FrameRateCoordinator {
         guard maximum > 0 else { return }
 
         let preferred = ReaderPerformancePolicy.preferredRefreshRate(maximumFramesPerSecond: maximum)
-        // The Info.plist switch removes the app-imposed 60 Hz floor. Avoid a
-        // permanent no-op CADisplayLink: idle callbacks consume main-thread
-        // time and compete with SwiftUI layout on long reader pages.
+        guard let range = preferredRange(maximumFramesPerSecond: maximum) else { return }
+        // This is the actual scene-level request. The Info.plist switch removes
+        // the app-imposed 60 Hz floor, while the scene range asks ProMotion for
+        // its native ceiling without running a permanent CADisplayLink.
+        windowScene.preferredFrameRateRange = range
         PerformanceSignpost.event(
             "frame.rate",
-            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred)"
+            "scene=\(windowScene.session.persistentIdentifier) max=\(maximum) preferred=\(preferred) min=\(range.minimum)"
         )
     }
 }
