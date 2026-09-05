@@ -37,7 +37,8 @@ struct SourceBatchDiagnosticRunner: Sendable {
                     status: .failed,
                     requestSummary: "keyword=",
                     responseSummary: "测试关键词为空",
-                    failureClassification: "empty-keyword"
+                    failureClassification: "empty-keyword",
+                    failureCode: .invalidInput
                 )]
             )
         }
@@ -84,7 +85,8 @@ struct SourceBatchDiagnosticRunner: Sendable {
                 responseSummary: isEmpty ? "搜索结果为空" : "搜索结果 " + String(books.count) + " 条",
                 matchCount: books.count,
                 elapsedMilliseconds: elapsed,
-                failureClassification: isEmpty ? "empty-result" : nil
+                failureClassification: isEmpty ? "empty-result" : nil,
+                failureCode: isEmpty ? .emptyResult : nil
             )
         case .failure(let error):
             step = SourceDiagnosticStep(
@@ -93,7 +95,8 @@ struct SourceBatchDiagnosticRunner: Sendable {
                 requestSummary: "keyword=" + cleanKeyword + "&page=" + String(page),
                 responseSummary: error.displayMessage,
                 elapsedMilliseconds: elapsed,
-                failureClassification: String(describing: error)
+                failureClassification: String(describing: error),
+                failureCode: SourceDiagnosticClassifier.kind(error: error, stage: "search")
             )
         }
 
@@ -128,7 +131,9 @@ struct SourceBatchDiagnosticRunner: Sendable {
                 responseHeaders: evidence.responseHeaders,
                 cookieSummary: evidence.cookieSummary,
                 finalURL: evidence.finalURL,
-                retryCount: 0
+                retryCount: step.retryCount,
+                failureCode: step.failureCode,
+                retryable: step.retryable
             )
         }
         return SourceDiagnosticReport(
@@ -218,7 +223,8 @@ struct SourceBatchDiagnosticRunner: Sendable {
                 status: .warning,
             requestSummary: "keyword=" + keyword,
                 responseSummary: message,
-                failureClassification: "timeout"
+                failureClassification: "timeout",
+                failureCode: .timeout
             )]
         )
     }

@@ -18,6 +18,37 @@ enum SourceDiagnosticStage: String, CaseIterable, Codable, Hashable, Sendable {
     }
 }
 
+/// Stable machine-readable failure taxonomy used by batch diagnostics.  The
+/// human-facing `failureClassification` string is intentionally preserved for
+/// compatibility, while this code lets UI, exports and automation group the
+/// same failure consistently across sources and locales.
+enum SourceDiagnosticFailureKind: String, Codable, Hashable, Sendable {
+    case invalidInput = "invalid-input"
+    case invalidSource = "invalid-source"
+    case network
+    case timeout
+    case parsing
+    case emptyResult = "empty-result"
+    case authentication
+    case verification
+    case blocked
+    case unsupported
+    case javascript
+    case cancelled
+    case unknown
+
+    var isRetryable: Bool {
+        switch self {
+        case .network, .timeout, .verification:
+            return true
+        case .invalidInput, .invalidSource, .parsing, .emptyResult,
+             .authentication, .blocked, .unsupported, .javascript,
+             .cancelled, .unknown:
+            return false
+        }
+    }
+}
+
 struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let stage: SourceDiagnosticStage
@@ -37,12 +68,14 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
     let cookieSummary: String?
     let finalURL: String?
     let retryCount: Int
+    let failureCode: SourceDiagnosticFailureKind?
+    let retryable: Bool
 
     private enum CodingKeys: String, CodingKey {
         case id, stage, status, requestSummary, responseSummary, matchCount,
              elapsedMilliseconds, failureClassification, requestMethod,
              requestBody, requestHeaders, responseStatusCode, responseHeaders,
-             cookieSummary, finalURL, retryCount
+             cookieSummary, finalURL, retryCount, failureCode, retryable
     }
 
     init(
@@ -61,7 +94,9 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         responseHeaders: [String: String]? = nil,
         cookieSummary: String? = nil,
         finalURL: String? = nil,
-        retryCount: Int = 0
+        retryCount: Int = 0,
+        failureCode: SourceDiagnosticFailureKind? = nil,
+        retryable: Bool? = nil
     ) {
         self.id = id
         self.stage = stage
@@ -79,6 +114,8 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
         self.cookieSummary = cookieSummary.map(SourceDiagnosticRedactor.value)
         self.finalURL = finalURL
         self.retryCount = max(0, retryCount)
+        self.failureCode = failureCode
+        self.retryable = retryable ?? failureCode?.isRetryable ?? false
     }
 
     init(from decoder: Decoder) throws {
@@ -99,7 +136,9 @@ struct SourceDiagnosticStep: Identifiable, Codable, Hashable, Sendable {
             responseHeaders: try container.decodeIfPresent([String: String].self, forKey: .responseHeaders),
             cookieSummary: try container.decodeIfPresent(String.self, forKey: .cookieSummary),
             finalURL: try container.decodeIfPresent(String.self, forKey: .finalURL),
-            retryCount: try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
+            retryCount: try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0,
+            failureCode: try container.decodeIfPresent(SourceDiagnosticFailureKind.self, forKey: .failureCode),
+            retryable: try container.decodeIfPresent(Bool.self, forKey: .retryable)
         )
     }
 }
@@ -285,7 +324,8 @@ struct SourceDiagnosticBatchReport: Identifiable, Codable, Hashable, Sendable {
                 let count = step.matchCount > 0 ? " · results=\(step.matchCount)" : ""
                 let elapsed = step.elapsedMilliseconds.map { " · \($0) ms" } ?? ""
                 let code = step.responseStatusCode.map { " · HTTP \($0)" } ?? ""
-                lines.append("  - \(step.stage.rawValue): \(step.status.rawValue)\(count)\(elapsed)\(code)")
+                let failure = step.failureCode.map { " · failure=\($0.rawValue)" } ?? ""
+                lines.append("  - \(step.stage.rawValue): \(step.status.rawValue)\(count)\(elapsed)\(code)\(failure)")
                 if let request = step.requestMethod {
                     let destination = step.finalURL ?? step.requestSummary ?? ""
                     lines.append("    request: \(request) \(destination)")

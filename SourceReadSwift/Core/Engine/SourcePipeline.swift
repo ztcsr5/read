@@ -133,7 +133,8 @@ extension SourceEngine {
                 responseSummary: message,
                 matchCount: count,
                 elapsedMilliseconds: elapsed(start),
-                failureClassification: String(describing: error)
+                failureClassification: String(describing: error),
+                failureCode: SourceDiagnosticClassifier.kind(error: error, stage: stage.rawValue)
             ))
             return SourcePipelineExecution(result: makeResult(), error: error)
         }
@@ -156,7 +157,8 @@ extension SourceEngine {
                 responseSummary: "搜索结果 \(books.count) 条",
                 matchCount: books.count,
                 elapsedMilliseconds: elapsed(searchStarted),
-                failureClassification: nil
+                failureClassification: nil,
+                failureCode: nil
             ))
             guard let first = books.first else { return failure(.empty("搜索结果为空"), stage: .search, start: searchStarted) }
 
@@ -222,7 +224,8 @@ extension SourceEngine {
                 responseSummary: "正文 \(value.paragraphs.count) 段",
                 matchCount: value.paragraphs.count,
                 elapsedMilliseconds: elapsed(contentStarted),
-                failureClassification: value.paragraphs.isEmpty ? "empty-result" : nil
+                failureClassification: value.paragraphs.isEmpty ? "empty-result" : nil,
+                failureCode: value.paragraphs.isEmpty ? .emptyResult : nil
             ))
             return SourcePipelineExecution(result: makeResult(), error: nil)
         }

@@ -54,19 +54,89 @@ enum ResponseFormatDetector {
     /// never silently treated as source data.
     static func jsonObject(from body: String) -> Any? {
         var value = normalizedBody(body)
+        value = stripKnownWrapper(from: value)
+        if let object = parseJSON(value) { return object }
+
+        // A few legacy endpoints HTML-escape the JSON while still returning
+        // it as text/html. Decode only the standard entity forms and retry;
+        // ordinary HTML remains a non-JSON response.
+        let unescaped = decodeHTMLEntities(value)
+        if unescaped != value, let object = parseJSON(unescaped) { return object }
+
+        // Some APIs return application/x-www-form-urlencoded envelopes such
+        // as `data=%7B...%7D`. Percent-decode only when the decoded payload is
+        // itself a balanced JSON value, avoiding accidental query decoding.
+        if let decoded = value.removingPercentEncoding, decoded != value {
+            if let object = parseJSON(decoded) { return object }
+            // Form/query envelopes often keep a stable key in front of the
+            // encoded payload (`data=%7B...%7D` or `json=%5B...%5D`).
+            let candidates = decoded
+                .split(separator: "&", omittingEmptySubsequences: true)
+                .compactMap { part -> String? in
+                    guard let equals = part.firstIndex(of: "=") else { return nil }
+                    return String(part[part.index(after: equals)...])
+                }
+            for candidate in candidates {
+                if let object = parseJSON(candidate) { return object }
+            }
+        }
+        return nil
+    }
+
+    private static func parseJSON(_ value: String) -> Any? {
+        let candidate = normalizedBody(value)
+        if let data = candidate.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+            return object
+        }
+        return firstBalancedJSONValue(in: candidate)
+    }
+
+    /// Removes wrappers commonly emitted by JSONP and JavaScript bootstrap
+    /// endpoints while keeping extraction conservative. The balanced scanner
+    /// ensures a prose prefix/suffix cannot be mistaken for source data.
+    private static func stripKnownWrapper(from input: String) -> String {
+        var value = normalizedBody(input)
         for prefix in xssiPrefixes where value.hasPrefix(prefix) {
             value = String(value.dropFirst(prefix.count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: ","))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if value.lowercased().hasPrefix("<pre"), let end = value.firstIndex(of: ">"), let close = value.range(of: "</pre>", options: .caseInsensitive) {
-            value = String(value[value.index(after: end)..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.lowercased().hasPrefix("<pre"),
+           let end = value.firstIndex(of: ">"),
+           let close = value.range(of: "</pre>", options: .caseInsensitive) {
+            value = String(value[value.index(after: end)..<close.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if let data = value.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
-            return object
+        return value
+    }
+
+    private static func decodeHTMLEntities(_ input: String) -> String {
+        var value = input
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
+        // Numeric entities occur in escaped JSON returned by older PHP
+        // endpoints. Decode them without introducing a Foundation parser.
+        let pattern = "&#(x[0-9A-Fa-f]+|[0-9]+);"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
+        let nsRange = NSRange(value.startIndex..<value.endIndex, in: value)
+        let matches = regex.matches(in: value, range: nsRange).reversed()
+        for match in matches {
+            guard let whole = Range(match.range, in: value),
+                  let number = Range(match.range(at: 1), in: value) else { continue }
+            let token = String(value[number])
+            let radix = token.lowercased().hasPrefix("x") ? 16 : 10
+            let digits = token.dropFirst(token.lowercased().hasPrefix("x") ? 1 : 0)
+            guard let scalarValue = UInt32(digits, radix: radix),
+                  let scalar = UnicodeScalar(scalarValue) else { continue }
+            value.replaceSubrange(whole, with: String(scalar))
         }
-        return firstBalancedJSONValue(in: value)
+        return value
     }
 
     private static func firstBalancedJSONValue(in value: String) -> Any? {
