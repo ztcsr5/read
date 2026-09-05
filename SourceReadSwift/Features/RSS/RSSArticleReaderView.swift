@@ -96,6 +96,14 @@ struct RSSArticleReaderView: View {
             resetReaderSession()
             appState.rssArticleStateStore.markRead(currentArticle)
         }
+        .onChange(of: paragraphs.count) { count in
+            guard count > 0 else { return }
+            let clamped = min(max(visibleParagraphIndex, 0), count - 1)
+            if clamped != visibleParagraphIndex {
+                visibleParagraphIndex = clamped
+                appState.rssArticleStateStore.updateParagraphPosition(clamped, for: currentArticle)
+            }
+        }
         .onDisappear {
             stopAutoScroll()
             stopSpeechPlayback()
@@ -171,6 +179,7 @@ struct RSSArticleReaderView: View {
                     onVisibleParagraph: { index in
                         guard !autoScrollEnabled, paragraphs.indices.contains(index), index != visibleParagraphIndex else { return }
                         visibleParagraphIndex = index
+                        appState.rssArticleStateStore.updateParagraphPosition(index, for: currentArticle)
                     }
                 )
                 .ignoresSafeArea(.container, edges: .bottom)
@@ -388,6 +397,9 @@ struct RSSArticleReaderView: View {
                     statusMessage = nil
                 }
             }
+        }
+        if let savedPosition = appState.rssArticleStateStore.paragraphPosition(for: article) {
+            visibleParagraphIndex = max(0, savedPosition)
         }
         // Read stale entries too. A reader should remain useful offline; the
         // network request below is still attempted and replaces the cache when

@@ -41,7 +41,7 @@ final class AppDataBackupTests: XCTestCase {
             bookshelf: bookshelf,
             sources: SourceLibrarySnapshot(sources: [source]),
             purifyRules: [PurifyRule(id: "rule-1", pattern: "广告")],
-            rssState: RSSArticleStateSnapshot(readIDs: ["r1"], favoriteIDs: ["r2"]),
+            rssState: RSSArticleStateSnapshot(readIDs: ["r1"], favoriteIDs: ["r2"], paragraphPositions: ["feed|Article|https://example.com/article|": 4]),
             readerPreferences: ["reader.fontSize": .double(20), "reader.mode": .string("paged")]
         )
         let encoder = JSONEncoder()
@@ -56,6 +56,7 @@ final class AppDataBackupTests: XCTestCase {
         XCTAssertEqual(decoded.sources.sources.first?.bookSourceUrl, source.bookSourceUrl)
         XCTAssertEqual(decoded.purifyRules, snapshot.purifyRules)
         XCTAssertEqual(decoded.rssState, snapshot.rssState)
+        XCTAssertEqual(decoded.rssState.paragraphPositions["feed|Article|https://example.com/article|"], 4)
         XCTAssertEqual(decoded.readerPreferences, snapshot.readerPreferences)
         XCTAssertEqual(decoded.bookshelf.books.first?.title, "测试书")
         XCTAssertEqual(decoded.readerPreferences["reader.fontSize"], BackupPreferenceValue.double(20))

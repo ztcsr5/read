@@ -49,4 +49,18 @@ final class RSSArticleStateStoreTests: XCTestCase {
         XCTAssertTrue(store.isFavorite(second))
         defaults.removePersistentDomain(forName: suite)
     }
+
+    func testPersistsAndClearsParagraphPosition() {
+        let suite = "RSSArticleStateStoreTests.position.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let article = RSSArticlePreview(title: "A", link: "https://example.com/a", pubDate: nil, description: nil, sourceURL: "https://feed.one")
+        let store = RSSArticleStateStore(defaults: defaults)
+        store.updateParagraphPosition(7, for: article)
+        XCTAssertEqual(store.paragraphPosition(for: article), 7)
+        let reloaded = RSSArticleStateStore(defaults: defaults)
+        XCTAssertEqual(reloaded.paragraphPosition(for: article), 7)
+        store.clear(sourceURL: "https://feed.one")
+        XCTAssertNil(store.paragraphPosition(for: article))
+        defaults.removePersistentDomain(forName: suite)
+    }
 }
