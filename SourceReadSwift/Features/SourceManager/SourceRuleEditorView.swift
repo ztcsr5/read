@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct SourceRuleEditorView: View {
     let source: BookSource
@@ -18,10 +19,16 @@ struct SourceRuleEditorView: View {
     @State private var previewMatchCount = 0
     @State private var previewStage: RulePreviewEvaluator.Stage?
     @State private var previewEvidence: RulePreviewEvaluator.Evidence?
+    @State private var previewLogs: [String] = []
     @State private var isPreviewing = false
     @State private var validationBlocked = false
     @State private var previewHistory: [RulePreviewHistoryEntry] = []
-    @State private var initialDraft: RuleDraftSnapshot?
+    @State private var initialDraft: SourceRuleDraft?
+    @State private var hasLoadedPersistedDraft = false
+    @State private var draftDocument: SourceRuleDraftDocument?
+    @State private var isExportingDraft = false
+    @State private var isImportingDraft = false
+    @State private var draftMessage: String?
 
     init(source: BookSource, onSave: @escaping (BookSource) -> Void, onCancel: @escaping () -> Void) {
         self.source = source
@@ -64,6 +71,11 @@ struct SourceRuleEditorView: View {
                         .font(.system(.footnote, design: .monospaced))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    if let draftMessage {
+                        Text(draftMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section {
                     TextEditor(text: $previewSample)
@@ -113,6 +125,19 @@ struct SourceRuleEditorView: View {
                                     .foregroundStyle(.secondary)
                                 }
                             }
+                            if !previewLogs.isEmpty {
+                                DisclosureGroup("执行日志") {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        ForEach(Array(previewLogs.enumerated()), id: \.offset) { _, log in
+                                            Text(log)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .textSelection(.enabled)
+                                        }
+                                    }
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 } header: {
@@ -131,6 +156,12 @@ struct SourceRuleEditorView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
+                                    if let log = entry.logs.last {
+                                        Text(log)
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1)
+                                    }
                                     Text(entry.date, format: .dateTime.hour().minute().second())
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
@@ -173,16 +204,14 @@ struct SourceRuleEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .onChange(of: searchURL) { _ in clearValidation() }
-            .onChange(of: searchRule) { _ in clearValidation() }
-            .onChange(of: detailRule) { _ in clearValidation() }
-            .onChange(of: tocRule) { _ in clearValidation() }
-            .onChange(of: contentRule) { _ in clearValidation() }
+            .onChange(of: searchURL) { _ in clearValidation(); persistDraftIfLoaded() }
+            .onChange(of: searchRule) { _ in clearValidation(); persistDraftIfLoaded() }
+            .onChange(of: detailRule) { _ in clearValidation(); persistDraftIfLoaded() }
+            .onChange(of: tocRule) { _ in clearValidation(); persistDraftIfLoaded() }
+            .onChange(of: contentRule) { _ in clearValidation(); persistDraftIfLoaded() }
             .onChange(of: selectedSection) { _ in clearPreview() }
             .onAppear {
-                if initialDraft == nil {
-                    initialDraft = RuleDraftSnapshot(searchURL: searchURL, searchRule: searchRule, detailRule: detailRule, tocRule: tocRule, contentRule: contentRule)
-                }
+                loadPersistedDraftIfNeeded()
             }
             .navigationTitle("规则编辑 · \(source.bookSourceName)")
             .navigationBarTitleDisplayMode(.inline)
@@ -195,18 +224,58 @@ struct SourceRuleEditorView: View {
                         }
                     }
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button {
+                            draftDocument = SourceRuleDraftDocument(draft: makeDraft())
+                            isExportingDraft = true
+                        } label: {
+                            Label("导出草稿", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            isImportingDraft = true
+                        } label: {
+                            Label("导入草稿", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "doc.badge.gearshape")
+                    }
+                    .accessibilityLabel("规则草稿")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         let drafts = currentDrafts
                         issues = RuleEditorValidator().validate(source: source, drafts: drafts)
                         validationBlocked = !issues.isEmpty
                         guard issues.isEmpty else { return }
+                        SourceRuleDraftStore().remove(sourceURL: source.bookSourceUrl)
+                        draftMessage = nil
                         onSave(source.updatingRules(searchURL: searchURL, search: searchRule, detail: detailRule, toc: tocRule, content: contentRule))
                     } label: {
                         Label(validationBlocked ? "修正后重试 (\(issues.count))" : "校验并保存", systemImage: validationBlocked ? "exclamationmark.triangle" : "checkmark")
                     }
                     .disabled(isPreviewing)
                 }
+            }
+            .fileExporter(
+                isPresented: $isExportingDraft,
+                document: draftDocument,
+                contentType: .json,
+                defaultFilename: "SourceReadSwift-rule-draft"
+            ) { result in
+                switch result {
+                case .success:
+                    draftMessage = "规则草稿已导出"
+                case .failure(let error):
+                    draftMessage = "导出草稿失败：\(error.localizedDescription)"
+                }
+            }
+            .fileImporter(
+                isPresented: $isImportingDraft,
+                allowedContentTypes: [.json, .plainText],
+                allowsMultipleSelection: false
+            ) { result in
+                importDraft(result)
             }
         }
     }
@@ -256,6 +325,7 @@ struct SourceRuleEditorView: View {
         previewMatchCount = 0
         previewStage = nil
         previewEvidence = nil
+        previewLogs = []
     }
 
     private var currentRuleBinding: Binding<String> {
@@ -300,12 +370,14 @@ struct SourceRuleEditorView: View {
                 previewMatchCount = result.matchedCount
                 previewStage = result.stage
                 previewEvidence = result.evidence
+                previewLogs = result.logs
                 previewHistory.insert(
                     RulePreviewHistoryEntry(
                         stage: result.stage,
                         matchedCount: result.matchedCount,
                         message: result.message,
                         evidence: result.evidence,
+                        logs: result.logs,
                         sample: sample,
                         ruleText: text
                     ),
@@ -328,11 +400,9 @@ struct SourceRuleEditorView: View {
 
     private func restoreInitialDraft() {
         guard let initialDraft else { return }
-        searchURL = initialDraft.searchURL
-        searchRule = initialDraft.searchRule
-        detailRule = initialDraft.detailRule
-        tocRule = initialDraft.tocRule
-        contentRule = initialDraft.contentRule
+        applyDraft(initialDraft)
+        SourceRuleDraftStore().remove(sourceURL: source.bookSourceUrl)
+        draftMessage = "已撤销未保存草稿"
         clearValidation()
         clearPreview()
     }
@@ -350,7 +420,78 @@ struct SourceRuleEditorView: View {
         previewMatchCount = entry.matchedCount
         previewStage = entry.stage
         previewEvidence = entry.evidence
+        previewLogs = entry.logs
         clearValidation()
+    }
+
+    private func makeDraft() -> SourceRuleDraft {
+        SourceRuleDraft(
+            sourceURL: source.bookSourceUrl,
+            sourceName: source.bookSourceName,
+            searchURL: searchURL,
+            searchRule: searchRule,
+            detailRule: detailRule,
+            tocRule: tocRule,
+            contentRule: contentRule
+        )
+    }
+
+    private func loadPersistedDraftIfNeeded() {
+        guard !hasLoadedPersistedDraft else { return }
+        if initialDraft == nil {
+            initialDraft = makeDraft()
+            if let persisted = SourceRuleDraftStore().load(sourceURL: source.bookSourceUrl),
+               persisted.sourceURL == source.bookSourceUrl {
+                applyDraft(persisted)
+                if hasDraftChanges {
+                    draftMessage = "已恢复上次未保存的规则草稿"
+                } else {
+                    SourceRuleDraftStore().remove(sourceURL: source.bookSourceUrl)
+                }
+            }
+        }
+        hasLoadedPersistedDraft = true
+    }
+
+    private func applyDraft(_ draft: SourceRuleDraft) {
+        searchURL = draft.searchURL
+        searchRule = draft.searchRule
+        detailRule = draft.detailRule
+        tocRule = draft.tocRule
+        contentRule = draft.contentRule
+    }
+
+    private func persistDraftIfLoaded() {
+        guard hasLoadedPersistedDraft else { return }
+        guard hasDraftChanges else {
+            SourceRuleDraftStore().remove(sourceURL: source.bookSourceUrl)
+            return
+        }
+        do {
+            try SourceRuleDraftStore().save(makeDraft())
+        } catch {
+            draftMessage = "草稿保存失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func importDraft(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            let imported = try SourceRuleDraft.decode(data)
+            guard imported.sourceURL == source.bookSourceUrl else {
+                throw SourceRuleDraftError.sourceMismatch
+            }
+            applyDraft(imported)
+            try SourceRuleDraftStore().save(imported)
+            draftMessage = "规则草稿已导入"
+            clearValidation()
+            clearPreview()
+        } catch {
+            draftMessage = "导入草稿失败：\(error.localizedDescription)"
+        }
     }
 
     private static func text(_ rule: SourceRule?) -> String {
@@ -373,14 +514,6 @@ private struct ValidationGroup: Identifiable {
     var id: String { field }
 }
 
-private struct RuleDraftSnapshot: Sendable {
-    let searchURL: String
-    let searchRule: String
-    let detailRule: String
-    let tocRule: String
-    let contentRule: String
-}
-
 private struct RulePreviewHistoryEntry: Identifiable, Sendable {
     let id = UUID()
     let date = Date()
@@ -388,6 +521,7 @@ private struct RulePreviewHistoryEntry: Identifiable, Sendable {
     let matchedCount: Int
     let message: String
     let evidence: RulePreviewEvaluator.Evidence
+    let logs: [String]
     let sample: String
     let ruleText: String
 }

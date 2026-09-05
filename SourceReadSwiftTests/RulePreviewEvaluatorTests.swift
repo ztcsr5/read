@@ -57,5 +57,7 @@ final class RulePreviewEvaluatorTests: XCTestCase {
         XCTAssertEqual(result.evidence.parsedOutput, ["One", "Two"])
         XCTAssertEqual(result.evidence.outputByteCount, "One\nTwo".utf8.count)
         XCTAssertEqual(result.evidence.normalizedResponse.first, "{")
+        XCTAssertTrue(result.logs.contains { $0.contains("preview.start") })
+        XCTAssertTrue(result.logs.contains { $0.contains("extract.list") })
     }
 }

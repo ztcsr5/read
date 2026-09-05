@@ -2035,13 +2035,14 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - `node ci-log/extract-prelude.js` passed (`164531` bytes extracted).
 - `node --check ci-log/js-prelude-check.js` passed.
 - Windows cannot run Swift/Xcode/UIKit/XCTest locally; GitHub Actions is the
-  authoritative compile/test and unsigned-IPA gate for commit `2e35a46`.
+  authoritative compile/test and unsigned-IPA gate for final head `7eeded4`.
 - Sustained 120 Hz remains a real-device/Instruments acceptance item.
 
 ### Rollback
 
-- Revert commit `2e35a46` to restore raw absolute-string pagination identity and
-  the previous pagination diagnostics.
+- Revert commits `2e35a46`, `3990354` and `7eeded4` to restore raw
+  absolute-string pagination identity and the previous request interpolation
+  and diagnostics behavior.
 
 ### Next
 
@@ -2049,3 +2050,32 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
   dynamic URL/header/body token injection, mixed `ajaxAll` responses,
   compressed/Base64/AES/bodyJs combinations, and the remaining rule-editor
   execution-log/export gaps.
+
+### Stage 22 CI correction and final evidence
+
+- Initial Stage 22 commit `2e35a46` exposed missing `canonicalURL` arguments in
+  the first-page diagnostic calls; correction commit `3990354` added them.
+- Dynamic URL boundary encoding was added in `7eeded4`, preserving valid
+  existing `%HH` escapes while encoding spaces, CJK, separators and ampersands.
+- iOS build/XCTest: [run 33996803826](https://github.com/ztcsr5/read/actions/runs/33996803826) — success.
+- Unsigned IPA: [run 33996803801](https://github.com/ztcsr5/read/actions/runs/33996803801) — success; artifact `SourceReadSwift-unsigned-ipa`.
+- Final Stage 22 head: `7eeded4`.
+
+### Stage 22 Rule Editor slice (working tree)
+
+- Added source-scoped `SourceRuleDraft` JSON schema with ISO-8601 timestamps,
+  schema validation and isolated `UserDefaults` persistence.
+- Added SwiftUI `FileDocument` import/export for rule drafts, with source URL
+  mismatch checks and automatic recovery of unfinished edits on editor launch.
+- Rule editor now autosaves edits, clears the draft after successful validation,
+  exposes preview execution logs and keeps those logs in the eight-entry
+  preview history.
+- Added regression coverage for draft JSON/schema/store isolation and the
+  portable file document, plus preview log assertions.
+
+### Next verification
+
+- Run the iOS XCTest and unsigned-IPA workflows for this Rule Editor slice;
+  Windows can only run the static checks (`git diff --check`, JS prelude
+  extraction/syntax). Real iOS UI and sustained ProMotion 120 Hz remain device
+  acceptance items.

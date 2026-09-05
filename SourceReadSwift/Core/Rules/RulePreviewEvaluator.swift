@@ -27,9 +27,18 @@ struct RulePreviewEvaluator {
         let values: [String]
         let message: String
         let evidence: Evidence
+        let logs: [String]
 
         var matchedCount: Int { values.count }
         var hasMatches: Bool { !values.isEmpty }
+
+        init(stage: Stage, values: [String], message: String, evidence: Evidence, logs: [String] = []) {
+            self.stage = stage
+            self.values = values
+            self.message = message
+            self.evidence = evidence
+            self.logs = logs
+        }
     }
 
     /// Deterministic evidence for the editor's offline preview.  Keeping the
@@ -55,7 +64,11 @@ struct RulePreviewEvaluator {
         stage: Stage,
         baseURL: URL? = URL(string: "https://fixture.invalid/")
     ) -> Result {
+        var logs = ["preview.start stage=\(stage.rawValue) inputBytes=\(sample.utf8.count)"]
         let normalizedSample = ResponseFormatDetector.normalizedBody(sample)
+        if normalizedSample != sample {
+            logs.append("response.normalized bytes=\(sample.utf8.count)->\(normalizedSample.utf8.count)")
+        }
         let baseEvidence = Evidence(
             requestMethod: "LOCAL",
             requestURL: baseURL?.absoluteString ?? "fixture://local/",
@@ -70,18 +83,22 @@ struct RulePreviewEvaluator {
         )
         let trimmed = ruleText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return Result(stage: stage, values: [], message: "规则为空", evidence: baseEvidence)
+            logs.append("rule.empty")
+            return Result(stage: stage, values: [], message: "规则为空", evidence: baseEvidence, logs: logs)
         }
         let rule = parseRule(trimmed, preferredKeys: stage.preferredKeys)
         guard !rule.isEmpty else {
+            logs.append("rule.no-executable-field")
             return Result(
                 stage: stage,
                 values: [],
                 message: "规则对象没有可执行字段",
-                evidence: baseEvidence.with(selectedRule: rule)
+                evidence: baseEvidence.with(selectedRule: rule),
+                logs: logs
             )
         }
 
+        logs.append("rule.selected \(rule)")
         let evidence = baseEvidence.with(selectedRule: rule)
 
         let context = RuleExecutionContext()
@@ -90,24 +107,29 @@ struct RulePreviewEvaluator {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !listValues.isEmpty {
+            logs.append("extract.list count=\(listValues.count)")
             let message = listValues.joined(separator: "\n")
             return Result(
                 stage: stage,
                 values: listValues,
                 message: message,
-                evidence: evidence.with(outputByteCount: message.utf8.count, parsedOutput: listValues)
+                evidence: evidence.with(outputByteCount: message.utf8.count, parsedOutput: listValues),
+                logs: logs
             )
         }
         let scalar = analyzer.string(content: normalizedSample, rule: rule, baseURL: baseURL)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if scalar.isEmpty {
-            return Result(stage: stage, values: [], message: "未提取到结果", evidence: evidence)
+            logs.append("extract.scalar empty")
+            return Result(stage: stage, values: [], message: "未提取到结果", evidence: evidence, logs: logs)
         }
+        logs.append("extract.scalar count=1")
         return Result(
             stage: stage,
             values: [scalar],
             message: scalar,
-            evidence: evidence.with(outputByteCount: scalar.utf8.count, parsedOutput: [scalar])
+            evidence: evidence.with(outputByteCount: scalar.utf8.count, parsedOutput: [scalar]),
+            logs: logs
         )
     }
 
