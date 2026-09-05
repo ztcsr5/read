@@ -20,6 +20,8 @@ struct RSSArticleReaderView: View {
     @State private var lastVisibleParagraphUpdateAt = Date.distantPast
     @State private var speechPausedForScene = false
     @State private var autoScrollPausedForScene = false
+    @State private var statusMessage: String?
+    @State private var showSettings = false
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var speechController = ReaderSpeechController()
     @StateObject private var playbackCoordinator = ReaderPlaybackCoordinator()
@@ -27,6 +29,8 @@ struct RSSArticleReaderView: View {
     @AppStorage("reader.lineSpacing") private var lineSpacing: Double = 8
     @AppStorage("reader.pagePadding") private var pagePadding: Double = 24
     @AppStorage("reader.paragraphSpacing") private var paragraphSpacing: Double = 16
+    @AppStorage("reader.letterSpacing") private var letterSpacing: Double = 0
+    @AppStorage("reader.titleSpacing") private var titleSpacing: Double = 12
     @AppStorage("reader.ttsRate") private var ttsRate: Double = 0.52
     @AppStorage("reader.autoScrollDelay") private var autoScrollDelay: Double = 2.0
     @AppStorage("reader.background") private var backgroundRawValue = "paper"
@@ -74,7 +78,14 @@ struct RSSArticleReaderView: View {
     }
 
     var body: some View {
-        articleReaderSurface
+        ZStack(alignment: .top) {
+            articleReaderSurface
+
+            if let statusMessage {
+                readerStatusBanner(statusMessage)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .background(readerBackground.ignoresSafeArea())
         .navigationTitle("文章阅读")
         .navigationBarTitleDisplayMode(.inline)
@@ -112,6 +123,22 @@ struct RSSArticleReaderView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.18), value: statusMessage)
+        .highRefreshRateSurface()
+        .sheet(isPresented: $showSettings) {
+            RSSReaderSettingsView(
+                fontSize: $fontSize,
+                lineSpacing: $lineSpacing,
+                letterSpacing: $letterSpacing,
+                paragraphSpacing: $paragraphSpacing,
+                pagePadding: $pagePadding,
+                titleSpacing: $titleSpacing,
+                ttsRate: $ttsRate,
+                autoScrollDelay: $autoScrollDelay,
+                backgroundRawValue: $backgroundRawValue
+            )
+            .presentationDetents([.medium, .large])
+        }
         .toolbar { readerToolbar }
     }
 
@@ -129,10 +156,10 @@ struct RSSArticleReaderView: View {
                     fontSize: fontSize,
                     lineSpacing: lineSpacing,
                     pagePadding: pagePadding,
-                    letterSpacing: 0,
+                    letterSpacing: letterSpacing,
                     paragraphSpacing: paragraphSpacing,
                     paragraphIndent: 0,
-                    titleSpacing: 12,
+                    titleSpacing: titleSpacing,
                     footerHeight: 110,
                     textColor: readerTextUIColor,
                     highlightColor: AppTheme.accentUIColor.withAlphaComponent(backgroundRawValue == "dark" ? 0.24 : 0.12),
@@ -181,10 +208,67 @@ struct RSSArticleReaderView: View {
 
     @ToolbarContentBuilder private var readerToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            Button { reloadToken = UUID() } label: { Image(systemName: isLoading ? "hourglass" : "arrow.clockwise") }.disabled(isLoading)
-            Button { appState.rssArticleStateStore.toggleFavorite(currentArticle) } label: { Image(systemName: appState.rssArticleStateStore.isFavorite(currentArticle) ? "star.fill" : "star").foregroundStyle(appState.rssArticleStateStore.isFavorite(currentArticle) ? .yellow : readerTextColor) }
-            if let link = currentArticle.link, let url = URL(string: link) { Link(destination: url) { Image(systemName: "safari") } }
+            Menu {
+                Button {
+                    toggleSpeech()
+                } label: {
+                    Label(
+                        speechController.isSpeaking
+                            ? (speechController.isPaused ? "继续朗读" : "暂停朗读")
+                            : "从当前段落朗读",
+                        systemImage: speechController.isSpeaking && !speechController.isPaused ? "pause.fill" : "speaker.wave.2"
+                    )
+                }
+                Button {
+                    autoScrollEnabled ? stopAutoScroll() : startAutoScroll()
+                } label: {
+                    Label(autoScrollEnabled ? "暂停自动滚动" : "自动滚动", systemImage: autoScrollEnabled ? "pause.circle" : "arrow.down.circle")
+                }
+                Divider()
+                Button {
+                    reloadToken = UUID()
+                } label: {
+                    Label("刷新正文", systemImage: "arrow.clockwise")
+                }
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("阅读设置", systemImage: "gearshape")
+                }
+                Button {
+                    appState.rssArticleStateStore.toggleFavorite(currentArticle)
+                } label: {
+                    Label(
+                        appState.rssArticleStateStore.isFavorite(currentArticle) ? "取消收藏" : "收藏文章",
+                        systemImage: appState.rssArticleStateStore.isFavorite(currentArticle) ? "star.slash" : "star"
+                    )
+                }
+                if let link = currentArticle.link, let url = URL(string: link) {
+                    Link(destination: url) { Label("在浏览器打开", systemImage: "safari") }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("文章阅读菜单")
         }
+    }
+
+    private func readerStatusBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: showingCachedContent ? "externaldrive" : (isLoading ? "arrow.triangle.2.circlepath" : "exclamationmark.triangle"))
+            Text(message)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(readerTextColor)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: Capsule())
+        .overlay { Capsule().stroke(Color.white.opacity(backgroundRawValue == "dark" ? 0.08 : 0.35), lineWidth: 0.8) }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .allowsHitTesting(false)
     }
 
     private var readerControls: some View {
@@ -216,6 +300,7 @@ struct RSSArticleReaderView: View {
         contentFingerprint = ""
         errorMessage = nil
         showingCachedContent = false
+        statusMessage = nil
         visibleParagraphIndex = 0
         autoScrollTarget = 0
         lastVisibleParagraphUpdateAt = .distantPast
@@ -295,9 +380,13 @@ struct RSSArticleReaderView: View {
         isLoading = true
         errorMessage = nil
         showingCachedContent = false
+        statusMessage = "正在加载正文…"
         defer {
             if generation == loadGeneration {
                 isLoading = false
+                if !showingCachedContent, errorMessage == nil {
+                    statusMessage = nil
+                }
             }
         }
         // Read stale entries too. A reader should remain useful offline; the
@@ -305,14 +394,25 @@ struct RSSArticleReaderView: View {
         // fresh content is available.
         if let cachedHTML = appState.rssArticleContentCacheStore.contentHTML(for: article) {
             let cached = RSSArticleContentParser().parseParagraphs(from: cachedHTML)
-            if !cached.isEmpty { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
+            if !cached.isEmpty {
+                paragraphs = cached
+                contentFingerprint = makeContentFingerprint(cached, articleID: article.id)
+                showingCachedContent = true
+                statusMessage = "网络加载中 · 当前显示离线缓存"
+            }
         }
-        if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article) { paragraphs = cached; contentFingerprint = makeContentFingerprint(cached, articleID: article.id); showingCachedContent = true }
+        if paragraphs.isEmpty, let cached = appState.rssArticleContentCacheStore.paragraphs(for: article) {
+            paragraphs = cached
+            contentFingerprint = makeContentFingerprint(cached, articleID: article.id)
+            showingCachedContent = true
+            statusMessage = "网络加载中 · 当前显示离线缓存"
+        }
         guard let link = article.link, let url = URL(string: link) else {
             if paragraphs.isEmpty {
                 paragraphs = fallbackParagraphs(for: article)
                 contentFingerprint = makeContentFingerprint(paragraphs, articleID: article.id)
             }
+            statusMessage = paragraphs.isEmpty ? "该文章没有有效链接" : "已显示文章内容"
             return
         }
         do {
@@ -329,6 +429,7 @@ struct RSSArticleReaderView: View {
                 contentFingerprint = makeContentFingerprint(parsed, articleID: article.id)
                 appState.rssArticleContentCacheStore.save(parsed, for: article, contentHTML: article.contentHTML ?? html)
                 showingCachedContent = false
+                statusMessage = nil
             }
         } catch is CancellationError { return }
         catch {
@@ -337,7 +438,13 @@ struct RSSArticleReaderView: View {
                 paragraphs = fallbackParagraphs(for: article)
                 contentFingerprint = makeContentFingerprint(paragraphs, articleID: article.id)
             }
-            if paragraphs.isEmpty { errorMessage = error.localizedDescription } else { showingCachedContent = true }
+            if paragraphs.isEmpty {
+                errorMessage = error.localizedDescription
+                statusMessage = "正文加载失败"
+            } else {
+                showingCachedContent = true
+                statusMessage = "网络不可用 · 已回退到离线缓存"
+            }
         }
     }
 

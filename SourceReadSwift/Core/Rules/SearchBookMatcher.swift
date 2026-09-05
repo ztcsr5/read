@@ -19,10 +19,7 @@ enum SearchBookMatcher {
         let query = normalized(keyword)
         guard !query.isEmpty else { return [] }
 
-        var seenIDs = Set<String>()
-        let unique = books.filter { book in
-            !normalized(book.name).isEmpty && seenIDs.insert(book.id).inserted
-        }
+        let unique = deduplicated(books)
 
         let matched = unique.filter { book in
             let name = normalized(book.name)
@@ -37,6 +34,31 @@ enum SearchBookMatcher {
             if left != right { return left > right }
             if lhs.name != rhs.name { return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending }
             return lhs.sourceName.localizedStandardCompare(rhs.sourceName) == .orderedAscending
+        }
+    }
+
+    /// De-duplicates incrementally collected source results while retaining
+    /// the first source's metadata.  Search requests arrive out of order, so
+    /// the caller can run this after each batch without reshuffling equal
+    /// scores unpredictably.
+    static func deduplicated(_ books: [SearchBook]) -> [SearchBook] {
+        var seenIDs = Set<String>()
+        return books.filter { book in
+            let name = normalized(book.name)
+            guard !name.isEmpty else { return false }
+            let normalizedURL = book.bookUrl
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .lowercased()
+            let source = book.sourceUrl
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .lowercased()
+            let id = "\(source)|\(normalizedURL)"
+            // Some sources return the same item once as an absolute URL and
+            // once as a path. Keep distinct source URLs, but collapse exact
+            // duplicates from the same source regardless of slash casing.
+            return seenIDs.insert(id).inserted
         }
     }
 

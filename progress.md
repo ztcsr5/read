@@ -1789,3 +1789,48 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Stage 19: reader/UI quality pass—EPUB/RSS reading surfaces, speech/auto-page
   state, 120 Hz rendering hygiene, source-detail/rule-editor validation and
   the remaining bookshelf/source-management workflows.
+
+## 2026-09-06 - Stage 19B: reader and LAN source quality pass (in progress)
+
+### Implemented in this batch
+
+- Added a shared numeric editor for reader sliders. Decimal comma input is
+  normalized, incomplete drafts are tolerated while typing, committed values
+  are clamped to their documented ranges, and invalid values restore the last
+  valid setting. The same control is now used by the chapter reader and RSS
+  article reader.
+- Added a dedicated RSS reading-settings sheet covering background, typography,
+  spacing, speech rate and automatic-scroll delay. RSS articles now use the
+  native TextKit reader surface and the same high-refresh anchor as chapters.
+- Unified the RSS overflow menu with speech-from-visible-paragraph,
+  auto-scroll, refresh, settings, favorite and browser actions. Loading,
+  cached/offline and failure states are visible without covering the bottom
+  reader controls.
+- Replaced the LAN source editor's UTF-8 string-offset HTTP handling with a
+  byte-oriented HTTP/1.1 parser. It handles packet splits, UTF-8 JSON bodies,
+  HEAD/OPTIONS/favicon probes, normalized headers, bounded body/header sizes,
+  CORS preflight caching and deterministic 501 responses for chunked requests.
+- Search results now collapse URL slash/case duplicates within one source while
+  preserving equivalent books from different sources. The source-manager
+  import sheet no longer exposes a duplicate top-level Import action.
+
+### Verification before CI
+
+- `node ci-log/extract-prelude.js` pass (164531 bytes extracted).
+- `node --check ci-log/js-prelude-check.js` pass.
+- `git diff --check` pass.
+- Added deterministic XCTest coverage for reader value normalization, HTTP
+  framing/body limits/HEAD handling and search URL de-duplication.
+- Swift/XCTest and unsigned IPA remain pending GitHub Actions because this
+  Windows host has no Xcode/UIKit runtime.
+
+### Rollback
+
+- The batch is uncommitted until CI validation. After commit, revert the single
+  Stage 19B commit to restore the Stage 19A reader/source behavior.
+
+### Next
+
+- Push the Stage 19B batch to `codex/swift-v2-lifetime-reader`, wait for both
+  iOS XCTest and unsigned-IPA workflows, then fix any compiler/test failures
+  before starting the next large stage.

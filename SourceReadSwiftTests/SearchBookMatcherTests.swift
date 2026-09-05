@@ -26,4 +26,11 @@ final class SearchBookMatcherTests: XCTestCase {
         let result = SearchBookMatcher.filteredAndRanked([item, item], keyword: "测试书", exact: true)
         XCTAssertEqual(result.count, 1)
     }
+
+    func testDeduplicatesTrailingSlashAndCaseVariantsWithinSource() {
+        let first = SearchBook(name: "测试书", author: "甲", coverUrl: nil, bookUrl: "/book/", sourceName: "A", sourceUrl: "HTTPS://A/", intro: nil)
+        let duplicate = SearchBook(name: "测试书", author: "乙", coverUrl: nil, bookUrl: "book", sourceName: "A", sourceUrl: "https://a", intro: nil)
+        let otherSource = SearchBook(name: "测试书", author: "乙", coverUrl: nil, bookUrl: "book", sourceName: "B", sourceUrl: "https://b", intro: nil)
+        XCTAssertEqual(SearchBookMatcher.deduplicated([first, duplicate, otherSource]).count, 2)
+    }
 }

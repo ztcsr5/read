@@ -944,12 +944,6 @@ struct SourceManagerView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { showImportSheet = false }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("导入") {
-                        Task { await importSourcesSmart() }
-                    }
-                    .disabled(importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("完成") { dismissKeyboard() }

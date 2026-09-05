@@ -1090,27 +1090,13 @@ struct ReaderView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                TextField(
-                    title,
-                    text: Binding(
-                        get: {
-                            step < 1
-                                ? String(format: "%.2f", value.wrappedValue)
-                                : String(format: "%.0f", value.wrappedValue)
-                        },
-                        set: { raw in
-                            guard let parsed = Double(raw) else { return }
-                            value.wrappedValue = min(max(parsed, range.lowerBound), range.upperBound)
-                        }
-                    )
+                ReaderNumberInput(
+                    title: title,
+                    value: value,
+                    range: range,
+                    step: step,
+                    unit: unit
                 )
-                    .keyboardType(.numbersAndPunctuation)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 76)
-                Text(unit)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: step)
             Text(help)
@@ -2071,40 +2057,6 @@ final class ReaderSpeechController: NSObject, ObservableObject, AVSpeechSynthesi
             self.currentParagraphIndex = -1
             self.queue.clear()
             self.onFinished = nil
-        }
-    }
-}
-
-private enum ReaderBackground: String, CaseIterable, Identifiable {
-    case paper
-    case green
-    case gray
-    case dark
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .paper: return "纸张"
-        case .green: return "护眼"
-        case .gray: return "浅灰"
-        case .dark: return "深色"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .paper: return Color(red: 0.96, green: 0.93, blue: 0.86)
-        case .green: return Color(red: 0.88, green: 0.94, blue: 0.86)
-        case .gray: return Color(.systemGray6)
-        case .dark: return Color(red: 0.12, green: 0.12, blue: 0.13)
-        }
-    }
-
-    var textColor: Color {
-        switch self {
-        case .dark: return .white.opacity(0.9)
-        default: return .primary
         }
     }
 }

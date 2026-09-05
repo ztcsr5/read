@@ -347,42 +347,38 @@ final class LightweightHTTPServer: ObservableObject {
 
             var buffer = accumulated
             buffer.append(data)
-            if buffer.count > 2_000_000 {
+            if buffer.count > LightweightHTTPParser.maximumHeaderBytes + LightweightHTTPParser.maximumBodyBytes {
                 self.sendResponse(connection: connection, statusCode: 413, statusText: "Payload Too Large", contentType: "text/plain; charset=utf-8", body: "Payload too large")
                 return
             }
-            if self.isCompleteHTTPRequest(buffer) {
-                self.handleHttpRequest(data: buffer, connection: connection)
-            } else {
+            switch LightweightHTTPParser.parse(buffer) {
+            case .incomplete:
                 self.receiveRequest(on: connection, accumulated: buffer)
+            case .complete(let request):
+                self.handleHttpRequest(request, connection: connection)
+            case .failure(let statusCode, let message):
+                self.sendResponse(connection: connection, statusCode: statusCode, statusText: Self.statusText(for: statusCode), contentType: "text/plain; charset=utf-8", body: message)
             }
         }
     }
+
+    private static func statusText(for statusCode: Int) -> String {
+        switch statusCode {
+        case 204: return "No Content"
+        case 400: return "Bad Request"
+        case 413: return "Payload Too Large"
+        case 431: return "Request Header Fields Too Large"
+        case 501: return "Not Implemented"
+        default: return "Error"
+        }
+    }
     
-    private func handleHttpRequest(data: Data, connection: NWConnection) {
-        guard let requestString = String(data: data, encoding: .utf8) else {
-            sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "text/plain", body: "Invalid UTF-8 sequence")
-            return
-        }
-        
-        let lines = requestString.components(separatedBy: "\r\n")
-        guard !lines.isEmpty else {
-            sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "text/plain", body: "Empty Request")
-            return
-        }
-        
-        let requestLineParts = lines[0].components(separatedBy: " ")
-        guard requestLineParts.count >= 2 else {
-            sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "text/plain", body: "Invalid request line")
-            return
-        }
-        
-        let method = requestLineParts[0]
+    private func handleHttpRequest(_ request: LightweightHTTPRequest, connection: NWConnection) {
+        let method = request.method
         // Browsers append cache-busting query items and routinely probe for
         // `/favicon.ico`. Route on the URL path only so `/api/status?ts=...`
         // remains compatible with the same lightweight server.
-        let rawPath = requestLineParts[1]
-        let path = rawPath.split(separator: "?", maxSplits: 1).first.map(String.init) ?? rawPath
+        let path = request.path
         
         if method == "OPTIONS" {
             sendResponse(connection: connection, statusCode: 204, statusText: "No Content", contentType: "text/plain; charset=utf-8", body: "")
@@ -391,7 +387,9 @@ final class LightweightHTTPServer: ObservableObject {
             sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/html; charset=utf-8", body: html)
         } else if (method == "GET" || method == "HEAD") && path == "/health" {
             let healthBody = "SOURCE_READ_SWIFT_WEB_OK\nREAD_SOURCE_WEB_OK port=\(port)"
-            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: method == "HEAD" ? "" : healthBody)
+            sendResponse(connection: connection, statusCode: 200, statusText: "OK", contentType: "text/plain; charset=utf-8", body: healthBody, includeBody: method != "HEAD")
+        } else if (method == "GET" || method == "HEAD") && path == "/favicon.ico" {
+            sendResponse(connection: connection, statusCode: 204, statusText: "No Content", contentType: "image/x-icon", body: "", includeBody: false)
         } else if method == "GET" && path == "/api/status" {
             respondWithSourceStore(connection: connection) { store in
                 let body = #"{"ok":true,"service":"source-writing","port":\#(self.port),"sourceCount":\#(store?.sources.count ?? 0),"enabledSourceCount":\#(store?.sources.filter(\.enabled).count ?? 0)}"#
@@ -412,16 +410,12 @@ final class LightweightHTTPServer: ObservableObject {
                 let snapshot = store?.backupSnapshot() ?? SourceLibrarySnapshot()
                 self.sendJSON(connection: connection, value: snapshot)
             }
-        } else if method == "POST" && path == "/api/sources/import" {
-            let parts = requestString.components(separatedBy: "\r\n\r\n")
-            let body = parts.dropFirst().joined(separator: "\r\n\r\n")
+        } else if method == "POST" && (path == "/api/sources/import" || path == "/import") {
+            guard let body = String(data: request.body, encoding: .utf8) else {
+                sendResponse(connection: connection, statusCode: 400, statusText: "Bad Request", contentType: "application/json; charset=utf-8", body: #"{"ok":false,"error":"Request body must be UTF-8 JSON"}"#)
+                return
+            }
             importSourceJSON(body.trimmingCharacters(in: .whitespacesAndNewlines), connection: connection)
-        } else if method == "POST" && path == "/import" {
-            let parts = requestString.components(separatedBy: "\r\n\r\n")
-            let body = parts.dropFirst().joined(separator: "\r\n\r\n")
-            let cleanBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            importSourceJSON(cleanBody, connection: connection)
         } else {
             sendResponse(connection: connection, statusCode: 404, statusText: "Not Found", contentType: "text/plain; charset=utf-8", body: "Not Found")
         }
@@ -471,21 +465,31 @@ final class LightweightHTTPServer: ObservableObject {
         return String(encoded.dropFirst().dropLast())
     }
 
-    private func sendResponse(connection: NWConnection, statusCode: Int, statusText: String, contentType: String, body: String) {
+    private func sendResponse(
+        connection: NWConnection,
+        statusCode: Int,
+        statusText: String,
+        contentType: String,
+        body: String,
+        includeBody: Bool = true
+    ) {
         let responseBodyData = body.data(using: .utf8) ?? Data()
         let responseHeader = """
         HTTP/1.1 \(statusCode) \(statusText)\r
         Content-Type: \(contentType)\r
         Content-Length: \(responseBodyData.count)\r
         Access-Control-Allow-Origin: *\r
-        Access-Control-Allow-Methods: GET, POST, OPTIONS\r
+        Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS\r
         Access-Control-Allow-Headers: Content-Type\r
+        Access-Control-Max-Age: 600\r
         Connection: close\r
         \r
         """
         
         var responseData = responseHeader.data(using: .utf8) ?? Data()
-        responseData.append(responseBodyData)
+        if includeBody {
+            responseData.append(responseBodyData)
+        }
         
         connection.send(content: responseData, completion: .contentProcessed { [weak self] error in
             if let error = error {
@@ -505,23 +509,6 @@ final class LightweightHTTPServer: ObservableObject {
                 self.logMessages.removeLast(self.logMessages.count - 80)
             }
         }
-    }
-
-    private func isCompleteHTTPRequest(_ data: Data) -> Bool {
-        guard let text = String(data: data, encoding: .utf8),
-              let headerRange = text.range(of: "\r\n\r\n") else {
-            return false
-        }
-        let headerText = String(text[..<headerRange.lowerBound])
-        let contentLength = headerText
-            .components(separatedBy: "\r\n")
-            .first { $0.lowercased().hasPrefix("content-length:") }
-            .flatMap { line -> Int? in
-                let value = line.split(separator: ":", maxSplits: 1).dropFirst().first
-                return value.flatMap { Int(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
-            } ?? 0
-        let bodyStart = text.distance(from: text.startIndex, to: headerRange.upperBound)
-        return data.count >= bodyStart + contentLength
     }
 
     private func webURLs() -> [String] {
