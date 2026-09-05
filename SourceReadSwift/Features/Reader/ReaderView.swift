@@ -307,6 +307,7 @@ struct ReaderView: View {
         .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden(!showOverlay)
         .preferredColorScheme(background == .dark ? .dark : .light)
+        .highRefreshRateSurface()
         .sheet(isPresented: $showChapterList) {
             chapterListSheet
         }

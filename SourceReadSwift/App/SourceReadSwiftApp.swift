@@ -10,6 +10,7 @@ struct SourceReadSwiftApp: App {
         WindowGroup {
             RootTabView()
                 .environmentObject(appState)
+                .highRefreshRateSurface()
                 .preferredColorScheme((ThemeMode(rawValue: themeModeRawValue) ?? .system).colorScheme)
                 .onOpenURL { url in
                     appState.importSharedDocument(url)
