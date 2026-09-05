@@ -1744,3 +1744,48 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - Stage 18: source-rule parity expansion beyond async syntax—Legado Java/HTTP
   host surface, import-script behavior, pagination state and representative
   offline fixtures—then connect the outcomes to visual source-detail testing.
+
+## 2026-09-05 - Stage 18: Legado Java/HTTP host surface and pagination (complete)
+
+### Implemented
+
+- Extended the source request model with PUT, PATCH, DELETE and OPTIONS and
+  preserved explicit method/body/header evidence through URL directives and the
+  synchronous JavaScript bridge.
+- Added `java.connect()` verb aliases, request-body/output-stream shims,
+  `java.fetch` options, response status/final-URL/header/raw-byte metadata and
+  chapter-variable injection for Legado-compatible scripts.
+- Added loop-safe TOC (30 pages) and Content (8 pages) pagination with repeated
+  URL detection, diagnostic stop events and successful-prefix preservation.
+- Added deterministic offline fixture coverage for HTTP verbs, binary bodies,
+  importScript, source/book/chapter variables and pagination termination.
+
+### Verification
+
+- Local: `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js`
+  and `git diff --check` pass. Windows has no Swift/Xcode/UIKit runtime.
+- iOS build/XCTest: [run 33966640698](https://github.com/ztcsr5/read/actions/runs/33966640698) — success.
+- Unsigned IPA: [run 33966641149](https://github.com/ztcsr5/read/actions/runs/33966641149) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9969700683`,
+  6,397,798 bytes. Package digest is not exposed by the unauthenticated API
+  and is intentionally not guessed.
+- The green CI gate proves compilation, XCTest execution and packaging for the
+  deterministic fixtures; broad public-source compatibility, LAN Web 写源 and
+  sustained ProMotion frame pacing still require a physical iPhone/source corpus.
+
+### Commits
+
+- `fffd901 feat: expand Legado HTTP and pagination compatibility`
+- `a8213f2 fix: preserve connect aliases and chapter state`
+- `308473e fix: route HEAD through request bridge`
+
+### Rollback
+
+- Revert `fffd901`, `a8213f2` and `308473e` together to restore the Stage 17
+  JavaScript/transport behavior.
+
+### Next
+
+- Stage 19: reader/UI quality pass—EPUB/RSS reading surfaces, speech/auto-page
+  state, 120 Hz rendering hygiene, source-detail/rule-editor validation and
+  the remaining bookshelf/source-management workflows.
