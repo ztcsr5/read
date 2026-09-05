@@ -1934,6 +1934,33 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - The failed experimental commits `e66e4d1`, `cbfb348` and `2b974cb` are
   superseded; they are retained only in git history for auditability.
 
+## 2026-09-06 - Stage 20C: reader/source/search correctness pass (in CI)
+
+### Implemented in this batch
+
+- Reader auto-scroll now starts from the current visible paragraph and can hand
+  off to the next chapter without losing playback state.
+- Native TextKit updates its visibility callback on every SwiftUI update;
+  paragraph indentation now affects only the first line.
+- Empty正文 results are classified as pipeline failures instead of false
+  success, with regression coverage.
+- Source detail actions are serialized through sheet dismissal before opening
+  test/rule/JSON editors; batch source tests use the complete selection rather
+  than only the current filter projection.
+- Search progress reports enabled-source count, avoids duplicate submissions,
+  keeps same-name sources separate, and preserves case-sensitive URL paths.
+
+### Verification
+
+- `git diff --check` passed before push.
+- Commit: `089ed25 fix: make reader autoplay and source modal flows stateful`.
+- GitHub Actions iOS/XCTest and unsigned IPA are running for this commit.
+
+### Device/corpus items still open
+
+- Sustained 120 Hz and touch smoothness require iPhone + Instruments.
+- EPUB/RSS parity and broad Legado corpus compatibility remain later-stage work.
+
 ### CI correction log
 
 - First Stage 20A Actions run exposed a SwiftUI `toolbar(content:)` overload ambiguity in `SmartWebReaderView`; replaced it with the compatible `navigationBarItems` API and pushed commit `0946340`.
