@@ -23,6 +23,70 @@ final class SourceEngineStage18FixtureTests: XCTestCase {
         let stop = try XCTUnwrap(diagnostics.events.first { $0.stage == "toc.pagination.stop" })
         XCTAssertEqual(stop.details["reason"], "duplicate-url")
         XCTAssertEqual(stop.details["pagesLoaded"], "2")
+        XCTAssertEqual(stop.details["retainedItemCount"], "2")
+    }
+
+    func testTOCPaginationStopsOnCanonicalDuplicateURL() async throws {
+        let source = paginationSource()
+        let first = "https://fixture.local/toc/1"
+        let second = "https://fixture.local/toc/2?b=2&a=1"
+        let network = Stage18FixtureNetwork(responses: [
+            first: html("<div class='chapter'><a href='/chapter/1'>一</a></div><a class='next' href='/toc/2?b=2&a=1'>next</a>"),
+            second: html("<div class='chapter'><a href='/chapter/2'>二</a></div><a class='next' href='HTTPS://FIXTURE.LOCAL:443/toc/2?a=1&b=2#reader'>next</a>")
+        ])
+        let diagnostics = Stage18Diagnostics()
+        let engine = LegadoSourceEngine(network: network, diagnostics: DiagnosticSink { event in diagnostics.append(event) })
+        let detail = BookDetail(name: "Paged", author: nil, coverUrl: nil, bookUrl: "https://fixture.local/book", tocUrl: first, sourceName: source.bookSourceName, sourceUrl: source.bookSourceUrl, intro: nil, latestChapter: nil)
+
+        let result = await engine.getChapterList(source: source, book: detail)
+        guard case .success(let chapters) = result else { return XCTFail("expected chapters: \(result)") }
+        XCTAssertEqual(chapters.map(\.title), ["一", "二"])
+        XCTAssertEqual(network.requestedURLs, [first, second])
+        let stop = try XCTUnwrap(diagnostics.events.first { $0.stage == "toc.pagination.stop" })
+        XCTAssertEqual(stop.details["reason"], "duplicate-url")
+        XCTAssertEqual(stop.details["canonicalURL"], "https://fixture.local/toc/2?a=1&b=2")
+    }
+
+    func testTOCPaginationReportsEmptyPageAndRetainsPrefix() async throws {
+        let source = paginationSource()
+        let first = "https://fixture.local/toc/1"
+        let second = "https://fixture.local/toc/2"
+        let network = Stage18FixtureNetwork(responses: [
+            first: html("<div class='chapter'><a href='/chapter/1'>一</a></div><a class='next' href='/toc/2'>next</a>"),
+            second: html("<div class='chapter'></div>")
+        ])
+        let diagnostics = Stage18Diagnostics()
+        let engine = LegadoSourceEngine(network: network, diagnostics: DiagnosticSink { event in diagnostics.append(event) })
+        let detail = BookDetail(name: "Paged", author: nil, coverUrl: nil, bookUrl: "https://fixture.local/book", tocUrl: first, sourceName: source.bookSourceName, sourceUrl: source.bookSourceUrl, intro: nil, latestChapter: nil)
+
+        let result = await engine.getChapterList(source: source, book: detail)
+        guard case .success(let chapters) = result else { return XCTFail("expected prefix: \(result)") }
+        XCTAssertEqual(chapters.map(\.title), ["一"])
+        let stop = try XCTUnwrap(diagnostics.events.first { $0.stage == "toc.pagination.stop" })
+        XCTAssertEqual(stop.details["reason"], "empty-page")
+        XCTAssertEqual(stop.details["attemptedURL"], second)
+        XCTAssertEqual(stop.details["retainedItemCount"], "1")
+    }
+
+    func testContentPaginationReportsLoadFailureAndRetainsPrefix() async throws {
+        let source = paginationSource()
+        let first = "https://fixture.local/content/1"
+        let second = "https://fixture.local/content/2"
+        let network = Stage18FixtureNetwork(responses: [
+            first: html("<div id='content'>页一</div><a class='next' href='/content/2'>next</a>")
+        ])
+        let diagnostics = Stage18Diagnostics()
+        let engine = LegadoSourceEngine(network: network, diagnostics: DiagnosticSink { event in diagnostics.append(event) })
+        let chapter = BookChapter(title: "Chapter", url: first, bookUrl: "https://fixture.local/book", index: 0, isVip: false)
+
+        let result = await engine.getContent(source: source, chapter: chapter)
+        guard case .success(let content) = result else { return XCTFail("expected prefix: \(result)") }
+        XCTAssertEqual(content.paragraphs, ["页一"])
+        XCTAssertEqual(content.nextContentUrl, second)
+        let stop = try XCTUnwrap(diagnostics.events.first { $0.stage == "content.pagination.stop" })
+        XCTAssertEqual(stop.details["reason"], "load-failure")
+        XCTAssertEqual(stop.details["attemptedURL"], second)
+        XCTAssertEqual(stop.details["retainedItemCount"], "1")
     }
 
     func testTOCPaginationStopsAtThirtyPages() async throws {

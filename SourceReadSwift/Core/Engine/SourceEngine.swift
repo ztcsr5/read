@@ -230,6 +230,15 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             let parsed = parseChapterListPage(source: source, book: book, response: transformedResponse, executionContext: executionContext)
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "toc.parse", source: source, details: ["url": response.url.absoluteString])
+                await emitPaginationStop(
+                    source: source,
+                    stage: "toc.pagination.stop",
+                    reason: isEmptyPaginationError(error) ? "empty-page" : "parse-failure",
+                    attemptedURL: response.url.absoluteString,
+                    pagesLoaded: 0,
+                    retainedItemCount: 0,
+                    maxPages: 30
+                )
             }
             guard case .success(let firstPage) = parsed else {
                 return parsed.map { $0.chapters }
@@ -243,6 +252,15 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             )
         case .failure(let error):
             await emitFailure(error, stage: "toc.load", source: source, details: ["url": request.url.absoluteString])
+            await emitPaginationStop(
+                source: source,
+                stage: "toc.pagination.stop",
+                reason: "load-failure",
+                attemptedURL: request.url.absoluteString,
+                pagesLoaded: 0,
+                retainedItemCount: 0,
+                maxPages: 30
+            )
             return .failure(error)
         }
     }
@@ -291,6 +309,15 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             )
             if case .failure(let error) = parsed {
                 await emitFailure(error, stage: "content.parse", source: source, details: ["url": response.url.absoluteString])
+                await emitPaginationStop(
+                    source: source,
+                    stage: "content.pagination.stop",
+                    reason: isEmptyPaginationError(error) ? "empty-page" : "parse-failure",
+                    attemptedURL: response.url.absoluteString,
+                    pagesLoaded: 0,
+                    retainedItemCount: 0,
+                    maxPages: 8
+                )
             }
             guard case .success(let firstPage) = parsed else { return parsed }
             return await appendNextContentPages(
@@ -303,6 +330,15 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             )
         case .failure(let error):
             await emitFailure(error, stage: "content.load", source: source, details: ["url": request.url.absoluteString])
+            await emitPaginationStop(
+                source: source,
+                stage: "content.pagination.stop",
+                reason: "load-failure",
+                attemptedURL: request.url.absoluteString,
+                pagesLoaded: 0,
+                retainedItemCount: 0,
+                maxPages: 8
+            )
             return .failure(error)
         }
     }
@@ -656,12 +692,17 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
     ) async -> Result<[BookChapter], SourceEngineError> {
         var chapters = firstPage.chapters
         var nextURLText = firstPage.nextTocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        var seenURLs: Set<String> = [firstURL.absoluteString]
+        let urlIdentity = SourcePaginationURLIdentity()
+        var seenURLs: Set<String> = [urlIdentity.canonical(firstURL)]
         var pagesLoaded = 1
         let maxPages = 30
-        var stopReason: String?
+        var stopReason: String? = nextURLText == nil ? "no-next-url" : nil
+        var attemptedURL = nextURLText
+        var attemptedCanonicalURL = nextURLText.flatMap(urlIdentity.canonical)
 
         while let currentNext = nextURLText {
+            attemptedURL = currentNext
+            attemptedCanonicalURL = urlIdentity.canonical(currentNext)
             if pagesLoaded >= maxPages {
                 stopReason = "max-pages"
                 break
@@ -672,14 +713,18 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
                 persistentValues: persistentState(for: source).snapshot()
             )
             let absolute = request.url.absoluteString
-            guard !seenURLs.contains(absolute) else {
+            let canonicalURL = urlIdentity.canonical(request.url)
+            attemptedURL = absolute
+            attemptedCanonicalURL = canonicalURL
+            guard !seenURLs.contains(canonicalURL) else {
                 stopReason = "duplicate-url"
                 break
             }
-            seenURLs.insert(absolute)
+            seenURLs.insert(canonicalURL)
 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "toc.next.load") {
             case .success(let response):
+                seenURLs.insert(urlIdentity.canonical(response.url))
                 let state = persistentState(for: source)
                 let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleToc], network: network, stateOverride: state, executionContext: executionContext)
                 switch parseChapterListPage(source: source, book: book, response: transformedResponse, executionContext: executionContext) {
@@ -696,29 +741,30 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
                     })
                     nextURLText = page.nextTocUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                     pagesLoaded += 1
+                    stopReason = nextURLText == nil ? "no-next-url" : nil
                 case .failure(let error):
                     await emitFailure(error, stage: "toc.next.parse", source: source, details: ["url": response.url.absoluteString])
+                    stopReason = isEmptyPaginationError(error) ? "empty-page" : "parse-failure"
                     nextURLText = nil
                 }
             case .failure(let error):
                 await emitFailure(error, stage: "toc.next.load", source: source, details: ["url": absolute])
+                stopReason = "load-failure"
                 nextURLText = nil
             }
         }
 
         if let stopReason {
-            await diagnostics.emit(.init(
-                level: .info,
+            await emitPaginationStop(
+                source: source,
                 stage: "toc.pagination.stop",
-                sourceName: source.bookSourceName,
-                message: "目录分页停止",
-                details: [
-                    "reason": stopReason,
-                    "url": nextURLText ?? firstURL.absoluteString,
-                    "pagesLoaded": String(pagesLoaded),
-                    "maxPages": String(maxPages)
-                ]
-            ))
+                reason: stopReason,
+                attemptedURL: attemptedURL ?? firstURL.absoluteString,
+                canonicalURL: attemptedCanonicalURL ?? urlIdentity.canonical(firstURL),
+                pagesLoaded: pagesLoaded,
+                retainedItemCount: chapters.count,
+                maxPages: maxPages
+            )
         }
 
         return chapters.isEmpty ? .failure(.empty("Chapter list is empty")) : .success(chapters)
@@ -734,13 +780,18 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
     ) async -> Result<ChapterContent, SourceEngineError> {
         var paragraphs = firstPage.paragraphs
         var nextURLText = firstPage.nextContentUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        var seenURLs: Set<String> = [firstURL.absoluteString]
+        let urlIdentity = SourcePaginationURLIdentity()
+        var seenURLs: Set<String> = [urlIdentity.canonical(firstURL)]
         var finalNextURL = nextURLText
         var pagesLoaded = 1
         let maxPages = 8
-        var stopReason: String?
+        var stopReason: String? = nextURLText == nil ? "no-next-url" : nil
+        var attemptedURL = nextURLText
+        var attemptedCanonicalURL = nextURLText.flatMap(urlIdentity.canonical)
 
         while let currentNext = nextURLText {
+            attemptedURL = currentNext
+            attemptedCanonicalURL = urlIdentity.canonical(currentNext)
             if pagesLoaded >= maxPages {
                 stopReason = "max-pages"
                 finalNextURL = nil
@@ -752,15 +803,19 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
                 persistentValues: persistentState(for: source).snapshot()
             )
             let absolute = request.url.absoluteString
-            guard !seenURLs.contains(absolute) else {
+            let canonicalURL = urlIdentity.canonical(request.url)
+            attemptedURL = absolute
+            attemptedCanonicalURL = canonicalURL
+            guard !seenURLs.contains(canonicalURL) else {
                 stopReason = "duplicate-url"
                 finalNextURL = nil
                 break
             }
-            seenURLs.insert(absolute)
+            seenURLs.insert(canonicalURL)
 
             switch await loadWithOptionalWebViewFallback(request, source: source, stage: "content.next.load") {
             case .success(let response):
+                seenURLs.insert(urlIdentity.canonical(response.url))
                 let state = persistentState(for: source)
                 let transformedResponse = transformBodyIfNeeded(response, source: source, rules: [source.ruleContent], network: network, stateOverride: state, executionContext: executionContext)
                 switch parseContentPage(
@@ -775,31 +830,32 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
                     nextURLText = nextPage.nextContentUrl?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                     finalNextURL = nextURLText
                     pagesLoaded += 1
+                    stopReason = nextURLText == nil ? "no-next-url" : nil
                 case .failure(let error):
                     await emitFailure(error, stage: "content.next.parse", source: source, details: ["url": response.url.absoluteString])
+                    stopReason = isEmptyPaginationError(error) ? "empty-page" : "parse-failure"
                     nextURLText = nil
                     finalNextURL = currentNext
                 }
             case .failure(let error):
                 await emitFailure(error, stage: "content.next.load", source: source, details: ["url": absolute])
+                stopReason = "load-failure"
                 nextURLText = nil
                 finalNextURL = currentNext
             }
         }
 
         if let stopReason {
-            await diagnostics.emit(.init(
-                level: .info,
+            await emitPaginationStop(
+                source: source,
                 stage: "content.pagination.stop",
-                sourceName: source.bookSourceName,
-                message: "正文分页停止",
-                details: [
-                    "reason": stopReason,
-                    "url": nextURLText ?? firstURL.absoluteString,
-                    "pagesLoaded": String(pagesLoaded),
-                    "maxPages": String(maxPages)
-                ]
-            ))
+                reason: stopReason,
+                attemptedURL: attemptedURL ?? firstURL.absoluteString,
+                canonicalURL: attemptedCanonicalURL ?? urlIdentity.canonical(firstURL),
+                pagesLoaded: pagesLoaded,
+                retainedItemCount: paragraphs.count,
+                maxPages: maxPages
+            )
         }
 
         return .success(ChapterContent(
@@ -807,6 +863,38 @@ final class LegadoSourceEngine: SourceEngine, SourceDiagnosticEvidenceProvider, 
             title: firstPage.title,
             paragraphs: paragraphs,
             nextContentUrl: finalNextURL
+        ))
+    }
+
+    private func isEmptyPaginationError(_ error: SourceEngineError) -> Bool {
+        guard case .empty = error else { return false }
+        return true
+    }
+
+    private func emitPaginationStop(
+        source: BookSource,
+        stage: String,
+        reason: String,
+        attemptedURL: String,
+        canonicalURL: String,
+        pagesLoaded: Int,
+        retainedItemCount: Int,
+        maxPages: Int
+    ) async {
+        await diagnostics.emit(.init(
+            level: .info,
+            stage: stage,
+            sourceName: source.bookSourceName,
+            message: stage.hasPrefix("toc") ? "目录分页停止" : "正文分页停止",
+            details: [
+                "reason": reason,
+                "url": attemptedURL,
+                "attemptedURL": attemptedURL,
+                "canonicalURL": canonicalURL,
+                "pagesLoaded": String(pagesLoaded),
+                "retainedItemCount": String(retainedItemCount),
+                "maxPages": String(maxPages)
+            ]
         ))
     }
 
