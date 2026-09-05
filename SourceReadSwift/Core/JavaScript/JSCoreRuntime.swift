@@ -106,6 +106,22 @@ final class JSCoreRuntime {
                         var title = String(chapter.title || chapter.name || '').toLowerCase();
                         return title.indexOf('vip') >= 0 || title.indexOf('订阅') >= 0 || title.indexOf('付费') >= 0;
                     };
+                    chapter.getVariable = function(key) {
+                        if (arguments.length > 0 && key != null && String(key) !== '') return java.getVar('chapter.variable.' + String(key));
+                        return chapter.variable || java.getVar('chapter.variable') || '';
+                    };
+                    chapter.setVariable = function(key, value) {
+                        if (arguments.length > 1) return java.put('chapter.variable.' + String(key), value == null ? '' : String(value));
+                        chapter.variable = key == null ? '' : String(key);
+                        return java.put('chapter.variable', chapter.variable);
+                    };
+                    chapter.putVariable = chapter.setVariable;
+                    chapter.variableMap = chapter.variableMap || {
+                        get: function(k) { return chapter.getVariable(k); },
+                        put: function(k, v) { return chapter.setVariable(k, v); },
+                        remove: function(k) { return java.removeVar('chapter.variable.' + String(k || '')); },
+                        containsKey: function(k) { return chapter.getVariable(k) !== ''; }
+                    };
                 }
                 """
                 context.evaluateScript(injectScript)
@@ -135,7 +151,7 @@ final class JSCoreRuntime {
                         var parsed = {};
                         try { parsed = JSON.parse(source.getVariable() || '{}'); } catch (_) {}
                         return {
-                          get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; },
+                          get: function(k) { var value = parsed[String(k)]; return value == null ? source.getVariable(k) : value; },
                           put: function(k, v) { parsed[String(k)] = v; source.setVariable(JSON.stringify(parsed)); return v; },
                           remove: function(k) { var old = parsed[String(k)]; delete parsed[String(k)]; source.setVariable(JSON.stringify(parsed)); return old == null ? null : old; },
                           containsKey: function(k) { return Object.prototype.hasOwnProperty.call(parsed, String(k)); },
@@ -467,14 +483,15 @@ final class JSCoreRuntime {
             let value = runtime.executionContext.networkHandler?(requestText) ?? ajaxHandler?(requestText) ?? ""
             return ["body": value, "url": url, "statusCode": 200, "headers": [:]] as NSDictionary
         }
-        let requestResponse: @convention(block) (String, String, String, String) -> NSDictionary = { url, body, headers, method in
+        let requestResponse: @convention(block) (String, String, String, String, Bool) -> NSDictionary = { url, body, headers, method, forceMethodDirective in
             guard let runtime = weakSelf else { return [:] }
             let requestText = runtime.requestText(
                 url: url,
                 body: body,
                 headers: headers,
                 includeStoredBody: true,
-                method: method
+                method: method,
+                forceMethodDirective: forceMethodDirective
             )
             if let response = runtime.executionContext.responseHandler?(requestText) {
                 runtime.executionContext.ingestResponse(response)
@@ -1250,6 +1267,7 @@ final class JSCoreRuntime {
             body: function() { return bodyValue; },
             text: function() { return bodyValue; },
             json: function() { return bodyValue.json(); },
+            execute: function() { return response; },
             url: function() { return finalUrl; },
             finalUrl: function() { return finalUrl; },
             header: function(name) { return headerMap.get(name); },
@@ -1437,11 +1455,22 @@ final class JSCoreRuntime {
         java.fetch = function(url, options) {
           options = options || {};
           var target = String(url || '');
+          var hasRequestOptions = options.method != null || options.body != null || options.headers != null;
           var method = String(options.method || 'GET').toUpperCase();
           var body = options.body == null ? '' : __bridgeString(options.body);
-          var headers = __bridgeString(options.headers || {});
+          var headerObject = options.headers || (hasRequestOptions ? {} : options);
+          var headers = __bridgeString(headerObject || {});
           if (method !== 'GET' || body) {
-            return __bridgeResponse('', target, __native_requestResponse(target, body, headers, method));
+            // Keep the Stage 17 request envelope for plain URLs because source
+            // scripts and diagnostics inspect method/body/headers there. When
+            // the URL already carries options, merge the method natively and
+            // append headers/body directives without a second JSON suffix.
+            if (target.indexOf(',{') < 0) {
+              var requestOptions = { method: method, body: body, headers: headerObject || {} };
+              var encodedTarget = target + ',' + JSON.stringify(requestOptions);
+              return __bridgeResponse('', target, __native_requestResponse(encodedTarget, body, '', method, true));
+            }
+            return __bridgeResponse('', target, __native_requestResponse(target, body, headers, method, true));
           }
           return __bridgeResponse('', target, __native_ajaxResponse(target, headers));
         };
@@ -1511,7 +1540,7 @@ final class JSCoreRuntime {
             var outgoingBody = config.body || '';
             if (!outgoingBody && config.output && typeof config.output.toByteArray === 'function') outgoingBody = String(__native_bytesToString(__javaBytes(config.output.toByteArray())) || '');
             if (config.method === 'POST' || config.method === 'PUT' || config.method === 'PATCH' || config.method === 'DELETE' || config.method === 'OPTIONS' || config.doOutput || outgoingBody) {
-              config.response = __bridgeResponse('', target, __native_requestResponse(target, outgoingBody, headerText, config.method));
+              config.response = __bridgeResponse('', target, __native_requestResponse(target, outgoingBody, headerText, config.method, false));
             } else {
               config.response = __bridgeResponse('', target, __native_ajaxResponse(target, headerText));
             }
@@ -1774,7 +1803,7 @@ final class JSCoreRuntime {
             var parsed = {};
             try { parsed = JSON.parse(source.getVariable() || '{}'); } catch (_) {}
             return {
-              get: function(k) { var value = parsed[String(k)]; return value == null ? '' : value; },
+              get: function(k) { var value = parsed[String(k)]; return value == null ? source.getVariable(k) : value; },
               put: function(k, v) { parsed[String(k)] = v; source.setVariable(JSON.stringify(parsed)); return v; },
               remove: function(k) { var old = parsed[String(k)]; delete parsed[String(k)]; source.setVariable(JSON.stringify(parsed)); return old == null ? null : old; },
               containsKey: function(k) { return Object.prototype.hasOwnProperty.call(parsed, String(k)); },
@@ -3191,21 +3220,22 @@ final class JSCoreRuntime {
         body: String?,
         headers explicitHeaders: String,
         includeStoredBody: Bool,
-        method: String? = nil
+        method: String? = nil,
+        forceMethodDirective: Bool = false
     ) -> String {
         var output = url
         let headers = mergedHeaders(explicitHeaders)
+        let bodyText = requestBody(explicitBody: body, includeStoredBody: includeStoredBody)
         let normalizedMethod = method?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if let normalizedMethod,
            !normalizedMethod.isEmpty,
-           normalizedMethod != "GET" {
+           normalizedMethod != "GET",
+           (forceMethodDirective || normalizedMethod != "POST" || bodyText?.isEmpty != false) {
             output = applyingMethodOverride(normalizedMethod, to: output)
         }
         if !headers.isEmpty, !output.localizedCaseInsensitiveContains("@Header:") {
             output += "@Header:\(jsonString(headers))"
         }
-
-        let bodyText = requestBody(explicitBody: body, includeStoredBody: includeStoredBody)
         if let bodyText, !bodyText.isEmpty, !output.localizedCaseInsensitiveContains("@Body:") {
             output += "@Body:\(bodyText)"
         }
