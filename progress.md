@@ -1661,3 +1661,36 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
   rule-editor preview evidence, then expose each preview stage's normalized
   request, transformed response and parsed output in one reusable diagnostic
   pipeline.
+
+## 2026-09-05 - Stage 16: normalized transport and rule-preview evidence (complete)
+
+### Implemented
+
+- Exposed `ResponseBodyDecoder.DecodeResult` with normalized Content-Encoding tokens and a decoded/raw flag, while preserving transactional fallback for malformed or unsupported payloads.
+- Extended `SourceResponse` and structured diagnostic evidence with encoded byte count, decoded byte count, coding list and decode status; the batch text export now reports transport evidence per stage.
+- Preserved transport metadata through Search, Detail, TOC and Content parser normalization so downstream rule evaluation cannot silently discard response provenance.
+- Added rule-editor preview evidence: local request URL, detected HTML/JSON/text format, normalized response, selected rule, parsed output count and byte counts. Evidence is shown in a collapsible preview panel and retained in preview history.
+- Added regression tests for compressed metadata, unsupported codings, legacy diagnostic JSON, transport export text, four-stage fixture evidence and BOM/JSON rule preview normalization.
+
+### Verification
+
+- `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js` and `git diff --check` pass locally.
+- iOS build/XCTest: [run 33941958449](https://github.com/ztcsr5/read/actions/runs/33941958449) - success.
+- Unsigned IPA: [run 33941958466](https://github.com/ztcsr5/read/actions/runs/33941958466) - success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9962159177`, 6,365,007 bytes; package digest `sha256:05eaed505997194faa8b0bb5929e054c81c3de6b94e7cec5875661779b0f0e44`.
+- Windows has no Xcode/UIKit runtime; real public-source diversity, LAN Web 写源 and sustained ProMotion frame pacing remain device/source checks.
+
+### Commits
+
+- `27e40a2 feat: expose normalized transport evidence`
+- `f02e03d fix: order transport evidence test arguments`
+- `90d31ec fix: assert compressed fixture decoded size`
+- `f51d6c0 feat: expose rule preview evidence`
+
+### Rollback
+
+- Revert commits `27e40a2`, `f02e03d`, `90d31ec` and `f51d6c0` together to restore the Stage 15 transport behavior and compact rule-editor preview.
+
+### Next
+
+- Stage 17: expand JavaScript compatibility beyond the current QuickJS/JavaScriptCore subset (Legado host shims, async/promise bridges and parity fixtures), then feed pass/fail reasons into the same evidence model.
