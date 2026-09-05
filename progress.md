@@ -1677,7 +1677,7 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js` and `git diff --check` pass locally.
 - iOS build/XCTest: [run 33941958449](https://github.com/ztcsr5/read/actions/runs/33941958449) - success.
 - Unsigned IPA: [run 33941958466](https://github.com/ztcsr5/read/actions/runs/33941958466) - success.
-- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9962159177`, 6,365,007 bytes; package digest `sha256:05eaed505997194faa8b0bb5929e054c81c3de6b94e7cec5875661779b0f0e44`.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9962159177`, 6,365,007 bytes; package digest `sha256:05eaed505997194faa8b0bb5929e054c81c3de6b94e7cec5875661779befe156`.
 - Windows has no Xcode/UIKit runtime; real public-source diversity, LAN Web 写源 and sustained ProMotion frame pacing remain device/source checks.
 
 ### Commits
