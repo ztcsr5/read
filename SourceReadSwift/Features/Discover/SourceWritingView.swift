@@ -372,7 +372,7 @@ final class LightweightHTTPServer: ObservableObject {
         default: return "Error"
         }
     }
-    
+
     private func handleHttpRequest(_ request: LightweightHTTPRequest, connection: NWConnection) {
         let method = request.method
         // Browsers append cache-busting query items and routinely probe for

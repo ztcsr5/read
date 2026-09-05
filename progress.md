@@ -1790,7 +1790,7 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
   state, 120 Hz rendering hygiene, source-detail/rule-editor validation and
   the remaining bookshelf/source-management workflows.
 
-## 2026-09-06 - Stage 19B: reader and LAN source quality pass (in progress)
+## 2026-09-06 - Stage 19B: reader and LAN source quality pass (complete)
 
 ### Implemented in this batch
 
@@ -1821,13 +1821,23 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 - `git diff --check` pass.
 - Added deterministic XCTest coverage for reader value normalization, HTTP
   framing/body limits/HEAD handling and search URL de-duplication.
-- Swift/XCTest and unsigned IPA remain pending GitHub Actions because this
-  Windows host has no Xcode/UIKit runtime.
+- Windows has no Xcode/UIKit runtime, so Swift validation ran in GitHub Actions.
+
+### Verification after push
+
+- iOS build/XCTest: [run 33977725581](https://github.com/ztcsr5/read/actions/runs/33977725581) — success.
+- Unsigned IPA: [run 33977725431](https://github.com/ztcsr5/read/actions/runs/33977725431) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9972893180`,
+  6,445,872 bytes; the artifact is retained on GitHub Actions for self-signing.
+- Commit: `33c47f7 feat: complete Stage 19B reader and LAN source quality pass`.
+- The green CI gate proves the new Swift sources compile, XCTest executes and
+  the unsigned device archive packages. Sustained 120 Hz pacing, public-source
+  diversity and LAN access from a particular PC/router still require physical
+  device/source-corpus checks.
 
 ### Rollback
 
-- The batch is uncommitted until CI validation. After commit, revert the single
-  Stage 19B commit to restore the Stage 19A reader/source behavior.
+- Revert `33c47f7` to restore the Stage 19A reader/source behavior.
 
 ### Next
 
