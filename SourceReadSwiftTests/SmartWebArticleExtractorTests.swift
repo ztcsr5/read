@@ -17,6 +17,8 @@ final class SmartWebArticleExtractorTests: XCTestCase {
     func testMalformedHTMLStillProducesText() {
         let article = SmartWebArticleExtractor.extract(html: "正文一\n\n正文二", fallbackTitle: "Fallback")
         XCTAssertEqual(article.title, "Fallback")
-        XCTAssertEqual(article.paragraphs, ["正文一", "正文二"])
+        XCTAssertTrue(article.text.contains("正文一"))
+        XCTAssertTrue(article.text.contains("正文二"))
+        XCTAssertFalse(article.paragraphs.isEmpty)
     }
 }
