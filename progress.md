@@ -1618,3 +1618,46 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Next
 
 - Stage 15: broaden the offline Android Legado corpus with paginated/dynamic/encoded/compressed fixtures and compatibility probes, then feed the resulting evidence into source diagnostics and rule-editor previews.
+
+## 2026-09-05 - Stage 15: compressed Legado transport normalization (complete)
+
+### Implemented
+
+- Added conservative HTTP body decoding for `gzip`, `x-gzip`, zlib-wrapped
+  `deflate`, raw DEFLATE and `identity`, including reverse-order decoding for
+  stacked `Content-Encoding` values.
+- Applied the same response normalization at URLSession, synchronous JS/Java
+  callbacks, injected network adapters and the production engine boundary, so
+  Search -> Detail -> TOC -> Content parsers receive decoded bytes regardless
+  of which transport path supplied the response.
+- Preserved the original bytes for unsupported or malformed encodings instead
+  of exposing a partial transform to source rules.
+- Added deterministic gzip/deflate unit coverage plus a four-stage offline
+  compressed fixture whose injected client returns binary data with an empty
+  text body.
+
+### Verification
+
+- Commits: `a23f1db`, `cd041b0`.
+- iOS build/XCTest: [run 33936755360](https://github.com/ztcsr5/read/actions/runs/33936755360) - success.
+- Unsigned IPA: [run 33936755392](https://github.com/ztcsr5/read/actions/runs/33936755392) - success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9960484340`,
+  6,342,255 bytes; package digest
+  `sha256:3a62c53f0f64eb038fc05d31ba8f955506f546c034a16bfc1f56f8c4e7ba8151`.
+- Python independently verified every fixed compressed fixture byte array;
+  `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js`
+  and `git diff --check` pass locally.
+- Windows has no Xcode/UIKit runtime. Public-source diversity, Web source LAN
+  access and sustained ProMotion frame pacing remain device/source checks.
+
+### Rollback
+
+- Revert `a23f1db` and `cd041b0` together to restore the Stage 14 transport
+  behavior.
+
+### Next
+
+- Stage 16: connect dynamic/paginated/encoded/encrypted response fixtures to
+  rule-editor preview evidence, then expose each preview stage's normalized
+  request, transformed response and parsed output in one reusable diagnostic
+  pipeline.
