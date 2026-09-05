@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import CoreGraphics
+import QuartzCore
 @testable import SourceReadSwift
 
 final class ReaderPerformancePolicyTests: XCTestCase {
@@ -10,6 +11,20 @@ final class ReaderPerformancePolicyTests: XCTestCase {
         XCTAssertEqual(ReaderPerformancePolicy.preferredRefreshRate(maximumFramesPerSecond: 144), 120)
         XCTAssertEqual(ReaderPerformancePolicy.preferredRefreshRate(maximumFramesPerSecond: 0), 0)
         XCTAssertTrue(ReaderPerformancePolicy.disablesMinimumFrameDuration)
+    }
+
+    func testPreferredFrameRateRangeTargetsHighRefreshOnlyWhenSupported() {
+        let proMotion = FrameRateCoordinator.preferredRange(maximumFramesPerSecond: 120)
+        XCTAssertEqual(proMotion?.minimum, 80)
+        XCTAssertEqual(proMotion?.maximum, 120)
+        XCTAssertEqual(proMotion?.preferred, 120)
+
+        let standard = FrameRateCoordinator.preferredRange(maximumFramesPerSecond: 60)
+        XCTAssertEqual(standard?.minimum, 60)
+        XCTAssertEqual(standard?.maximum, 60)
+        XCTAssertEqual(standard?.preferred, 60)
+
+        XCTAssertNil(FrameRateCoordinator.preferredRange(maximumFramesPerSecond: 0))
     }
 
     func testAdaptiveFrameRatePlanUsesOneHzFloorAndDeviceCeiling() {
