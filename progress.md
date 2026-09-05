@@ -1593,3 +1593,28 @@ Windows cannot run Xcode or a real ProMotion device. CI proves compilation/tests
 ### Next
 
 - Expand the offline Android Legado corpus and failure taxonomy, then add compatibility probes for less-common response transforms before the next CI-gated handoff.
+
+## 2026-09-05 - Stage 14: response variants and diagnostic failure taxonomy (complete)
+
+### Implemented
+
+- Hardened `ResponseFormatDetector` for JSONP callbacks, JavaScript assignments, HTML entities (named and numeric), URL-encoded JSON and form/query envelopes while retaining BOM, XSSI, `<pre>` and balanced JSON handling.
+- Added stable machine-readable `SourceDiagnosticFailureKind` values with retry policy, backward-compatible decoding and redacted export visibility.
+- Propagated failure codes through the production Search → Detail → TOC → Content pipeline and batch diagnostics, including empty-result, timeout and network/parser/script/authentication/blocked classifications.
+- Added regression coverage for wrapped/escaped/encoded responses, failure kinds, retry behavior and legacy diagnostic JSON.
+
+### Verification
+
+- `node ci-log/extract-prelude.js`, `node --check ci-log/js-prelude-check.js` and `git diff --check` pass locally.
+- iOS build/XCTest: [run 33933538847](https://github.com/ztcsr5/read/actions/runs/33933538847) — success.
+- Unsigned IPA: [run 33933538801](https://github.com/ztcsr5/read/actions/runs/33933538801) — success.
+- Artifact: `SourceReadSwift-unsigned-ipa`, artifact id `9959455684`, 6,337,437 bytes; package digest `sha256:755fca48ffdbc1ff2cdbefacf620bcea0976c9dd8f740abc91f15197d37f8ae3`.
+- Windows has no Xcode/UIKit runtime; public-source diversity, Web 写源 LAN behavior and sustained ProMotion frame pacing remain device/source checks.
+
+### Rollback
+
+- Revert commit `a5f4d44` and this closure entry together to restore the prior response detector and diagnostic model.
+
+### Next
+
+- Stage 15: broaden the offline Android Legado corpus with paginated/dynamic/encoded/compressed fixtures and compatibility probes, then feed the resulting evidence into source diagnostics and rule-editor previews.
